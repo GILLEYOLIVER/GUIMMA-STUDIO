@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -464,3 +466,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addSpacing(12)
         l.addWidget(QLabel("Escala 100%"))
         return barra
+
+
+def executar_app() -> int:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    janela = GuimmaStudioMainWindow()
+    janela.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(executar_app())
