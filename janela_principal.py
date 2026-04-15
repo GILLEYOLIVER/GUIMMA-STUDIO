@@ -278,23 +278,25 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.setStyleSheet(
             """
-            QMainWindow { background: #e9edf2; }
-            QWidget#TopHeader { background: #efefef; border-bottom: 1px solid #cfd6df; }
-            QWidget#RibbonHost { background: #efefef; border-bottom: 1px solid #d8dce3; }
+            QMainWindow { background: #f2f2f2; }
+            QWidget#TopHeader { background: #f2f2f2; border-bottom: 1px solid #d4d4d4; }
+            QWidget#RibbonHost { background: #f2f2f2; border-bottom: 1px solid #d4d4d4; }
             QTabBar::tab {
                 background: transparent;
-                color: #101010;
-                padding: 4px 10px;
+                color: #111111;
+                padding: 5px 12px;
                 margin: 0 1px;
                 border: none;
-                font-size: 10px;
+                font-size: 12px;
+                font-family: "Segoe UI";
             }
             QTabBar::tab:selected {
-                background: #0f7cb5;
-                color: #ffffff;
-                border: 1px solid #0b6898;
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #d9d9d9;
+                border-bottom: 2px solid #1081b8;
             }
-            QTabBar::tab:hover { background: #dcecf7; }
+            QTabBar::tab:hover { background: #ebeff4; }
             """
         )
 
@@ -307,7 +309,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra_superior = QWidget()
         sup = QHBoxLayout(barra_superior)
-        sup.setContentsMargins(6, 2, 6, 2)
+        sup.setContentsMargins(6, 2, 6, 1)
         sup.setSpacing(6)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
@@ -330,11 +332,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
-        titulo = QLabel("GUIMMA STUDIO")
-        titulo.setStyleSheet("font-size: 13px; font-weight: 700; color: #202020;")
-        sup.addWidget(titulo)
         sup.addStretch(1)
-        sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
+        opcoes = QLabel("˄  VISÃO • OPÇÕES • JANELAS")
+        opcoes.setStyleSheet("font-size: 12px; color: #1d1d1d; font-family: 'Segoe UI';")
+        sup.addWidget(opcoes)
         layout.addWidget(barra_superior)
         self.barra_superior = barra_superior
 
@@ -469,7 +470,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         faixa = QFrame()
         faixa.setFixedHeight(24)
-        faixa.setStyleSheet("background: #f4f4f4; border: 1px solid #d7dbe1; border-radius: 0px;")
+        faixa.setStyleSheet("background: #f9f9f9; border: 1px solid #d7dbe1; border-radius: 0px;")
         fl = QHBoxLayout(faixa)
         fl.setContentsMargins(10, 0, 10, 0)
         fl.addWidget(QLabel("ENCOMENDA 3 (3) NOVO TEC.adsx    ✕     GIL 130 2.adsx    ✕     GIL 144.adsx"))
@@ -479,7 +480,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         regua_superior = QFrame()
         regua_superior.setFixedHeight(22)
-        regua_superior.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        regua_superior.setStyleSheet("background: #ffffff; border: 1px solid #c8ced8; color: #3b3b3b;")
         rl_top = QHBoxLayout(regua_superior)
         rl_top.setContentsMargins(4, 0, 4, 0)
         rl_top.addWidget(QLabel("0      10      20      30      40      50      60      70      80      90      100"))
@@ -491,7 +492,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         regua_lateral = QFrame()
         regua_lateral.setFixedWidth(22)
-        regua_lateral.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        regua_lateral.setStyleSheet("background: #ffffff; border: 1px solid #c8ced8; color: #3b3b3b;")
         rl_left = QVBoxLayout(regua_lateral)
         rl_left.setContentsMargins(2, 4, 2, 4)
         rl_left.addWidget(QLabel("0"))
@@ -518,7 +519,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _criar_status():
         barra = QFrame()
         barra.setFixedHeight(28)
-        barra.setStyleSheet("background: #e7ebf1; border-top: 1px solid #cfd6df;")
+        barra.setStyleSheet("background: #0b88b6; border-top: 1px solid #0a7aa2; color: white;")
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
         l.addWidget(QLabel("Pronto"))
@@ -526,6 +527,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addWidget(QLabel("Snap Ativo"))
         l.addSpacing(12)
         l.addWidget(QLabel("Escala 100%"))
+        for i in range(l.count()):
+            item = l.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), QLabel):
+                item.widget().setStyleSheet("color: white; font-size: 11px;")
         return barra
 
 
