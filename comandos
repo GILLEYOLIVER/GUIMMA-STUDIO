@@ -23,5 +23,5 @@ baixar do github
 git fetch --all --prune
 git checkout main
 git reset --hard origin/main
-git clean -fdx
+git clean -fd
 git status
