@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -19,9 +21,10 @@ from PySide6.QtWidgets import (
 
 
 class RibbonTabBar(QTabBar):
+    # noinspection PyPep8Naming
     def tabSizeHint(self, index):
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 24, 128), 34)
+        return QSize(max(size.width() + 16, 92), 26)
 
 
 class RibbonButton(QToolButton):
@@ -33,17 +36,17 @@ class RibbonButton(QToolButton):
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.setText(titulo)
         self.setIcon(self._criar_icone())
-        self.setIconSize(QSize(28, 28) if grande else QSize(22, 22))
-        self.setMinimumSize(92, 86 if grande else 66)
+        self.setIconSize(QSize(20, 20) if grande else QSize(16, 16))
+        self.setMinimumSize(64, 52 if grande else 40)
         self.setStyleSheet(
             """
             QToolButton {
                 background: transparent;
                 border: 1px solid transparent;
-                border-radius: 6px;
+                border-radius: 4px;
                 color: #1e1e1e;
-                font-size: 11px;
-                padding: 6px;
+                font-size: 10px;
+                padding: 3px;
             }
             QToolButton:hover {
                 background: #f5f8fd;
@@ -75,14 +78,14 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, grandes: list[str], pequenos: list[str], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(138)
+        self.setFixedHeight(102)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 4)
-        raiz.setSpacing(4)
+        raiz.setContentsMargins(6, 4, 6, 2)
+        raiz.setSpacing(2)
 
         corpo = QHBoxLayout()
-        corpo.setSpacing(8)
+        corpo.setSpacing(4)
         raiz.addLayout(corpo)
 
         for texto in grandes:
@@ -98,7 +101,7 @@ class RibbonGroup(QFrame):
             for i, texto in enumerate(pequenos):
                 if i % 2 == 0:
                     linha = QHBoxLayout()
-                    linha.setSpacing(4)
+                    linha.setSpacing(2)
                     grade.addLayout(linha)
                 linha.addWidget(RibbonButton(texto, grande=False))
             corpo.addWidget(grade_wrap)
@@ -108,7 +111,7 @@ class RibbonGroup(QFrame):
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
         rodape.setStyleSheet(
-            "color: #505050; font-size: 10px; border-top: 1px solid #d9d9d9; padding-top: 3px;"
+            "color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 2px;"
         )
         raiz.addWidget(rodape)
 
@@ -126,7 +129,7 @@ class RibbonPage(QWidget):
     def __init__(self, grupos: list[tuple[str, list[str], list[str]]], parent: QWidget | None = None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(0)
         for titulo, grandes, pequenos in grupos:
             layout.addWidget(RibbonGroup(titulo, grandes, pequenos))
@@ -153,19 +156,20 @@ class BackstagePanel(QFrame):
         raiz.setSpacing(0)
 
         menu_esquerdo = QFrame()
-        menu_esquerdo.setFixedWidth(170)
-        menu_esquerdo.setStyleSheet("background: #1f4f8a;")
+        menu_esquerdo.setFixedWidth(180)
+        menu_esquerdo.setStyleSheet("background: #f6f7f9; border-right: 1px solid #d8dde3;")
         menu_layout = QVBoxLayout(menu_esquerdo)
         menu_layout.setContentsMargins(0, 10, 0, 10)
         menu_layout.setSpacing(2)
 
         titulo = QLabel("ARQUIVO")
-        titulo.setStyleSheet("color: white; font-size: 18px; font-weight: 700; padding: 8px 14px 14px 16px;")
+        titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 8px 14px 14px 16px;")
         menu_layout.addWidget(titulo)
 
         itens = [
             "Novo",
             "Abrir",
+            "Fechar",
             "Salvar",
             "Salvar como",
             "Modelo ▸",
@@ -173,8 +177,8 @@ class BackstagePanel(QFrame):
             "Exportar ▸",
             "Plotar",
             "Imprimir",
-            "Configuração ▸",
-            "Ajuda ▸",
+            "Configurações ▸",
+            "Ajuda",
         ]
         for item in itens:
             botao = QPushButton(item)
@@ -185,13 +189,13 @@ class BackstagePanel(QFrame):
                 QPushButton {
                     text-align: left;
                     padding-left: 16px;
-                    color: white;
+                    color: #1d1d1d;
                     border: none;
                     background: transparent;
                     font-size: 13px;
                 }
                 QPushButton:hover {
-                    background: rgba(255,255,255,0.12);
+                    background: #e8eef8;
                 }
                 """
             )
@@ -204,15 +208,23 @@ class BackstagePanel(QFrame):
         direito.setContentsMargins(18, 18, 18, 18)
         direito.setSpacing(12)
 
-        cab = QLabel("Painel de arquivo")
-        cab.setStyleSheet("font-size: 20px; font-weight: 700; color: #1e1e1e;")
+        cab = QLabel("Documentos Recentes")
+        cab.setStyleSheet("font-size: 19px; font-weight: 700; color: #1e1e1e;")
         direito.addWidget(cab)
 
-        desc = QLabel(
-            "Área reservada para opções detalhadas de Novo, Abrir, Salvar, Modelo, Importar, Exportar, Configuração e Ajuda."
-        )
+        desc = QLabel("\n".join([
+            "1  6395 CAMISA LISTRADA GOLA DUPLA MANGA P...",
+            "2  GIL 123 2.adsx",
+            "3  GIL 144.adsx",
+            "4  ENCOMENDA 3 (3) NOVO TEC.adsx",
+            "5  GIL 130 2.adsx",
+            "6  GIL 130.adsx",
+            "7  ENCOMENDA 3 (2) NOVO TEC.adsx",
+            "8  5972 vestido tencel coulisse.adsx",
+            "9  ENCOMENDA 3.adsx",
+        ]))
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #555555;")
+        desc.setStyleSheet("font-size: 13px; color: #2b2b2b; line-height: 1.6;")
         direito.addWidget(desc)
         direito.addStretch(1)
 
@@ -221,11 +233,7 @@ class BackstagePanel(QFrame):
 
         self.setStyleSheet(
             """
-            QFrame#BackstagePanel {
-                background: white;
-                border: 1px solid #cfd6df;
-                border-radius: 0px;
-            }
+            QFrame#BackstagePanel { background: white; border: 1px solid #cfd6df; border-radius: 0px; }
             """
         )
 
@@ -251,24 +259,25 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.setStyleSheet(
             """
-            QMainWindow { background: #f1f3f6; }
-            QWidget#TopHeader { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f7f8fb, stop:1 #e9edf3); border-bottom: 1px solid #cfd6df; }
+            QMainWindow { background: #e9edf2; }
+            QWidget#TopHeader { background: #f2f3f5; border-bottom: 1px solid #cfd6df; }
             QWidget#RibbonHost { background: white; border-bottom: 1px solid #d8dce3; }
             QTabBar::tab {
                 background: transparent;
                 color: #2d2d2d;
-                padding: 7px 18px;
-                margin: 0 2px;
+                padding: 4px 10px;
+                margin: 0 1px;
                 border: none;
-                font-size: 12px;
+                font-size: 10px;
             }
             QTabBar::tab:selected {
                 background: white;
                 border: 1px solid #d7dbe2;
                 border-bottom: 2px solid white;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
+                border-top-left-radius: 2px;
+                border-top-right-radius: 2px;
                 font-weight: 700;
+                color: #0b65a3;
             }
             QTabBar::tab:hover { color: #0e4f96; }
             """
@@ -283,34 +292,34 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra_superior = QWidget()
         sup = QHBoxLayout(barra_superior)
-        sup.setContentsMargins(8, 4, 10, 4)
-        sup.setSpacing(8)
+        sup.setContentsMargins(6, 2, 6, 2)
+        sup.setSpacing(6)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
         self.botao_arquivo.setCursor(Qt.PointingHandCursor)
-        self.botao_arquivo.setFixedSize(88, 30)
+        self.botao_arquivo.setFixedSize(82, 24)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
         self.botao_arquivo.setStyleSheet(
             """
             QPushButton {
-                background: #245998;
+                background: #0078b5;
                 color: white;
-                border: 1px solid #15406f;
-                border-radius: 4px;
-                font-size: 12px;
+                border: 1px solid #026da2;
+                border-radius: 2px;
+                font-size: 10px;
                 font-weight: 700;
             }
-            QPushButton:hover { background: #2d6ab3; }
-            QPushButton:pressed { background: #184879; }
+            QPushButton:hover { background: #0682c2; }
+            QPushButton:pressed { background: #016595; }
             """
         )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
         titulo = QLabel("GUIMMA STUDIO")
-        titulo.setStyleSheet("font-size: 15px; font-weight: 700; color: #202020;")
+        titulo.setStyleSheet("font-size: 13px; font-weight: 700; color: #202020;")
         sup.addWidget(titulo)
         sup.addStretch(1)
-        sup.addWidget(QLabel("Usuário 1"))
+        sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
         layout.addWidget(barra_superior)
 
         host = QWidget()
@@ -340,6 +349,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         return topo
 
+    # noinspection PyPep8Naming
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "backstage"):
@@ -351,85 +361,128 @@ class GuimmaStudioMainWindow(QMainWindow):
         if self.backstage.isVisible():
             self.backstage.raise_()
 
+    # noinspection PyPep8Naming
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
             self.backstage.hide()
 
-    def _dados_abas(self):
+    @staticmethod
+    def _dados_abas():
         return {
+            "Arquivo": [
+                ("Arquivo", ["Novo", "Abrir"], ["Fechar", "Salvar", "Salvar como", "Imprimir"]),
+            ],
             "Início": [
-                ("Projeto", ["Novo", "Abrir"], ["Salvar", "Salvar como", "Recente", "Fixar"]),
-                ("Editar", ["Selecionar", "Mover"], ["Desfazer", "Refazer", "Copiar", "Colar"]),
-                ("Exibir", ["Pan", "Zoom"], ["Grade", "Snap", "Réguas", "Guias"]),
+                ("Desenho", ["Cor", "Selecionar"], ["Colar", "Excluir", "Recortar", "Copiar"]),
+                ("Restauração", ["Selecionar moldes"], ["Ponto de restauração", "Restaurar", "Restaura cópia", "Abrir software"]),
+                ("3D", ["Abrir"], []),
+            ],
+            "Construção": [
+                ("Retas", ["Reta", "Retângulo"], ["Por ângulo", "Estender reta", "Estender duas retas", "Estender até elemento"]),
+                ("Curvas", ["Curva", "Espiral e curvas"], ["Dividir curva", "Cadastrar curva", "Pré-definida", "Editar pontos de curva"]),
+                ("Pontos", ["Por coordenada", "Por interseção"], ["No centro do arco", "No perímetro", "Por distância"]),
+                ("Arcos", ["Por raio"], []),
             ],
             "Produção": [
-                ("Ordem", ["Criar OP", "Listar"], ["Editar", "Duplicar", "Status", "Prioridade"]),
-                ("Peças", ["Separar", "Agrupar"], ["Etiqueta", "Resumo", "Lote", "Saída"]),
-                ("Relatórios", ["Geral", "Histórico"], ["PDF", "Imprimir", "Resumo", "Filtro"]),
+                ("Definir moldes", ["Criar molde", "Digitalizar"], ["Sentido do fio", "Encolhimento", "Linha simetria", "Bainha"]),
+                ("Costura", ["Remover costura", "Trocar costura/linha"], ["Converter em costura"]),
+                ("Pregas e pences", ["Pregas", "Pence no contorno"], ["Pence interna", "Fechar pence", "Transferir pence"]),
+                ("Cortar e unir", ["Múltiplas pences"], ["Cortar", "Unir", "Remover região"]),
             ],
-            "Marcação": [
-                ("Marcação", ["Nova", "Abrir"], ["Salvar", "Salvar como", "Duplicar", "Excluir"]),
-                ("Encaixe", ["Adicionar", "Rotacionar"], ["Espelhar", "Bloquear", "Agrupar", "Distribuir"]),
-                ("Análise", ["Eficiência", "Desperdício"], ["Área", "Perímetro", "Piques", "Tamanhos"]),
+            "Marcações": [
+                ("Piques", ["Inserir", "Remover pique"], ["Múltiplos", "Alinhar", "Substituir", "Alterar piques"]),
+                ("Linhas auxiliares", ["Inserir ou remover"], []),
+                ("Estampa digital", ["Corrida", "Localizada"], []),
             ],
             "Graduação": [
-                ("Grade", ["Tabela", "Aplicar"], ["Validar", "Atualizar", "Importar", "Exportar"]),
-                ("Tamanhos", ["Adicionar", "Editar"], ["Excluir", "Sequência", "Base", "Conferir"]),
-                ("Pontos", ["Movimento", "Visualizar"], ["X", "Y", "Regras", "Ajustes"]),
+                ("Graduar", ["Tabela", "Mouse"], ["Tangente", "Regras", "Criar regra", "Remover graduação"]),
+                ("Manipular graduação", ["Unir", "Agrupar"], ["Deduzir", "Copiar graduação", "Ajustar", "Graduar curva"]),
             ],
             "Manipulação": [
-                ("Desenho", ["Linhas", "Curvas"], ["Pontos", "Arcos", "Texto", "Medidas"]),
-                ("Molde", ["Cortar", "Unir"], ["Pence", "Costura", "Piques", "Complementar"]),
-                ("Transformar", ["Mover", "Rotacionar"], ["Escalar", "Espelhar", "Offset", "Alinhar"]),
+                ("Redefinir", ["Manipular pontos", "Mover"], ["Mover ponto", "Redefinir perímetro", "Dividir elementos", "Girar"]),
+                ("Cerca", ["Definir cerca"], ["Mover cerca"]),
+                ("Manipular molde", ["Inserir ponto", "Excluir ponto"], ["Transformar em elementos", "Alinhar", "Copiar ou trocar elemento", "Arredondar ou chanfrar"]),
             ],
             "Conferência": [
-                ("Medição", ["Distância", "Perímetro"], ["Área", "Ângulo", "Comprimento", "Largura"]),
-                ("Validação", ["Inconsist.", "Fechamento"], ["Sobreposição", "Curvas", "Pontos", "Avisos"]),
-                ("Saída", ["Relatório", "Imprimir"], ["PDF", "Exportar", "Lista", "Detalhes"]),
+                ("Conferir perímetro", ["Conferir", "Conferir múltiplos"], ["Contro. curvas", "Cota perímetro", "Perímetro", "Comparar perímetros"]),
+                ("Distância", ["Cota distância"], ["Horizontal/Vertical", "Ângulo", "Raio", "Comparar distância"]),
             ],
             "Modelo": [
-                ("Cadastro", ["Novo", "Editar"], ["Duplicar", "Excluir", "Buscar", "Biblioteca"]),
-                ("Estrutura", ["Partes", "Variantes"], ["Materiais", "Cores", "Referência", "Ficha"]),
-                ("Integração", ["Importar", "Exportar"], ["Config.", "Ajuda", "Padrão", "Opções"]),
+                ("Informações", ["Propriedades", "Tecidos"], ["Autor", "Informações dos moldes", "Variantes"]),
+                ("Operações", ["Relacionamento piques", "Imagens"], ["Localizar modelos", "Substituir", "Editar"]),
+                ("Medida/Grupos", ["Criar"], []),
+            ],
+            "Usuário 1": [
+                ("Ferramentas", ["Retângulo", "Curva"], ["Editar pontos de curva", "Por coordenada", "Inserir texto", "Extrair molde"]),
+                ("Operações", ["Cortar", "Unir"], ["Inserir pique", "Tabela", "Modificar"]),
+                ("Conferência", ["Conferir", "Perímetro"], ["Distância", "Comparar distância"]),
             ],
         }
 
-    def _criar_area_documento(self):
+    @staticmethod
+    def _criar_area_documento():
         area = QWidget()
-        area.setStyleSheet("background: #eef1f5;")
+        area.setStyleSheet("background: #f2f3f5;")
         layout = QVBoxLayout(area)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
         quadro = QFrame()
-        quadro.setStyleSheet(
-            "background: white; border: 1px solid #d4d9e0; border-radius: 6px;"
-        )
+        quadro.setStyleSheet("background: #000000; border: 1px solid #9da5b1; border-radius: 0px;")
         ql = QVBoxLayout(quadro)
-        ql.setContentsMargins(20, 18, 20, 18)
+        ql.setContentsMargins(2, 2, 2, 2)
+        ql.setSpacing(2)
 
         faixa = QFrame()
-        faixa.setFixedHeight(34)
-        faixa.setStyleSheet("background: #f6f7f9; border: 1px solid #e1e4e8; border-radius: 4px;")
+        faixa.setFixedHeight(24)
+        faixa.setStyleSheet("background: #f4f4f4; border: 1px solid #d7dbe1; border-radius: 0px;")
         fl = QHBoxLayout(faixa)
         fl.setContentsMargins(10, 0, 10, 0)
-        fl.addWidget(QLabel("Molde1 *"))
+        fl.addWidget(QLabel("ENCOMENDA 3 (3) NOVO TEC.adsx    ✕     GIL 130 2.adsx    ✕     GIL 144.adsx"))
         fl.addStretch(1)
         fl.addWidget(QLabel("100%"))
         ql.addWidget(faixa)
 
-        tela = QLabel("ÁREA DE TRABALHO / CANVAS")
+        regua_superior = QFrame()
+        regua_superior.setFixedHeight(22)
+        regua_superior.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        rl_top = QHBoxLayout(regua_superior)
+        rl_top.setContentsMargins(4, 0, 4, 0)
+        rl_top.addWidget(QLabel("0      10      20      30      40      50      60      70      80      90      100"))
+        rl_top.addStretch(1)
+        ql.addWidget(regua_superior)
+
+        corpo_canvas = QHBoxLayout()
+        corpo_canvas.setSpacing(2)
+
+        regua_lateral = QFrame()
+        regua_lateral.setFixedWidth(22)
+        regua_lateral.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        rl_left = QVBoxLayout(regua_lateral)
+        rl_left.setContentsMargins(2, 4, 2, 4)
+        rl_left.addWidget(QLabel("0"))
+        rl_left.addWidget(QLabel("10"))
+        rl_left.addWidget(QLabel("20"))
+        rl_left.addWidget(QLabel("30"))
+        rl_left.addStretch(1)
+        corpo_canvas.addWidget(regua_lateral)
+
+        tela = QLabel("ÁREA CANVAS")
         tela.setAlignment(Qt.AlignCenter)
-        tela.setMinimumHeight(520)
+        tela.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        tela.setMinimumHeight(620)
         tela.setStyleSheet(
-            "background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:1 #fafafa); border: 1px dashed #c8ced8; color: #7a7f87; font-size: 20px; font-weight: 700;"
+            "background: #000000; border: 1px solid #a8aeb8; color: #4b4b4b; font-size: 16px; font-weight: 700;"
         )
-        ql.addWidget(tela)
+        corpo_canvas.addWidget(tela, 1)
+        ql.addLayout(corpo_canvas, 1)
 
         layout.addWidget(quadro)
         return area
 
-    def _criar_status(self):
+    @staticmethod
+    def _criar_status():
         barra = QFrame()
         barra.setFixedHeight(28)
         barra.setStyleSheet("background: #e7ebf1; border-top: 1px solid #cfd6df;")
@@ -441,3 +494,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addSpacing(12)
         l.addWidget(QLabel("Escala 100%"))
         return barra
+
+
+def executar_app() -> int:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    janela = GuimmaStudioMainWindow()
+    janela.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(executar_app())
