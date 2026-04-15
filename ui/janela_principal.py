@@ -174,29 +174,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.abas_documentos.setDrawBase(False)
         self.abas_documentos.setExpanding(False)
         self.abas_documentos.setMovable(True)
+        self.abas_documentos.setTabsClosable(True)
+        self.abas_documentos.setDocumentMode(True)
         self.abas_documentos.addTab("ENCOMENDA 3  (3) NOVO TEC.adsx")
         self.abas_documentos.addTab("GIL 130 2.adsx")
         self.abas_documentos.addTab("GIL 144.adsx")
         self.abas_documentos.setStyleSheet(
             "QTabBar { background: #f9f9f9; }"
-            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:4px 12px; margin-right:2px; }"
-            "QTabBar::tab:selected { background:#eaf4ff; border-bottom:2px solid #0b8dd1; }"
+            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 10px; margin-right:1px; }"
+            "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos)
 
-        zoom_bar = QFrame()
-        zoom_bar.setFixedHeight(22)
-        zoom_bar.setStyleSheet("background: #f9f9f9; border: 1px solid #d7dbe1;")
-        zl = QHBoxLayout(zoom_bar)
-        zl.setContentsMargins(10, 0, 10, 0)
-        zl.addWidget(QLabel("Documento ativo"))
-        zl.addStretch(1)
-        self.lbl_zoom = QLabel("100%")
-        zl.addWidget(self.lbl_zoom)
-        layout.addWidget(zoom_bar)
-
         self.area_documento = AreaDocumentoWidget(CenaDocumento())
-        self.area_documento.zoom_changed.connect(lambda z: self.lbl_zoom.setText(f"{int(z * 100)}%"))
+        self.area_documento.zoom_changed.connect(lambda z: self.lbl_escala.setText(f"Escala {int(z * 100)}%"))
         layout.addWidget(self.area_documento, 1)
         return area
 
@@ -211,5 +202,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addStretch(1)
         l.addWidget(QLabel("Snap ativo"))
         l.addSpacing(12)
-        l.addWidget(QLabel("Escala 100%"))
+        self.lbl_escala = QLabel("Escala 100%")
+        l.addWidget(self.lbl_escala)
         return barra
