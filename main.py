@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import sys
-from PySide6.QtWidgets import QApplication
-from janela_principal import GuimmaStudioMainWindow
+from pathlib import Path
+
+# Garante prioridade para imports locais quando o script for executado fora da raiz.
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from guimma_app import GuimmaStudioApp
 
 
-def main() -> None:
-    app = QApplication(sys.argv)
-    app.setApplicationName("GUIMMA STUDIO")
-    janela = GuimmaStudioMainWindow()
-    janela.show()
-    sys.exit(app.exec())
+def main() -> int:
+    app = GuimmaStudioApp(sys.argv)
+    return app.run()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
