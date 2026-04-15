@@ -5,9 +5,12 @@ import sys
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QListWidget,
+    QListWidgetItem,
     QLabel,
     QMainWindow,
     QPushButton,
@@ -142,8 +145,9 @@ class BackstagePanel(QFrame):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("BackstagePanel")
-        self.setFixedWidth(420)
+        self.setFixedWidth(520)
         self.hide()
+        self._recentes: list[str] = []
 
         sombra = QGraphicsDropShadowEffect(self)
         sombra.setBlurRadius(28)
@@ -157,7 +161,7 @@ class BackstagePanel(QFrame):
 
         menu_esquerdo = QFrame()
         menu_esquerdo.setFixedWidth(180)
-        menu_esquerdo.setStyleSheet("background: #f6f7f9; border-right: 1px solid #d8dde3;")
+        menu_esquerdo.setStyleSheet("background: #f3f3f3; border-right: 1px solid #d8dde3;")
         menu_layout = QVBoxLayout(menu_esquerdo)
         menu_layout.setContentsMargins(0, 10, 0, 10)
         menu_layout.setSpacing(2)
@@ -166,6 +170,7 @@ class BackstagePanel(QFrame):
         titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 8px 14px 14px 16px;")
         menu_layout.addWidget(titulo)
 
+        self.botoes: dict[str, QPushButton] = {}
         itens = [
             "Novo",
             "Abrir",
@@ -192,14 +197,15 @@ class BackstagePanel(QFrame):
                     color: #1d1d1d;
                     border: none;
                     background: transparent;
-                    font-size: 13px;
+                    font-size: 12px;
                 }
                 QPushButton:hover {
-                    background: #e8eef8;
+                    background: #d9ebf7;
                 }
                 """
             )
             menu_layout.addWidget(botao)
+            self.botoes[item] = botao
         menu_layout.addStretch(1)
 
         painel_direito = QFrame()
@@ -212,20 +218,17 @@ class BackstagePanel(QFrame):
         cab.setStyleSheet("font-size: 19px; font-weight: 700; color: #1e1e1e;")
         direito.addWidget(cab)
 
-        desc = QLabel("\n".join([
-            "1  6395 CAMISA LISTRADA GOLA DUPLA MANGA P...",
-            "2  GIL 123 2.adsx",
-            "3  GIL 144.adsx",
-            "4  ENCOMENDA 3 (3) NOVO TEC.adsx",
-            "5  GIL 130 2.adsx",
-            "6  GIL 130.adsx",
-            "7  ENCOMENDA 3 (2) NOVO TEC.adsx",
-            "8  5972 vestido tencel coulisse.adsx",
-            "9  ENCOMENDA 3.adsx",
-        ]))
-        desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #2b2b2b; line-height: 1.6;")
-        direito.addWidget(desc)
+        self.lista_recentes = QListWidget()
+        self.lista_recentes.setStyleSheet(
+            "QListWidget { border: none; font-size: 14px; color: #1f1f1f; background: white; }"
+        )
+        self.lista_recentes.setSelectionMode(QListWidget.NoSelection)
+        direito.addWidget(self.lista_recentes)
+
+        self.lbl_vazio = QLabel("Nenhum documento recente.")
+        self.lbl_vazio.setStyleSheet("font-size: 13px; color: #676767;")
+        direito.addWidget(self.lbl_vazio)
+        self._atualizar_recentes()
         direito.addStretch(1)
 
         raiz.addWidget(menu_esquerdo)
@@ -236,6 +239,22 @@ class BackstagePanel(QFrame):
             QFrame#BackstagePanel { background: white; border: 1px solid #cfd6df; border-radius: 0px; }
             """
         )
+
+    def _atualizar_recentes(self):
+        self.lista_recentes.clear()
+        for i, caminho in enumerate(self._recentes, start=1):
+            self.lista_recentes.addItem(QListWidgetItem(f"{i}  {caminho}"))
+        vazio = len(self._recentes) == 0
+        self.lbl_vazio.setVisible(vazio)
+        self.lista_recentes.setVisible(not vazio)
+
+    def adicionar_recente(self, caminho: str):
+        nome = caminho.split("/")[-1].split("\\")[-1]
+        if nome in self._recentes:
+            self._recentes.remove(nome)
+        self._recentes.insert(0, nome)
+        self._recentes = self._recentes[:12]
+        self._atualizar_recentes()
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -260,26 +279,22 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow { background: #e9edf2; }
-            QWidget#TopHeader { background: #f2f3f5; border-bottom: 1px solid #cfd6df; }
-            QWidget#RibbonHost { background: white; border-bottom: 1px solid #d8dce3; }
+            QWidget#TopHeader { background: #efefef; border-bottom: 1px solid #cfd6df; }
+            QWidget#RibbonHost { background: #efefef; border-bottom: 1px solid #d8dce3; }
             QTabBar::tab {
                 background: transparent;
-                color: #2d2d2d;
+                color: #101010;
                 padding: 4px 10px;
                 margin: 0 1px;
                 border: none;
                 font-size: 10px;
             }
             QTabBar::tab:selected {
-                background: white;
-                border: 1px solid #d7dbe2;
-                border-bottom: 2px solid white;
-                border-top-left-radius: 2px;
-                border-top-right-radius: 2px;
-                font-weight: 700;
-                color: #0b65a3;
+                background: #0f7cb5;
+                color: #ffffff;
+                border: 1px solid #0b6898;
             }
-            QTabBar::tab:hover { color: #0e4f96; }
+            QTabBar::tab:hover { background: #dcecf7; }
             """
         )
 
@@ -297,7 +312,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.botao_arquivo = QPushButton("ARQUIVO")
         self.botao_arquivo.setCursor(Qt.PointingHandCursor)
-        self.botao_arquivo.setFixedSize(82, 24)
+        self.botao_arquivo.setFixedSize(84, 24)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
         self.botao_arquivo.setStyleSheet(
             """
@@ -321,6 +336,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addStretch(1)
         sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
         layout.addWidget(barra_superior)
+        self.barra_superior = barra_superior
 
         host = QWidget()
         host.setObjectName("RibbonHost")
@@ -331,6 +347,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.tabbar = RibbonTabBar()
         self.paginas = QStackedWidget()
         self.tabbar.currentChanged.connect(self.paginas.setCurrentIndex)
+        self.tabbar.currentChanged.connect(lambda _: self.backstage.hide() if hasattr(self, "backstage") else None)
 
         abas = self._dados_abas()
         for nome, grupos in abas.items():
@@ -344,7 +361,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(host)
 
         self.backstage = BackstagePanel(self)
-        self.backstage.move(0, 0)
+        self.backstage.botoes["Abrir"].clicked.connect(self._abrir_documento_real)
+        self.backstage.move(0, self._topo_backstage())
         self.backstage.raise_()
 
         return topo
@@ -353,10 +371,12 @@ class GuimmaStudioMainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "backstage"):
-            self.backstage.setFixedHeight(self.height() - 30)
-            self.backstage.move(0, 30)
+            y = self._topo_backstage()
+            self.backstage.setFixedHeight(max(220, self.height() - y - 28))
+            self.backstage.move(0, y)
 
     def _alternar_backstage(self):
+        self.tabbar.setCurrentIndex(0)
         self.backstage.setVisible(not self.backstage.isVisible())
         if self.backstage.isVisible():
             self.backstage.raise_()
@@ -366,6 +386,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
             self.backstage.hide()
+
+    def _topo_backstage(self) -> int:
+        return self.barra_superior.height() + self.tabbar.height()
+
+    def _abrir_documento_real(self):
+        caminho, _ = QFileDialog.getOpenFileName(
+            self,
+            "Abrir documento",
+            "",
+            "Arquivos de molde (*.adsx *.dxf *.plt);;Todos os arquivos (*.*)",
+        )
+        if caminho:
+            self.backstage.adicionar_recente(caminho)
 
     @staticmethod
     def _dados_abas():
