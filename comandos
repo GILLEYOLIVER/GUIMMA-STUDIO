@@ -1,0 +1,27 @@
+ENVIAR PARA GITHUB
+
+git status
+git add -A
+git status
+git commit -m "Sincroniza GitHub com estado local"
+git push origin main
+
+___________________________________________________________________________________
+
+empurrar forçado para o github
+
+
+git status
+git add -A
+git fetch origin
+git push --force-with-lease origin main
+
+
+___________________________________________________________________________________
+baixar do github
+
+git fetch --all --prune
+git checkout main
+git reset --hard origin/main
+git clean -fdx
+git status
