@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 
 class RibbonTabBar(QTabBar):
+    # noinspection PyPep8Naming
     def tabSizeHint(self, index):
         size = super().tabSizeHint(index)
         return QSize(max(size.width() + 24, 128), 34)
@@ -346,6 +347,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         return topo
 
+    # noinspection PyPep8Naming
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "backstage"):
@@ -357,12 +359,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         if self.backstage.isVisible():
             self.backstage.raise_()
 
+    # noinspection PyPep8Naming
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
             self.backstage.hide()
 
-    def _dados_abas(self):
+    @staticmethod
+    def _dados_abas():
         return {
             "Arquivo": [
                 ("Arquivo", ["Novo", "Abrir"], ["Fechar", "Salvar", "Salvar como", "Imprimir"]),
@@ -414,7 +418,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             ],
         }
 
-    def _criar_area_documento(self):
+    @staticmethod
+    def _criar_area_documento():
         area = QWidget()
         area.setStyleSheet("background: #f2f3f5;")
         layout = QVBoxLayout(area)
@@ -446,7 +451,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(quadro)
         return area
 
-    def _criar_status(self):
+    @staticmethod
+    def _criar_status():
         barra = QFrame()
         barra.setFixedHeight(28)
         barra.setStyleSheet("background: #e7ebf1; border-top: 1px solid #cfd6df;")
