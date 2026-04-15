@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QGridLayout, QLabel, QScrollArea, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
 from canvas.cena import CenaDocumento
+
+
+class ScrollAreaSemWheel(QScrollArea):
+    def wheelEvent(self, event: QWheelEvent):  # noqa: N802
+        # Rolagem vertical/horizontal somente pelas barras, conforme solicitado.
+        event.ignore()
 
 
 class ReguaWidget(QWidget):
@@ -72,10 +78,11 @@ class AreaDocumentoWidget(QWidget):
 
         self.canvas = VisualizacaoCanvas(cena)
 
-        self.scroll = QScrollArea()
+        self.scroll = ScrollAreaSemWheel()
         self.scroll.setWidget(self.canvas)
         self.scroll.setWidgetResizable(False)
-        self.scroll.setBackgroundRole(self.canvas.backgroundRole())
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         self.scroll.horizontalScrollBar().valueChanged.connect(self._sync_reguas)
         self.scroll.verticalScrollBar().valueChanged.connect(self._sync_reguas)

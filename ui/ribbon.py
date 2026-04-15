@@ -65,7 +65,7 @@ class RibbonButton(QToolButton):
         self.setStyleSheet(
             """
             QToolButton {
-                background: transparent;
+                background: #ffffff;
                 border: 1px solid transparent;
                 border-radius: 4px;
                 color: #1e1e1e;
@@ -106,7 +106,7 @@ class RibbonGroup(QFrame):
         rodape.setStyleSheet("color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 2px;")
         raiz.addWidget(rodape)
 
-        self.setStyleSheet("QFrame#RibbonGroup { background: transparent; border-right: 1px solid #dddddd; }")
+        self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
 
 
 class RibbonPage(QWidget):
@@ -136,6 +136,7 @@ class RibbonWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.setStyleSheet("background:#ffffff; color:#111;")
 
         self.tabbar = RibbonTabBar()
         self.paginas = QStackedWidget()

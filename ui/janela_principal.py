@@ -35,6 +35,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         raiz.addWidget(self._criar_area_documento(), 1)
         raiz.addWidget(self._criar_status())
 
+        self.setStyleSheet(
+            """
+            QMainWindow { background: #eef2f6; }
+            QTabBar::tab {
+                background: #f6f7f9;
+                color: #101010;
+                border: 1px solid #d7dde5;
+                padding: 6px 18px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #0b5f9e;
+                border-bottom: 2px solid #0b8dd1;
+            }
+            QTabBar::tab:hover { background: #ecf4fb; }
+            """
+        )
+
     def _criar_topo(self) -> QWidget:
         topo = QWidget()
         layout = QVBoxLayout(topo)
