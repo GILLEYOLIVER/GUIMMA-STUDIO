@@ -1,21 +1,13 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
-from canvas.visualizacao import VisualizacaoCanvas
+from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
@@ -29,7 +21,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual = Projeto()
         self._arquivo_atual: Path | None = None
         self.setWindowTitle("GUIMMA STUDIO")
-        self.resize(1500, 900)
+        self.resize(1700, 980)
         self._configurar_interface()
 
     def _configurar_interface(self):
@@ -45,7 +37,6 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _criar_topo(self) -> QWidget:
         topo = QWidget()
-        topo.setObjectName("TopHeader")
         layout = QVBoxLayout(topo)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -57,8 +48,9 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.botao_arquivo = QPushButton("ARQUIVO")
         self.botao_arquivo.setCursor(Qt.PointingHandCursor)
-        self.botao_arquivo.setFixedSize(84, 24)
+        self.botao_arquivo.setFixedSize(100, 28)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
+        self.botao_arquivo.setStyleSheet("background:#0b7fb8;color:white;font-weight:700;")
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
         sup.addStretch(1)
@@ -68,6 +60,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.ribbon = RibbonWidget()
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
+        self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         layout.addWidget(self.ribbon)
 
         self.backstage = BackstageArquivoPanel(self)
@@ -78,8 +71,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         return topo
 
-    # noinspection PyPep8Naming
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         y = self._topo_backstage()
         self.backstage.setFixedHeight(max(220, self.height() - y - 28))
@@ -90,14 +82,29 @@ class GuimmaStudioMainWindow(QMainWindow):
         if self.backstage.isVisible():
             self.backstage.raise_()
 
-    # noinspection PyPep8Naming
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
             self.backstage.hide()
 
     def _topo_backstage(self) -> int:
         return self.barra_superior.height() + self.ribbon.tabbar.height()
+
+    def _abrir_pagina_ferramenta(self, tool_id: str):
+        tool_def = self.ribbon.tool_def(tool_id)
+        if not tool_def:
+            self.lbl_status.setText(f"Ferramenta não encontrada: {tool_id}")
+            return
+
+        module_name = tool_def.module.replace("/", ".").replace(".py", "")
+        try:
+            module = import_module(module_name)
+            tool_cls = getattr(module, tool_def.class_name)
+            tool = tool_cls()
+            msg = tool.ativar()
+            self.lbl_status.setText(msg)
+        except Exception as exc:  # pragma: no cover - fallback de carregamento
+            self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
 
     def _novo_projeto(self):
         self.projeto_atual = Projeto()
@@ -106,12 +113,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
 
     def _abrir_projeto(self):
-        caminho, _ = QFileDialog.getOpenFileName(
-            self,
-            "Abrir projeto",
-            "",
-            f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos os arquivos (*.*)",
-        )
+        caminho, _ = QFileDialog.getOpenFileName(self, "Abrir projeto", "", f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)")
         if caminho:
             self.projeto_atual = GSProjectIO.abrir(caminho)
             self._arquivo_atual = Path(caminho)
@@ -128,12 +130,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._atualizar_titulo()
 
     def _salvar_projeto_como(self):
-        caminho, _ = QFileDialog.getSaveFileName(
-            self,
-            "Salvar projeto",
-            f"novo_projeto{EXTENSAO_PROJETO}",
-            f"Projeto GUIMMA (*{EXTENSAO_PROJETO})",
-        )
+        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar projeto", f"novo_projeto{EXTENSAO_PROJETO}", f"Projeto GUIMMA (*{EXTENSAO_PROJETO})")
         if caminho:
             destino = Path(caminho)
             if destino.suffix.lower() != EXTENSAO_PROJETO:
@@ -148,41 +145,38 @@ class GuimmaStudioMainWindow(QMainWindow):
         sufixo = self._arquivo_atual.name if self._arquivo_atual else "sem arquivo"
         self.setWindowTitle(f"GUIMMA STUDIO — {self.projeto_atual.nome} ({sufixo})")
 
-    @staticmethod
-    def _criar_area_documento() -> QWidget:
+    def _criar_area_documento(self) -> QWidget:
         area = QWidget()
-        area.setStyleSheet("background: #f2f3f5;")
+        area.setStyleSheet("background: #eceff3;")
         layout = QVBoxLayout(area)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
 
-        quadro = QFrame()
-        quadro.setStyleSheet("background: #f9fbfd; border: 1px solid #9da5b1;")
-        ql = QVBoxLayout(quadro)
-        ql.setContentsMargins(6, 6, 6, 6)
-
         faixa = QFrame()
-        faixa.setFixedHeight(24)
+        faixa.setFixedHeight(28)
         faixa.setStyleSheet("background: #f9f9f9; border: 1px solid #d7dbe1;")
         fl = QHBoxLayout(faixa)
         fl.setContentsMargins(10, 0, 10, 0)
-        fl.addWidget(QLabel("Documento técnico ativo"))
+        fl.addWidget(QLabel("ENCOMENDA 3  (3) NOVO TEC.adsx"))
         fl.addStretch(1)
-        fl.addWidget(QLabel("100%"))
-        ql.addWidget(faixa)
 
-        ql.addWidget(VisualizacaoCanvas(CenaDocumento()), 1)
-        layout.addWidget(quadro)
+        self.lbl_zoom = QLabel("100%")
+        fl.addWidget(self.lbl_zoom)
+        layout.addWidget(faixa)
+
+        self.area_documento = AreaDocumentoWidget(CenaDocumento())
+        self.area_documento.zoom_changed.connect(lambda z: self.lbl_zoom.setText(f"{int(z * 100)}%"))
+        layout.addWidget(self.area_documento, 1)
         return area
 
-    @staticmethod
-    def _criar_status() -> QFrame:
+    def _criar_status(self) -> QFrame:
         barra = QFrame()
         barra.setFixedHeight(28)
         barra.setStyleSheet("background: #0b88b6; border-top: 1px solid #0a7aa2; color: white;")
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
-        l.addWidget(QLabel("Pronto"))
+        self.lbl_status = QLabel("Pronto")
+        l.addWidget(self.lbl_status)
         l.addStretch(1)
         l.addWidget(QLabel("Snap ativo"))
         l.addSpacing(12)
