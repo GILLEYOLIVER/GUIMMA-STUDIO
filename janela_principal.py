@@ -24,7 +24,7 @@ class RibbonTabBar(QTabBar):
     # noinspection PyPep8Naming
     def tabSizeHint(self, index):
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 24, 128), 34)
+        return QSize(max(size.width() + 16, 92), 26)
 
 
 class RibbonButton(QToolButton):
@@ -36,17 +36,17 @@ class RibbonButton(QToolButton):
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.setText(titulo)
         self.setIcon(self._criar_icone())
-        self.setIconSize(QSize(28, 28) if grande else QSize(22, 22))
-        self.setMinimumSize(92, 86 if grande else 66)
+        self.setIconSize(QSize(20, 20) if grande else QSize(16, 16))
+        self.setMinimumSize(64, 52 if grande else 40)
         self.setStyleSheet(
             """
             QToolButton {
                 background: transparent;
                 border: 1px solid transparent;
-                border-radius: 6px;
+                border-radius: 4px;
                 color: #1e1e1e;
-                font-size: 11px;
-                padding: 6px;
+                font-size: 10px;
+                padding: 3px;
             }
             QToolButton:hover {
                 background: #f5f8fd;
@@ -78,14 +78,14 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, grandes: list[str], pequenos: list[str], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(138)
+        self.setFixedHeight(102)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 4)
-        raiz.setSpacing(4)
+        raiz.setContentsMargins(6, 4, 6, 2)
+        raiz.setSpacing(2)
 
         corpo = QHBoxLayout()
-        corpo.setSpacing(8)
+        corpo.setSpacing(4)
         raiz.addLayout(corpo)
 
         for texto in grandes:
@@ -101,7 +101,7 @@ class RibbonGroup(QFrame):
             for i, texto in enumerate(pequenos):
                 if i % 2 == 0:
                     linha = QHBoxLayout()
-                    linha.setSpacing(4)
+                    linha.setSpacing(2)
                     grade.addLayout(linha)
                 linha.addWidget(RibbonButton(texto, grande=False))
             corpo.addWidget(grade_wrap)
@@ -111,7 +111,7 @@ class RibbonGroup(QFrame):
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
         rodape.setStyleSheet(
-            "color: #505050; font-size: 10px; border-top: 1px solid #d9d9d9; padding-top: 3px;"
+            "color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 2px;"
         )
         raiz.addWidget(rodape)
 
@@ -129,7 +129,7 @@ class RibbonPage(QWidget):
     def __init__(self, grupos: list[tuple[str, list[str], list[str]]], parent: QWidget | None = None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(0)
         for titulo, grandes, pequenos in grupos:
             layout.addWidget(RibbonGroup(titulo, grandes, pequenos))
@@ -265,17 +265,17 @@ class GuimmaStudioMainWindow(QMainWindow):
             QTabBar::tab {
                 background: transparent;
                 color: #2d2d2d;
-                padding: 7px 18px;
-                margin: 0 2px;
+                padding: 4px 10px;
+                margin: 0 1px;
                 border: none;
-                font-size: 12px;
+                font-size: 10px;
             }
             QTabBar::tab:selected {
                 background: white;
                 border: 1px solid #d7dbe2;
                 border-bottom: 2px solid white;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
+                border-top-left-radius: 2px;
+                border-top-right-radius: 2px;
                 font-weight: 700;
                 color: #0b65a3;
             }
@@ -292,12 +292,12 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra_superior = QWidget()
         sup = QHBoxLayout(barra_superior)
-        sup.setContentsMargins(8, 4, 10, 4)
-        sup.setSpacing(8)
+        sup.setContentsMargins(6, 2, 6, 2)
+        sup.setSpacing(6)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
         self.botao_arquivo.setCursor(Qt.PointingHandCursor)
-        self.botao_arquivo.setFixedSize(92, 30)
+        self.botao_arquivo.setFixedSize(82, 24)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
         self.botao_arquivo.setStyleSheet(
             """
@@ -305,8 +305,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 background: #0078b5;
                 color: white;
                 border: 1px solid #026da2;
-                border-radius: 4px;
-                font-size: 12px;
+                border-radius: 2px;
+                font-size: 10px;
                 font-weight: 700;
             }
             QPushButton:hover { background: #0682c2; }
@@ -315,8 +315,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
-        titulo = QLabel("Audaces Moldes")
-        titulo.setStyleSheet("font-size: 15px; font-weight: 700; color: #202020;")
+        titulo = QLabel("GUIMMA STUDIO")
+        titulo.setStyleSheet("font-size: 13px; font-weight: 700; color: #202020;")
         sup.addWidget(titulo)
         sup.addStretch(1)
         sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
@@ -425,15 +425,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = QWidget()
         area.setStyleSheet("background: #f2f3f5;")
         layout = QVBoxLayout(area)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
         quadro = QFrame()
         quadro.setStyleSheet("background: #000000; border: 1px solid #9da5b1; border-radius: 0px;")
         ql = QVBoxLayout(quadro)
-        ql.setContentsMargins(20, 18, 20, 18)
+        ql.setContentsMargins(2, 2, 2, 2)
+        ql.setSpacing(2)
 
         faixa = QFrame()
-        faixa.setFixedHeight(30)
+        faixa.setFixedHeight(24)
         faixa.setStyleSheet("background: #f4f4f4; border: 1px solid #d7dbe1; border-radius: 0px;")
         fl = QHBoxLayout(faixa)
         fl.setContentsMargins(10, 0, 10, 0)
@@ -442,13 +444,39 @@ class GuimmaStudioMainWindow(QMainWindow):
         fl.addWidget(QLabel("100%"))
         ql.addWidget(faixa)
 
+        regua_superior = QFrame()
+        regua_superior.setFixedHeight(22)
+        regua_superior.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        rl_top = QHBoxLayout(regua_superior)
+        rl_top.setContentsMargins(4, 0, 4, 0)
+        rl_top.addWidget(QLabel("0      10      20      30      40      50      60      70      80      90      100"))
+        rl_top.addStretch(1)
+        ql.addWidget(regua_superior)
+
+        corpo_canvas = QHBoxLayout()
+        corpo_canvas.setSpacing(2)
+
+        regua_lateral = QFrame()
+        regua_lateral.setFixedWidth(22)
+        regua_lateral.setStyleSheet("background: #f6f7f9; border: 1px solid #c8ced8; color: #3b3b3b;")
+        rl_left = QVBoxLayout(regua_lateral)
+        rl_left.setContentsMargins(2, 4, 2, 4)
+        rl_left.addWidget(QLabel("0"))
+        rl_left.addWidget(QLabel("10"))
+        rl_left.addWidget(QLabel("20"))
+        rl_left.addWidget(QLabel("30"))
+        rl_left.addStretch(1)
+        corpo_canvas.addWidget(regua_lateral)
+
         tela = QLabel("ÁREA CANVAS")
         tela.setAlignment(Qt.AlignCenter)
-        tela.setMinimumHeight(520)
+        tela.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        tela.setMinimumHeight(620)
         tela.setStyleSheet(
             "background: #000000; border: 1px solid #a8aeb8; color: #4b4b4b; font-size: 16px; font-weight: 700;"
         )
-        ql.addWidget(tela)
+        corpo_canvas.addWidget(tela, 1)
+        ql.addLayout(corpo_canvas, 1)
 
         layout.addWidget(quadro)
         return area
