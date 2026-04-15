@@ -1,0 +1,721 @@
+{
+  "tabs": [
+    {
+      "id": "inicio",
+      "title": "Início",
+      "groups": [
+        {
+          "title": "Desenho",
+          "tools": [
+            "cor",
+            "selecionar"
+          ]
+        },
+        {
+          "title": "Editar",
+          "tools": [
+            "colar",
+            "recortar",
+            "excluir"
+          ]
+        },
+        {
+          "title": "Selecionar",
+          "tools": [
+            "inverter_selecao",
+            "selecionar_tudo",
+            "selecionar_moldes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "construcao",
+      "title": "Construção",
+      "groups": [
+        {
+          "title": "Retas",
+          "tools": [
+            "reta",
+            "retangulo",
+            "por_angulo"
+          ]
+        },
+        {
+          "title": "Curvas",
+          "tools": [
+            "curva",
+            "dividir_curva",
+            "predefinida"
+          ]
+        },
+        {
+          "title": "Pontos",
+          "tools": [
+            "por_coordenada",
+            "por_intersecao",
+            "por_distancia"
+          ]
+        },
+        {
+          "title": "Arcos",
+          "tools": [
+            "por_raio"
+          ]
+        },
+        {
+          "title": "Texto",
+          "tools": [
+            "inserir_texto",
+            "editar_texto"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "producao",
+      "title": "Produção",
+      "groups": [
+        {
+          "title": "Definir moldes",
+          "tools": [
+            "extrair_molde",
+            "criar_molde",
+            "digitalizar",
+            "sentido_fio"
+          ]
+        },
+        {
+          "title": "Complementar moldes",
+          "tools": [
+            "encolhimento",
+            "linha_simetria",
+            "bainha",
+            "dobrar"
+          ]
+        },
+        {
+          "title": "Costura",
+          "tools": [
+            "costura",
+            "remover_costura",
+            "trocar_costura"
+          ]
+        },
+        {
+          "title": "Pregas e pences",
+          "tools": [
+            "pregas",
+            "pence_contorno",
+            "pence_interna",
+            "fechar_pence"
+          ]
+        },
+        {
+          "title": "Cortar e unir",
+          "tools": [
+            "multiplas_pences",
+            "cortar",
+            "unir"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "marcacoes",
+      "title": "Marcações",
+      "groups": [
+        {
+          "title": "Piques",
+          "tools": [
+            "inserir_pique",
+            "remover_pique",
+            "pique_texto",
+            "multiplos"
+          ]
+        },
+        {
+          "title": "Editar piques",
+          "tools": [
+            "alinhar",
+            "substituir",
+            "alterar"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "graduacao",
+      "title": "Graduação",
+      "groups": [
+        {
+          "title": "Graduar",
+          "tools": [
+            "tabela",
+            "mouse",
+            "regras",
+            "criar_regra"
+          ]
+        },
+        {
+          "title": "Manipular graduação",
+          "tools": [
+            "remover_graduacao",
+            "separar",
+            "agrupar",
+            "graduar_curva"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "manipulacao",
+      "title": "Manipulação",
+      "groups": [
+        {
+          "title": "Redefinir",
+          "tools": [
+            "modificar",
+            "editar",
+            "manipular_pontos",
+            "mover"
+          ]
+        },
+        {
+          "title": "Indicar",
+          "tools": [
+            "elemento_paralelo",
+            "girar",
+            "espelhar"
+          ]
+        },
+        {
+          "title": "Manipular molde",
+          "tools": [
+            "inserir_ponto",
+            "excluir_ponto",
+            "arredondar_ou_chanfrar"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conferencia",
+      "title": "Conferência",
+      "groups": [
+        {
+          "title": "Perímetro",
+          "tools": [
+            "conferir",
+            "conferir_multiplos",
+            "controle_curvas",
+            "cota_perimetro"
+          ]
+        },
+        {
+          "title": "Distância",
+          "tools": [
+            "cota_distancia",
+            "distancia",
+            "comparar_distancia",
+            "raio"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "modelo",
+      "title": "Modelo",
+      "groups": [
+        {
+          "title": "Informações",
+          "tools": [
+            "propriedades",
+            "tecidos",
+            "autor",
+            "informacoes_moldes"
+          ]
+        },
+        {
+          "title": "Operações",
+          "tools": [
+            "variantes",
+            "relacionamento_piques",
+            "imagens",
+            "substituir"
+          ]
+        }
+      ]
+    }
+  ],
+  "tools": {
+    "cor": {
+      "title": "Cor",
+      "module": "tools/cor_tool.py",
+      "class": "Ferramenta",
+      "icon": "cor.svg"
+    },
+    "selecionar": {
+      "title": "Selecionar",
+      "module": "tools/selecionar_tool.py",
+      "class": "Ferramenta",
+      "icon": "selecionar.svg"
+    },
+    "colar": {
+      "title": "Colar",
+      "module": "tools/colar_tool.py",
+      "class": "Ferramenta",
+      "icon": "colar.svg"
+    },
+    "recortar": {
+      "title": "Recortar",
+      "module": "tools/recortar_tool.py",
+      "class": "Ferramenta",
+      "icon": "recortar.svg"
+    },
+    "excluir": {
+      "title": "Excluir",
+      "module": "tools/excluir_tool.py",
+      "class": "Ferramenta",
+      "icon": "excluir.svg"
+    },
+    "inverter_selecao": {
+      "title": "Inverter Selecao",
+      "module": "tools/inverter_selecao_tool.py",
+      "class": "Ferramenta",
+      "icon": "inverter_selecao.svg"
+    },
+    "selecionar_tudo": {
+      "title": "Selecionar Tudo",
+      "module": "tools/selecionar_tudo_tool.py",
+      "class": "Ferramenta",
+      "icon": "selecionar_tudo.svg"
+    },
+    "selecionar_moldes": {
+      "title": "Selecionar Moldes",
+      "module": "tools/selecionar_moldes_tool.py",
+      "class": "Ferramenta",
+      "icon": "selecionar_moldes.svg"
+    },
+    "reta": {
+      "title": "Reta",
+      "module": "tools/reta_tool.py",
+      "class": "Ferramenta",
+      "icon": "reta.svg"
+    },
+    "retangulo": {
+      "title": "Retangulo",
+      "module": "tools/retangulo_tool.py",
+      "class": "Ferramenta",
+      "icon": "retangulo.svg"
+    },
+    "por_angulo": {
+      "title": "Por Angulo",
+      "module": "tools/por_angulo_tool.py",
+      "class": "Ferramenta",
+      "icon": "por_angulo.svg"
+    },
+    "curva": {
+      "title": "Curva",
+      "module": "tools/curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "curva.svg"
+    },
+    "dividir_curva": {
+      "title": "Dividir Curva",
+      "module": "tools/dividir_curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "dividir_curva.svg"
+    },
+    "predefinida": {
+      "title": "Predefinida",
+      "module": "tools/predefinida_tool.py",
+      "class": "Ferramenta",
+      "icon": "predefinida.svg"
+    },
+    "por_coordenada": {
+      "title": "Por Coordenada",
+      "module": "tools/por_coordenada_tool.py",
+      "class": "Ferramenta",
+      "icon": "por_coordenada.svg"
+    },
+    "por_intersecao": {
+      "title": "Por Intersecao",
+      "module": "tools/por_intersecao_tool.py",
+      "class": "Ferramenta",
+      "icon": "por_intersecao.svg"
+    },
+    "por_distancia": {
+      "title": "Por Distancia",
+      "module": "tools/por_distancia_tool.py",
+      "class": "Ferramenta",
+      "icon": "por_distancia.svg"
+    },
+    "por_raio": {
+      "title": "Por Raio",
+      "module": "tools/por_raio_tool.py",
+      "class": "Ferramenta",
+      "icon": "por_raio.svg"
+    },
+    "inserir_texto": {
+      "title": "Inserir Texto",
+      "module": "tools/inserir_texto_tool.py",
+      "class": "Ferramenta",
+      "icon": "inserir_texto.svg"
+    },
+    "editar_texto": {
+      "title": "Editar Texto",
+      "module": "tools/editar_texto_tool.py",
+      "class": "Ferramenta",
+      "icon": "editar_texto.svg"
+    },
+    "extrair_molde": {
+      "title": "Extrair Molde",
+      "module": "tools/extrair_molde_tool.py",
+      "class": "Ferramenta",
+      "icon": "extrair_molde.svg"
+    },
+    "criar_molde": {
+      "title": "Criar Molde",
+      "module": "tools/criar_molde_tool.py",
+      "class": "Ferramenta",
+      "icon": "criar_molde.svg"
+    },
+    "digitalizar": {
+      "title": "Digitalizar",
+      "module": "tools/digitalizar_tool.py",
+      "class": "Ferramenta",
+      "icon": "digitalizar.svg"
+    },
+    "sentido_fio": {
+      "title": "Sentido Fio",
+      "module": "tools/sentido_fio_tool.py",
+      "class": "Ferramenta",
+      "icon": "sentido_fio.svg"
+    },
+    "encolhimento": {
+      "title": "Encolhimento",
+      "module": "tools/encolhimento_tool.py",
+      "class": "Ferramenta",
+      "icon": "encolhimento.svg"
+    },
+    "linha_simetria": {
+      "title": "Linha Simetria",
+      "module": "tools/linha_simetria_tool.py",
+      "class": "Ferramenta",
+      "icon": "linha_simetria.svg"
+    },
+    "bainha": {
+      "title": "Bainha",
+      "module": "tools/bainha_tool.py",
+      "class": "Ferramenta",
+      "icon": "bainha.svg"
+    },
+    "dobrar": {
+      "title": "Dobrar",
+      "module": "tools/dobrar_tool.py",
+      "class": "Ferramenta",
+      "icon": "dobrar.svg"
+    },
+    "costura": {
+      "title": "Costura",
+      "module": "tools/costura_tool.py",
+      "class": "Ferramenta",
+      "icon": "costura.svg"
+    },
+    "remover_costura": {
+      "title": "Remover Costura",
+      "module": "tools/remover_costura_tool.py",
+      "class": "Ferramenta",
+      "icon": "remover_costura.svg"
+    },
+    "trocar_costura": {
+      "title": "Trocar Costura",
+      "module": "tools/trocar_costura_tool.py",
+      "class": "Ferramenta",
+      "icon": "trocar_costura.svg"
+    },
+    "pregas": {
+      "title": "Pregas",
+      "module": "tools/pregas_tool.py",
+      "class": "Ferramenta",
+      "icon": "pregas.svg"
+    },
+    "pence_contorno": {
+      "title": "Pence Contorno",
+      "module": "tools/pence_contorno_tool.py",
+      "class": "Ferramenta",
+      "icon": "pence_contorno.svg"
+    },
+    "pence_interna": {
+      "title": "Pence Interna",
+      "module": "tools/pence_interna_tool.py",
+      "class": "Ferramenta",
+      "icon": "pence_interna.svg"
+    },
+    "fechar_pence": {
+      "title": "Fechar Pence",
+      "module": "tools/fechar_pence_tool.py",
+      "class": "Ferramenta",
+      "icon": "fechar_pence.svg"
+    },
+    "multiplas_pences": {
+      "title": "Multiplas Pences",
+      "module": "tools/multiplas_pences_tool.py",
+      "class": "Ferramenta",
+      "icon": "multiplas_pences.svg"
+    },
+    "cortar": {
+      "title": "Cortar",
+      "module": "tools/cortar_tool.py",
+      "class": "Ferramenta",
+      "icon": "cortar.svg"
+    },
+    "unir": {
+      "title": "Unir",
+      "module": "tools/unir_tool.py",
+      "class": "Ferramenta",
+      "icon": "unir.svg"
+    },
+    "inserir_pique": {
+      "title": "Inserir Pique",
+      "module": "tools/inserir_pique_tool.py",
+      "class": "Ferramenta",
+      "icon": "inserir_pique.svg"
+    },
+    "remover_pique": {
+      "title": "Remover Pique",
+      "module": "tools/remover_pique_tool.py",
+      "class": "Ferramenta",
+      "icon": "remover_pique.svg"
+    },
+    "pique_texto": {
+      "title": "Pique Texto",
+      "module": "tools/pique_texto_tool.py",
+      "class": "Ferramenta",
+      "icon": "pique_texto.svg"
+    },
+    "multiplos": {
+      "title": "Multiplos",
+      "module": "tools/multiplos_tool.py",
+      "class": "Ferramenta",
+      "icon": "multiplos.svg"
+    },
+    "alinhar": {
+      "title": "Alinhar",
+      "module": "tools/alinhar_tool.py",
+      "class": "Ferramenta",
+      "icon": "alinhar.svg"
+    },
+    "substituir": {
+      "title": "Substituir",
+      "module": "tools/substituir_tool.py",
+      "class": "Ferramenta",
+      "icon": "substituir.svg"
+    },
+    "alterar": {
+      "title": "Alterar",
+      "module": "tools/alterar_tool.py",
+      "class": "Ferramenta",
+      "icon": "alterar.svg"
+    },
+    "tabela": {
+      "title": "Tabela",
+      "module": "tools/tabela_tool.py",
+      "class": "Ferramenta",
+      "icon": "tabela.svg"
+    },
+    "mouse": {
+      "title": "Mouse",
+      "module": "tools/mouse_tool.py",
+      "class": "Ferramenta",
+      "icon": "mouse.svg"
+    },
+    "regras": {
+      "title": "Regras",
+      "module": "tools/regras_tool.py",
+      "class": "Ferramenta",
+      "icon": "regras.svg"
+    },
+    "criar_regra": {
+      "title": "Criar Regra",
+      "module": "tools/criar_regra_tool.py",
+      "class": "Ferramenta",
+      "icon": "criar_regra.svg"
+    },
+    "remover_graduacao": {
+      "title": "Remover Graduacao",
+      "module": "tools/remover_graduacao_tool.py",
+      "class": "Ferramenta",
+      "icon": "remover_graduacao.svg"
+    },
+    "separar": {
+      "title": "Separar",
+      "module": "tools/separar_tool.py",
+      "class": "Ferramenta",
+      "icon": "separar.svg"
+    },
+    "agrupar": {
+      "title": "Agrupar",
+      "module": "tools/agrupar_tool.py",
+      "class": "Ferramenta",
+      "icon": "agrupar.svg"
+    },
+    "graduar_curva": {
+      "title": "Graduar Curva",
+      "module": "tools/graduar_curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "graduar_curva.svg"
+    },
+    "modificar": {
+      "title": "Modificar",
+      "module": "tools/modificar_tool.py",
+      "class": "Ferramenta",
+      "icon": "modificar.svg"
+    },
+    "editar": {
+      "title": "Editar",
+      "module": "tools/editar_tool.py",
+      "class": "Ferramenta",
+      "icon": "editar.svg"
+    },
+    "manipular_pontos": {
+      "title": "Manipular Pontos",
+      "module": "tools/manipular_pontos_tool.py",
+      "class": "Ferramenta",
+      "icon": "manipular_pontos.svg"
+    },
+    "mover": {
+      "title": "Mover",
+      "module": "tools/mover_tool.py",
+      "class": "Ferramenta",
+      "icon": "mover.svg"
+    },
+    "elemento_paralelo": {
+      "title": "Elemento Paralelo",
+      "module": "tools/elemento_paralelo_tool.py",
+      "class": "Ferramenta",
+      "icon": "elemento_paralelo.svg"
+    },
+    "girar": {
+      "title": "Girar",
+      "module": "tools/girar_tool.py",
+      "class": "Ferramenta",
+      "icon": "girar.svg"
+    },
+    "espelhar": {
+      "title": "Espelhar",
+      "module": "tools/espelhar_tool.py",
+      "class": "Ferramenta",
+      "icon": "espelhar.svg"
+    },
+    "inserir_ponto": {
+      "title": "Inserir Ponto",
+      "module": "tools/inserir_ponto_tool.py",
+      "class": "Ferramenta",
+      "icon": "inserir_ponto.svg"
+    },
+    "excluir_ponto": {
+      "title": "Excluir Ponto",
+      "module": "tools/excluir_ponto_tool.py",
+      "class": "Ferramenta",
+      "icon": "excluir_ponto.svg"
+    },
+    "arredondar_ou_chanfrar": {
+      "title": "Arredondar Ou Chanfrar",
+      "module": "tools/arredondar_ou_chanfrar_tool.py",
+      "class": "Ferramenta",
+      "icon": "arredondar_ou_chanfrar.svg"
+    },
+    "conferir": {
+      "title": "Conferir",
+      "module": "tools/conferir_tool.py",
+      "class": "Ferramenta",
+      "icon": "conferir.svg"
+    },
+    "conferir_multiplos": {
+      "title": "Conferir Multiplos",
+      "module": "tools/conferir_multiplos_tool.py",
+      "class": "Ferramenta",
+      "icon": "conferir_multiplos.svg"
+    },
+    "controle_curvas": {
+      "title": "Controle Curvas",
+      "module": "tools/controle_curvas_tool.py",
+      "class": "Ferramenta",
+      "icon": "controle_curvas.svg"
+    },
+    "cota_perimetro": {
+      "title": "Cota Perimetro",
+      "module": "tools/cota_perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "cota_perimetro.svg"
+    },
+    "cota_distancia": {
+      "title": "Cota Distancia",
+      "module": "tools/cota_distancia_tool.py",
+      "class": "Ferramenta",
+      "icon": "cota_distancia.svg"
+    },
+    "distancia": {
+      "title": "Distancia",
+      "module": "tools/distancia_tool.py",
+      "class": "Ferramenta",
+      "icon": "distancia.svg"
+    },
+    "comparar_distancia": {
+      "title": "Comparar Distancia",
+      "module": "tools/comparar_distancia_tool.py",
+      "class": "Ferramenta",
+      "icon": "comparar_distancia.svg"
+    },
+    "raio": {
+      "title": "Raio",
+      "module": "tools/raio_tool.py",
+      "class": "Ferramenta",
+      "icon": "raio.svg"
+    },
+    "propriedades": {
+      "title": "Propriedades",
+      "module": "tools/propriedades_tool.py",
+      "class": "Ferramenta",
+      "icon": "propriedades.svg"
+    },
+    "tecidos": {
+      "title": "Tecidos",
+      "module": "tools/tecidos_tool.py",
+      "class": "Ferramenta",
+      "icon": "tecidos.svg"
+    },
+    "autor": {
+      "title": "Autor",
+      "module": "tools/autor_tool.py",
+      "class": "Ferramenta",
+      "icon": "autor.svg"
+    },
+    "informacoes_moldes": {
+      "title": "Informacoes Moldes",
+      "module": "tools/informacoes_moldes_tool.py",
+      "class": "Ferramenta",
+      "icon": "informacoes_moldes.svg"
+    },
+    "variantes": {
+      "title": "Variantes",
+      "module": "tools/variantes_tool.py",
+      "class": "Ferramenta",
+      "icon": "variantes.svg"
+    },
+    "relacionamento_piques": {
+      "title": "Relacionamento Piques",
+      "module": "tools/relacionamento_piques_tool.py",
+      "class": "Ferramenta",
+      "icon": "relacionamento_piques.svg"
+    },
+    "imagens": {
+      "title": "Imagens",
+      "module": "tools/imagens_tool.py",
+      "class": "Ferramenta",
+      "icon": "imagens.svg"
+    }
+  }
+}
