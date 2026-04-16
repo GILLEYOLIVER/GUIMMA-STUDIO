@@ -90,7 +90,7 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa not in {"reta", "curva"}:
             return super().mousePressEvent(event)
 
-        pos = event.position()
+        pos = self._tela_para_cena(event.position())
         if event.button() == Qt.LeftButton:
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
@@ -111,7 +111,7 @@ class VisualizacaoCanvas(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
         if self.ferramenta_ativa in {"reta", "curva"} and self._pontos_reta:
-            self._preview_reta = event.position()
+            self._preview_reta = self._tela_para_cena(event.position())
             self.update()
             event.accept()
             return
@@ -126,6 +126,8 @@ class VisualizacaoCanvas(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000000"))
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.save()
+        painter.scale(self.zoom, self.zoom)
 
         for elemento in self.cena.elementos:
             if elemento.get("tipo") != "polyline":
@@ -140,6 +142,7 @@ class VisualizacaoCanvas(QWidget):
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
             self._desenhar_marcador(painter, self._pontos_reta[0])
+        painter.restore()
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF]):
         for inicio, fim in zip(pontos, pontos[1:]):
@@ -192,3 +195,6 @@ class VisualizacaoCanvas(QWidget):
         x = (self.width() - self.painel_retas.width()) // 2
         y = 24
         self.painel_retas.move(max(8, x), y)
+
+    def _tela_para_cena(self, ponto: QPointF) -> QPointF:
+        return QPointF(ponto.x() / self.zoom, ponto.y() / self.zoom)
