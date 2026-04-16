@@ -147,7 +147,7 @@ class VisualizacaoCanvas(QWidget):
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
         if self.ferramenta_ativa not in {"reta", "curva"}:
             if event.button() == Qt.LeftButton:
-                pos = self._tela_para_cena(event.position())
+                pos = self._ponto_com_snap(event.position())
                 idx = self._indice_elemento_em_ponto(pos)
                 if idx is not None and idx in self._selecionados:
                     self._arrastando_selecao = True
@@ -200,9 +200,8 @@ class VisualizacaoCanvas(QWidget):
             self.update()
             event.accept()
             return
-        self._snap_resultado = None
         if self.ferramenta_ativa not in {"reta", "curva"}:
-            pos = self._tela_para_cena(event.position())
+            pos = self._ponto_com_snap(event.position())
             if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
                 delta_x = pos.x() - self._ultimo_ponto_arrasto.x()
                 delta_y = pos.y() - self._ultimo_ponto_arrasto.y()
@@ -266,7 +265,7 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
-        if self._snap_resultado and self.ferramenta_ativa in {"reta", "curva"}:
+        if self._snap_resultado and self._snap_ativo:
             self._desenhar_marcador_snap(painter, self._snap_resultado)
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
@@ -418,7 +417,11 @@ class VisualizacaoCanvas(QWidget):
     def _atualizar_selecao_por_caixa(self, inicio: QPointF, fim: QPointF):
         x1, y1, x2, y2 = self._retangulo_selecao(inicio, fim)
         if abs(x2 - x1) < 1 and abs(y2 - y1) < 1:
-            idx = self._indice_elemento_em_ponto(inicio)
+            idx = None
+            if self._snap_resultado and self._snap_resultado.elemento_idx is not None:
+                idx = self._snap_resultado.elemento_idx
+            if idx is None:
+                idx = self._indice_elemento_em_ponto(inicio)
             self._selecionados = {idx} if idx is not None else set()
             return
         selecionados: set[int] = set()

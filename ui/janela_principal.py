@@ -24,6 +24,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
+        self._modo_navegacao = "cursor"
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._configurar_atalhos()
@@ -372,9 +373,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()
         if not area:
-            self.btn_snap.blockSignals(True)
-            self.btn_snap.setChecked(False)
-            self.btn_snap.blockSignals(False)
+            self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
             return
         area.canvas.set_snap_ativo(ativo)
 
@@ -415,6 +414,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_snap.setCheckable(True)
         self.btn_snap.setChecked(True)
         self.btn_snap.setCursor(Qt.PointingHandCursor)
+        self.btn_snap.setToolTip("Ativar/Desativar snap (ímã)")
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
             self.btn_snap.setIcon(QIcon(str(icone_snap)))
@@ -424,6 +424,32 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
         )
         row.addWidget(self.btn_snap)
+
+        self.btn_mao = QPushButton("🖐")
+        self.btn_mao.setCheckable(True)
+        self.btn_mao.setFixedHeight(24)
+        self.btn_mao.setToolTip("Mão (navegação)")
+        self.btn_mao.clicked.connect(lambda: self._set_modo_navegacao("mao"))
+        row.addWidget(self.btn_mao)
+
+        self.btn_lupa = QPushButton("🔍")
+        self.btn_lupa.setCheckable(True)
+        self.btn_lupa.setFixedHeight(24)
+        self.btn_lupa.setToolTip("Lupa")
+        self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
+        row.addWidget(self.btn_lupa)
+
+        self.btn_zoom_menos = QPushButton("−")
+        self.btn_zoom_menos.setFixedHeight(24)
+        self.btn_zoom_menos.setToolTip("Zoom -")
+        self.btn_zoom_menos.clicked.connect(lambda: self._aplicar_zoom_incremental(1 / 1.1))
+        row.addWidget(self.btn_zoom_menos)
+
+        self.btn_zoom_mais = QPushButton("+")
+        self.btn_zoom_mais.setFixedHeight(24)
+        self.btn_zoom_mais.setToolTip("Zoom +")
+        self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
+        row.addWidget(self.btn_zoom_mais)
 
         row.addStretch(1)
         layout.addWidget(atalhos)
@@ -440,3 +466,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addWidget(self.lbl_escala)
         layout.addWidget(barra)
         return container
+
+    def _set_modo_navegacao(self, modo: str):
+        self._modo_navegacao = modo
+        self.btn_mao.blockSignals(True)
+        self.btn_lupa.blockSignals(True)
+        self.btn_mao.setChecked(modo == "mao")
+        self.btn_lupa.setChecked(modo == "lupa")
+        self.btn_mao.blockSignals(False)
+        self.btn_lupa.blockSignals(False)
+        self.lbl_status.setText(f"Modo {modo} selecionado")
+
+    def _aplicar_zoom_incremental(self, fator: float):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        area.canvas.set_zoom(area.canvas.zoom * fator)
