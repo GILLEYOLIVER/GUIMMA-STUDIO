@@ -54,6 +54,7 @@ class VisualizacaoCanvas(QWidget):
         super().__init__(parent)
         self.cena = cena
         self.zoom = 1.0
+        self.origem_cena = QPointF(0.0, 0.0)
         self.ferramenta_ativa: str | None = None
         self._pontos_reta: list[QPointF] = []
         self._preview_reta: QPointF | None = None
@@ -87,9 +88,15 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
+        cursor_tela = event.position()
+        cursor_cena_antes = self._tela_para_cena(cursor_tela)
         delta = event.angleDelta().y()
         fator = 1.1 if delta > 0 else 0.9
         self.set_zoom(self.zoom * fator)
+        self.origem_cena = QPointF(
+            cursor_cena_antes.x() - (cursor_tela.x() / self.zoom),
+            cursor_cena_antes.y() - (cursor_tela.y() / self.zoom),
+        )
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
@@ -132,8 +139,6 @@ class VisualizacaoCanvas(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000000"))
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.save()
-        painter.scale(self.zoom, self.zoom)
 
         for elemento in self.cena.elementos:
             if elemento.get("tipo") != "polyline":
@@ -148,7 +153,6 @@ class VisualizacaoCanvas(QWidget):
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
             self._desenhar_marcador(painter, self._pontos_reta[0])
-        painter.restore()
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF]):
         for inicio, fim in zip(pontos, pontos[1:]):
@@ -160,12 +164,13 @@ class VisualizacaoCanvas(QWidget):
         if tracejado:
             pen.setStyle(Qt.DotLine)
         painter.setPen(pen)
-        painter.drawLine(inicio, fim)
+        painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
 
     def _desenhar_marcador(self, painter: QPainter, ponto: QPointF):
         painter.setPen(QPen(QColor("#ff5a00"), 1))
-        painter.drawLine(ponto.x() - 5, ponto.y(), ponto.x() + 5, ponto.y())
-        painter.drawLine(ponto.x(), ponto.y() - 5, ponto.x(), ponto.y() + 5)
+        p = self._cena_para_tela(ponto)
+        painter.drawLine(p.x() - 5, p.y(), p.x() + 5, p.y())
+        painter.drawLine(p.x(), p.y() - 5, p.x(), p.y() + 5)
 
     def _desfazer_ponto(self):
         if not self._pontos_reta:
@@ -204,7 +209,10 @@ class VisualizacaoCanvas(QWidget):
         self.painel_retas.move(max(8, x), y)
 
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
-        return QPointF(ponto.x() / self.zoom, ponto.y() / self.zoom)
+        return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(), (ponto.y() / self.zoom) + self.origem_cena.y())
+
+    def _cena_para_tela(self, ponto: QPointF) -> QPointF:
+        return QPointF((ponto.x() - self.origem_cena.x()) * self.zoom, (ponto.y() - self.origem_cena.y()) * self.zoom)
 
     def desfazer_acao(self):
         if self._pontos_reta:
