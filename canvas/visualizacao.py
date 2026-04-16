@@ -125,6 +125,8 @@ class VisualizacaoCanvas(QWidget):
         self.ferramenta_ativa = tool_id
         self._aguardando_retorno_selecao = False
         self._snap_resultado = None
+        self._snap_candidatos = []
+        self._snap_indice = 0
         if tool_id in {"reta", "curva"}:
             self.painel_retas.show()
             self._reposicionar_painel_retas()
@@ -227,6 +229,10 @@ class VisualizacaoCanvas(QWidget):
                 self.update()
                 event.accept()
                 return
+            # Em modo seleção, o snap precisa continuar visível/ativo também em hover.
+            self.update()
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
