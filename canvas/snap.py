@@ -22,8 +22,21 @@ class SnapManager:
     def __init__(self, tolerancia_px: float = 10.0):
         self.tolerancia_px = tolerancia_px
 
-    def calcular(self, cena: CenaDocumento, cursor: QPointF, zoom: float) -> SnapResult | None:
-        tolerancia_cena = self.tolerancia_px / max(zoom, 0.001)
+    def calcular(self, cena: CenaDocumento, cursor: QPointF, zoom: float, tolerancia_px: float | None = None) -> SnapResult | None:
+        candidatos_validos = self.calcular_candidatos(cena, cursor, zoom, tolerancia_px=tolerancia_px)
+        if not candidatos_validos:
+            return None
+        return candidatos_validos[0]
+
+    def calcular_candidatos(
+        self,
+        cena: CenaDocumento,
+        cursor: QPointF,
+        zoom: float,
+        tolerancia_px: float | None = None,
+    ) -> list[SnapResult]:
+        tolerancia_efetiva = self.tolerancia_px if tolerancia_px is None else tolerancia_px
+        tolerancia_cena = tolerancia_efetiva / max(zoom, 0.001)
         candidatos: list[SnapResult] = []
 
         for idx, elemento in enumerate(cena.elementos):
@@ -33,12 +46,9 @@ class SnapManager:
             elif tipo in {"circle", "esfera"}:
                 self._candidatos_circulo(idx, elemento, cursor, candidatos)
 
-        if not candidatos:
-            return None
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
-        if not candidatos_validos:
-            return None
-        return min(candidatos_validos, key=lambda c: (self._prioridade(c.tipo), c.distancia))
+        candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
+        return candidatos_validos
 
     def _candidatos_polyline(self, idx: int, elemento: dict, cursor: QPointF, candidatos: list[SnapResult]):
         pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]

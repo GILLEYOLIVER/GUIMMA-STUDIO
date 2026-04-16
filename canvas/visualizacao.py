@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
@@ -104,6 +104,8 @@ class VisualizacaoCanvas(QWidget):
         self._snap_manager = SnapManager()
         self._snap_ativo = True
         self._snap_resultado: SnapResult | None = None
+        self._snap_candidatos: list[SnapResult] = []
+        self._snap_indice = 0
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -162,6 +164,15 @@ class VisualizacaoCanvas(QWidget):
                 self.update()
                 event.accept()
                 return
+            if event.button() == Qt.RightButton:
+                if self._snap_ativo and self._snap_candidatos:
+                    self._snap_indice = (self._snap_indice + 1) % len(self._snap_candidatos)
+                    self._snap_resultado = self._snap_candidatos[self._snap_indice]
+                    if self._snap_resultado.elemento_idx is not None:
+                        self._selecionados = {self._snap_resultado.elemento_idx}
+                    self.update()
+                    event.accept()
+                    return
             return super().mousePressEvent(event)
 
         pos = self._ponto_com_snap(event.position())
@@ -466,13 +477,34 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(int(pt.x() - 5), int(pt.y() - 5), 10, 10)
+        texto = snap.tipo
+        metrics = QFontMetrics(painter.font())
+        tw = metrics.horizontalAdvance(texto)
+        th = metrics.height()
+
+        offset_x = 10
+        offset_y = -10
+        tx = pt.x() + offset_x
+        ty = pt.y() + offset_y
+        if tx + tw + 8 > self.width():
+            tx = pt.x() - tw - 14
+        if ty - th < 0:
+            ty = pt.y() + th + 8
+
+        bg_x = int(tx - 4)
+        bg_y = int(ty - th + 2)
+        bg_w = int(tw + 8)
+        bg_h = int(th + 4)
+        painter.fillRect(bg_x, bg_y, bg_w, bg_h, QColor(0, 0, 0, 180))
         painter.setPen(QPen(cor, 1))
-        painter.drawText(int(pt.x() + 8), int(pt.y() + 4), snap.tipo)
+        painter.drawText(int(tx), int(ty), texto)
 
     def set_snap_ativo(self, ativo: bool):
         self._snap_ativo = ativo
         if not ativo:
             self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
         self.snap_changed.emit(ativo)
         self.update()
 
@@ -486,11 +518,33 @@ class VisualizacaoCanvas(QWidget):
         pos_cena = self._tela_para_cena(pos_tela)
         if not self._snap_ativo:
             self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
             return pos_cena
-        self._snap_resultado = self._snap_manager.calcular(self.cena, pos_cena, self.zoom)
+        self._snap_candidatos = self._snap_manager.calcular_candidatos(
+            self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
+        )
+        if self._snap_candidatos:
+            self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
+            self._snap_resultado = self._snap_candidatos[self._snap_indice]
+        else:
+            self._snap_resultado = None
+            self._snap_indice = 0
         if self._snap_resultado:
             return self._snap_resultado.ponto
         return pos_cena
+
+    def _tolerancia_snap_px(self) -> float:
+        # 0,5 cm na tela (aprox.) usando DPI lógico da janela/canvas.
+        dpi = float(self.logicalDpiX()) if self.logicalDpiX() > 0 else 96.0
+        return (dpi / 2.54) * 0.5
+
+    def leaveEvent(self, event):  # noqa: N802
+        self._snap_resultado = None
+        self._snap_candidatos = []
+        self._snap_indice = 0
+        self.update()
+        super().leaveEvent(event)
 
     def _registrar_posicao_painel(self, x: int, y: int):
         self._painel_retas_posicao = (x, y)
