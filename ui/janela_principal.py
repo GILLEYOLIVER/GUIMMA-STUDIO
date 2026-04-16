@@ -65,18 +65,23 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra_menu = QWidget()
         sup = QHBoxLayout(barra_menu)
-        sup.setContentsMargins(2, 2, 6, 1)
-        sup.setSpacing(6)
+        sup.setContentsMargins(0, 0, 4, 0)
+        sup.setSpacing(0)
+        barra_menu.setFixedHeight(30)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
         self.botao_arquivo.setCursor(Qt.PointingHandCursor)
-        self.botao_arquivo.setFixedSize(100, 28)
+        self.botao_arquivo.setFixedSize(88, 26)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
-        self.botao_arquivo.setStyleSheet("background:#0b7fb8;color:white;font-weight:700;")
+        self.botao_arquivo.setStyleSheet(
+            "background:#0b7fb8;color:white;font-weight:700;border:1px solid #0b6fa0;"
+            "border-radius:0;padding:0 8px;"
+        )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
         self.ribbon = RibbonWidget(include_tabbar=False)
         self.ribbon.tabbar.setExpanding(True)
+        self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         sup.addWidget(self.ribbon.tabbar, 1)
@@ -305,7 +310,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             documentos_canvas.append(
                 {
                     "nome": self.abas_documentos.tabText(i),
-                    "elementos": area.canvas.cena.elementos,
+                    "elementos": area.canvas.elementos_para_salvar(),
                     "painel_retas_pos": area.canvas.painel_auxiliar_posicao(),
                 }
             )

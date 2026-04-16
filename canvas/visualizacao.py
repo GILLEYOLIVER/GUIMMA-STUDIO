@@ -435,9 +435,25 @@ class VisualizacaoCanvas(QWidget):
         self._painel_retas_posicao = (x, y)
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
-        return self._painel_retas_posicao
+        if self._painel_retas_posicao:
+            return self._painel_retas_posicao
+        if self.painel_retas.isVisible():
+            return self.painel_retas.x(), self.painel_retas.y()
+        return None
 
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
         self._painel_retas_posicao = pos
         if pos and self.painel_retas.isVisible():
             self.painel_retas.move(*pos)
+
+    def elementos_para_salvar(self) -> list[dict]:
+        elementos = deepcopy(self.cena.elementos)
+        if len(self._pontos_reta) >= 2:
+            elementos.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
+                    "cor": "#ff5a00",
+                }
+            )
+        return elementos
