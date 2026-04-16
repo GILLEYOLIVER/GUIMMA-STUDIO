@@ -425,12 +425,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         row.addWidget(self.btn_snap)
 
-        for titulo in ["Orto", "Grade", "Nó", "Meio", "Centro", "Borda"]:
-            btn = QPushButton(titulo)
-            btn.setEnabled(False)
-            btn.setFixedHeight(24)
-            btn.setStyleSheet("color:#78838f; background:#eef2f6; border:1px solid #ccd4dc; padding:2px 8px;")
-            row.addWidget(btn)
         row.addStretch(1)
         layout.addWidget(atalhos)
 
