@@ -107,7 +107,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not hasattr(self, "barra_superior") or not hasattr(self, "ribbon"):
             return
         y = self._topo_backstage()
-        self.backstage.setFixedHeight(max(220, self.height() - y - 28))
+        altura_disponivel = max(240, self.height() - y - 40)
+        self.backstage.setFixedHeight(min(520, altura_disponivel))
         self.backstage.move(0, y)
 
     def _alternar_backstage(self):

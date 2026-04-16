@@ -21,6 +21,7 @@ flowchart LR
 | Área / Botão | Evento no código | Arquivo principal |
 |---|---|---|
 | ARQUIVO | `self.botao_arquivo.clicked.connect(self._alternar_backstage)` | `ui/janela_principal.py` |
+| Janela do Backstage (altura compacta) | `resizeEvent -> setFixedHeight(min(520, ...))` | `ui/janela_principal.py` |
 | Novo | `self.backstage.botoes["Novo"].clicked.connect(self._novo_projeto)` | `ui/janela_principal.py` |
 | Abrir | `...connect(self._abrir_projeto)` | `ui/janela_principal.py` |
 | Salvar | `...connect(self._salvar_projeto)` | `ui/janela_principal.py` |

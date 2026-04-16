@@ -21,7 +21,7 @@ class BackstageArquivoPanel(QFrame):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("BackstagePanel")
-        self.setFixedWidth(540)
+        self.setFixedWidth(520)
         self.hide()
         self._recentes: list[str] = []
         self._settings = QSettings("GUIMMA", "GUIMMA STUDIO")
