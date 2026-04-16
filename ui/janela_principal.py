@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTabBar, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QTabBar, QTabWidget, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
@@ -22,6 +22,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual = Projeto()
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
+        self._ferramenta_ativa_id = "selecionar"
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._configurar_atalhos()
@@ -125,6 +126,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             tool_cls = getattr(module, tool_def.class_name)
             tool = tool_cls()
             msg = tool.ativar()
+            self._ferramenta_ativa_id = tool_id
             area_atual = self._area_documento_atual()
             if area_atual:
                 area_atual.canvas.set_ferramenta_ativa(tool_id)
@@ -146,15 +148,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._adicionar_aba_documento(self._arquivo_atual.stem)
             self.backstage.hide()
 
-    def _salvar_projeto(self):
+    def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
-            self._salvar_projeto_como()
-            return
+            return self._salvar_projeto_como()
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
         self.backstage.adicionar_recente(str(self._arquivo_atual))
         self._atualizar_titulo()
+        return True
 
-    def _salvar_projeto_como(self):
+    def _salvar_projeto_como(self) -> bool:
         caminho, _ = QFileDialog.getSaveFileName(self, "Salvar projeto", f"novo_projeto{EXTENSAO_PROJETO}", f"Projeto GUIMMA (*{EXTENSAO_PROJETO})")
         if caminho:
             destino = Path(caminho)
@@ -165,6 +167,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.backstage.adicionar_recente(str(destino))
             self._atualizar_titulo()
             self.backstage.hide()
+            return True
+        return False
 
     def _atualizar_titulo(self):
         sufixo = self._arquivo_atual.name if self._arquivo_atual else "sem arquivo"
@@ -196,12 +200,16 @@ class GuimmaStudioMainWindow(QMainWindow):
             nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
         area_doc = AreaDocumentoWidget(CenaDocumento())
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
+        area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
 
     def _fechar_aba_documento(self, index: int):
         if index < 0 or index >= self.abas_documentos.count():
+            return
+        nome_aba = self.abas_documentos.tabText(index)
+        if not self._confirmar_fechamento_aba(nome_aba):
             return
         widget = self.abas_documentos.widget(index)
         self.abas_documentos.removeTab(index)
@@ -267,6 +275,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.apagar_selecionados()
+
+    def _confirmar_fechamento_aba(self, nome_aba: str) -> bool:
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Fechando arquivo")
+        caixa.setIcon(QMessageBox.Question)
+        caixa.setText(f"O arquivo\n{nome_aba}\nfoi alterado. Deseja salvar as alterações?")
+        caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        caixa.setDefaultButton(QMessageBox.Yes)
+        resposta = caixa.exec()
+        if resposta == QMessageBox.Cancel:
+            return False
+        if resposta == QMessageBox.Yes:
+            return self._salvar_projeto()
+        return True
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()

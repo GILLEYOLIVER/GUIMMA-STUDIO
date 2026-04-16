@@ -29,22 +29,48 @@ class PainelAuxiliarRetas(QFrame):
         botao.setFixedHeight(24)
         botao.clicked.connect(self.desfazer_ponto.emit)
         layout.addWidget(botao)
+        self._offset_arraste: QPointF | None = None
 
         self.setStyleSheet(
             """
             QFrame#PainelAuxiliarRetas {
-                background: #e8e8e8;
-                border: 1px solid #a8a8a8;
+                background: #ebebeb;
+                border: 1px solid #9a9a9a;
                 border-radius: 8px;
+                color: #1f1f1f;
             }
             QPushButton {
-                background: #f8f8f8;
-                border: 1px solid #b7b7b7;
+                background: #f6f6f6;
+                border: 1px solid #9b9b9b;
                 font-size: 10px;
+                font-weight: 600;
+                color: #111111;
             }
             QPushButton:hover { background: #ffffff; }
             """
         )
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._offset_arraste = event.position()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        if self._offset_arraste is not None and event.buttons() & Qt.LeftButton:
+            destino = self.mapToParent(event.position().toPoint() - self._offset_arraste.toPoint())
+            self.move(destino)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._offset_arraste = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class VisualizacaoCanvas(QWidget):
