@@ -11,6 +11,7 @@ from canvas.cena import CenaDocumento
 
 class PainelAuxiliarRetas(QFrame):
     desfazer_ponto = Signal()
+    posicao_alterada = Signal(int, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -61,6 +62,7 @@ class PainelAuxiliarRetas(QFrame):
         if self._offset_arraste is not None and event.buttons() & Qt.LeftButton:
             destino = self.mapToParent(event.position().toPoint() - self._offset_arraste.toPoint())
             self.move(destino)
+            self.posicao_alterada.emit(self.x(), self.y())
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -94,6 +96,7 @@ class VisualizacaoCanvas(QWidget):
         self._arrastando_selecao = False
         self._ultimo_ponto_arrasto: QPointF | None = None
         self._moveu_selecao = False
+        self._painel_retas_posicao: tuple[int, int] | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -101,6 +104,7 @@ class VisualizacaoCanvas(QWidget):
 
         self.painel_retas = PainelAuxiliarRetas(self)
         self.painel_retas.desfazer_ponto.connect(self._desfazer_ponto)
+        self.painel_retas.posicao_alterada.connect(self._registrar_posicao_painel)
         self.painel_retas.hide()
 
     def set_zoom(self, zoom: float):
@@ -293,6 +297,9 @@ class VisualizacaoCanvas(QWidget):
     def _reposicionar_painel_retas(self):
         if not self.painel_retas.isVisible():
             return
+        if self._painel_retas_posicao:
+            self.painel_retas.move(*self._painel_retas_posicao)
+            return
         x = (self.width() - self.painel_retas.width()) // 2
         y = 24
         self.painel_retas.move(max(8, x), y)
@@ -423,3 +430,14 @@ class VisualizacaoCanvas(QWidget):
         painter.fillRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1), QColor(120, 0, 0, 80))
         painter.setPen(QPen(QColor("#ff3333"), 1))
         painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+    def _registrar_posicao_painel(self, x: int, y: int):
+        self._painel_retas_posicao = (x, y)
+
+    def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
+        return self._painel_retas_posicao
+
+    def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
+        self._painel_retas_posicao = pos
+        if pos and self.painel_retas.isVisible():
+            self.painel_retas.move(*pos)

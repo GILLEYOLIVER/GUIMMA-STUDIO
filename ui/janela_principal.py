@@ -63,9 +63,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        barra_superior = QWidget()
-        sup = QHBoxLayout(barra_superior)
-        sup.setContentsMargins(6, 2, 6, 1)
+        barra_menu = QWidget()
+        sup = QHBoxLayout(barra_menu)
+        sup.setContentsMargins(2, 2, 6, 1)
         sup.setSpacing(6)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
@@ -75,14 +75,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.botao_arquivo.setStyleSheet("background:#0b7fb8;color:white;font-weight:700;")
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
-        sup.addStretch(1)
-        sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
-        layout.addWidget(barra_superior)
-        self.barra_superior = barra_superior
-
-        self.ribbon = RibbonWidget()
+        self.ribbon = RibbonWidget(include_tabbar=False)
+        self.ribbon.tabbar.setExpanding(True)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
+        sup.addWidget(self.ribbon.tabbar, 1)
+
+        sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
+        layout.addWidget(barra_menu)
+        self.barra_superior = barra_menu
         layout.addWidget(self.ribbon)
 
         self.backstage = BackstageArquivoPanel(self)
@@ -112,7 +113,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.backstage.hide()
 
     def _topo_backstage(self) -> int:
-        return self.barra_superior.height() + self.ribbon.tabbar.height()
+        return self.barra_superior.height()
 
     def _abrir_pagina_ferramenta(self, tool_id: str):
         tool_def = self.ribbon.tool_def(tool_id)
@@ -145,12 +146,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._arquivo_atual = Path(caminho)
             self.backstage.adicionar_recente(caminho)
             self._atualizar_titulo()
-            self._adicionar_aba_documento(self._arquivo_atual.stem)
+            self._carregar_documentos_canvas()
             self.backstage.hide()
 
     def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
             return self._salvar_projeto_como()
+        self._sincronizar_documentos_canvas_no_projeto()
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
         self.backstage.adicionar_recente(str(self._arquivo_atual))
         self._atualizar_titulo()
@@ -162,6 +164,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             destino = Path(caminho)
             if destino.suffix.lower() != EXTENSAO_PROJETO:
                 destino = destino.with_suffix(EXTENSAO_PROJETO)
+            self._sincronizar_documentos_canvas_no_projeto()
             GSProjectIO.salvar(self.projeto_atual, destino)
             self._arquivo_atual = destino
             self.backstage.adicionar_recente(str(destino))
@@ -209,7 +212,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if index < 0 or index >= self.abas_documentos.count():
             return
         nome_aba = self.abas_documentos.tabText(index)
-        if not self._confirmar_fechamento_aba(nome_aba):
+        if not self._confirmar_fechamento_aba(index, nome_aba):
             return
         widget = self.abas_documentos.widget(index)
         self.abas_documentos.removeTab(index)
@@ -276,7 +279,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         if area:
             area.canvas.apagar_selecionados()
 
-    def _confirmar_fechamento_aba(self, nome_aba: str) -> bool:
+    def _confirmar_fechamento_aba(self, index: int, nome_aba: str) -> bool:
+        area = self.abas_documentos.widget(index) if index >= 0 else None
+        if isinstance(area, AreaDocumentoWidget) and not area.canvas.cena.elementos:
+            return True
         caixa = QMessageBox(self)
         caixa.setWindowTitle("Fechando arquivo")
         caixa.setIcon(QMessageBox.Question)
@@ -289,6 +295,45 @@ class GuimmaStudioMainWindow(QMainWindow):
         if resposta == QMessageBox.Yes:
             return self._salvar_projeto()
         return True
+
+    def _sincronizar_documentos_canvas_no_projeto(self):
+        documentos_canvas: list[dict] = []
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            documentos_canvas.append(
+                {
+                    "nome": self.abas_documentos.tabText(i),
+                    "elementos": area.canvas.cena.elementos,
+                    "painel_retas_pos": area.canvas.painel_auxiliar_posicao(),
+                }
+            )
+        self.projeto_atual.preferencias_usuario["documentos_canvas"] = documentos_canvas
+
+    def _carregar_documentos_canvas(self):
+        while self.abas_documentos.count():
+            widget = self.abas_documentos.widget(0)
+            self.abas_documentos.removeTab(0)
+            if widget:
+                widget.deleteLater()
+
+        docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
+        if not docs:
+            self._adicionar_aba_documento(self._arquivo_atual.stem if self._arquivo_atual else None)
+            return
+
+        for doc in docs:
+            area_doc = AreaDocumentoWidget(CenaDocumento(elementos=doc.get("elementos", [])))
+            area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
+            area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
+            painel_pos = doc.get("painel_retas_pos")
+            if isinstance(painel_pos, (list, tuple)) and len(painel_pos) == 2:
+                area_doc.canvas.set_painel_auxiliar_posicao((int(painel_pos[0]), int(painel_pos[1])))
+            nome = doc.get("nome") or "(Sem nome)"
+            idx = self.abas_documentos.addTab(area_doc, nome)
+            self._configurar_botao_fechar_aba(idx)
+        self.abas_documentos.setCurrentIndex(0)
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()

@@ -166,7 +166,7 @@ class RibbonPage(QWidget):
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
         self._tabs, self._tools = carregar_mapa_ribbon()
 
@@ -188,7 +188,8 @@ class RibbonWidget(QWidget):
             pagina.tool_selected.connect(self.tool_selected.emit)
             self.paginas.addWidget(pagina)
 
-        layout.addWidget(self.tabbar)
+        if include_tabbar:
+            layout.addWidget(self.tabbar)
         layout.addWidget(self.paginas)
 
     def tool_def(self, tool_id: str) -> ToolDef | None:
