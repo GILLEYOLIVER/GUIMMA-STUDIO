@@ -132,10 +132,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             tool_cls = getattr(module, tool_def.class_name)
             tool = tool_cls()
             msg = tool.ativar()
-            self._ferramenta_ativa_id = tool_id
-            area_atual = self._area_documento_atual()
-            if area_atual:
-                area_atual.canvas.set_ferramenta_ativa(tool_id)
+            self._ativar_ferramenta_global(tool_id)
             self.lbl_status.setText(msg)
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
@@ -208,6 +205,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
         area_doc = AreaDocumentoWidget(CenaDocumento())
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
+        area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -331,6 +329,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         for doc in docs:
             area_doc = AreaDocumentoWidget(CenaDocumento(elementos=doc.get("elementos", [])))
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
+            area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             painel_pos = doc.get("painel_retas_pos")
             if isinstance(painel_pos, (list, tuple)) and len(painel_pos) == 2:
@@ -339,6 +338,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
         self.abas_documentos.setCurrentIndex(0)
+
+    def _ativar_ferramenta_global(self, tool_id: str):
+        self._ferramenta_ativa_id = tool_id
+        area_atual = self._area_documento_atual()
+        if area_atual:
+            area_atual.canvas.set_ferramenta_ativa(tool_id)
+        if tool_id == "selecionar":
+            self.lbl_status.setText("Selecionar ativada")
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()

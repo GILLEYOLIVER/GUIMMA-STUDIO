@@ -77,6 +77,7 @@ class PainelAuxiliarRetas(QFrame):
 
 class VisualizacaoCanvas(QWidget):
     zoom_changed = Signal(float)
+    ferramenta_padrao_solicitada = Signal(str)
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -97,6 +98,7 @@ class VisualizacaoCanvas(QWidget):
         self._ultimo_ponto_arrasto: QPointF | None = None
         self._moveu_selecao = False
         self._painel_retas_posicao: tuple[int, int] | None = None
+        self._aguardando_retorno_selecao = False
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -114,6 +116,7 @@ class VisualizacaoCanvas(QWidget):
 
     def set_ferramenta_ativa(self, tool_id: str):
         self.ferramenta_ativa = tool_id
+        self._aguardando_retorno_selecao = False
         if tool_id in {"reta", "curva"}:
             self.painel_retas.show()
             self._reposicionar_painel_retas()
@@ -157,6 +160,7 @@ class VisualizacaoCanvas(QWidget):
 
         pos = self._tela_para_cena(event.position())
         if event.button() == Qt.LeftButton:
+            self._aguardando_retorno_selecao = False
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
@@ -167,6 +171,14 @@ class VisualizacaoCanvas(QWidget):
             return
 
         if event.button() == Qt.RightButton:
+            if self._aguardando_retorno_selecao and len(self._pontos_reta) <= 1:
+                self._pontos_reta.clear()
+                self._preview_reta = None
+                self._aguardando_retorno_selecao = False
+                self.ferramenta_padrao_solicitada.emit("selecionar")
+                self.update()
+                event.accept()
+                return
             self._finalizar_reta_atual()
             self.update()
             event.accept()
@@ -279,20 +291,23 @@ class VisualizacaoCanvas(QWidget):
         if len(self._pontos_reta) == 1:
             self._pontos_reta.clear()
             self._preview_reta = None
+            self._aguardando_retorno_selecao = False
             return
 
         if len(self._pontos_reta) >= 2:
-            self.cena.elementos.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
-                    "cor": "#ff5a00",
-                }
-            )
+            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
+                self.cena.elementos.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                        "cor": "#ff5a00",
+                    }
+                )
             self._registrar_historico()
             ultimo_ponto = self._pontos_reta[-1]
             self._pontos_reta = [ultimo_ponto]
             self._preview_reta = ultimo_ponto
+            self._aguardando_retorno_selecao = True
 
     def _reposicionar_painel_retas(self):
         if not self.painel_retas.isVisible():
@@ -449,11 +464,12 @@ class VisualizacaoCanvas(QWidget):
     def elementos_para_salvar(self) -> list[dict]:
         elementos = deepcopy(self.cena.elementos)
         if len(self._pontos_reta) >= 2:
-            elementos.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
-                    "cor": "#ff5a00",
-                }
-            )
+            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
+                elementos.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                        "cor": "#ff5a00",
+                    }
+                )
         return elementos
