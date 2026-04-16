@@ -38,7 +38,10 @@
           "tools": [
             "reta",
             "retangulo",
-            "por_angulo"
+            "por_angulo",
+            "estender_reta",
+            "estender_ate_elemento",
+            "estender_duas_retas"
           ]
         },
         {
@@ -716,6 +719,24 @@
       "module": "tools/imagens_tool.py",
       "class": "Ferramenta",
       "icon": "imagens.svg"
+    },
+    "estender_reta": {
+      "title": "Estender reta",
+      "module": "tools/estender_reta_tool.py",
+      "class": "Ferramenta",
+      "icon": "reta.svg"
+    },
+    "estender_ate_elemento": {
+      "title": "Estender até elemento",
+      "module": "tools/estender_ate_elemento_tool.py",
+      "class": "Ferramenta",
+      "icon": "reta.svg"
+    },
+    "estender_duas_retas": {
+      "title": "Estender duas retas",
+      "module": "tools/estender_duas_retas_tool.py",
+      "class": "Ferramenta",
+      "icon": "reta.svg"
     }
   }
 }
