@@ -4,7 +4,8 @@ from importlib import import_module
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTabBar, QTabWidget, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
@@ -20,9 +21,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         super().__init__()
         self.projeto_atual = Projeto()
         self._arquivo_atual: Path | None = None
+        self._contador_sem_nome = 0
         self.setWindowTitle("GUIMMA STUDIO")
-        self.resize(1700, 980)
         self._configurar_interface()
+        self._configurar_atalhos()
+        self.showMaximized()
 
     def _configurar_interface(self):
         central = QWidget()
@@ -91,6 +94,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        if not hasattr(self, "barra_superior") or not hasattr(self, "ribbon"):
+            return
         y = self._topo_backstage()
         self.backstage.setFixedHeight(max(220, self.height() - y - 28))
         self.backstage.move(0, y)
@@ -120,14 +125,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             tool_cls = getattr(module, tool_def.class_name)
             tool = tool_cls()
             msg = tool.ativar()
+            area_atual = self._area_documento_atual()
+            if area_atual:
+                area_atual.canvas.set_ferramenta_ativa(tool_id)
             self.lbl_status.setText(msg)
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
 
     def _novo_projeto(self):
-        self.projeto_atual = Projeto()
-        self._arquivo_atual = None
-        self._atualizar_titulo()
+        self._adicionar_aba_documento()
         self.backstage.hide()
 
     def _abrir_projeto(self):
@@ -137,6 +143,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._arquivo_atual = Path(caminho)
             self.backstage.adicionar_recente(caminho)
             self._atualizar_titulo()
+            self._adicionar_aba_documento(self._arquivo_atual.stem)
             self.backstage.hide()
 
     def _salvar_projeto(self):
@@ -169,27 +176,97 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = QVBoxLayout(area)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
-
-        self.abas_documentos = QTabBar()
-        self.abas_documentos.setDrawBase(False)
-        self.abas_documentos.setExpanding(False)
+        self.abas_documentos = QTabWidget()
+        self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
-        self.abas_documentos.setTabsClosable(True)
-        self.abas_documentos.setDocumentMode(True)
-        self.abas_documentos.addTab("ENCOMENDA 3  (3) NOVO TEC.adsx")
-        self.abas_documentos.addTab("GIL 130 2.adsx")
-        self.abas_documentos.addTab("GIL 144.adsx")
+        self.abas_documentos.currentChanged.connect(self._on_aba_documento_alterada)
+        self.abas_documentos.tabBar().tabMoved.connect(lambda _from, _to: self._reconfigurar_botoes_fechar_abas())
         self.abas_documentos.setStyleSheet(
+            "QTabWidget::pane { border: 1px solid #d7dbe1; }"
             "QTabBar { background: #f9f9f9; }"
             "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 10px; margin-right:1px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
-        layout.addWidget(self.abas_documentos)
-
-        self.area_documento = AreaDocumentoWidget(CenaDocumento())
-        self.area_documento.zoom_changed.connect(lambda z: self.lbl_escala.setText(f"Escala {int(z * 100)}%"))
-        layout.addWidget(self.area_documento, 1)
+        layout.addWidget(self.abas_documentos, 1)
         return area
+
+    def _adicionar_aba_documento(self, nome: str | None = None):
+        if nome is None:
+            self._contador_sem_nome += 1
+            nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
+        area_doc = AreaDocumentoWidget(CenaDocumento())
+        area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
+        index = self.abas_documentos.addTab(area_doc, nome)
+        self._configurar_botao_fechar_aba(index)
+        self.abas_documentos.setCurrentIndex(index)
+
+    def _fechar_aba_documento(self, index: int):
+        if index < 0 or index >= self.abas_documentos.count():
+            return
+        widget = self.abas_documentos.widget(index)
+        self.abas_documentos.removeTab(index)
+        if widget:
+            widget.deleteLater()
+        self._reconfigurar_botoes_fechar_abas()
+        self._on_aba_documento_alterada(self.abas_documentos.currentIndex())
+
+    def _on_zoom_canvas_alterado(self, zoom: float):
+        area_atual = self._area_documento_atual()
+        if area_atual and self.sender() is area_atual:
+            self.lbl_escala.setText(f"Escala {int(zoom * 100)}%")
+
+    def _on_aba_documento_alterada(self, index: int):
+        area = self.abas_documentos.widget(index) if index >= 0 else None
+        if isinstance(area, AreaDocumentoWidget):
+            self.lbl_escala.setText(f"Escala {int(area.canvas.zoom * 100)}%")
+        else:
+            self.lbl_escala.setText("Escala --")
+
+    def _area_documento_atual(self) -> AreaDocumentoWidget | None:
+        area = self.abas_documentos.currentWidget()
+        if isinstance(area, AreaDocumentoWidget):
+            return area
+        return None
+
+    def _configurar_botao_fechar_aba(self, index: int):
+        barra = self.abas_documentos.tabBar()
+        botao = QPushButton("✕")
+        botao.setCursor(Qt.PointingHandCursor)
+        botao.setFlat(True)
+        botao.setFixedSize(16, 16)
+        botao.setStyleSheet("QPushButton { color:#c62828; border:none; font-weight:700; } QPushButton:hover { color:#ff5252; }")
+        botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
+        barra.setTabButton(index, QTabBar.RightSide, botao)
+
+    def _reconfigurar_botoes_fechar_abas(self):
+        for i in range(self.abas_documentos.count()):
+            self._configurar_botao_fechar_aba(i)
+
+    def _configurar_atalhos(self):
+        QShortcut(QKeySequence.Undo, self, activated=self._desfazer_canvas_atual)
+        QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
+        QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
+        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
+
+    def _desfazer_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.desfazer_acao()
+
+    def _copiar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.copiar()
+
+    def _colar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.colar()
+
+    def _apagar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.apagar_selecionados()
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()
