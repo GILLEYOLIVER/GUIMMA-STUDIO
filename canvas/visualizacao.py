@@ -255,14 +255,12 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
-            self._desenhar_marcador(painter, self._pontos_reta[0])
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
         for inicio, fim in zip(pontos, pontos[1:]):
             self._desenhar_segmento(painter, inicio, fim, cor=cor)
-        self._desenhar_marcador(painter, pontos[-1])
 
     def _desenhar_segmento(self, painter: QPainter, inicio: QPointF, fim: QPointF, tracejado: bool = False, cor: str = "#ff5a00"):
         pen = QPen(QColor(cor), 1)
@@ -270,12 +268,6 @@ class VisualizacaoCanvas(QWidget):
             pen.setStyle(Qt.DotLine)
         painter.setPen(pen)
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
-
-    def _desenhar_marcador(self, painter: QPainter, ponto: QPointF):
-        painter.setPen(QPen(QColor("#ff5a00"), 1))
-        p = self._cena_para_tela(ponto)
-        painter.drawLine(p.x() - 5, p.y(), p.x() + 5, p.y())
-        painter.drawLine(p.x(), p.y() - 5, p.x(), p.y() + 5)
 
     def _desfazer_ponto(self):
         if not self._pontos_reta:
