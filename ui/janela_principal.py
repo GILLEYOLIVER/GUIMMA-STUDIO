@@ -96,6 +96,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Abrir"].clicked.connect(self._abrir_projeto)
         self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
+        self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
 
@@ -144,12 +145,15 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_projeto(self):
         caminho, _ = QFileDialog.getOpenFileName(self, "Abrir projeto", "", f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)")
         if caminho:
-            self.projeto_atual = GSProjectIO.abrir(caminho)
-            self._arquivo_atual = Path(caminho)
-            self.backstage.adicionar_recente(caminho)
-            self._atualizar_titulo()
-            self._carregar_documentos_canvas()
-            self.backstage.hide()
+            self._abrir_projeto_em_caminho(caminho)
+
+    def _abrir_projeto_em_caminho(self, caminho: str):
+        self.projeto_atual = GSProjectIO.abrir(caminho)
+        self._arquivo_atual = Path(caminho)
+        self.backstage.adicionar_recente(caminho)
+        self._atualizar_titulo()
+        self._carregar_documentos_canvas()
+        self.backstage.hide()
 
     def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
@@ -258,6 +262,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _configurar_atalhos(self):
         QShortcut(QKeySequence.Undo, self, activated=self._desfazer_canvas_atual)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._refazer_canvas_atual)
         QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
@@ -271,6 +276,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.copiar()
+
+    def _refazer_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.refazer_acao()
 
     def _colar_canvas_atual(self):
         area = self._area_documento_atual()

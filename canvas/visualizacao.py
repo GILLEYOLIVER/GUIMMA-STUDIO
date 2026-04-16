@@ -336,6 +336,13 @@ class VisualizacaoCanvas(QWidget):
         self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
         self.update()
 
+    def refazer_acao(self):
+        if self._indice_historico >= len(self._historico_elementos) - 1:
+            return
+        self._indice_historico += 1
+        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.update()
+
     def copiar(self):
         if self._selecionados:
             self._buffer_copia = {
@@ -417,7 +424,7 @@ class VisualizacaoCanvas(QWidget):
             if not bbox:
                 continue
             bx1, by1, bx2, by2 = bbox
-            if not (bx2 < x1 or bx1 > x2 or by2 < y1 or by1 > y2):
+            if bx1 >= x1 and bx2 <= x2 and by1 >= y1 and by2 <= y2:
                 selecionados.add(idx)
         self._selecionados = selecionados
 
