@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 
 
 class BackstageArquivoPanel(QFrame):
+    arquivo_recente_clicado = Signal(str)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("BackstagePanel")
@@ -87,7 +89,7 @@ class BackstageArquivoPanel(QFrame):
         direito.setContentsMargins(18, 18, 18, 18)
         direito.setSpacing(12)
 
-        cab = QLabel("Projetos Recentes")
+        cab = QLabel("Arquivos Recentes")
         cab.setStyleSheet("font-size: 19px; font-weight: 700; color: #1e1e1e;")
         direito.addWidget(cab)
 
@@ -95,10 +97,11 @@ class BackstageArquivoPanel(QFrame):
         self.lista_recentes.setStyleSheet(
             "QListWidget { border: none; font-size: 14px; color: #1f1f1f; background: white; }"
         )
-        self.lista_recentes.setSelectionMode(QListWidget.NoSelection)
+        self.lista_recentes.setSelectionMode(QListWidget.SingleSelection)
+        self.lista_recentes.itemClicked.connect(self._ao_clicar_recente)
         direito.addWidget(self.lista_recentes)
 
-        self.lbl_vazio = QLabel("Nenhum projeto recente.")
+        self.lbl_vazio = QLabel("Nenhum arquivo recente.")
         self.lbl_vazio.setStyleSheet("font-size: 13px; color: #676767;")
         direito.addWidget(self.lbl_vazio)
 
@@ -113,7 +116,9 @@ class BackstageArquivoPanel(QFrame):
     def _atualizar_recentes(self):
         self.lista_recentes.clear()
         for i, caminho in enumerate(self._recentes, start=1):
-            self.lista_recentes.addItem(QListWidgetItem(f"{i}  {caminho}"))
+            item = QListWidgetItem(f"{i}  {caminho}")
+            item.setData(Qt.UserRole, caminho)
+            self.lista_recentes.addItem(item)
         vazio = len(self._recentes) == 0
         self.lbl_vazio.setVisible(vazio)
         self.lista_recentes.setVisible(not vazio)
@@ -124,3 +129,8 @@ class BackstageArquivoPanel(QFrame):
         self._recentes.insert(0, caminho)
         self._recentes = self._recentes[:12]
         self._atualizar_recentes()
+
+    def _ao_clicar_recente(self, item: QListWidgetItem):
+        caminho = item.data(Qt.UserRole)
+        if caminho:
+            self.arquivo_recente_clicado.emit(caminho)
