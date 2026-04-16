@@ -26,6 +26,7 @@ flowchart LR
 | Abrir | `...connect(self._abrir_projeto)` | `ui/janela_principal.py` |
 | Salvar | `...connect(self._salvar_projeto)` | `ui/janela_principal.py` |
 | Salvar como | `...connect(self._salvar_projeto_como)` | `ui/janela_principal.py` |
+| Janela "Salvar como..." | `SalvarComoDialog` (arquivo + metadados) | `ui/salvar_como_dialog.py` |
 | Arquivo recente | `arquivo_recente_clicado -> _abrir_projeto_em_caminho` | `ui/backstage_arquivo.py` + `ui/janela_principal.py` |
 | Hover em Arquivos Recentes | `QListWidget::item:hover` (realce + barra lateral) | `ui/backstage_arquivo.py` |
 | Botão de fechar aba (✕) | `clicked -> _fechar_aba_documento` | `ui/janela_principal.py` |

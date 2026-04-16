@@ -15,6 +15,7 @@ from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
+from ui.salvar_como_dialog import SalvarComoDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -169,11 +170,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         return True
 
     def _salvar_projeto_como(self) -> bool:
-        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar projeto", f"novo_projeto{EXTENSAO_PROJETO}", f"Projeto GUIMMA (*{EXTENSAO_PROJETO})")
-        if caminho:
-            destino = Path(caminho)
-            if destino.suffix.lower() != EXTENSAO_PROJETO:
-                destino = destino.with_suffix(EXTENSAO_PROJETO)
+        pasta_inicial = self._arquivo_atual.parent if self._arquivo_atual else Path.home()
+        nome_inicial = self._arquivo_atual.stem if self._arquivo_atual else "novo_projeto"
+        dlg = SalvarComoDialog(self, pasta_inicial=pasta_inicial, nome_inicial=nome_inicial)
+        if dlg.exec():
+            destino = dlg.caminho_destino()
+            self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
             self._sincronizar_documentos_canvas_no_projeto()
             GSProjectIO.salvar(self.projeto_atual, destino)
             self._arquivo_atual = destino
