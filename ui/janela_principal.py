@@ -120,6 +120,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             tool_cls = getattr(module, tool_def.class_name)
             tool = tool_cls()
             msg = tool.ativar()
+            self.area_documento.canvas.set_ferramenta_ativa(tool_id)
             self.lbl_status.setText(msg)
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
