@@ -4,7 +4,8 @@ from importlib import import_module
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTabBar, QTabWidget, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
@@ -22,8 +23,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         self.setWindowTitle("GUIMMA STUDIO")
-        self.resize(1700, 980)
+        self.showMaximized()
         self._configurar_interface()
+        self._configurar_atalhos()
 
     def _configurar_interface(self):
         central = QWidget()
@@ -173,10 +175,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
         self.abas_documentos = QTabWidget()
-        self.abas_documentos.setTabsClosable(True)
+        self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
         self.abas_documentos.currentChanged.connect(self._on_aba_documento_alterada)
-        self.abas_documentos.tabCloseRequested.connect(self._fechar_aba_documento)
+        self.abas_documentos.tabBar().tabMoved.connect(lambda _from, _to: self._reconfigurar_botoes_fechar_abas())
         self.abas_documentos.setStyleSheet(
             "QTabWidget::pane { border: 1px solid #d7dbe1; }"
             "QTabBar { background: #f9f9f9; }"
@@ -184,7 +186,6 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
-        self._adicionar_aba_documento()
         return area
 
     def _adicionar_aba_documento(self, nome: str | None = None):
@@ -194,15 +195,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc = AreaDocumentoWidget(CenaDocumento())
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         index = self.abas_documentos.addTab(area_doc, nome)
+        self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
 
     def _fechar_aba_documento(self, index: int):
-        if self.abas_documentos.count() <= 1:
+        if index < 0 or index >= self.abas_documentos.count():
             return
         widget = self.abas_documentos.widget(index)
         self.abas_documentos.removeTab(index)
         if widget:
             widget.deleteLater()
+        self._reconfigurar_botoes_fechar_abas()
         self._on_aba_documento_alterada(self.abas_documentos.currentIndex())
 
     def _on_zoom_canvas_alterado(self, zoom: float):
@@ -214,12 +217,48 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self.abas_documentos.widget(index) if index >= 0 else None
         if isinstance(area, AreaDocumentoWidget):
             self.lbl_escala.setText(f"Escala {int(area.canvas.zoom * 100)}%")
+        else:
+            self.lbl_escala.setText("Escala --")
 
     def _area_documento_atual(self) -> AreaDocumentoWidget | None:
         area = self.abas_documentos.currentWidget()
         if isinstance(area, AreaDocumentoWidget):
             return area
         return None
+
+    def _configurar_botao_fechar_aba(self, index: int):
+        barra = self.abas_documentos.tabBar()
+        botao = QPushButton("✕")
+        botao.setCursor(Qt.PointingHandCursor)
+        botao.setFlat(True)
+        botao.setFixedSize(16, 16)
+        botao.setStyleSheet("QPushButton { color:#c62828; border:none; font-weight:700; } QPushButton:hover { color:#ff5252; }")
+        botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
+        barra.setTabButton(index, QTabBar.RightSide, botao)
+
+    def _reconfigurar_botoes_fechar_abas(self):
+        for i in range(self.abas_documentos.count()):
+            self._configurar_botao_fechar_aba(i)
+
+    def _configurar_atalhos(self):
+        QShortcut(QKeySequence.Undo, self, activated=self._desfazer_canvas_atual)
+        QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
+        QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
+
+    def _desfazer_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.desfazer_acao()
+
+    def _copiar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.copiar()
+
+    def _colar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.colar()
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()

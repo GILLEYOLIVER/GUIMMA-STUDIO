@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -55,6 +57,10 @@ class VisualizacaoCanvas(QWidget):
         self.ferramenta_ativa: str | None = None
         self._pontos_reta: list[QPointF] = []
         self._preview_reta: QPointF | None = None
+        self._historico_elementos: list[list[dict]] = [[]]
+        self._indice_historico = 0
+        self._buffer_copia: dict | None = None
+        self._offset_colagem = 0
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -185,6 +191,7 @@ class VisualizacaoCanvas(QWidget):
                     "cor": "#ff5a00",
                 }
             )
+            self._registrar_historico()
             ultimo_ponto = self._pontos_reta[-1]
             self._pontos_reta = [ultimo_ponto]
             self._preview_reta = ultimo_ponto
@@ -198,3 +205,46 @@ class VisualizacaoCanvas(QWidget):
 
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
         return QPointF(ponto.x() / self.zoom, ponto.y() / self.zoom)
+
+    def desfazer_acao(self):
+        if self._pontos_reta:
+            self._desfazer_ponto()
+            return
+
+        if self._indice_historico == 0:
+            return
+        self._indice_historico -= 1
+        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.update()
+
+    def copiar(self):
+        if self._pontos_reta and len(self._pontos_reta) >= 2:
+            self._buffer_copia = {
+                "tipo": "polyline",
+                "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
+                "cor": "#ff5a00",
+            }
+            return
+
+        if self.cena.elementos:
+            self._buffer_copia = deepcopy(self.cena.elementos[-1])
+
+    def colar(self):
+        if not self._buffer_copia:
+            return
+        novo = deepcopy(self._buffer_copia)
+        self._offset_colagem += 10
+        if novo.get("tipo") == "polyline":
+            novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+        self.cena.elementos.append(novo)
+        self._registrar_historico()
+        self.update()
+
+    def _registrar_historico(self):
+        snapshot = deepcopy(self.cena.elementos)
+        if self._indice_historico < len(self._historico_elementos) - 1:
+            self._historico_elementos = self._historico_elementos[: self._indice_historico + 1]
+        self._historico_elementos.append(snapshot)
+        if len(self._historico_elementos) > 200:
+            self._historico_elementos.pop(0)
+        self._indice_historico = len(self._historico_elementos) - 1
