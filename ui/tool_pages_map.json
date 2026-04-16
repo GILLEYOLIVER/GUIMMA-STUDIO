@@ -38,7 +38,10 @@
           "tools": [
             "reta",
             "retangulo",
-            "por_angulo"
+            "por_angulo",
+            "estender_reta",
+            "estender_ate_elemento",
+            "estender_duas_retas"
           ]
         },
         {
@@ -299,26 +302,26 @@
     },
     "reta": {
       "title": "Reta",
-      "module": "tools/reta_tool.py",
-      "class": "Ferramenta",
+      "module": "tools/construcao.py",
+      "class": "FerramentaReta",
       "icon": "reta.svg"
     },
     "retangulo": {
       "title": "Retangulo",
-      "module": "tools/retangulo_tool.py",
-      "class": "Ferramenta",
+      "module": "tools/construcao.py",
+      "class": "FerramentaRetangulo",
       "icon": "retangulo.svg"
     },
     "por_angulo": {
       "title": "Por Angulo",
-      "module": "tools/por_angulo_tool.py",
-      "class": "Ferramenta",
+      "module": "tools/construcao.py",
+      "class": "FerramentaPorAngulo",
       "icon": "por_angulo.svg"
     },
     "curva": {
       "title": "Curva",
-      "module": "tools/curva_tool.py",
-      "class": "Ferramenta",
+      "module": "tools/construcao.py",
+      "class": "FerramentaCurva",
       "icon": "curva.svg"
     },
     "dividir_curva": {
@@ -716,6 +719,24 @@
       "module": "tools/imagens_tool.py",
       "class": "Ferramenta",
       "icon": "imagens.svg"
+    },
+    "estender_reta": {
+      "title": "Estender reta",
+      "module": "tools/construcao.py",
+      "class": "FerramentaEstenderReta",
+      "icon": "reta.svg"
+    },
+    "estender_ate_elemento": {
+      "title": "Estender até elemento",
+      "module": "tools/construcao.py",
+      "class": "FerramentaEstenderAteElemento",
+      "icon": "reta.svg"
+    },
+    "estender_duas_retas": {
+      "title": "Estender duas retas",
+      "module": "tools/construcao.py",
+      "class": "FerramentaEstenderDuasRetas",
+      "icon": "reta.svg"
     }
   }
 }
