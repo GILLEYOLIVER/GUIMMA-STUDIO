@@ -27,8 +27,18 @@ flowchart LR
 | Salvar como | `...connect(self._salvar_projeto_como)` | `ui/janela_principal.py` |
 | Arquivo recente | `arquivo_recente_clicado -> _abrir_projeto_em_caminho` | `ui/backstage_arquivo.py` + `ui/janela_principal.py` |
 | Botão de fechar aba (✕) | `clicked -> _fechar_aba_documento` | `ui/janela_principal.py` |
-| Barra inferior: Snap | `btn_snap.toggled -> _alternar_snap_canvas_atual` | `ui/janela_principal.py` + `canvas/visualizacao.py` + `canvas/snap.py` |
-| Barra inferior: Orto/Grade/Nó/Meio/Centro/Borda | placeholders (etapas futuras) | `ui/janela_principal.py` |
+| Barra inferior: Snap (ímã) | `btn_snap.toggled -> _alternar_snap_canvas_atual` | `ui/janela_principal.py` + `canvas/visualizacao.py` + `canvas/snap.py` |
+| Barra inferior: Mão | `btn_mao.clicked -> _set_modo_navegacao("mao")` | `ui/janela_principal.py` |
+| Barra inferior: Lupa | `btn_lupa.clicked -> _set_modo_navegacao("lupa")` | `ui/janela_principal.py` |
+| Barra inferior: Zoom - | `btn_zoom_menos.clicked -> _aplicar_zoom_incremental(1/1.1)` | `ui/janela_principal.py` |
+| Barra inferior: Zoom + | `btn_zoom_mais.clicked -> _aplicar_zoom_incremental(1.1)` | `ui/janela_principal.py` |
+
+### Observações de comportamento atual do Snap
+
+- O snap calcula candidatos por **nó**, **ponto médio**, **borda** e **centro** em `canvas/snap.py`.
+- Em `canvas/visualizacao.py`, o snap é aplicado tanto no desenho (`reta/curva`) quanto no **modo seleção**.
+- No clique de seleção (sem arrastar caixa), se existir alvo de snap ativo, a seleção prioriza o `elemento_idx` vindo do snap.
+- O marcador de snap mostra o tipo do alvo (ex.: `nó`, `ponto médio`, `borda`, `centro`) ao aproximar o cursor.
 
 ## 3) Mapa detalhado do Ribbon (todas as ferramentas)
 
