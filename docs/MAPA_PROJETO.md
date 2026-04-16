@@ -26,12 +26,14 @@ flowchart LR
 | Salvar | `...connect(self._salvar_projeto)` | `ui/janela_principal.py` |
 | Salvar como | `...connect(self._salvar_projeto_como)` | `ui/janela_principal.py` |
 | Arquivo recente | `arquivo_recente_clicado -> _abrir_projeto_em_caminho` | `ui/backstage_arquivo.py` + `ui/janela_principal.py` |
+| Hover em Arquivos Recentes | `QListWidget::item:hover` (realce + barra lateral) | `ui/backstage_arquivo.py` |
 | Botão de fechar aba (✕) | `clicked -> _fechar_aba_documento` | `ui/janela_principal.py` |
 | Barra inferior: Snap (ímã) | `btn_snap.toggled -> _alternar_snap_canvas_atual` | `ui/janela_principal.py` + `canvas/visualizacao.py` + `canvas/snap.py` |
 | Barra inferior: Mão | `btn_mao.clicked -> _set_modo_navegacao("mao")` | `ui/janela_principal.py` |
 | Barra inferior: Lupa | `btn_lupa.clicked -> _set_modo_navegacao("lupa")` | `ui/janela_principal.py` |
 | Barra inferior: Zoom - | `btn_zoom_menos.clicked -> _aplicar_zoom_incremental(1/1.1)` | `ui/janela_principal.py` |
 | Barra inferior: Zoom + | `btn_zoom_mais.clicked -> _aplicar_zoom_incremental(1.1)` | `ui/janela_principal.py` |
+| Topbar/Ribbon (aba ativa com faixa colorida) | `tabbar.currentChanged -> _atualizar_destaque_aba` | `ui/ribbon.py` |
 
 ### Observações de comportamento atual do Snap
 

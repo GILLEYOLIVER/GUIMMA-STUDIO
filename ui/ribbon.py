@@ -178,6 +178,7 @@ class RibbonWidget(QWidget):
         self.tabbar = RibbonTabBar()
         self.paginas = QStackedWidget()
         self.tabbar.currentChanged.connect(self.paginas.setCurrentIndex)
+        self.tabbar.currentChanged.connect(self._atualizar_destaque_aba)
 
         for tab in self._tabs:
             self.tabbar.addTab(tab.title)
@@ -191,9 +192,34 @@ class RibbonWidget(QWidget):
         if include_tabbar:
             layout.addWidget(self.tabbar)
         layout.addWidget(self.paginas)
+        self.tabbar.setStyleSheet(
+            """
+            QTabBar::tab {
+                background: #f3f5f8;
+                color: #1e2a36;
+                border: 1px solid #d4dbe4;
+                padding: 6px 18px;
+            }
+            QTabBar::tab:selected {
+                background: #e8f2fc;
+                color: #0f4f86;
+                border-bottom: 2px solid #2f9fe8;
+            }
+            QTabBar::tab:hover { background: #edf5ff; }
+            """
+        )
+        self._atualizar_destaque_aba(self.tabbar.currentIndex())
 
     def tool_def(self, tool_id: str) -> ToolDef | None:
         return self._tools.get(tool_id)
+
+    def _atualizar_destaque_aba(self, index: int):
+        for i in range(self.paginas.count()):
+            pagina = self.paginas.widget(i)
+            if i == index:
+                pagina.setStyleSheet("background: #eaf4ff; border-top: 1px solid #c7ddf3;")
+            else:
+                pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
 
 
 def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:

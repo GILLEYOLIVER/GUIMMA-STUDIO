@@ -41,7 +41,7 @@ class BackstageArquivoPanel(QFrame):
         menu_esquerdo.setStyleSheet("background: #f3f3f3; border-right: 1px solid #d8dde3;")
         menu_layout = QVBoxLayout(menu_esquerdo)
         menu_layout.setContentsMargins(0, 10, 0, 10)
-        menu_layout.setSpacing(2)
+        menu_layout.setSpacing(1)
 
         titulo = QLabel("ARQUIVO")
         titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 8px 14px 14px 16px;")
@@ -64,7 +64,8 @@ class BackstageArquivoPanel(QFrame):
         for item in itens:
             botao = QPushButton(item)
             botao.setCursor(Qt.PointingHandCursor)
-            botao.setMinimumHeight(34)
+            botao.setMinimumHeight(30)
+            botao.setMaximumHeight(30)
             botao.setStyleSheet(
                 """
                 QPushButton {
@@ -82,7 +83,8 @@ class BackstageArquivoPanel(QFrame):
             )
             menu_layout.addWidget(botao)
             self.botoes[item] = botao
-        menu_layout.addStretch(1)
+        menu_layout.addStretch(0)
+        menu_esquerdo.setFixedHeight(menu_layout.sizeHint().height() + 4)
 
         painel_direito = QFrame()
         painel_direito.setStyleSheet("background: #ffffff;")
@@ -95,8 +97,29 @@ class BackstageArquivoPanel(QFrame):
         direito.addWidget(cab)
 
         self.lista_recentes = QListWidget()
+        self.lista_recentes.setMouseTracking(True)
         self.lista_recentes.setStyleSheet(
-            "QListWidget { border: none; font-size: 14px; color: #1f1f1f; background: white; }"
+            """
+            QListWidget {
+                border: none;
+                font-size: 14px;
+                color: #1f1f1f;
+                background: white;
+            }
+            QListWidget::item {
+                padding: 5px 8px;
+                border-left: 2px solid transparent;
+            }
+            QListWidget::item:hover {
+                background: #f3f8ff;
+                border-left: 2px solid #2ea3f2;
+            }
+            QListWidget::item:selected {
+                background: #eef6ff;
+                border-left: 2px solid #1f9bf0;
+                color: #0f3c66;
+            }
+            """
         )
         self.lista_recentes.setSelectionMode(QListWidget.SingleSelection)
         self.lista_recentes.itemClicked.connect(self._ao_clicar_recente)
