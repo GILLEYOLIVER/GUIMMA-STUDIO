@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from pathlib import Path
 
@@ -162,6 +163,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
         self.backstage.adicionar_recente(str(self._arquivo_atual))
         self._atualizar_titulo()
+        self._marcar_documentos_como_salvos()
         return True
 
     def _salvar_projeto_como(self) -> bool:
@@ -176,6 +178,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.backstage.adicionar_recente(str(destino))
             self._atualizar_titulo()
             self.backstage.hide()
+            self._marcar_documentos_como_salvos()
             return True
         return False
 
@@ -211,6 +214,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
+        area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
@@ -294,7 +298,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _confirmar_fechamento_aba(self, index: int, nome_aba: str) -> bool:
         area = self.abas_documentos.widget(index) if index >= 0 else None
-        if isinstance(area, AreaDocumentoWidget) and not area.canvas.cena.elementos:
+        if isinstance(area, AreaDocumentoWidget) and not self._tem_alteracoes_area(area):
             return True
         caixa = QMessageBox(self)
         caixa.setWindowTitle("Fechando arquivo")
@@ -344,6 +348,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             painel_pos = doc.get("painel_retas_pos")
             if isinstance(painel_pos, (list, tuple)) and len(painel_pos) == 2:
                 area_doc.canvas.set_painel_auxiliar_posicao((int(painel_pos[0]), int(painel_pos[1])))
+            area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
             nome = doc.get("nome") or "(Sem nome)"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
@@ -356,6 +361,23 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_atual.canvas.set_ferramenta_ativa(tool_id)
         if tool_id == "selecionar":
             self.lbl_status.setText("Selecionar ativada")
+
+    def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = {
+            "elementos": area.canvas.elementos_para_salvar(),
+            "painel": area.canvas.painel_auxiliar_posicao(),
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
+        assinatura_salva = area.property("assinatura_salva")
+        return self._assinatura_canvas(area) != assinatura_salva
+
+    def _marcar_documentos_como_salvos(self):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.setProperty("assinatura_salva", self._assinatura_canvas(area))
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()

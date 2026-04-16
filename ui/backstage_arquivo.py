@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -24,6 +24,7 @@ class BackstageArquivoPanel(QFrame):
         self.setFixedWidth(540)
         self.hide()
         self._recentes: list[str] = []
+        self._settings = QSettings("GUIMMA", "GUIMMA STUDIO")
 
         sombra = QGraphicsDropShadowEffect(self)
         sombra.setBlurRadius(28)
@@ -105,6 +106,7 @@ class BackstageArquivoPanel(QFrame):
         self.lbl_vazio.setStyleSheet("font-size: 13px; color: #676767;")
         direito.addWidget(self.lbl_vazio)
 
+        self._carregar_recentes_persistidos()
         self._atualizar_recentes()
         direito.addStretch(1)
 
@@ -128,9 +130,18 @@ class BackstageArquivoPanel(QFrame):
             self._recentes.remove(caminho)
         self._recentes.insert(0, caminho)
         self._recentes = self._recentes[:12]
+        self._persistir_recentes()
         self._atualizar_recentes()
 
     def _ao_clicar_recente(self, item: QListWidgetItem):
         caminho = item.data(Qt.UserRole)
         if caminho:
             self.arquivo_recente_clicado.emit(caminho)
+
+    def _carregar_recentes_persistidos(self):
+        recentes = self._settings.value("recent_files", [], list)
+        if isinstance(recentes, list):
+            self._recentes = [str(c) for c in recentes][:12]
+
+    def _persistir_recentes(self):
+        self._settings.setValue("recent_files", self._recentes[:12])
