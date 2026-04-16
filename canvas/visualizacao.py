@@ -417,7 +417,11 @@ class VisualizacaoCanvas(QWidget):
     def _atualizar_selecao_por_caixa(self, inicio: QPointF, fim: QPointF):
         x1, y1, x2, y2 = self._retangulo_selecao(inicio, fim)
         if abs(x2 - x1) < 1 and abs(y2 - y1) < 1:
-            idx = self._indice_elemento_em_ponto(inicio)
+            idx = None
+            if self._snap_resultado and self._snap_resultado.elemento_idx is not None:
+                idx = self._snap_resultado.elemento_idx
+            if idx is None:
+                idx = self._indice_elemento_em_ponto(inicio)
             self._selecionados = {idx} if idx is not None else set()
             return
         selecionados: set[int] = set()
