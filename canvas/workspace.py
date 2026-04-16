@@ -25,30 +25,34 @@ class ReguaWidget(QWidget):
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#f8f8f8"))
-        painter.setPen(QPen(QColor("#9aa6b2"), 1))
+        painter.fillRect(self.rect(), QColor("#f2f2f2"))
+        painter.setPen(QPen(QColor("#222222"), 1))
 
-        pixel_step = max(20, int(50 * self.zoom))
+        pixel_step = max(25, int(40 * self.zoom))
         if self.horizontal:
             painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
             for x in range(0, self.width(), 5):
                 if x % pixel_step == 0:
-                    painter.drawLine(x, self.height() - 10, x, self.height())
-                    painter.drawText(x + 2, 10, str(int(x / max(self.zoom, 0.001))))
+                    painter.drawLine(x, self.height() - 12, x, self.height())
+                    painter.drawText(x + 2, 9, str(int(x / max(self.zoom, 0.001))))
                 elif x % max(1, pixel_step // 2) == 0:
-                    painter.drawLine(x, self.height() - 6, x, self.height())
+                    painter.drawLine(x, self.height() - 8, x, self.height())
+                else:
+                    painter.drawLine(x, self.height() - 4, x, self.height())
         else:
             painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
             for y in range(0, self.height(), 5):
                 if y % pixel_step == 0:
-                    painter.drawLine(self.width() - 10, y, self.width(), y)
+                    painter.drawLine(self.width() - 12, y, self.width(), y)
                     painter.save()
-                    painter.translate(10, y + 2)
+                    painter.translate(9, y + 2)
                     painter.rotate(-90)
                     painter.drawText(0, 0, str(int(y / max(self.zoom, 0.001))))
                     painter.restore()
                 elif y % max(1, pixel_step // 2) == 0:
-                    painter.drawLine(self.width() - 6, y, self.width(), y)
+                    painter.drawLine(self.width() - 8, y, self.width(), y)
+                else:
+                    painter.drawLine(self.width() - 4, y, self.width(), y)
 
 
 class AreaDocumentoWidget(QWidget):
