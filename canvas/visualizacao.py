@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
+from canvas.snap import SnapManager, SnapResult
 
 
 class PainelAuxiliarRetas(QFrame):
@@ -78,6 +79,7 @@ class PainelAuxiliarRetas(QFrame):
 class VisualizacaoCanvas(QWidget):
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
+    snap_changed = Signal(bool)
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -99,6 +101,9 @@ class VisualizacaoCanvas(QWidget):
         self._moveu_selecao = False
         self._painel_retas_posicao: tuple[int, int] | None = None
         self._aguardando_retorno_selecao = False
+        self._snap_manager = SnapManager()
+        self._snap_ativo = True
+        self._snap_resultado: SnapResult | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -117,6 +122,7 @@ class VisualizacaoCanvas(QWidget):
     def set_ferramenta_ativa(self, tool_id: str):
         self.ferramenta_ativa = tool_id
         self._aguardando_retorno_selecao = False
+        self._snap_resultado = None
         if tool_id in {"reta", "curva"}:
             self.painel_retas.show()
             self._reposicionar_painel_retas()
@@ -158,7 +164,7 @@ class VisualizacaoCanvas(QWidget):
                 return
             return super().mousePressEvent(event)
 
-        pos = self._tela_para_cena(event.position())
+        pos = self._ponto_com_snap(event.position())
         if event.button() == Qt.LeftButton:
             self._aguardando_retorno_selecao = False
             if not self._pontos_reta:
@@ -187,11 +193,14 @@ class VisualizacaoCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
-        if self.ferramenta_ativa in {"reta", "curva"} and self._pontos_reta:
-            self._preview_reta = self._tela_para_cena(event.position())
+        if self.ferramenta_ativa in {"reta", "curva"}:
+            snap_pos = self._ponto_com_snap(event.position())
+            if self._pontos_reta:
+                self._preview_reta = snap_pos
             self.update()
             event.accept()
             return
+        self._snap_resultado = None
         if self.ferramenta_ativa not in {"reta", "curva"}:
             pos = self._tela_para_cena(event.position())
             if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
@@ -257,6 +266,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
+        if self._snap_resultado and self.ferramenta_ativa in {"reta", "curva"}:
+            self._desenhar_marcador_snap(painter, self._snap_resultado)
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
         for inicio, fim in zip(pontos, pontos[1:]):
@@ -444,6 +455,39 @@ class VisualizacaoCanvas(QWidget):
         painter.fillRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1), QColor(120, 0, 0, 80))
         painter.setPen(QPen(QColor("#ff3333"), 1))
         painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+    def _desenhar_marcador_snap(self, painter: QPainter, snap: SnapResult):
+        pt = self._cena_para_tela(snap.ponto)
+        cor = QColor("#ff6a00")
+        pen = QPen(cor, 1)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(pt.x() - 5), int(pt.y() - 5), 10, 10)
+        painter.setPen(QPen(cor, 1))
+        painter.drawText(int(pt.x() + 8), int(pt.y() + 4), snap.tipo)
+
+    def set_snap_ativo(self, ativo: bool):
+        self._snap_ativo = ativo
+        if not ativo:
+            self._snap_resultado = None
+        self.snap_changed.emit(ativo)
+        self.update()
+
+    def alternar_snap(self):
+        self.set_snap_ativo(not self._snap_ativo)
+
+    def snap_ativo(self) -> bool:
+        return self._snap_ativo
+
+    def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
+        pos_cena = self._tela_para_cena(pos_tela)
+        if not self._snap_ativo:
+            self._snap_resultado = None
+            return pos_cena
+        self._snap_resultado = self._snap_manager.calcular(self.cena, pos_cena, self.zoom)
+        if self._snap_resultado:
+            return self._snap_resultado.ponto
+        return pos_cena
 
     def _registrar_posicao_painel(self, x: int, y: int):
         self._painel_retas_posicao = (x, y)
