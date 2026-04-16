@@ -8,6 +8,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -52,16 +53,37 @@ class RibbonTabBar(QTabBar):
 class RibbonButton(QToolButton):
     acionada = Signal(str)
 
-    def __init__(self, ferramenta: ToolDef, parent: QWidget | None = None):
+    def __init__(self, ferramenta: ToolDef, compacto: bool = False, parent: QWidget | None = None):
         super().__init__(parent)
         self.ferramenta = ferramenta
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.setText(ferramenta.title)
         self.setIcon(_carregar_icone(ferramenta.icon))
+        self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
+
+        if compacto:
+            self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.setIconSize(QSize(14, 14))
+            self.setFixedSize(132, 22)
+            self.setStyleSheet(
+                """
+                QToolButton {
+                    text-align: left;
+                    background: transparent;
+                    border: 1px solid transparent;
+                    color: #1e1e1e;
+                    font-size: 10px;
+                    padding: 0 2px;
+                }
+                QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
+                QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
+                """
+            )
+            return
+
+        self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.setIconSize(QSize(20, 20))
         self.setMinimumSize(64, 54)
-        self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
         self.setStyleSheet(
             """
             QToolButton {
@@ -90,16 +112,31 @@ class RibbonGroup(QFrame):
         raiz.setContentsMargins(6, 4, 6, 2)
         raiz.setSpacing(2)
 
-        corpo = QHBoxLayout()
-        corpo.setSpacing(4)
+        if len(tools) > 3:
+            corpo = QGridLayout()
+            corpo.setHorizontalSpacing(4)
+            corpo.setVerticalSpacing(1)
+            for index, tool in enumerate(tools):
+                botao = RibbonButton(tool, compacto=True)
+                botao.acionada.connect(self.tool_selected.emit)
+                linha = index % 3
+                coluna = index // 3
+                corpo.addWidget(botao, linha, coluna)
+            if len(tools) < 6:
+                for linha in range(len(tools), 3):
+                    spacer = QWidget()
+                    spacer.setFixedSize(132, 22)
+                    corpo.addWidget(spacer, linha, 0)
+        else:
+            corpo = QHBoxLayout()
+            corpo.setSpacing(4)
+            for tool in tools:
+                botao = RibbonButton(tool)
+                botao.acionada.connect(self.tool_selected.emit)
+                corpo.addWidget(botao)
+            corpo.addStretch(1)
+
         raiz.addLayout(corpo)
-
-        for tool in tools:
-            botao = RibbonButton(tool)
-            botao.acionada.connect(self.tool_selected.emit)
-            corpo.addWidget(botao)
-
-        corpo.addStretch(1)
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
@@ -129,7 +166,7 @@ class RibbonPage(QWidget):
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
         self._tabs, self._tools = carregar_mapa_ribbon()
 
@@ -151,7 +188,8 @@ class RibbonWidget(QWidget):
             pagina.tool_selected.connect(self.tool_selected.emit)
             self.paginas.addWidget(pagina)
 
-        layout.addWidget(self.tabbar)
+        if include_tabbar:
+            layout.addWidget(self.tabbar)
         layout.addWidget(self.paginas)
 
     def tool_def(self, tool_id: str) -> ToolDef | None:
