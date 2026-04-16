@@ -62,6 +62,12 @@ class VisualizacaoCanvas(QWidget):
         self._indice_historico = 0
         self._buffer_copia: dict | None = None
         self._offset_colagem = 0
+        self._selecionados: set[int] = set()
+        self._inicio_selecao: QPointF | None = None
+        self._fim_selecao: QPointF | None = None
+        self._arrastando_selecao = False
+        self._ultimo_ponto_arrasto: QPointF | None = None
+        self._moveu_selecao = False
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -101,6 +107,22 @@ class VisualizacaoCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
         if self.ferramenta_ativa not in {"reta", "curva"}:
+            if event.button() == Qt.LeftButton:
+                pos = self._tela_para_cena(event.position())
+                idx = self._indice_elemento_em_ponto(pos)
+                if idx is not None and idx in self._selecionados:
+                    self._arrastando_selecao = True
+                    self._ultimo_ponto_arrasto = pos
+                    self._moveu_selecao = False
+                    event.accept()
+                    return
+                self._arrastando_selecao = False
+                self._inicio_selecao = pos
+                self._fim_selecao = pos
+                self._ultimo_ponto_arrasto = None
+                self.update()
+                event.accept()
+                return
             return super().mousePressEvent(event)
 
         pos = self._tela_para_cena(event.position())
@@ -128,7 +150,45 @@ class VisualizacaoCanvas(QWidget):
             self.update()
             event.accept()
             return
+        if self.ferramenta_ativa not in {"reta", "curva"}:
+            pos = self._tela_para_cena(event.position())
+            if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
+                delta_x = pos.x() - self._ultimo_ponto_arrasto.x()
+                delta_y = pos.y() - self._ultimo_ponto_arrasto.y()
+                self._mover_selecionados(delta_x, delta_y)
+                self._ultimo_ponto_arrasto = pos
+                self._moveu_selecao = True
+                self.update()
+                event.accept()
+                return
+            if self._inicio_selecao:
+                self._fim_selecao = pos
+                self.update()
+                event.accept()
+                return
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
+        if self.ferramenta_ativa in {"reta", "curva"}:
+            return super().mouseReleaseEvent(event)
+        if event.button() != Qt.LeftButton:
+            return super().mouseReleaseEvent(event)
+
+        if self._arrastando_selecao:
+            self._arrastando_selecao = False
+            self._ultimo_ponto_arrasto = None
+            if self._moveu_selecao:
+                self._registrar_historico()
+            self._moveu_selecao = False
+            event.accept()
+            return
+
+        if self._inicio_selecao and self._fim_selecao:
+            self._atualizar_selecao_por_caixa(self._inicio_selecao, self._fim_selecao)
+        self._inicio_selecao = None
+        self._fim_selecao = None
+        self.update()
+        event.accept()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -140,27 +200,30 @@ class VisualizacaoCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#000000"))
         painter.setRenderHint(QPainter.Antialiasing)
 
-        for elemento in self.cena.elementos:
+        for idx, elemento in enumerate(self.cena.elementos):
             if elemento.get("tipo") != "polyline":
                 continue
             pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
             if len(pontos) < 2:
                 continue
-            self._desenhar_polilinha(painter, pontos)
+            cor = "#ffd54a" if idx in self._selecionados else elemento.get("cor", "#d0d0d0")
+            self._desenhar_polilinha(painter, pontos, cor=cor)
 
         if self._pontos_reta:
-            self._desenhar_polilinha(painter, self._pontos_reta)
+            self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
             self._desenhar_marcador(painter, self._pontos_reta[0])
+        if self._inicio_selecao and self._fim_selecao:
+            self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
 
-    def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF]):
+    def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
         for inicio, fim in zip(pontos, pontos[1:]):
-            self._desenhar_segmento(painter, inicio, fim)
+            self._desenhar_segmento(painter, inicio, fim, cor=cor)
         self._desenhar_marcador(painter, pontos[-1])
 
-    def _desenhar_segmento(self, painter: QPainter, inicio: QPointF, fim: QPointF, tracejado: bool = False):
-        pen = QPen(QColor("#ff5a00"), 1)
+    def _desenhar_segmento(self, painter: QPainter, inicio: QPointF, fim: QPointF, tracejado: bool = False, cor: str = "#ff5a00"):
+        pen = QPen(QColor(cor), 1)
         if tracejado:
             pen.setStyle(Qt.DotLine)
         painter.setPen(pen)
@@ -226,6 +289,12 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def copiar(self):
+        if self._selecionados:
+            self._buffer_copia = {
+                "tipo": "multiplos",
+                "elementos": [deepcopy(self.cena.elementos[idx]) for idx in sorted(self._selecionados)],
+            }
+            return
         if self._pontos_reta and len(self._pontos_reta) >= 2:
             self._buffer_copia = {
                 "tipo": "polyline",
@@ -240,11 +309,29 @@ class VisualizacaoCanvas(QWidget):
     def colar(self):
         if not self._buffer_copia:
             return
-        novo = deepcopy(self._buffer_copia)
         self._offset_colagem += 10
-        if novo.get("tipo") == "polyline":
-            novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-        self.cena.elementos.append(novo)
+        self._selecionados.clear()
+        if self._buffer_copia.get("tipo") == "multiplos":
+            for item in self._buffer_copia.get("elementos", []):
+                novo = deepcopy(item)
+                if novo.get("tipo") == "polyline":
+                    novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+                self.cena.elementos.append(novo)
+                self._selecionados.add(len(self.cena.elementos) - 1)
+        else:
+            novo = deepcopy(self._buffer_copia)
+            if novo.get("tipo") == "polyline":
+                novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+            self.cena.elementos.append(novo)
+            self._selecionados.add(len(self.cena.elementos) - 1)
+        self._registrar_historico()
+        self.update()
+
+    def apagar_selecionados(self):
+        if not self._selecionados:
+            return
+        self.cena.elementos = [el for idx, el in enumerate(self.cena.elementos) if idx not in self._selecionados]
+        self._selecionados.clear()
         self._registrar_historico()
         self.update()
 
@@ -256,3 +343,57 @@ class VisualizacaoCanvas(QWidget):
         if len(self._historico_elementos) > 200:
             self._historico_elementos.pop(0)
         self._indice_historico = len(self._historico_elementos) - 1
+
+    def _retangulo_selecao(self, inicio: QPointF, fim: QPointF) -> tuple[float, float, float, float]:
+        return min(inicio.x(), fim.x()), min(inicio.y(), fim.y()), max(inicio.x(), fim.x()), max(inicio.y(), fim.y())
+
+    def _bbox_elemento(self, elemento: dict) -> tuple[float, float, float, float] | None:
+        if elemento.get("tipo") != "polyline":
+            return None
+        pontos = elemento.get("pontos", [])
+        if not pontos:
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _atualizar_selecao_por_caixa(self, inicio: QPointF, fim: QPointF):
+        x1, y1, x2, y2 = self._retangulo_selecao(inicio, fim)
+        if abs(x2 - x1) < 1 and abs(y2 - y1) < 1:
+            idx = self._indice_elemento_em_ponto(inicio)
+            self._selecionados = {idx} if idx is not None else set()
+            return
+        selecionados: set[int] = set()
+        for idx, elemento in enumerate(self.cena.elementos):
+            bbox = self._bbox_elemento(elemento)
+            if not bbox:
+                continue
+            bx1, by1, bx2, by2 = bbox
+            if not (bx2 < x1 or bx1 > x2 or by2 < y1 or by1 > y2):
+                selecionados.add(idx)
+        self._selecionados = selecionados
+
+    def _indice_elemento_em_ponto(self, ponto: QPointF) -> int | None:
+        tolerancia = 4 / max(self.zoom, 0.001)
+        for idx in range(len(self.cena.elementos) - 1, -1, -1):
+            bbox = self._bbox_elemento(self.cena.elementos[idx])
+            if not bbox:
+                continue
+            x1, y1, x2, y2 = bbox
+            if x1 - tolerancia <= ponto.x() <= x2 + tolerancia and y1 - tolerancia <= ponto.y() <= y2 + tolerancia:
+                return idx
+        return None
+
+    def _mover_selecionados(self, dx: float, dy: float):
+        for idx in self._selecionados:
+            el = self.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
+
+    def _desenhar_caixa_selecao(self, painter: QPainter, inicio: QPointF, fim: QPointF):
+        p1 = self._cena_para_tela(inicio)
+        p2 = self._cena_para_tela(fim)
+        x1, y1, x2, y2 = min(p1.x(), p2.x()), min(p1.y(), p2.y()), max(p1.x(), p2.x()), max(p1.y(), p2.y())
+        painter.fillRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1), QColor(120, 0, 0, 80))
+        painter.setPen(QPen(QColor("#ff3333"), 1))
+        painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))

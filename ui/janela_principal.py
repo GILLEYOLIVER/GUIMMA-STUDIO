@@ -23,9 +23,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         self.setWindowTitle("GUIMMA STUDIO")
-        self.showMaximized()
         self._configurar_interface()
         self._configurar_atalhos()
+        self.showMaximized()
 
     def _configurar_interface(self):
         central = QWidget()
@@ -94,6 +94,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        if not hasattr(self, "barra_superior") or not hasattr(self, "ribbon"):
+            return
         y = self._topo_backstage()
         self.backstage.setFixedHeight(max(220, self.height() - y - 28))
         self.backstage.move(0, y)
@@ -244,6 +246,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence.Undo, self, activated=self._desfazer_canvas_atual)
         QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
+        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -259,6 +262,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.colar()
+
+    def _apagar_canvas_atual(self):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.apagar_selecionados()
 
     def _criar_status(self) -> QFrame:
         barra = QFrame()
