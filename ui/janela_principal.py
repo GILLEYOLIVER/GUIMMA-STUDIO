@@ -104,15 +104,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         sup.addWidget(self.ribbon.tabbar, 1)
 
+        menu_btn_style = (
+            "QToolButton { color:#1b1b1b; font-weight:600; padding:0 6px; border:none; background:transparent; }"
+            "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
+            "QToolButton:hover { color:#0b5f9e; }"
+        )
+
         self.btn_visao = QToolButton()
         self.btn_visao.setText("VISÃO")
         self.btn_visao.setPopupMode(QToolButton.InstantPopup)
         self.btn_visao.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.btn_visao.setStyleSheet(
-            "QToolButton { color:#1b1b1b; font-weight:600; padding:0 8px; border:none; background:transparent; }"
-            "QToolButton::menu-indicator { image:none; width:0; }"
-            "QToolButton:hover { color:#0b5f9e; }"
-        )
+        self.btn_visao.setStyleSheet(menu_btn_style)
         self.menu_visao = QMenu(self)
         self.menu_visao.setStyleSheet(
             "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
@@ -152,9 +154,37 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
-        self.lbl_topo_menus = QLabel("OPÇÕES • JANELAS")
-        self.lbl_topo_menus.setStyleSheet("color:#1b1b1b; font-weight:600; padding:0 8px;")
-        sup.addWidget(self.lbl_topo_menus)
+        self.btn_opcoes = QToolButton()
+        self.btn_opcoes.setText("OPÇÕES")
+        self.btn_opcoes.setPopupMode(QToolButton.InstantPopup)
+        self.btn_opcoes.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_opcoes.setStyleSheet(menu_btn_style)
+        menu_opcoes = QMenu(self)
+        menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
+        menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
+        self.btn_opcoes.setMenu(menu_opcoes)
+        sup.addWidget(self.btn_opcoes)
+
+        self.btn_janelas = QToolButton()
+        self.btn_janelas.setText("JANELAS")
+        self.btn_janelas.setPopupMode(QToolButton.InstantPopup)
+        self.btn_janelas.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_janelas.setStyleSheet(menu_btn_style)
+        menu_janelas = QMenu(self)
+        menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
+        menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
+        self.btn_janelas.setMenu(menu_janelas)
+        sup.addWidget(self.btn_janelas)
+
+        for texto, dica in [("?", "Ajuda"), ("i", "Sobre")]:
+            ic_btn = QPushButton(texto)
+            ic_btn.setFixedSize(18, 18)
+            ic_btn.setStyleSheet(
+                "QPushButton { border:1px solid #7f858c; border-radius:9px; color:#4f565f; background:#f2f2f2; font-weight:700; }"
+                "QPushButton:hover { background:#ffffff; }"
+            )
+            ic_btn.clicked.connect(lambda _=False, t=dica: self.lbl_status.setText(f"{t} (em breve)"))
+            sup.addWidget(ic_btn)
         layout.addWidget(barra_menu)
         self.barra_superior = barra_menu
         layout.addWidget(self.ribbon)

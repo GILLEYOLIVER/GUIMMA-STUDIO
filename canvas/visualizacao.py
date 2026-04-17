@@ -6,7 +6,7 @@ from math import atan2, cos, degrees, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.snap import SnapManager, SnapResult
@@ -283,14 +283,9 @@ class VisualizacaoCanvas(QWidget):
                 event.accept()
                 return
             if event.button() == Qt.RightButton:
-                if self._snap_ativo and self._snap_candidatos:
-                    self._snap_indice = (self._snap_indice + 1) % len(self._snap_candidatos)
-                    self._snap_resultado = self._snap_candidatos[self._snap_indice]
-                    if self._snap_resultado.elemento_idx is not None:
-                        self._selecionados = {self._snap_resultado.elemento_idx}
-                    self.update()
-                    event.accept()
-                    return
+                self._abrir_menu_contexto(event.globalPosition().toPoint())
+                event.accept()
+                return
             return super().mousePressEvent(event)
 
         pos = self._ponto_com_snap(event.position())
@@ -440,6 +435,45 @@ class VisualizacaoCanvas(QWidget):
         painter.fillRect(x - 4, y - th, tw + 8, th + 4, QColor(0, 0, 0, 180))
         painter.setPen(QPen(QColor("#ff6a00"), 1))
         painter.drawText(x, y, texto)
+
+    def _abrir_menu_contexto(self, pos_global):
+        menu = QMenu(self)
+        menu.addAction("Propriedades\tCtrl+Enter", lambda: None)
+        menu.addAction("Variantes", lambda: None)
+        menu.addAction("Informações modelo\tCtrl+M", lambda: None)
+        menu.addSeparator()
+
+        menu.addAction("Excluir\tDel", self.apagar_selecionados)
+        ac_recortar = menu.addAction("Recortar\tCtrl+X", self._recortar_selecionados)
+        ac_recortar.setEnabled(bool(self._selecionados))
+        ac_copiar = menu.addAction("Copiar\tCtrl+C", self.copiar)
+        ac_copiar.setEnabled(bool(self._selecionados or len(self._pontos_reta) >= 2 or self.cena.elementos))
+        menu.addAction("Colar\tCtrl+V", self.colar)
+        menu.addSeparator()
+
+        menu.addAction("Selecionar tudo\tCtrl+T", self._selecionar_tudo)
+        menu.addAction("Selecionar moldes", self._selecionar_tudo)
+        menu.addAction("Inverter seleção", self._inverter_selecao)
+        menu.addAction("Inverter seleção moldes", self._inverter_selecao)
+        menu.addSeparator()
+
+        menu.addAction("Cria ponto de restauração", self._registrar_historico)
+        menu.addAction("Restaurar", self.desfazer_acao)
+        menu.addAction("Restaura ponto de restauração com cópia", self.refazer_acao)
+        menu.exec(pos_global)
+
+    def _selecionar_tudo(self):
+        self._selecionados = set(range(len(self.cena.elementos)))
+        self.update()
+
+    def _inverter_selecao(self):
+        todos = set(range(len(self.cena.elementos)))
+        self._selecionados = todos.difference(self._selecionados)
+        self.update()
+
+    def _recortar_selecionados(self):
+        self.copiar()
+        self.apagar_selecionados()
 
     def _desenhar_guia_angular(self, painter: QPainter, origem: QPointF, destino: QPointF):
         dx = destino.x() - origem.x()
