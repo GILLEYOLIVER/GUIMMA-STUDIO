@@ -7,10 +7,13 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
 from PySide6.QtWidgets import (
+    QComboBox,
+    QColorDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QTabBar,
@@ -100,8 +103,95 @@ class RibbonButton(QToolButton):
         )
 
 
+class ColorControlWidget(QFrame):
+    estilo_changed = Signal(dict)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("ColorControlWidget")
+        self._cor = "#ff5a00"
+        self._estilo = "solid"
+        self._espessura = 1.0
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(2)
+
+        topo = QHBoxLayout()
+        topo.setContentsMargins(0, 0, 0, 0)
+        topo.setSpacing(2)
+
+        self.btn_cor = QPushButton()
+        self.btn_cor.setFixedSize(30, 30)
+        self.btn_cor.setCursor(Qt.PointingHandCursor)
+        self.btn_cor.clicked.connect(self._selecionar_cor)
+        topo.addWidget(self.btn_cor)
+
+        coluna_setas = QVBoxLayout()
+        coluna_setas.setContentsMargins(0, 0, 0, 0)
+        coluna_setas.setSpacing(2)
+
+        self.cmb_estilo = QComboBox()
+        self.cmb_estilo.setFixedSize(18, 14)
+        self.cmb_estilo.addItem("", "solid")
+        self.cmb_estilo.addItem("", "dash")
+        self.cmb_estilo.addItem("", "dot")
+        self.cmb_estilo.currentIndexChanged.connect(self._on_estilo_changed)
+        coluna_setas.addWidget(self.cmb_estilo)
+
+        self.cmb_espessura = QComboBox()
+        self.cmb_espessura.setFixedSize(18, 14)
+        for valor in (1, 2, 3, 4, 5, 6):
+            self.cmb_espessura.addItem("", float(valor))
+        self.cmb_espessura.currentIndexChanged.connect(self._on_espessura_changed)
+        coluna_setas.addWidget(self.cmb_espessura)
+
+        topo.addLayout(coluna_setas)
+        layout.addLayout(topo)
+
+        lbl = QLabel("Cor")
+        lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        lbl.setStyleSheet("font-size: 9px; color:#1e1e1e; padding-left:2px;")
+        layout.addWidget(lbl)
+        self.setFixedSize(56, 58)
+        self.setStyleSheet(
+            """
+            QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
+            QComboBox { border:1px solid #d1d7de; background:#f8fafc; padding:0; }
+            QComboBox::drop-down { border:none; width:16px; }
+            QComboBox::down-arrow { image: none; border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #2f4f6f; margin-right:2px; }
+            """
+        )
+        self._atualizar_preview_cor()
+
+    def _on_estilo_changed(self):
+        self._estilo = str(self.cmb_estilo.currentData() or "solid")
+        self.estilo_changed.emit(self.valor())
+
+    def _on_espessura_changed(self):
+        self._espessura = float(self.cmb_espessura.currentData() or 1.0)
+        self.estilo_changed.emit(self.valor())
+
+    def _selecionar_cor(self):
+        cor = QColorDialog.getColor(QColor(self._cor), self, "Selecionar cor da linha")
+        if not cor.isValid():
+            return
+        self._cor = cor.name()
+        self._atualizar_preview_cor()
+        self.estilo_changed.emit(self.valor())
+
+    def _atualizar_preview_cor(self):
+        self.btn_cor.setStyleSheet(
+            f"QPushButton {{ background:{self._cor}; border:1px solid #6b7480; }} QPushButton:hover {{ border:1px solid #1f5f99; }}"
+        )
+
+    def valor(self) -> dict:
+        return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura}
+
+
 class RibbonGroup(QFrame):
     tool_selected = Signal(str)
+    estilo_changed = Signal(dict)
 
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
@@ -131,9 +221,14 @@ class RibbonGroup(QFrame):
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
             for tool in tools:
-                botao = RibbonButton(tool)
-                botao.acionada.connect(self.tool_selected.emit)
-                corpo.addWidget(botao)
+                if tool.tool_id == "cor":
+                    controle_cor = ColorControlWidget()
+                    controle_cor.estilo_changed.connect(self.estilo_changed.emit)
+                    corpo.addWidget(controle_cor)
+                else:
+                    botao = RibbonButton(tool)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    corpo.addWidget(botao)
             corpo.addStretch(1)
 
         raiz.addLayout(corpo)
@@ -165,6 +260,7 @@ class RibbonPage(QWidget):
 
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
+    estilo_changed = Signal(dict)
 
     def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
@@ -187,6 +283,8 @@ class RibbonWidget(QWidget):
                 grupos.append((group.title, [self._tools[tid] for tid in group.tools]))
             pagina = RibbonPage(grupos)
             pagina.tool_selected.connect(self.tool_selected.emit)
+            for grupo in pagina.findChildren(RibbonGroup):
+                grupo.estilo_changed.connect(self.estilo_changed.emit)
             self.paginas.addWidget(pagina)
 
         if include_tabbar:
