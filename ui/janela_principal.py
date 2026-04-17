@@ -762,9 +762,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         png_bytes = bytes(arr)
         with ZipFile(destino, mode="a", compression=ZIP_DEFLATED) as pacote:
             pacote.writestr("preview/thumbnail.png", png_bytes)
-        miniatura_lateral = destino.with_suffix(".png")
-        with open(miniatura_lateral, "wb") as f:
-            f.write(png_bytes)
 
     def _gerar_thumbnail_elementos(self, elementos: list[dict], largura: int, altura: int) -> QImage | None:
         pontos: list[tuple[float, float]] = []

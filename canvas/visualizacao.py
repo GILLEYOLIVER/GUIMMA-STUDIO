@@ -232,8 +232,8 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
-        # Faixa operacional de zoom: 0.025x (2,500%) até 199.000x
-        self.zoom = max(0.025, min(zoom, 199.0))
+        # Faixa operacional de zoom: 0.025x (2,500%) até 5000.000x
+        self.zoom = max(0.025, min(zoom, 5000.0))
         self.zoom_changed.emit(self.zoom)
         self.update()
 
