@@ -279,13 +279,68 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return
             area.canvas.cena.elementos.extend(elementos)
             area.canvas._registrar_historico()
+            self._centralizar_canvas_em_elementos(area.canvas, elementos)
             area.canvas.update()
+            self.backstage.hide()
             self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")
             return
 
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
+        self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
+
+    def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
+        pontos: list[tuple[float, float]] = []
+        for el in elementos:
+            if el.get("tipo") != "polyline":
+                continue
+            pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+        if not pontos:
+            return
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        largura = max(max_x - min_x, 1.0)
+        altura = max(max_y - min_y, 1.0)
+
+        area_w = max(canvas.width() - 40, 1)
+        area_h = max(canvas.height() - 40, 1)
+        novo_zoom = min(area_w / largura, area_h / altura)
+        canvas.set_zoom(max(0.05, min(novo_zoom, 8.0)))
+
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        canvas.origem_cena.setX(cx - (canvas.width() / (2 * canvas.zoom)))
+        canvas.origem_cena.setY(cy - (canvas.height() / (2 * canvas.zoom)))
+        canvas.update()
+
+    def closeEvent(self, event):  # noqa: N802
+        if not self._ha_alteracoes_nao_salvas():
+            event.accept()
+            return
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Fechar programa")
+        caixa.setIcon(QMessageBox.Question)
+        caixa.setText("Existem alterações não salvas. Deseja salvar antes de sair?")
+        caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        caixa.setDefaultButton(QMessageBox.Yes)
+        resposta = caixa.exec()
+        if resposta == QMessageBox.Cancel:
+            event.ignore()
+            return
+        if resposta == QMessageBox.Yes and not self._salvar_projeto():
+            event.ignore()
+            return
+        event.accept()
+
+    def _ha_alteracoes_nao_salvas(self) -> bool:
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget) and self._tem_alteracoes_area(area):
+                return True
+        return False
 
     def _novo_projeto(self):
         self._adicionar_aba_documento()
