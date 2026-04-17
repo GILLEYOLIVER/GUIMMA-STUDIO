@@ -39,12 +39,15 @@ class SnapManager:
         tolerancia_cena = tolerancia_efetiva / max(zoom, 0.001)
         candidatos: list[SnapResult] = []
 
+        segmentos: list[tuple[int, QPointF, QPointF]] = []
         for idx, elemento in enumerate(cena.elementos):
             tipo = elemento.get("tipo")
             if tipo == "polyline":
                 self._candidatos_polyline(idx, elemento, cursor, candidatos)
+                segmentos.extend(self._segmentos_polyline(idx, elemento))
             elif tipo in {"circle", "esfera"}:
                 self._candidatos_circulo(idx, elemento, cursor, candidatos)
+        self._candidatos_interseccoes(segmentos, cursor, candidatos)
 
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
@@ -72,6 +75,59 @@ class SnapManager:
         ponto = QPointF(float(centro[0]), float(centro[1]))
         candidatos.append(SnapResult(ponto=ponto, tipo="centro", distancia=self._dist(cursor, ponto), elemento_idx=idx))
 
+    def _segmentos_polyline(self, idx: int, elemento: dict) -> list[tuple[int, QPointF, QPointF]]:
+        pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        if len(pontos) < 2:
+            return []
+        return [(idx, inicio, fim) for inicio, fim in zip(pontos, pontos[1:])]
+
+    def _candidatos_interseccoes(
+        self,
+        segmentos: list[tuple[int, QPointF, QPointF]],
+        cursor: QPointF,
+        candidatos: list[SnapResult],
+    ):
+        for i in range(len(segmentos)):
+            idx_a, a1, a2 = segmentos[i]
+            for j in range(i + 1, len(segmentos)):
+                idx_b, b1, b2 = segmentos[j]
+                if idx_a == idx_b:
+                    continue
+                pt = self._intersecao_segmentos(a1, a2, b1, b2)
+                if pt is None:
+                    continue
+                dist = self._dist(cursor, pt)
+                candidatos.append(SnapResult(ponto=pt, tipo="interseção", distancia=dist, elemento_idx=idx_a))
+                candidatos.append(SnapResult(ponto=pt, tipo="interseção", distancia=dist, elemento_idx=idx_b))
+
+    def _intersecao_segmentos(self, a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> QPointF | None:
+        x1, y1 = a1.x(), a1.y()
+        x2, y2 = a2.x(), a2.y()
+        x3, y3 = b1.x(), b1.y()
+        x4, y4 = b2.x(), b2.y()
+
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 1e-9:
+            return None
+
+        det1 = x1 * y2 - y1 * x2
+        det2 = x3 * y4 - y3 * x4
+        px = (det1 * (x3 - x4) - (x1 - x2) * det2) / den
+        py = (det1 * (y3 - y4) - (y1 - y2) * det2) / den
+
+        if not self._ponto_no_segmento(px, py, a1, a2):
+            return None
+        if not self._ponto_no_segmento(px, py, b1, b2):
+            return None
+        return QPointF(px, py)
+
+    def _ponto_no_segmento(self, px: float, py: float, p1: QPointF, p2: QPointF) -> bool:
+        margem = 1e-6
+        return (
+            min(p1.x(), p2.x()) - margem <= px <= max(p1.x(), p2.x()) + margem
+            and min(p1.y(), p2.y()) - margem <= py <= max(p1.y(), p2.y()) + margem
+        )
+
     def _projetar_em_segmento(self, ponto: QPointF, inicio: QPointF, fim: QPointF) -> QPointF:
         vx = fim.x() - inicio.x()
         vy = fim.y() - inicio.y()
@@ -86,12 +142,14 @@ class SnapManager:
         return hypot(a.x() - b.x(), a.y() - b.y())
 
     def _prioridade(self, tipo: str) -> int:
-        if tipo == "nó":
+        if tipo == "interseção":
             return 0
-        if tipo == "centro":
+        if tipo == "nó":
             return 1
-        if tipo == "ponto médio":
+        if tipo == "centro":
             return 2
-        if tipo == "borda":
+        if tipo == "ponto médio":
             return 3
+        if tipo == "borda":
+            return 4
         return 9

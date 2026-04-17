@@ -5,8 +5,22 @@ from importlib import import_module
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QTabBar, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTabBar,
+    QTabWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
@@ -83,13 +97,94 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
         self.ribbon = RibbonWidget(include_tabbar=False)
-        self.ribbon.tabbar.setExpanding(True)
+        self.ribbon.tabbar.setExpanding(False)
+        self.ribbon.tabbar.setUsesScrollButtons(True)
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         sup.addWidget(self.ribbon.tabbar, 1)
 
-        sup.addWidget(QLabel("VISÃO • OPÇÕES • JANELAS"))
+        menu_btn_style = (
+            "QToolButton { color:#1b1b1b; font-weight:600; padding:0 6px; border:none; background:transparent; }"
+            "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
+            "QToolButton:hover { color:#0b5f9e; }"
+        )
+
+        self.btn_visao = QToolButton()
+        self.btn_visao.setText("VISÃO")
+        self.btn_visao.setPopupMode(QToolButton.InstantPopup)
+        self.btn_visao.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_visao.setStyleSheet(menu_btn_style)
+        self.menu_visao = QMenu(self)
+        self.menu_visao.setStyleSheet(
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
+        self.action_regras = QAction("Réguas", self)
+        self.action_regras.setCheckable(True)
+        self.action_regras.setChecked(True)
+        self.action_regras.toggled.connect(lambda ativo: self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas"))
+        self.menu_visao.addAction(self.action_regras)
+
+        self.action_barra_mensagem = QAction("Barra de mensagem", self)
+        self.action_barra_mensagem.setCheckable(True)
+        self.action_barra_mensagem.setChecked(True)
+        self.action_barra_mensagem.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
+        )
+        self.menu_visao.addAction(self.action_barra_mensagem)
+
+        self.action_menu_moldes = QAction("Menu de moldes", self)
+        self.action_menu_moldes.triggered.connect(lambda: self.lbl_status.setText("Menu de moldes (em breve)"))
+        self.menu_visao.addAction(self.action_menu_moldes)
+
+        self.action_coordenadas = QAction("Coordenadas", self)
+        self.action_coordenadas.setCheckable(True)
+        self.action_coordenadas.setChecked(True)
+        self.action_coordenadas.toggled.connect(self._alternar_coordenadas_canvas_atual)
+        self.menu_visao.addAction(self.action_coordenadas)
+
+        self.action_log = QAction("Mostrar mensagens na área de log", self)
+        self.action_log.setCheckable(True)
+        self.action_log.setChecked(False)
+        self.action_log.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Mensagens no log ativas" if ativo else "Mensagens no log ocultas")
+        )
+        self.menu_visao.addAction(self.action_log)
+        self.btn_visao.setMenu(self.menu_visao)
+        sup.addWidget(self.btn_visao)
+
+        self.btn_opcoes = QToolButton()
+        self.btn_opcoes.setText("OPÇÕES")
+        self.btn_opcoes.setPopupMode(QToolButton.InstantPopup)
+        self.btn_opcoes.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_opcoes.setStyleSheet(menu_btn_style)
+        menu_opcoes = QMenu(self)
+        menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
+        menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
+        self.btn_opcoes.setMenu(menu_opcoes)
+        sup.addWidget(self.btn_opcoes)
+
+        self.btn_janelas = QToolButton()
+        self.btn_janelas.setText("JANELAS")
+        self.btn_janelas.setPopupMode(QToolButton.InstantPopup)
+        self.btn_janelas.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_janelas.setStyleSheet(menu_btn_style)
+        menu_janelas = QMenu(self)
+        menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
+        menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
+        self.btn_janelas.setMenu(menu_janelas)
+        sup.addWidget(self.btn_janelas)
+
+        for texto, dica in [("?", "Ajuda"), ("i", "Sobre")]:
+            ic_btn = QPushButton(texto)
+            ic_btn.setFixedSize(18, 18)
+            ic_btn.setStyleSheet(
+                "QPushButton { border:1px solid #7f858c; border-radius:9px; color:#4f565f; background:#f2f2f2; font-weight:700; }"
+                "QPushButton:hover { background:#ffffff; }"
+            )
+            ic_btn.clicked.connect(lambda _=False, t=dica: self.lbl_status.setText(f"{t} (em breve)"))
+            sup.addWidget(ic_btn)
         layout.addWidget(barra_menu)
         self.barra_superior = barra_menu
         layout.addWidget(self.ribbon)
@@ -221,6 +316,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.snap_changed.connect(self._on_snap_changed)
+        area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
@@ -253,6 +349,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.btn_snap.blockSignals(True)
             self.btn_snap.setChecked(area.canvas.snap_ativo())
             self.btn_snap.blockSignals(False)
+            self.action_coordenadas.blockSignals(True)
+            self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
+            self.action_coordenadas.blockSignals(False)
         else:
             self.lbl_escala.setText("Escala --")
 
@@ -336,6 +435,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "nome": self.abas_documentos.tabText(i),
                     "elementos": area.canvas.elementos_para_salvar(),
                     "painel_retas_pos": area.canvas.painel_auxiliar_posicao(),
+                    "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
                 }
             )
         self.projeto_atual.preferencias_usuario["documentos_canvas"] = documentos_canvas
@@ -357,11 +457,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
             area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.snap_changed.connect(self._on_snap_changed)
+            area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
             painel_pos = doc.get("painel_retas_pos")
             if isinstance(painel_pos, (list, tuple)) and len(painel_pos) == 2:
                 area_doc.canvas.set_painel_auxiliar_posicao((int(painel_pos[0]), int(painel_pos[1])))
+            if "painel_coordenadas_visivel" in doc:
+                area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
             nome = doc.get("nome") or "(Sem nome)"
             idx = self.abas_documentos.addTab(area_doc, nome)
@@ -386,10 +489,26 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _on_snap_changed(self, ativo: bool):
         self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
 
+    def _alternar_coordenadas_canvas_atual(self, visivel: bool):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        area.canvas.definir_painel_coordenadas_visivel(visivel)
+        self.lbl_status.setText("Coordenadas visíveis" if visivel else "Coordenadas ocultas")
+
+    def _on_painel_coordenadas_changed(self, visivel: bool):
+        area_atual = self._area_documento_atual()
+        if not area_atual or self.sender() is not area_atual.canvas:
+            return
+        self.action_coordenadas.blockSignals(True)
+        self.action_coordenadas.setChecked(visivel)
+        self.action_coordenadas.blockSignals(False)
+
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = {
             "elementos": area.canvas.elementos_para_salvar(),
             "painel": area.canvas.painel_auxiliar_posicao(),
+            "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
