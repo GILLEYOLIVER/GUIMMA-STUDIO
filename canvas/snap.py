@@ -43,19 +43,31 @@ class SnapManager:
         for idx, elemento in enumerate(cena.elementos):
             tipo = elemento.get("tipo")
             if tipo == "polyline":
-                self._candidatos_polyline(idx, elemento, cursor, candidatos)
+                self._candidatos_polyline(idx, elemento, cursor, tolerancia_cena, candidatos)
                 segmentos.extend(self._segmentos_polyline(idx, elemento))
             elif tipo in {"circle", "esfera"}:
                 self._candidatos_circulo(idx, elemento, cursor, candidatos)
-        self._candidatos_interseccoes(segmentos, cursor, candidatos)
+        self._candidatos_interseccoes(segmentos, cursor, tolerancia_cena, candidatos)
 
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
 
-    def _candidatos_polyline(self, idx: int, elemento: dict, cursor: QPointF, candidatos: list[SnapResult]):
+    def _candidatos_polyline(
+        self,
+        idx: int,
+        elemento: dict,
+        cursor: QPointF,
+        tolerancia_cena: float,
+        candidatos: list[SnapResult],
+    ):
         pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
         if not pontos:
+            return
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        margem = tolerancia_cena * 2.5
+        if cursor.x() < min(xs) - margem or cursor.x() > max(xs) + margem or cursor.y() < min(ys) - margem or cursor.y() > max(ys) + margem:
             return
 
         for ponto in pontos:
@@ -85,12 +97,20 @@ class SnapManager:
         self,
         segmentos: list[tuple[int, QPointF, QPointF]],
         cursor: QPointF,
+        tolerancia_cena: float,
         candidatos: list[SnapResult],
     ):
-        for i in range(len(segmentos)):
-            idx_a, a1, a2 = segmentos[i]
-            for j in range(i + 1, len(segmentos)):
-                idx_b, b1, b2 = segmentos[j]
+        proximos: list[tuple[int, QPointF, QPointF]] = []
+        for idx, a1, a2 in segmentos:
+            if self._dist_ponto_segmento(cursor, a1, a2) <= tolerancia_cena * 2.0:
+                proximos.append((idx, a1, a2))
+        if len(proximos) > 120:
+            proximos = sorted(proximos, key=lambda s: self._dist_ponto_segmento(cursor, s[1], s[2]))[:120]
+
+        for i in range(len(proximos)):
+            idx_a, a1, a2 = proximos[i]
+            for j in range(i + 1, len(proximos)):
+                idx_b, b1, b2 = proximos[j]
                 if idx_a == idx_b:
                     continue
                 pt = self._intersecao_segmentos(a1, a2, b1, b2)
@@ -140,6 +160,10 @@ class SnapManager:
 
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return hypot(a.x() - b.x(), a.y() - b.y())
+
+    def _dist_ponto_segmento(self, ponto: QPointF, inicio: QPointF, fim: QPointF) -> float:
+        proj = self._projetar_em_segmento(ponto, inicio, fim)
+        return self._dist(ponto, proj)
 
     def _prioridade(self, tipo: str) -> int:
         if tipo == "interseção":
