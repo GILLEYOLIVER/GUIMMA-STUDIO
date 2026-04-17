@@ -586,9 +586,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
-            painel_pos = doc.get("painel_retas_pos")
-            if isinstance(painel_pos, (list, tuple)) and len(painel_pos) == 2:
-                area_doc.canvas.set_painel_auxiliar_posicao((int(painel_pos[0]), int(painel_pos[1])))
+            area_doc.canvas.set_painel_auxiliar_posicao(None)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
