@@ -2,40 +2,97 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from math import atan2, cos, degrees, radians, sin, sqrt
+
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.snap import SnapManager, SnapResult
 
 
-class PainelAuxiliarRetas(QFrame):
+class PainelCoordenadas(QFrame):
     desfazer_ponto = Signal()
+    aplicar = Signal(dict)
+    alternado = Signal(bool)
     posicao_alterada = Signal(int, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setObjectName("PainelAuxiliarRetas")
-        self.setFixedSize(200, 64)
+        self.setObjectName("PainelCoordenadas")
+        self.setFixedSize(300, 120)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
-        titulo = QLabel("Retas e curvas")
+        topo = QHBoxLayout()
+        topo.setContentsMargins(0, 0, 0, 0)
+        topo.setSpacing(4)
+
+        titulo = QLabel("(cm) Coordenadas")
         titulo.setStyleSheet("font-size: 10px; color: #7c7c7c;")
-        layout.addWidget(titulo)
+        topo.addWidget(titulo, 1)
+        btn_fechar = QPushButton("✕")
+        btn_fechar.setFixedSize(16, 16)
+        btn_fechar.clicked.connect(lambda: self._alternar_visibilidade(False))
+        topo.addWidget(btn_fechar, 0, Qt.AlignRight)
+        layout.addLayout(topo)
 
-        botao = QPushButton("Desfaz ponto")
-        botao.setFixedHeight(24)
-        botao.clicked.connect(self.desfazer_ponto.emit)
-        layout.addWidget(botao)
+        grade = QGridLayout()
+        grade.setContentsMargins(0, 0, 0, 0)
+        grade.setHorizontalSpacing(6)
+        grade.setVerticalSpacing(2)
+        self.dx_input = QLineEdit()
+        self.dy_input = QLineEdit()
+        self.a_input = QLineEdit()
+        self.d_input = QLineEdit()
+        for field in (self.dx_input, self.dy_input, self.a_input, self.d_input):
+            field.setFixedHeight(20)
+            field.setStyleSheet("background:#f2f2f2; border:1px solid #a2a2a2;")
+        self.dx_preview = QLabel("0")
+        self.dy_preview = QLabel("0")
+        self.a_preview = QLabel("0°")
+        self.d_preview = QLabel("0")
+        for lbl in (self.dx_preview, self.dy_preview, self.a_preview, self.d_preview):
+            lbl.setStyleSheet("font-size:10px; color:#7c7c7c;")
+            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        grade.addWidget(QLabel("Dx:"), 0, 0)
+        grade.addWidget(self.dx_input, 0, 1)
+        grade.addWidget(self.dx_preview, 0, 2)
+        grade.addWidget(QLabel("A:"), 0, 3)
+        grade.addWidget(self.a_input, 0, 4)
+        grade.addWidget(self.a_preview, 0, 5)
+        grade.addWidget(QLabel("Dy:"), 1, 0)
+        grade.addWidget(self.dy_input, 1, 1)
+        grade.addWidget(self.dy_preview, 1, 2)
+        grade.addWidget(QLabel("D:"), 1, 3)
+        grade.addWidget(self.d_input, 1, 4)
+        grade.addWidget(self.d_preview, 1, 5)
+        layout.addLayout(grade)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        botao_desfazer = QPushButton("Desfaz ponto")
+        botao_desfazer.setFixedHeight(22)
+        botao_desfazer.clicked.connect(self.desfazer_ponto.emit)
+        row.addWidget(botao_desfazer)
+        botao_limpar = QPushButton("Limpar")
+        botao_limpar.setFixedHeight(22)
+        botao_limpar.clicked.connect(self._limpar)
+        row.addWidget(botao_limpar)
+        botao_aplicar = QPushButton("Aplicar")
+        botao_aplicar.setFixedHeight(22)
+        botao_aplicar.clicked.connect(self._emitir_aplicar)
+        row.addWidget(botao_aplicar)
+        layout.addLayout(row)
         self._offset_arraste: QPointF | None = None
 
         self.setStyleSheet(
             """
-            QFrame#PainelAuxiliarRetas {
+            QFrame#PainelCoordenadas {
                 background: #ebebeb;
                 border: 1px solid #9a9a9a;
                 border-radius: 8px;
@@ -51,6 +108,55 @@ class PainelAuxiliarRetas(QFrame):
             QPushButton:hover { background: #ffffff; }
             """
         )
+
+    def _alternar_visibilidade(self, visivel: bool):
+        if visivel:
+            self.show()
+        else:
+            self.hide()
+        self.alternado.emit(visivel)
+
+    def definir_visivel(self, visivel: bool):
+        self._alternar_visibilidade(visivel)
+
+    def _limpar(self):
+        for field in (self.dx_input, self.dy_input, self.a_input, self.d_input):
+            field.clear()
+
+    def _parse(self, txt: str) -> float | None:
+        txt = txt.strip().replace(",", ".")
+        if not txt:
+            return None
+        try:
+            return float(txt)
+        except ValueError:
+            return None
+
+    def _emitir_aplicar(self):
+        self.aplicar.emit(
+            {
+                "dx": self._parse(self.dx_input.text()),
+                "dy": self._parse(self.dy_input.text()),
+                "a": self._parse(self.a_input.text()),
+                "d": self._parse(self.d_input.text()),
+            }
+        )
+
+    def atualizar_preview(self, origem: QPointF | None, destino: QPointF | None):
+        if not origem or not destino:
+            self.dx_preview.setText("0")
+            self.dy_preview.setText("0")
+            self.a_preview.setText("0°")
+            self.d_preview.setText("0")
+            return
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        ang = degrees(atan2(-dy, dx)) % 360.0
+        dist = sqrt(dx * dx + dy * dy)
+        self.dx_preview.setText(f"{dx:.2f}")
+        self.dy_preview.setText(f"{dy:.2f}")
+        self.a_preview.setText(f"{ang:.0f}°")
+        self.d_preview.setText(f"{dist:.2f}")
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
@@ -80,6 +186,7 @@ class VisualizacaoCanvas(QWidget):
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
     snap_changed = Signal(bool)
+    painel_coordenadas_changed = Signal(bool)
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -89,6 +196,7 @@ class VisualizacaoCanvas(QWidget):
         self.ferramenta_ativa: str | None = None
         self._pontos_reta: list[QPointF] = []
         self._preview_reta: QPointF | None = None
+        self._marcacoes_temporarias: list[QPointF] = []
         self._historico_elementos: list[list[dict]] = [[]]
         self._indice_historico = 0
         self._buffer_copia: dict | None = None
@@ -99,7 +207,8 @@ class VisualizacaoCanvas(QWidget):
         self._arrastando_selecao = False
         self._ultimo_ponto_arrasto: QPointF | None = None
         self._moveu_selecao = False
-        self._painel_retas_posicao: tuple[int, int] | None = None
+        self._painel_coordenadas_posicao: tuple[int, int] | None = None
+        self._painel_coordenadas_visivel = True
         self._aguardando_retorno_selecao = False
         self._snap_manager = SnapManager()
         self._snap_ativo = True
@@ -111,10 +220,12 @@ class VisualizacaoCanvas(QWidget):
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
 
-        self.painel_retas = PainelAuxiliarRetas(self)
-        self.painel_retas.desfazer_ponto.connect(self._desfazer_ponto)
-        self.painel_retas.posicao_alterada.connect(self._registrar_posicao_painel)
-        self.painel_retas.hide()
+        self.painel_coordenadas = PainelCoordenadas(self)
+        self.painel_coordenadas.desfazer_ponto.connect(self._desfazer_ponto)
+        self.painel_coordenadas.aplicar.connect(self._aplicar_coordenadas)
+        self.painel_coordenadas.alternado.connect(self._set_painel_coordenadas_visivel)
+        self.painel_coordenadas.posicao_alterada.connect(self._registrar_posicao_painel)
+        self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
         # Faixa operacional de zoom: 0.025x (2,500%) até 99.500x
@@ -129,10 +240,10 @@ class VisualizacaoCanvas(QWidget):
         self._snap_candidatos = []
         self._snap_indice = 0
         if tool_id in {"reta", "curva"}:
-            self.painel_retas.show()
-            self._reposicionar_painel_retas()
+            if self._painel_coordenadas_visivel:
+                self.painel_coordenadas.show()
+            self._reposicionar_painel_coordenadas()
         else:
-            self.painel_retas.hide()
             self._pontos_reta.clear()
             self._preview_reta = None
         self.update()
@@ -184,8 +295,11 @@ class VisualizacaoCanvas(QWidget):
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
+                pos = self._snap_angular(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
+            if len(self._pontos_reta) >= 2:
+                self.painel_coordenadas.atualizar_preview(self._pontos_reta[-2], self._pontos_reta[-1])
             self.update()
             event.accept()
             return
@@ -210,7 +324,8 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa in {"reta", "curva"}:
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
-                self._preview_reta = snap_pos
+                self._preview_reta = self._snap_angular(self._pontos_reta[-1], snap_pos)
+                self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
             self.update()
             event.accept()
             return
@@ -260,7 +375,7 @@ class VisualizacaoCanvas(QWidget):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        self._reposicionar_painel_retas()
+        self._reposicionar_painel_coordenadas()
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -280,7 +395,9 @@ class VisualizacaoCanvas(QWidget):
         if self._pontos_reta:
             self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
-                self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=True)
+                self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=False)
+        for marca in self._marcacoes_temporarias[-10:]:
+            self._desenhar_marca_x(painter, marca)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado and self._snap_ativo:
@@ -329,15 +446,15 @@ class VisualizacaoCanvas(QWidget):
             self._preview_reta = ultimo_ponto
             self._aguardando_retorno_selecao = True
 
-    def _reposicionar_painel_retas(self):
-        if not self.painel_retas.isVisible():
+    def _reposicionar_painel_coordenadas(self):
+        if not self.painel_coordenadas.isVisible():
             return
-        if self._painel_retas_posicao:
-            self.painel_retas.move(*self._painel_retas_posicao)
+        if self._painel_coordenadas_posicao:
+            self.painel_coordenadas.move(*self._painel_coordenadas_posicao)
             return
-        x = (self.width() - self.painel_retas.width()) // 2
-        y = 24
-        self.painel_retas.move(max(8, x), y)
+        x = max(8, self.width() - self.painel_coordenadas.width() - 12)
+        y = 16
+        self.painel_coordenadas.move(x, y)
 
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
         return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(), (ponto.y() / self.zoom) + self.origem_cena.y())
@@ -554,19 +671,71 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def _registrar_posicao_painel(self, x: int, y: int):
-        self._painel_retas_posicao = (x, y)
+        self._painel_coordenadas_posicao = (x, y)
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
-        if self._painel_retas_posicao:
-            return self._painel_retas_posicao
-        if self.painel_retas.isVisible():
-            return self.painel_retas.x(), self.painel_retas.y()
+        if self._painel_coordenadas_posicao:
+            return self._painel_coordenadas_posicao
+        if self.painel_coordenadas.isVisible():
+            return self.painel_coordenadas.x(), self.painel_coordenadas.y()
         return None
 
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
-        self._painel_retas_posicao = pos
-        if pos and self.painel_retas.isVisible():
-            self.painel_retas.move(*pos)
+        self._painel_coordenadas_posicao = pos
+        if pos and self.painel_coordenadas.isVisible():
+            self.painel_coordenadas.move(*pos)
+
+    def painel_coordenadas_visivel(self) -> bool:
+        return self._painel_coordenadas_visivel
+
+    def definir_painel_coordenadas_visivel(self, visivel: bool):
+        self._painel_coordenadas_visivel = visivel
+        if visivel:
+            self.painel_coordenadas.show()
+            self._reposicionar_painel_coordenadas()
+        else:
+            self.painel_coordenadas.hide()
+        self.painel_coordenadas_changed.emit(visivel)
+
+    def _set_painel_coordenadas_visivel(self, visivel: bool):
+        self._painel_coordenadas_visivel = visivel
+        self.painel_coordenadas_changed.emit(visivel)
+
+    def _snap_angular(self, origem: QPointF, destino: QPointF) -> QPointF:
+        if not self._snap_ativo:
+            return destino
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        dist = sqrt(dx * dx + dy * dy)
+        if dist <= 0.0001:
+            return destino
+        ang = degrees(atan2(dy, dx))
+        passo = 15.0
+        ang_snap = round(ang / passo) * passo
+        return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() + dist * sin(radians(ang_snap)))
+
+    def _aplicar_coordenadas(self, payload: dict):
+        origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
+        dx = payload.get("dx")
+        dy = payload.get("dy")
+        ang = payload.get("a")
+        dist = payload.get("d")
+        destino: QPointF | None = None
+        if ang is not None and dist is not None:
+            rad = radians(ang)
+            destino = QPointF(origem.x() + (dist * cos(rad)), origem.y() - (dist * sin(rad)))
+        elif dx is not None or dy is not None:
+            destino = QPointF(origem.x() + float(dx or 0.0), origem.y() + float(dy or 0.0))
+        if destino is None:
+            return
+        destino = self._snap_angular(origem, destino)
+        if not self._pontos_reta:
+            self._pontos_reta.append(origem)
+        self._pontos_reta.append(destino)
+        self._preview_reta = destino
+        self._marcacoes_temporarias.append(destino)
+        self.painel_coordenadas.atualizar_preview(origem, destino)
+        self.update()
 
     def elementos_para_salvar(self) -> list[dict]:
         elementos = deepcopy(self.cena.elementos)
@@ -580,3 +749,9 @@ class VisualizacaoCanvas(QWidget):
                     }
                 )
         return elementos
+    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF):
+        pt = self._cena_para_tela(ponto)
+        pen = QPen(QColor("#ff5a00"), 1)
+        painter.setPen(pen)
+        painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
+        painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
