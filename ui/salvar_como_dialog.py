@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
+from config import EXTENSAO_PROJETO
 
 
 class SalvarComoDialog(QDialog):
@@ -43,7 +44,7 @@ class SalvarComoDialog(QDialog):
 
         self.edt_nome = QLineEdit(nome_inicial)
         self.cmb_tipo = QComboBox()
-        self.cmb_tipo.addItem("Projeto GUIMMA (*.gstudio)")
+        self.cmb_tipo.addItem(f"Projeto GUIMMA (*{EXTENSAO_PROJETO})")
         g.addWidget(self.edt_nome, 1, 0, 1, 2)
         g.addWidget(self.cmb_tipo, 2, 0, 1, 2)
         raiz.addWidget(topo)
@@ -86,8 +87,8 @@ class SalvarComoDialog(QDialog):
     def caminho_destino(self) -> Path:
         nome = self.edt_nome.text().strip() or "novo_projeto"
         destino = self._pasta / nome
-        if destino.suffix.lower() != ".gstudio":
-            destino = destino.with_suffix(".gstudio")
+        if destino.suffix.lower() != EXTENSAO_PROJETO:
+            destino = destino.with_suffix(EXTENSAO_PROJETO)
         return destino
 
     def metadados(self) -> dict:
