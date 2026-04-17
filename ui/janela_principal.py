@@ -280,6 +280,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.cena.elementos.extend(elementos)
             area.canvas._registrar_historico()
             self._centralizar_canvas_em_elementos(area.canvas, elementos)
+            area._on_zoom_changed(area.canvas.zoom)
             area.canvas.update()
             self.backstage.hide()
             self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")

@@ -262,6 +262,7 @@ class VisualizacaoCanvas(QWidget):
             cursor_cena_antes.x() - (cursor_tela.x() / self.zoom),
             cursor_cena_antes.y() - (cursor_tela.y() / self.zoom),
         )
+        self.zoom_changed.emit(self.zoom)
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
