@@ -5,9 +5,10 @@ from importlib import import_module
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -45,6 +46,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._configurar_atalhos()
+        QApplication.instance().installEventFilter(self)
         self.showMaximized()
 
     def _configurar_interface(self):
@@ -219,6 +221,22 @@ class GuimmaStudioMainWindow(QMainWindow):
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
             self.backstage.hide()
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        if (
+            hasattr(self, "backstage")
+            and self.backstage.isVisible()
+            and event.type() == QEvent.MouseButtonPress
+            and hasattr(event, "globalPosition")
+        ):
+            pos = event.globalPosition().toPoint()
+            backstage_topo = self.backstage.mapToGlobal(QPoint(0, 0))
+            backstage_rect = self.backstage.rect().translated(backstage_topo)
+            botao_topo = self.botao_arquivo.mapToGlobal(QPoint(0, 0))
+            botao_rect = self.botao_arquivo.rect().translated(botao_topo)
+            if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
+                self.backstage.hide()
+        return super().eventFilter(watched, event)
 
     def _topo_backstage(self) -> int:
         return self.barra_superior.height()
