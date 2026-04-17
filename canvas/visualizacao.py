@@ -745,7 +745,7 @@ class VisualizacaoCanvas(QWidget):
     def _snap_angular(self, origem: QPointF, destino: QPointF, travar_snap_exato: bool = False) -> QPointF:
         if not self._snap_ativo:
             return destino
-        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord"}:
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
