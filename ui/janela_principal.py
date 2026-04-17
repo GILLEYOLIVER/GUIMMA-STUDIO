@@ -582,8 +582,6 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _carregar_documentos_canvas(self):
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
         if not docs:
-            if self.abas_documentos.count() == 0:
-                self._adicionar_aba_documento(self._arquivo_atual.stem if self._arquivo_atual else None)
             return
 
         for doc in docs:
