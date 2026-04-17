@@ -44,6 +44,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
+        self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -108,6 +109,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
+        self.ribbon.estilo_changed.connect(self._atualizar_estilo_desenho)
         sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
         sup.addStretch(1)
 
@@ -459,6 +461,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
+        area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -593,6 +596,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
+            area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_painel_auxiliar_posicao(None)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
@@ -610,6 +614,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_atual.canvas.set_ferramenta_ativa(tool_id)
         if tool_id == "selecionar":
             self.lbl_status.setText("Selecionar ativada")
+
+    def _atualizar_estilo_desenho(self, estilo: dict):
+        self._estilo_desenho_atual.update(estilo)
+        area_atual = self._area_documento_atual()
+        if area_atual:
+            area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+        self.lbl_status.setText(
+            f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | Espessura {self._estilo_desenho_atual['espessura']:.0f}"
+        )
 
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()

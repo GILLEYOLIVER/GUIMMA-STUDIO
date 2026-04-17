@@ -220,6 +220,9 @@ class VisualizacaoCanvas(QWidget):
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
+        self._linha_cor = "#ff5a00"
+        self._linha_estilo = "solid"
+        self._linha_espessura = 1.0
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -400,14 +403,34 @@ class VisualizacaoCanvas(QWidget):
             if len(pontos) < 2:
                 continue
             cor = "#ffd54a" if idx in self._selecionados else elemento.get("cor", "#d0d0d0")
-            self._desenhar_polilinha(painter, pontos, cor=cor)
+            self._desenhar_polilinha(
+                painter,
+                pontos,
+                cor=cor,
+                espessura=float(elemento.get("espessura", 1.0)),
+                estilo=str(elemento.get("estilo", "solid")),
+            )
 
         if self._pontos_reta:
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_guia_angular(painter, self._pontos_reta[-1], self._preview_reta)
-            self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
+            self._desenhar_polilinha(
+                painter,
+                self._pontos_reta,
+                cor=self._linha_cor,
+                espessura=self._linha_espessura,
+                estilo=self._linha_estilo,
+            )
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
-                self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=False)
+                self._desenhar_segmento(
+                    painter,
+                    self._pontos_reta[-1],
+                    self._preview_reta,
+                    tracejado=False,
+                    cor=self._linha_cor,
+                    espessura=self._linha_espessura,
+                    estilo=self._linha_estilo,
+                )
         if self._guia_fechamento:
             self._desenhar_segmento(
                 painter,
@@ -425,16 +448,37 @@ class VisualizacaoCanvas(QWidget):
         if self._snap_resultado:
             self._desenhar_marcador_snap(painter, self._snap_resultado)
 
-    def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
+    def _desenhar_polilinha(
+        self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00", espessura: float = 1.0, estilo: str = "solid"
+    ):
         for inicio, fim in zip(pontos, pontos[1:]):
-            self._desenhar_segmento(painter, inicio, fim, cor=cor)
+            self._desenhar_segmento(painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo)
 
-    def _desenhar_segmento(self, painter: QPainter, inicio: QPointF, fim: QPointF, tracejado: bool = False, cor: str = "#ff5a00"):
-        pen = QPen(QColor(cor), 1)
+    def _desenhar_segmento(
+        self,
+        painter: QPainter,
+        inicio: QPointF,
+        fim: QPointF,
+        tracejado: bool = False,
+        cor: str = "#ff5a00",
+        espessura: float = 1.0,
+        estilo: str = "solid",
+    ):
+        pen = QPen(QColor(cor), espessura)
         if tracejado:
             pen.setStyle(Qt.DotLine)
+        else:
+            pen.setStyle(self._qt_pen_style(estilo))
         painter.setPen(pen)
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
+
+    def _qt_pen_style(self, estilo: str):
+        estilos = {
+            "solid": Qt.SolidLine,
+            "dash": Qt.DashLine,
+            "dot": Qt.DotLine,
+        }
+        return estilos.get(estilo, Qt.SolidLine)
 
     def _desenhar_label_angulo_cursor(self, painter: QPainter, origem: QPointF, destino: QPointF):
         dx = destino.x() - origem.x()
@@ -541,7 +585,9 @@ class VisualizacaoCanvas(QWidget):
                     {
                         "tipo": "polyline",
                         "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                        "cor": "#ff5a00",
+                        "cor": self._linha_cor,
+                        "espessura": self._linha_espessura,
+                        "estilo": self._linha_estilo,
                     }
                 )
             self._registrar_historico()
@@ -596,7 +642,9 @@ class VisualizacaoCanvas(QWidget):
             self._buffer_copia = {
                 "tipo": "polyline",
                 "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
-                "cor": "#ff5a00",
+                "cor": self._linha_cor,
+                "espessura": self._linha_espessura,
+                "estilo": self._linha_estilo,
             }
             return
 
@@ -899,13 +947,25 @@ class VisualizacaoCanvas(QWidget):
                     {
                         "tipo": "polyline",
                         "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                        "cor": "#ff5a00",
+                        "cor": self._linha_cor,
+                        "espessura": self._linha_espessura,
+                        "estilo": self._linha_estilo,
                     }
                 )
         return elementos
+
     def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF):
         pt = self._cena_para_tela(ponto)
         pen = QPen(QColor("#ff5a00"), 1)
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
+
+    def set_estilo_linha(self, cor: str | None = None, estilo: str | None = None, espessura: float | None = None):
+        if cor:
+            self._linha_cor = cor
+        if estilo:
+            self._linha_estilo = estilo
+        if espessura is not None:
+            self._linha_espessura = max(1.0, float(espessura))
+        self.update()
