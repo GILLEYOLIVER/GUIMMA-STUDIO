@@ -400,6 +400,8 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_polilinha(painter, pontos, cor=cor)
 
         if self._pontos_reta:
+            if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
+                self._desenhar_guia_angular(painter, self._pontos_reta[-1], self._preview_reta)
             self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=False)
@@ -409,7 +411,7 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_label_angulo_cursor(painter, self._pontos_reta[-1], self._preview_reta)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
-        if self._snap_resultado and self._snap_ativo:
+        if self._snap_resultado:
             self._desenhar_marcador_snap(painter, self._snap_resultado)
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00"):
@@ -438,6 +440,22 @@ class VisualizacaoCanvas(QWidget):
         painter.fillRect(x - 4, y - th, tw + 8, th + 4, QColor(0, 0, 0, 180))
         painter.setPen(QPen(QColor("#ff6a00"), 1))
         painter.drawText(x, y, texto)
+
+    def _desenhar_guia_angular(self, painter: QPainter, origem: QPointF, destino: QPointF):
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        dist = sqrt(dx * dx + dy * dy)
+        if dist <= 0.0001:
+            return
+        origem_tela = self._cena_para_tela(origem)
+        raio_tela = dist * self.zoom
+        pen_guia = QPen(QColor("#ff43ff"), 1)
+        pen_guia.setStyle(Qt.DotLine)
+        painter.setPen(pen_guia)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(origem_tela, raio_tela, raio_tela)
+        eixo = QPointF(origem.x() + dist, origem.y())
+        self._desenhar_segmento(painter, origem, eixo, tracejado=True, cor="#ff43ff")
 
     def _desfazer_ponto(self):
         if not self._pontos_reta:
@@ -665,11 +683,6 @@ class VisualizacaoCanvas(QWidget):
 
     def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
         pos_cena = self._tela_para_cena(pos_tela)
-        if not self._snap_ativo:
-            self._snap_resultado = None
-            self._snap_candidatos = []
-            self._snap_indice = 0
-            return pos_cena
         self._snap_candidatos = self._snap_manager.calcular_candidatos(
             self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
         )
