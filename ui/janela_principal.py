@@ -367,7 +367,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
 
     def _abrir_projeto(self):
-        caminho, _ = QFileDialog.getOpenFileName(self, "Abrir projeto", "", f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)")
+        caminho, _ = QFileDialog.getOpenFileName(
+            self,
+            "Abrir projeto",
+            "",
+            f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
+        )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)
 
@@ -409,8 +414,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         return False
 
     def _atualizar_titulo(self):
-        sufixo = self._arquivo_atual.name if self._arquivo_atual else "sem arquivo"
-        self.setWindowTitle(f"GUIMMA STUDIO — {self.projeto_atual.nome} ({sufixo})")
+        self.setWindowTitle("GUIMMA STUDIO")
 
     def _criar_area_documento(self) -> QWidget:
         area = QWidget()
@@ -568,15 +572,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["documentos_canvas"] = documentos_canvas
 
     def _carregar_documentos_canvas(self):
-        while self.abas_documentos.count():
-            widget = self.abas_documentos.widget(0)
-            self.abas_documentos.removeTab(0)
-            if widget:
-                widget.deleteLater()
-
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
         if not docs:
-            self._adicionar_aba_documento(self._arquivo_atual.stem if self._arquivo_atual else None)
+            if self.abas_documentos.count() == 0:
+                self._adicionar_aba_documento(self._arquivo_atual.stem if self._arquivo_atual else None)
             return
 
         for doc in docs:
@@ -597,7 +596,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
             QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
-        self.abas_documentos.setCurrentIndex(0)
+        self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
 
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
