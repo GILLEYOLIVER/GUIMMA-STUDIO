@@ -438,6 +438,15 @@ class VisualizacaoCanvas(QWidget):
 
     def _abrir_menu_contexto(self, pos_global):
         menu = QMenu(self)
+        menu.setStyleSheet(
+            """
+            QMenu { background:#f5f6f8; color:#111111; border:1px solid #9da3aa; }
+            QMenu::item { color:#111111; padding:4px 10px; }
+            QMenu::item:selected { background:#dcecff; color:#111111; }
+            QMenu::item:disabled { color:#5d636a; }
+            QMenu::separator { height:1px; background:#9fa5ad; margin:4px 6px; }
+            """
+        )
         menu.addAction("Propriedades\tCtrl+Enter", lambda: None)
         menu.addAction("Variantes", lambda: None)
         menu.addAction("Informações modelo\tCtrl+M", lambda: None)

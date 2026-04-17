@@ -27,6 +27,7 @@ from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO, ICONS_DIR
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
+from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -194,6 +195,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Abrir"].clicked.connect(self._abrir_projeto)
         self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
+        self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
         self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
@@ -236,6 +238,54 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(msg)
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
+
+    def _abrir_menu_importar(self):
+        botao = self.backstage.botoes.get("Importar ▸")
+        if not botao:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
+        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama"))
+        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plot"))
+        menu.addAction("Lectra", lambda: self._importar_por_tipo("lectra"))
+        menu.addAction("Investronica", lambda: self._importar_por_tipo("investronica"))
+        menu.addAction("Gerber", lambda: self._importar_por_tipo("gerber"))
+        menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
+        pos = botao.mapToGlobal(botao.rect().bottomRight())
+        menu.exec(pos)
+
+    def _importar_por_tipo(self, tipo: str):
+        filtros = {
+            "dxf": "DXF (*.dxf)",
+            "aama": "AAMA/ASTM (*.aama *.astm *.zip)",
+            "plot": "Plotagem (*.plt *.hpgl *.txt)",
+            "lectra": "Lectra (*.mdl *.iba *.zip)",
+            "investronica": "Investronica (*.vec *.pat *.zip)",
+            "gerber": "Gerber (*.ger *.gbr *.zip)",
+            "assyst": "Assyst (*.assyst *.ast *.zip)",
+        }
+        caminho, _ = QFileDialog.getOpenFileName(self, f"Importar {tipo.upper()}", "", filtros.get(tipo, "Todos (*.*)"))
+        if not caminho:
+            return
+        area = self._area_documento_atual()
+        if tipo == "dxf" and area:
+            elementos = importar_dxf_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("DXF sem entidades LINE/LWPOLYLINE suportadas.")
+                return
+            area.canvas.cena.elementos.extend(elementos)
+            area.canvas._registrar_historico()
+            area.canvas.update()
+            self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")
+            return
+
+        imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
+        imports.append({"tipo": tipo, "caminho": caminho})
+        self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
 
     def _novo_projeto(self):
         self._adicionar_aba_documento()
