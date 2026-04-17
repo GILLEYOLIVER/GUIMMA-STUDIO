@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from importlib import import_module
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -365,6 +366,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             return self._salvar_projeto_como()
         self._sincronizar_documentos_canvas_no_projeto()
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
+        self._salvar_thumbnail_projeto(self._arquivo_atual)
         self.backstage.adicionar_recente(str(self._arquivo_atual))
         self._atualizar_titulo()
         self._marcar_documentos_como_salvos()
@@ -379,6 +381,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
             self._sincronizar_documentos_canvas_no_projeto()
             GSProjectIO.salvar(self.projeto_atual, destino)
+            self._salvar_thumbnail_projeto(destino)
             self._arquivo_atual = destino
             self.backstage.adicionar_recente(str(destino))
             self._atualizar_titulo()
@@ -575,6 +578,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             nome = doc.get("nome") or "(Sem nome)"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
+            QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
         self.abas_documentos.setCurrentIndex(0)
 
     def _ativar_ferramenta_global(self, tool_id: str):
@@ -716,3 +720,69 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _texto_escala(self, zoom: float) -> str:
         return f"Escala {zoom * 100:.3f}%"
+
+    def _centralizar_area_documento(self, area: AreaDocumentoWidget):
+        elementos = area.canvas.cena.elementos
+        if not elementos:
+            return
+        self._centralizar_canvas_em_elementos(area.canvas, elementos)
+        area._on_zoom_changed(area.canvas.zoom)
+
+    def _salvar_thumbnail_projeto(self, destino: Path):
+        docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
+        if not docs:
+            return
+        elementos = docs[0].get("elementos", [])
+        imagem = self._gerar_thumbnail_elementos(elementos, largura=320, altura=180)
+        if imagem is None:
+            return
+        arr = QByteArray()
+        buffer = QBuffer(arr)
+        buffer.open(QIODevice.WriteOnly)
+        imagem.save(buffer, "PNG")
+        buffer.close()
+        png_bytes = bytes(arr)
+        with ZipFile(destino, mode="a", compression=ZIP_DEFLATED) as pacote:
+            pacote.writestr("preview/thumbnail.png", png_bytes)
+        miniatura_lateral = destino.with_suffix(".png")
+        with open(miniatura_lateral, "wb") as f:
+            f.write(png_bytes)
+
+    def _gerar_thumbnail_elementos(self, elementos: list[dict], largura: int, altura: int) -> QImage | None:
+        pontos: list[tuple[float, float]] = []
+        for el in elementos:
+            if el.get("tipo") == "polyline":
+                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+        if len(pontos) < 2:
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        largura_geo = max(max_x - min_x, 1.0)
+        altura_geo = max(max_y - min_y, 1.0)
+
+        margem = 12
+        escala = min((largura - margem * 2) / largura_geo, (altura - margem * 2) / altura_geo)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+
+        img = QImage(largura, altura, QImage.Format_ARGB32)
+        img.fill(QColor("#000000"))
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor("#ff5a00"), 2))
+        for el in elementos:
+            if el.get("tipo") != "polyline":
+                continue
+            pts = el.get("pontos", [])
+            if len(pts) < 2:
+                continue
+            (x1, y1), (x2, y2) = pts[0], pts[1]
+            sx1 = (x1 - cx) * escala + (largura / 2)
+            sy1 = (y1 - cy) * escala + (altura / 2)
+            sx2 = (x2 - cx) * escala + (largura / 2)
+            sy2 = (y2 - cy) * escala + (altura / 2)
+            painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
+        painter.end()
+        return img
