@@ -35,6 +35,7 @@ flowchart LR
 | Barra inferior: Lupa | `btn_lupa.clicked -> _set_modo_navegacao("lupa")` | `ui/janela_principal.py` |
 | Barra inferior: Zoom - | `btn_zoom_menos.clicked -> _aplicar_zoom_incremental(1/1.1)` | `ui/janela_principal.py` |
 | Barra inferior: Zoom + | `btn_zoom_mais.clicked -> _aplicar_zoom_incremental(1.1)` | `ui/janela_principal.py` |
+| Faixa de zoom | `VisualizacaoCanvas.set_zoom(0.2x..8.0x)` + label em porcentagem inteira | `canvas/visualizacao.py` + `ui/janela_principal.py` |
 | Topbar/Ribbon (aba ativa com faixa colorida) | `tabbar.currentChanged -> _atualizar_destaque_aba` | `ui/ribbon.py` |
 
 ### Observações de comportamento atual do Snap

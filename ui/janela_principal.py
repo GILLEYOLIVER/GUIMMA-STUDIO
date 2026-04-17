@@ -241,12 +241,12 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _on_zoom_canvas_alterado(self, zoom: float):
         area_atual = self._area_documento_atual()
         if area_atual and self.sender() is area_atual:
-            self.lbl_escala.setText(f"Escala {int(zoom * 100)}%")
+            self.lbl_escala.setText(self._texto_escala(zoom))
 
     def _on_aba_documento_alterada(self, index: int):
         area = self.abas_documentos.widget(index) if index >= 0 else None
         if isinstance(area, AreaDocumentoWidget):
-            self.lbl_escala.setText(f"Escala {int(area.canvas.zoom * 100)}%")
+            self.lbl_escala.setText(self._texto_escala(area.canvas.zoom))
             self.btn_snap.blockSignals(True)
             self.btn_snap.setChecked(area.canvas.snap_ativo())
             self.btn_snap.blockSignals(False)
@@ -485,3 +485,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         area.canvas.set_zoom(area.canvas.zoom * fator)
+
+    def _texto_escala(self, zoom: float) -> str:
+        return f"Escala {int(round(zoom * 100))}%"
