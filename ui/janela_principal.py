@@ -199,10 +199,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.abas_documentos = QTabWidget()
         self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
+        self.abas_documentos.tabBar().setExpanding(False)
+        self.abas_documentos.tabBar().setUsesScrollButtons(True)
         self.abas_documentos.currentChanged.connect(self._on_aba_documento_alterada)
         self.abas_documentos.tabBar().tabMoved.connect(lambda _from, _to: self._reconfigurar_botoes_fechar_abas())
         self.abas_documentos.setStyleSheet(
             "QTabWidget::pane { border: 1px solid #d7dbe1; }"
+            "QTabWidget::tab-bar { alignment: left; }"
             "QTabBar { background: #f9f9f9; }"
             "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 10px; margin-right:1px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"

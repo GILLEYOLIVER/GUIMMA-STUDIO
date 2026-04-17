@@ -30,6 +30,7 @@ flowchart LR
 | Arquivo recente | `arquivo_recente_clicado -> _abrir_projeto_em_caminho` | `ui/backstage_arquivo.py` + `ui/janela_principal.py` |
 | Hover em Arquivos Recentes | `QListWidget::item:hover` (realce + barra lateral) | `ui/backstage_arquivo.py` |
 | Botão de fechar aba (✕) | `clicked -> _fechar_aba_documento` | `ui/janela_principal.py` |
+| Abas de documentos (alinhadas à esquerda) | `QTabWidget::tab-bar { alignment: left; }` | `ui/janela_principal.py` |
 | Barra inferior: Snap (ímã) | `btn_snap.toggled -> _alternar_snap_canvas_atual` | `ui/janela_principal.py` + `canvas/visualizacao.py` + `canvas/snap.py` |
 | Barra inferior: Mão | `btn_mao.clicked -> _set_modo_navegacao("mao")` | `ui/janela_principal.py` |
 | Barra inferior: Lupa | `btn_lupa.clicked -> _set_modo_navegacao("lupa")` | `ui/janela_principal.py` |
