@@ -487,4 +487,4 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.set_zoom(area.canvas.zoom * fator)
 
     def _texto_escala(self, zoom: float) -> str:
-        return f"Escala {int(round(zoom * 100))}%"
+        return f"Escala {zoom * 100:.3f}%"

@@ -117,8 +117,8 @@ class VisualizacaoCanvas(QWidget):
         self.painel_retas.hide()
 
     def set_zoom(self, zoom: float):
-        # Faixa operacional de zoom: 0.2x (20%) até 8.0x (800%)
-        self.zoom = max(0.2, min(zoom, 8.0))
+        # Faixa operacional de zoom: 0.025x (2,500%) até 99.500x
+        self.zoom = max(0.025, min(zoom, 99.5))
         self.zoom_changed.emit(self.zoom)
         self.update()
 
