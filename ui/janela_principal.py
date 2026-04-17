@@ -750,7 +750,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
         if not docs:
             return
-        elementos = docs[0].get("elementos", [])
+        elementos: list[dict] = []
+        for doc in docs:
+            cand = doc.get("elementos", [])
+            if isinstance(cand, list) and cand:
+                elementos = cand
+                break
+        if not elementos:
+            return
         imagem = self._gerar_thumbnail_elementos(elementos, largura=320, altura=180)
         if imagem is None:
             return
@@ -762,6 +769,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         png_bytes = bytes(arr)
         with ZipFile(destino, mode="a", compression=ZIP_DEFLATED) as pacote:
             pacote.writestr("preview/thumbnail.png", png_bytes)
+            pacote.writestr("thumbnail.png", png_bytes)
+            pacote.writestr("meta/thumbnail.png", png_bytes)
+        self.projeto_atual.preferencias_usuario["thumbnail_internal"] = "preview/thumbnail.png"
 
     def _gerar_thumbnail_elementos(self, elementos: list[dict], largura: int, altura: int) -> QImage | None:
         pontos: list[tuple[float, float]] = []
