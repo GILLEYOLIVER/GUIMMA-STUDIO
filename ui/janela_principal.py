@@ -47,6 +47,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
