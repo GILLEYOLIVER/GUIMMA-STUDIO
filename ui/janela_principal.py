@@ -97,7 +97,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
         self.ribbon = RibbonWidget(include_tabbar=False)
-        self.ribbon.tabbar.setExpanding(True)
+        self.ribbon.tabbar.setExpanding(False)
+        self.ribbon.tabbar.setUsesScrollButtons(True)
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
@@ -117,11 +118,37 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
         )
+        self.action_regras = QAction("Réguas", self)
+        self.action_regras.setCheckable(True)
+        self.action_regras.setChecked(True)
+        self.action_regras.toggled.connect(lambda ativo: self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas"))
+        self.menu_visao.addAction(self.action_regras)
+
+        self.action_barra_mensagem = QAction("Barra de mensagem", self)
+        self.action_barra_mensagem.setCheckable(True)
+        self.action_barra_mensagem.setChecked(True)
+        self.action_barra_mensagem.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
+        )
+        self.menu_visao.addAction(self.action_barra_mensagem)
+
+        self.action_menu_moldes = QAction("Menu de moldes", self)
+        self.action_menu_moldes.triggered.connect(lambda: self.lbl_status.setText("Menu de moldes (em breve)"))
+        self.menu_visao.addAction(self.action_menu_moldes)
+
         self.action_coordenadas = QAction("Coordenadas", self)
         self.action_coordenadas.setCheckable(True)
         self.action_coordenadas.setChecked(True)
         self.action_coordenadas.toggled.connect(self._alternar_coordenadas_canvas_atual)
         self.menu_visao.addAction(self.action_coordenadas)
+
+        self.action_log = QAction("Mostrar mensagens na área de log", self)
+        self.action_log.setCheckable(True)
+        self.action_log.setChecked(False)
+        self.action_log.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Mensagens no log ativas" if ativo else "Mensagens no log ocultas")
+        )
+        self.menu_visao.addAction(self.action_log)
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
