@@ -107,7 +107,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setText("VISÃO")
         self.btn_visao.setPopupMode(QToolButton.InstantPopup)
         self.btn_visao.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_visao.setStyleSheet(
+            "QToolButton { color:#1b1b1b; font-weight:600; padding:0 8px; border:none; background:transparent; }"
+            "QToolButton::menu-indicator { image:none; width:0; }"
+            "QToolButton:hover { color:#0b5f9e; }"
+        )
         self.menu_visao = QMenu(self)
+        self.menu_visao.setStyleSheet(
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
         self.action_coordenadas = QAction("Coordenadas", self)
         self.action_coordenadas.setCheckable(True)
         self.action_coordenadas.setChecked(True)
@@ -116,7 +125,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
-        sup.addWidget(QLabel("OPÇÕES • JANELAS"))
+        self.lbl_topo_menus = QLabel("OPÇÕES • JANELAS")
+        self.lbl_topo_menus.setStyleSheet("color:#1b1b1b; font-weight:600; padding:0 8px;")
+        sup.addWidget(self.lbl_topo_menus)
         layout.addWidget(barra_menu)
         self.barra_superior = barra_menu
         layout.addWidget(self.ribbon)
