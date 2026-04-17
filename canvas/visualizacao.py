@@ -106,6 +106,8 @@ class PainelCoordenadas(QFrame):
                 color: #111111;
             }
             QPushButton:hover { background: #ffffff; }
+            QLabel { color: #1f1f1f; }
+            QLineEdit { color: #1a1a1a; selection-background-color: #0b8dd1; }
             """
         )
 
@@ -197,6 +199,8 @@ class VisualizacaoCanvas(QWidget):
         self._pontos_reta: list[QPointF] = []
         self._preview_reta: QPointF | None = None
         self._marcacoes_temporarias: list[QPointF] = []
+        self._ponto_coordenada_aplicada: QPointF | None = None
+        self._cursor_tela = QPointF(0.0, 0.0)
         self._historico_elementos: list[list[dict]] = [[]]
         self._indice_historico = 0
         self._buffer_copia: dict | None = None
@@ -321,6 +325,7 @@ class VisualizacaoCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
+        self._cursor_tela = event.position()
         if self.ferramenta_ativa in {"reta", "curva"}:
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
@@ -398,6 +403,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=False)
         for marca in self._marcacoes_temporarias[-10:]:
             self._desenhar_marca_x(painter, marca)
+        if self._pontos_reta and self._preview_reta:
+            self._desenhar_label_angulo_cursor(painter, self._pontos_reta[-1], self._preview_reta)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado and self._snap_ativo:
@@ -413,6 +420,22 @@ class VisualizacaoCanvas(QWidget):
             pen.setStyle(Qt.DotLine)
         painter.setPen(pen)
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
+
+    def _desenhar_label_angulo_cursor(self, painter: QPainter, origem: QPointF, destino: QPointF):
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        if abs(dx) < 0.0001 and abs(dy) < 0.0001:
+            return
+        ang = degrees(atan2(-dy, dx)) % 360.0
+        texto = f"{ang:.0f}°"
+        metrics = QFontMetrics(painter.font())
+        tw = metrics.horizontalAdvance(texto)
+        th = metrics.height()
+        x = int(self._cursor_tela.x() + 14)
+        y = int(self._cursor_tela.y() - 12)
+        painter.fillRect(x - 4, y - th, tw + 8, th + 4, QColor(0, 0, 0, 180))
+        painter.setPen(QPen(QColor("#ff6a00"), 1))
+        painter.drawText(x, y, texto)
 
     def _desfazer_ponto(self):
         if not self._pontos_reta:
@@ -648,6 +671,22 @@ class VisualizacaoCanvas(QWidget):
         self._snap_candidatos = self._snap_manager.calcular_candidatos(
             self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
         )
+        if self._ponto_coordenada_aplicada is not None:
+            dist = sqrt(
+                (pos_cena.x() - self._ponto_coordenada_aplicada.x()) ** 2
+                + (pos_cena.y() - self._ponto_coordenada_aplicada.y()) ** 2
+            )
+            tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+            if dist <= tol_cena:
+                self._snap_candidatos.insert(
+                    0,
+                    SnapResult(
+                        ponto=QPointF(self._ponto_coordenada_aplicada),
+                        tipo="coord",
+                        distancia=dist,
+                        elemento_idx=None,
+                    ),
+                )
         if self._snap_candidatos:
             self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
             self._snap_resultado = self._snap_candidatos[self._snap_indice]
@@ -729,10 +768,7 @@ class VisualizacaoCanvas(QWidget):
         if destino is None:
             return
         destino = self._snap_angular(origem, destino)
-        if not self._pontos_reta:
-            self._pontos_reta.append(origem)
-        self._pontos_reta.append(destino)
-        self._preview_reta = destino
+        self._ponto_coordenada_aplicada = destino
         self._marcacoes_temporarias.append(destino)
         self.painel_coordenadas.atualizar_preview(origem, destino)
         self.update()
