@@ -108,7 +108,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
-        sup.addWidget(self.ribbon.tabbar, 1)
+        sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
+        sup.addStretch(1)
 
         menu_btn_style = (
             "QToolButton { color:#1b1b1b; font-weight:600; padding:0 6px; border:none; background:transparent; }"
