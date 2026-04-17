@@ -96,7 +96,9 @@ class SnapManager:
                 pt = self._intersecao_segmentos(a1, a2, b1, b2)
                 if pt is None:
                     continue
-                candidatos.append(SnapResult(ponto=pt, tipo="interseção", distancia=self._dist(cursor, pt), elemento_idx=idx_a))
+                dist = self._dist(cursor, pt)
+                candidatos.append(SnapResult(ponto=pt, tipo="interseção", distancia=dist, elemento_idx=idx_a))
+                candidatos.append(SnapResult(ponto=pt, tipo="interseção", distancia=dist, elemento_idx=idx_b))
 
     def _intersecao_segmentos(self, a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> QPointF | None:
         x1, y1 = a1.x(), a1.y()
