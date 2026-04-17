@@ -219,6 +219,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado: SnapResult | None = None
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
+        self._guia_fechamento: tuple[QPointF, QPointF] | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -250,6 +251,7 @@ class VisualizacaoCanvas(QWidget):
         else:
             self._pontos_reta.clear()
             self._preview_reta = None
+            self._guia_fechamento = None
         self.update()
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
@@ -296,6 +298,7 @@ class VisualizacaoCanvas(QWidget):
                 self._pontos_reta.append(pos)
             else:
                 pos = self._snap_angular(self._pontos_reta[-1], pos, travar_snap_exato=self._snap_resultado is not None)
+                pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
             if len(self._pontos_reta) >= 2:
@@ -308,6 +311,7 @@ class VisualizacaoCanvas(QWidget):
             if self._aguardando_retorno_selecao and len(self._pontos_reta) <= 1:
                 self._pontos_reta.clear()
                 self._preview_reta = None
+                self._guia_fechamento = None
                 self._aguardando_retorno_selecao = False
                 self.ferramenta_padrao_solicitada.emit("selecionar")
                 self.update()
@@ -328,7 +332,10 @@ class VisualizacaoCanvas(QWidget):
                 self._preview_reta = self._snap_angular(
                     self._pontos_reta[-1], snap_pos, travar_snap_exato=self._snap_resultado is not None
                 )
+                self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
+            else:
+                self._guia_fechamento = None
             self.update()
             event.accept()
             return
@@ -401,6 +408,14 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_polilinha(painter, self._pontos_reta, cor="#ff5a00")
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(painter, self._pontos_reta[-1], self._preview_reta, tracejado=False)
+        if self._guia_fechamento:
+            self._desenhar_segmento(
+                painter,
+                self._guia_fechamento[0],
+                self._guia_fechamento[1],
+                tracejado=True,
+                cor="#ff43ff",
+            )
         for marca in self._marcacoes_temporarias[-10:]:
             self._desenhar_marca_x(painter, marca)
         if self._pontos_reta and self._preview_reta:
@@ -509,12 +524,14 @@ class VisualizacaoCanvas(QWidget):
             self._preview_reta = self._pontos_reta[-1]
         else:
             self._preview_reta = None
+            self._guia_fechamento = None
         self.update()
 
     def _finalizar_reta_atual(self):
         if len(self._pontos_reta) == 1:
             self._pontos_reta.clear()
             self._preview_reta = None
+            self._guia_fechamento = None
             self._aguardando_retorno_selecao = False
             return
 
@@ -531,6 +548,7 @@ class VisualizacaoCanvas(QWidget):
             ultimo_ponto = self._pontos_reta[-1]
             self._pontos_reta = [ultimo_ponto]
             self._preview_reta = ultimo_ponto
+            self._guia_fechamento = None
             self._aguardando_retorno_selecao = True
 
     def _reposicionar_painel_coordenadas(self):
@@ -813,6 +831,45 @@ class VisualizacaoCanvas(QWidget):
         passo = 15.0
         ang_snap = round(ang / passo) * passo
         return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() - dist * sin(radians(ang_snap)))
+
+    def _aplicar_guia_fechamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guia_fechamento = None
+        if len(self._pontos_reta) < 2 or not self._snap_resultado:
+            return destino
+
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+
+        ponto_final = self._snap_resultado.ponto
+        ponto_anterior = self._pontos_reta[-2]
+        vec_ref = QPointF(origem.x() - ponto_anterior.x(), origem.y() - ponto_anterior.y())
+        vec_cursor = QPointF(destino.x() - origem.x(), destino.y() - origem.y())
+        mod_ref = sqrt(vec_ref.x() * vec_ref.x() + vec_ref.y() * vec_ref.y())
+        mod_cursor = sqrt(vec_cursor.x() * vec_cursor.x() + vec_cursor.y() * vec_cursor.y())
+        if mod_ref <= 0.0001 or mod_cursor <= 0.0001:
+            return destino
+
+        det = (vec_ref.x() * vec_cursor.y()) - (vec_ref.y() * vec_cursor.x())
+        if abs(det) <= 0.0001:
+            return destino
+
+        delta = QPointF(origem.x() - ponto_final.x(), origem.y() - ponto_final.y())
+        t = ((delta.x() * vec_cursor.y()) - (delta.y() * vec_cursor.x())) / det
+        u = ((delta.x() * vec_ref.y()) - (delta.y() * vec_ref.x())) / det
+        if u < 0:
+            return destino
+
+        intersecao = QPointF(ponto_final.x() + t * vec_ref.x(), ponto_final.y() + t * vec_ref.y())
+        tolerancia_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        dist_intersecao = sqrt((intersecao.x() - destino.x()) ** 2 + (intersecao.y() - destino.y()) ** 2)
+        if dist_intersecao > tolerancia_cena * 4:
+            return destino
+
+        self._guia_fechamento = (ponto_final, intersecao)
+
+        if dist_intersecao <= tolerancia_cena:
+            return intersecao
+        return destino
 
     def _aplicar_coordenadas(self, payload: dict):
         origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
