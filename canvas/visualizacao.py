@@ -61,13 +61,13 @@ class PainelCoordenadas(QFrame):
         grade.addWidget(QLabel("Dx:"), 0, 0)
         grade.addWidget(self.dx_input, 0, 1)
         grade.addWidget(self.dx_preview, 0, 2)
-        grade.addWidget(QLabel("A:"), 0, 3)
+        grade.addWidget(QLabel("Ângulo:"), 0, 3)
         grade.addWidget(self.a_input, 0, 4)
         grade.addWidget(self.a_preview, 0, 5)
         grade.addWidget(QLabel("Dy:"), 1, 0)
         grade.addWidget(self.dy_input, 1, 1)
         grade.addWidget(self.dy_preview, 1, 2)
-        grade.addWidget(QLabel("D:"), 1, 3)
+        grade.addWidget(QLabel("Distância:"), 1, 3)
         grade.addWidget(self.d_input, 1, 4)
         grade.addWidget(self.d_preview, 1, 5)
         layout.addLayout(grade)
@@ -299,7 +299,7 @@ class VisualizacaoCanvas(QWidget):
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
-                pos = self._snap_angular(self._pontos_reta[-1], pos)
+                pos = self._snap_angular(self._pontos_reta[-1], pos, travar_snap_exato=self._snap_resultado is not None)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
             if len(self._pontos_reta) >= 2:
@@ -329,7 +329,9 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa in {"reta", "curva"}:
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
-                self._preview_reta = self._snap_angular(self._pontos_reta[-1], snap_pos)
+                self._preview_reta = self._snap_angular(
+                    self._pontos_reta[-1], snap_pos, travar_snap_exato=self._snap_resultado is not None
+                )
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
             self.update()
             event.accept()
@@ -740,18 +742,20 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_visivel = visivel
         self.painel_coordenadas_changed.emit(visivel)
 
-    def _snap_angular(self, origem: QPointF, destino: QPointF) -> QPointF:
+    def _snap_angular(self, origem: QPointF, destino: QPointF, travar_snap_exato: bool = False) -> QPointF:
         if not self._snap_ativo:
+            return destino
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
         dist = sqrt(dx * dx + dy * dy)
         if dist <= 0.0001:
             return destino
-        ang = degrees(atan2(dy, dx))
+        ang = degrees(atan2(-dy, dx))
         passo = 15.0
         ang_snap = round(ang / passo) * passo
-        return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() + dist * sin(radians(ang_snap)))
+        return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() - dist * sin(radians(ang_snap)))
 
     def _aplicar_coordenadas(self, payload: dict):
         origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
