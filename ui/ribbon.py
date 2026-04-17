@@ -47,7 +47,7 @@ class TabDef:
 class RibbonTabBar(QTabBar):
     def tabSizeHint(self, index):  # noqa: N802
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 16, 92), 26)
+        return QSize(max(size.width() + 8, 56), 26)
 
 
 class RibbonButton(QToolButton):
@@ -198,7 +198,7 @@ class RibbonWidget(QWidget):
                 background: #f3f5f8;
                 color: #1e2a36;
                 border: 1px solid #d4dbe4;
-                padding: 6px 18px;
+                padding: 6px 10px;
             }
             QTabBar::tab:selected {
                 background: #e8f2fc;
