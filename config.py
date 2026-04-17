@@ -4,7 +4,7 @@ from pathlib import Path
 
 APP_NOME = "GUIMMA STUDIO"
 APP_VERSAO = "0.1.0"
-EXTENSAO_PROJETO = ".gstudio"
+EXTENSAO_PROJETO = ".gs"
 
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
