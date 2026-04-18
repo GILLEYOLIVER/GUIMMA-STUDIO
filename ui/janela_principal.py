@@ -49,6 +49,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._snap_contextual_ativo = True
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
