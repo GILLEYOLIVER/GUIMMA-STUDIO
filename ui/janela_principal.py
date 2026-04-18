@@ -48,6 +48,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_snap_angular_atual = 15.0
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
