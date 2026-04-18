@@ -288,6 +288,10 @@ class ColorControlWidget(QFrame):
                     passo = 16.0 if estilo == "half_moon" else 18.0
                     x = 6.0
                     while x < 126.0:
+                        restante = 126.0 - x
+                        if restante < (passo * 0.7):
+                            path.lineTo(126.0, 10.0)
+                            break
                         raio = passo / 2.0
                         centro_x = x + raio
                         inicio = x

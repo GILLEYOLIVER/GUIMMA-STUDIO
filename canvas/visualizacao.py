@@ -580,7 +580,12 @@ class VisualizacaoCanvas(QWidget):
         else:
             t = 0.0
             while t < comprimento:
-                arco = min(passo, comprimento - t)
+                restante = comprimento - t
+                if restante < (passo * 0.7):
+                    fim_resto = QPointF(p1.x() + (ux * comprimento), p1.y() + (uy * comprimento))
+                    path.lineTo(self._cena_para_tela(fim_resto))
+                    break
+                arco = min(passo, restante)
                 amostras_arco = max(20, int(arco * 14))
                 for i in range(1, amostras_arco + 1):
                     frac = i / amostras_arco
