@@ -46,6 +46,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
         self._passo_snap_angular_atual = 15.0
+        self._snap_contextual_ativo = True
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -163,6 +164,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             lambda ativo: self.lbl_status.setText("Mensagens no log ativas" if ativo else "Mensagens no log ocultas")
         )
         self.menu_visao.addAction(self.action_log)
+        self.action_snap_contextual = QAction("Snap contextual (paralelo/perpendicular)", self)
+        self.action_snap_contextual.setCheckable(True)
+        self.action_snap_contextual.setChecked(True)
+        self.action_snap_contextual.toggled.connect(self._alternar_snap_contextual)
+        self.menu_visao.addAction(self.action_snap_contextual)
         menu_snap_angular = self.menu_visao.addMenu("Snap angular")
         grupo_passo = QActionGroup(self)
         grupo_passo.setExclusive(True)
@@ -474,6 +480,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
+        area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -610,6 +617,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
             area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
+            area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas.set_painel_auxiliar_posicao(None)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
@@ -644,6 +652,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             if isinstance(area, AreaDocumentoWidget):
                 area.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}°")
+
+    def _alternar_snap_contextual(self, ativo: bool):
+        self._snap_contextual_ativo = bool(ativo)
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+        self.lbl_status.setText("Snap contextual ativo" if self._snap_contextual_ativo else "Snap contextual desativado")
 
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()

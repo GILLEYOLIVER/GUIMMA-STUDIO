@@ -224,6 +224,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._snap_angular_passo = 15.0
+        self._snap_contextual_ativo = True
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -879,9 +880,31 @@ class VisualizacaoCanvas(QWidget):
         if dist <= 0.0001:
             return destino
         ang = degrees(atan2(-dy, dx))
+        if self._snap_contextual_ativo and len(self._pontos_reta) >= 2:
+            ang_contextual = self._snap_angular_contextual(origem, ang)
+            if ang_contextual is not None:
+                return QPointF(origem.x() + dist * cos(radians(ang_contextual)), origem.y() - dist * sin(radians(ang_contextual)))
         passo = max(1.0, float(self._snap_angular_passo))
         ang_snap = round(ang / passo) * passo
         return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() - dist * sin(radians(ang_snap)))
+
+    def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
+        ponto_anterior = self._pontos_reta[-2]
+        vx = origem.x() - ponto_anterior.x()
+        vy = origem.y() - ponto_anterior.y()
+        dist_ref = sqrt(vx * vx + vy * vy)
+        if dist_ref <= 0.0001:
+            return None
+        ang_ref = degrees(atan2(-vy, vx))
+        candidatos = [ang_ref, ang_ref + 180.0, ang_ref + 90.0, ang_ref - 90.0]
+        melhor = min(candidatos, key=lambda ang: self._dist_angular(ang_atual, ang))
+        if self._dist_angular(ang_atual, melhor) <= 12.0:
+            return melhor
+        return None
+
+    def _dist_angular(self, a: float, b: float) -> float:
+        diff = abs((a - b) % 360.0)
+        return min(diff, 360.0 - diff)
 
     def _aplicar_guia_fechamento(self, origem: QPointF, destino: QPointF) -> QPointF:
         self._guia_fechamento = None
@@ -975,3 +998,6 @@ class VisualizacaoCanvas(QWidget):
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))
+
+    def set_snap_contextual_ativo(self, ativo: bool):
+        self._snap_contextual_ativo = bool(ativo)
