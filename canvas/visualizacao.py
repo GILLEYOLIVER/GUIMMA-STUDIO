@@ -223,12 +223,14 @@ class VisualizacaoCanvas(QWidget):
         self._linha_cor = "#ff5a00"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
-        self._snap_angular_passo = 15.0
+        self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
+        self._tecla_a_livre = False
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self.painel_coordenadas = PainelCoordenadas(self)
         self.painel_coordenadas.desfazer_ponto.connect(self._desfazer_ponto)
@@ -298,11 +300,17 @@ class VisualizacaoCanvas(QWidget):
 
         pos = self._ponto_com_snap(event.position())
         if event.button() == Qt.LeftButton:
+            self.setFocus(Qt.MouseFocusReason)
             self._aguardando_retorno_selecao = False
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
-                pos = self._snap_angular(self._pontos_reta[-1], pos, travar_snap_exato=self._snap_resultado is not None)
+                pos = self._snap_angular(
+                    self._pontos_reta[-1],
+                    pos,
+                    travar_snap_exato=self._snap_resultado is not None,
+                    liberar_angular=self._tecla_a_livre,
+                )
                 pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
@@ -335,7 +343,10 @@ class VisualizacaoCanvas(QWidget):
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
                 self._preview_reta = self._snap_angular(
-                    self._pontos_reta[-1], snap_pos, travar_snap_exato=self._snap_resultado is not None
+                    self._pontos_reta[-1],
+                    snap_pos,
+                    travar_snap_exato=self._snap_resultado is not None,
+                    liberar_angular=self._tecla_a_livre,
                 )
                 self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
@@ -494,8 +505,22 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         tw = metrics.horizontalAdvance(texto)
         th = metrics.height()
-        x = int(self._cursor_tela.x() + 14)
-        y = int(self._cursor_tela.y() - 12)
+        candidatos = [
+            (int(self._cursor_tela.x() + 14), int(self._cursor_tela.y() - 12)),
+            (int(self._cursor_tela.x() + 14), int(self._cursor_tela.y() + th + 8)),
+            (int(self._cursor_tela.x() - tw - 18), int(self._cursor_tela.y() - 12)),
+            (int(self._cursor_tela.x() - tw - 18), int(self._cursor_tela.y() + th + 8)),
+        ]
+        snap_rect = self._retangulo_label_snap(painter, self._snap_resultado) if self._snap_resultado else None
+        x, y = candidatos[0]
+        for cx, cy in candidatos:
+            ax, ay, aw, ah = cx - 4, cy - th, tw + 8, th + 4
+            if cx < 0 or cy - th < 0 or cx + tw + 4 > self.width() or cy + 4 > self.height():
+                continue
+            if snap_rect and self._retangulos_intersectam((ax, ay, aw, ah), snap_rect):
+                continue
+            x, y = cx, cy
+            break
         painter.fillRect(x - 4, y - th, tw + 8, th + 4, QColor(0, 0, 0, 180))
         painter.setPen(QPen(QColor("#ff6a00"), 1))
         painter.drawText(x, y, texto)
@@ -780,6 +805,31 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(QPen(cor, 1))
         painter.drawText(int(tx), int(ty), texto)
 
+    def _retangulo_label_snap(self, painter: QPainter, snap: SnapResult | None) -> tuple[int, int, int, int] | None:
+        if not snap:
+            return None
+        pt = self._cena_para_tela(snap.ponto)
+        texto = snap.tipo
+        metrics = QFontMetrics(painter.font())
+        tw = metrics.horizontalAdvance(texto)
+        th = metrics.height()
+        tx = pt.x() + 10
+        ty = pt.y() - 10
+        if tx + tw + 8 > self.width():
+            tx = pt.x() - tw - 14
+        if ty - th < 0:
+            ty = pt.y() + th + 8
+        return int(tx - 4), int(ty - th + 2), int(tw + 8), int(th + 4)
+
+    def _retangulos_intersectam(
+        self,
+        a: tuple[int, int, int, int],
+        b: tuple[int, int, int, int],
+    ) -> bool:
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        return not (ax + aw < bx or bx + bw < ax or ay + ah < by or by + bh < ay)
+
     def set_snap_ativo(self, ativo: bool):
         self._snap_ativo = ativo
         if not ativo:
@@ -869,8 +919,16 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_visivel = visivel
         self.painel_coordenadas_changed.emit(visivel)
 
-    def _snap_angular(self, origem: QPointF, destino: QPointF, travar_snap_exato: bool = False) -> QPointF:
+    def _snap_angular(
+        self,
+        origem: QPointF,
+        destino: QPointF,
+        travar_snap_exato: bool = False,
+        liberar_angular: bool = False,
+    ) -> QPointF:
         if not self._snap_ativo:
+            return destino
+        if liberar_angular:
             return destino
         if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
             return destino
@@ -1001,3 +1059,17 @@ class VisualizacaoCanvas(QWidget):
 
     def set_snap_contextual_ativo(self, ativo: bool):
         self._snap_contextual_ativo = bool(ativo)
+
+    def keyPressEvent(self, event):  # noqa: N802
+        if event.key() == Qt.Key_A and not event.isAutoRepeat():
+            self._tecla_a_livre = True
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):  # noqa: N802
+        if event.key() == Qt.Key_A and not event.isAutoRepeat():
+            self._tecla_a_livre = False
+            event.accept()
+            return
+        super().keyReleaseEvent(event)

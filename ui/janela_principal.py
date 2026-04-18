@@ -45,7 +45,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
-        self._passo_snap_angular_atual = 15.0
+        self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
@@ -172,10 +172,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_snap_angular = self.menu_visao.addMenu("Snap angular")
         grupo_passo = QActionGroup(self)
         grupo_passo.setExclusive(True)
-        for passo in (1, 5, 10, 15, 30):
+        for passo in (30, 45, 60, 90):
             acao = QAction(f"{passo}°", self)
             acao.setCheckable(True)
-            acao.setChecked(passo == 15)
+            acao.setChecked(passo == 45)
             acao.triggered.connect(lambda marcado=False, p=float(passo): self._definir_passo_snap_angular(p) if marcado else None)
             grupo_passo.addAction(acao)
             menu_snap_angular.addAction(acao)
@@ -651,7 +651,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
-        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}°")
+        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}° (A = livre)")
 
     def _alternar_snap_contextual(self, ativo: bool):
         self._snap_contextual_ativo = bool(ativo)
