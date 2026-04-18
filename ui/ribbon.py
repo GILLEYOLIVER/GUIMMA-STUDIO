@@ -223,32 +223,35 @@ class ColorControlWidget(QFrame):
         menu.addAction(acao)
 
     def _icone_estilo(self, estilo: str) -> QPixmap:
-        pix = QPixmap(110, 16)
+        pix = QPixmap(132, 20)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
         try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
             pen = QPen(QColor("#111111"), 2)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             if is_geometric_line_style(estilo):
                 path = QPainterPath()
-                path.moveTo(4, 8)
+                path.moveTo(6, 10)
                 if estilo.startswith("zigzag"):
                     amp = 2.0 if estilo == "zigzag_soft" else 4.0
                     passo = 10.0 if estilo == "zigzag_soft" else 12.0
-                    x = 4.0
+                    x = 6.0
                     sentido = 1.0
-                    while x < 106.0:
-                        x = min(106.0, x + passo)
-                        path.lineTo(x, 8 + (amp * sentido))
+                    while x < 126.0:
+                        x = min(126.0, x + passo)
+                        path.lineTo(x, 10 + (amp * sentido))
                         sentido *= -1.0
-                    path.lineTo(106, 8)
+                    path.lineTo(126, 10)
                 else:
                     amp = 2.0 if estilo == "wave_soft" else 4.0
                     passo = 12.0 if estilo == "wave_soft" else 14.0
-                    for i in range(1, 36):
-                        t = i / 35.0
-                        x = 4.0 + (102.0 * t)
-                        y = 8.0 + (amp * sin((2.0 * 3.14159265359 * (x - 4.0)) / passo))
+                    for i in range(1, 48):
+                        t = i / 47.0
+                        x = 6.0 + (120.0 * t)
+                        y = 10.0 + (amp * sin((2.0 * 3.14159265359 * (x - 6.0)) / passo))
                         path.lineTo(x, y)
                 painter.drawPath(path)
             else:
@@ -257,7 +260,7 @@ class ColorControlWidget(QFrame):
                 if padrao:
                     pen.setDashPattern(padrao)
                 painter.setPen(pen)
-                painter.drawLine(4, 8, 106, 8)
+                painter.drawLine(6, 10, 126, 10)
         finally:
             painter.end()
         return pix
