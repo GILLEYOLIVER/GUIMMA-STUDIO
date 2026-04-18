@@ -223,7 +223,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_cor = "#ff5a00"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
-        self._snap_angular_passo = 15.0
+        self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
 
         self.setMinimumSize(100, 100)
@@ -302,7 +302,12 @@ class VisualizacaoCanvas(QWidget):
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
-                pos = self._snap_angular(self._pontos_reta[-1], pos, travar_snap_exato=self._snap_resultado is not None)
+                pos = self._snap_angular(
+                    self._pontos_reta[-1],
+                    pos,
+                    travar_snap_exato=self._snap_resultado is not None,
+                    modifiers=event.modifiers(),
+                )
                 pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
@@ -335,7 +340,10 @@ class VisualizacaoCanvas(QWidget):
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
                 self._preview_reta = self._snap_angular(
-                    self._pontos_reta[-1], snap_pos, travar_snap_exato=self._snap_resultado is not None
+                    self._pontos_reta[-1],
+                    snap_pos,
+                    travar_snap_exato=self._snap_resultado is not None,
+                    modifiers=event.modifiers(),
                 )
                 self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
@@ -869,8 +877,16 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_visivel = visivel
         self.painel_coordenadas_changed.emit(visivel)
 
-    def _snap_angular(self, origem: QPointF, destino: QPointF, travar_snap_exato: bool = False) -> QPointF:
+    def _snap_angular(
+        self,
+        origem: QPointF,
+        destino: QPointF,
+        travar_snap_exato: bool = False,
+        modifiers: Qt.KeyboardModifiers | None = None,
+    ) -> QPointF:
         if not self._snap_ativo:
+            return destino
+        if modifiers is not None and modifiers & Qt.AltModifier:
             return destino
         if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
             return destino
