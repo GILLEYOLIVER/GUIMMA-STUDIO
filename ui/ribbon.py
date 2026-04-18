@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon, QPen
 from PySide6.QtWidgets import (
     QColorDialog,
     QFrame,
@@ -201,22 +201,26 @@ class ColorControlWidget(QFrame):
         pix = QPixmap(110, 16)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
-        pen = QPen(QColor("#111111"), 2)
-        pen.setStyle(mapa.get(estilo, Qt.SolidLine))
-        painter.setPen(pen)
-        painter.drawLine(4, 8, 106, 8)
-        painter.end()
+        try:
+            pen = QPen(QColor("#111111"), 2)
+            pen.setStyle(mapa.get(estilo, Qt.SolidLine))
+            painter.setPen(pen)
+            painter.drawLine(4, 8, 106, 8)
+        finally:
+            painter.end()
         return pix
 
     def _icone_espessura(self, espessura: float) -> QPixmap:
         pix = QPixmap(90, 16)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
-        pen = QPen(QColor("#111111"), espessura)
-        pen.setStyle(Qt.SolidLine)
-        painter.setPen(pen)
-        painter.drawLine(4, 8, 86, 8)
-        painter.end()
+        try:
+            pen = QPen(QColor("#111111"), espessura)
+            pen.setStyle(Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(4, 8, 86, 8)
+        finally:
+            painter.end()
         return pix
 
     def _selecionar_cor(self):
