@@ -53,7 +53,7 @@ class TabDef:
 class RibbonTabBar(QTabBar):
     def tabSizeHint(self, index):  # noqa: N802
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 10, 62), 28)
+        return QSize(max(size.width() + 12, 66), 30)
 
 
 class RibbonButton(QToolButton):
@@ -69,8 +69,8 @@ class RibbonButton(QToolButton):
 
         if compacto:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(16, 16))
-            self.setFixedSize(146, 24)
+            self.setIconSize(QSize(18, 18))
+            self.setFixedSize(158, 26)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -78,8 +78,7 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: 1px solid transparent;
                     color: #1e1e1e;
-                    font-size: 11px;
-                    font-weight: 600;
+                    font-size: 12px;
                     padding: 0 4px;
                 }
                 QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
@@ -89,8 +88,8 @@ class RibbonButton(QToolButton):
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(22, 22))
-        self.setMinimumSize(70, 58)
+        self.setIconSize(QSize(26, 26))
+        self.setMinimumSize(78, 66)
         self.setStyleSheet(
             """
             QToolButton {
@@ -98,8 +97,7 @@ class RibbonButton(QToolButton):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 color: #1e1e1e;
-                font-size: 11px;
-                font-weight: 600;
+                font-size: 12px;
                 padding: 3px;
             }
             QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
@@ -167,13 +165,13 @@ class ColorControlWidget(QFrame):
 
         lbl = QLabel("Cor")
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        lbl.setStyleSheet("font-size: 10px; font-weight:600; color:#1e1e1e; padding-left:2px;")
+        lbl.setStyleSheet("font-size: 11px; color:#1e1e1e; padding-left:2px;")
         layout.addWidget(lbl)
         self.setFixedSize(122, 72)
         self.setStyleSheet(
             """
             QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
-            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:9px; font-weight:700; }
+            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:10px; }
             QToolButton:hover { background:#eef5fd; }
             """
         )
@@ -404,7 +402,7 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
+        rodape.setStyleSheet("color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -465,8 +463,7 @@ class RibbonWidget(QWidget):
                 background: #f3f5f8;
                 color: #1e2a36;
                 border: 1px solid #d4dbe4;
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
                 padding: 6px 12px;
             }
             QTabBar::tab:selected {
