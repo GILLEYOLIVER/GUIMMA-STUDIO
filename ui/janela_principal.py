@@ -47,6 +47,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
+        self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -407,17 +408,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._abrir_projeto_em_caminho(caminho)
 
     def _abrir_projeto_em_caminho(self, caminho: str):
+        caminho_resolvido = str(Path(caminho).resolve())
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
+                self.abas_documentos.setCurrentIndex(i)
+                QMessageBox.information(self, "Arquivo já aberto", f"O arquivo já está aberto:\n{Path(caminho).name}")
+                self.backstage.hide()
+                return
         self.projeto_atual = GSProjectIO.abrir(caminho)
         self._arquivo_atual = Path(caminho)
         self.backstage.adicionar_recente(caminho)
         self._atualizar_titulo()
-        self._adicionar_aba_documento(nome=self._arquivo_atual.stem)
+        self._adicionar_aba_documento(nome=self._arquivo_atual.stem, caminho_origem=caminho_resolvido)
         area = self._area_documento_atual()
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
         if area and docs:
             doc = docs[0]
             area.canvas.cena.elementos = [dict(el) for el in doc.get("elementos", [])]
-            area.canvas.set_painel_auxiliar_posicao(None)
+            area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
@@ -495,7 +504,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(self.abas_documentos, 1)
         return area
 
-    def _adicionar_aba_documento(self, nome: str | None = None):
+    def _adicionar_aba_documento(self, nome: str | None = None, caminho_origem: str | None = None):
         if nome is None:
             self._contador_sem_nome += 1
             nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
@@ -504,12 +513,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.snap_changed.connect(self._on_snap_changed)
         area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
+        area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+        area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
+        area_doc.setProperty("arquivo_origem", caminho_origem)
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
@@ -636,7 +648,6 @@ class GuimmaStudioMainWindow(QMainWindow):
                 {
                     "nome": self.abas_documentos.tabText(i),
                     "elementos": area.canvas.elementos_para_salvar(),
-                    "painel_retas_pos": area.canvas.painel_auxiliar_posicao(),
                     "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
                 }
             )
@@ -654,12 +665,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.snap_changed.connect(self._on_snap_changed)
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
+            area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
             area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
-            area_doc.canvas.set_painel_auxiliar_posicao(None)
+            area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
@@ -730,6 +742,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_coordenadas.blockSignals(True)
         self.action_coordenadas.setChecked(visivel)
         self.action_coordenadas.blockSignals(False)
+
+    def _on_painel_posicao_canvas(self, x: int, y: int):
+        self._painel_coordenadas_pos_global = (x, y)
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = {

@@ -190,6 +190,7 @@ class VisualizacaoCanvas(QWidget):
     ferramenta_padrao_solicitada = Signal(str)
     snap_changed = Signal(bool)
     painel_coordenadas_changed = Signal(bool)
+    painel_posicao_changed = Signal(int, int)
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -1015,6 +1016,7 @@ class VisualizacaoCanvas(QWidget):
 
     def _registrar_posicao_painel(self, x: int, y: int):
         self._painel_coordenadas_posicao = (x, y)
+        self.painel_posicao_changed.emit(x, y)
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
         if self._painel_coordenadas_posicao:
