@@ -49,6 +49,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._snap_contextual_ativo = True
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
@@ -513,6 +514,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
 
+    def _limpar_abas_documentos(self):
+        while self.abas_documentos.count():
+            widget = self.abas_documentos.widget(0)
+            self.abas_documentos.removeTab(0)
+            if widget:
+                widget.deleteLater()
+        self._contador_sem_nome = 0
+
     def _fechar_aba_documento(self, index: int):
         if index < 0 or index >= self.abas_documentos.count():
             return
@@ -552,7 +561,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _configurar_botao_fechar_aba(self, index: int):
         barra = self.abas_documentos.tabBar()
-        botao = QPushButton("✕")
+        botao = QPushButton("")
         botao.setCursor(Qt.PointingHandCursor)
         botao.setFlat(True)
         botao.setFixedSize(18, 18)
