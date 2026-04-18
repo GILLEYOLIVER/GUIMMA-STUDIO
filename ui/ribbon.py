@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon, QPen
 from PySide6.QtWidgets import (
+    QColorDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QTabBar,
@@ -100,8 +103,148 @@ class RibbonButton(QToolButton):
         )
 
 
+class ColorControlWidget(QFrame):
+    estilo_changed = Signal(dict)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("ColorControlWidget")
+        self._cor = "#ff5a00"
+        self._estilo = "solid"
+        self._espessura = 1.0
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(2)
+
+        topo = QHBoxLayout()
+        topo.setContentsMargins(0, 0, 0, 0)
+        topo.setSpacing(2)
+
+        self.btn_cor = QPushButton()
+        self.btn_cor.setFixedSize(30, 30)
+        self.btn_cor.setCursor(Qt.PointingHandCursor)
+        self.btn_cor.clicked.connect(self._selecionar_cor)
+        topo.addWidget(self.btn_cor)
+
+        coluna_setas = QVBoxLayout()
+        coluna_setas.setContentsMargins(0, 0, 0, 0)
+        coluna_setas.setSpacing(2)
+
+        self.btn_estilo = QToolButton()
+        self.btn_estilo.setText("▾")
+        self.btn_estilo.setCursor(Qt.PointingHandCursor)
+        self.btn_estilo.setFixedSize(18, 14)
+        self.btn_estilo.clicked.connect(self._abrir_menu_estilo)
+        coluna_setas.addWidget(self.btn_estilo)
+
+        self.btn_espessura = QToolButton()
+        self.btn_espessura.setText("▾")
+        self.btn_espessura.setCursor(Qt.PointingHandCursor)
+        self.btn_espessura.setFixedSize(18, 14)
+        self.btn_espessura.clicked.connect(self._abrir_menu_espessura)
+        coluna_setas.addWidget(self.btn_espessura)
+
+        topo.addLayout(coluna_setas)
+        layout.addLayout(topo)
+
+        lbl = QLabel("Cor")
+        lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        lbl.setStyleSheet("font-size: 9px; color:#1e1e1e; padding-left:2px;")
+        layout.addWidget(lbl)
+        self.setFixedSize(56, 58)
+        self.setStyleSheet(
+            """
+            QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
+            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:10px; }
+            QToolButton:hover { background:#eef5fd; }
+            """
+        )
+        self._menu_estilo = QMenu(self)
+        self._menu_estilo.setIconSize(QSize(110, 16))
+        self._adicionar_acao_estilo("solid", "Contínua")
+        self._adicionar_acao_estilo("dash", "Tracejada")
+        self._adicionar_acao_estilo("dot", "Pontilhada")
+        self._adicionar_acao_estilo("dashdot", "Traço-ponto")
+        self._adicionar_acao_estilo("dashdotdot", "Traço-ponto-ponto")
+        self._menu_espessura = QMenu(self)
+        self._menu_espessura.setIconSize(QSize(90, 16))
+        for valor in (1, 2, 3, 4, 5, 6):
+            acao = self._menu_espessura.addAction(QIcon(self._icone_espessura(float(valor))), f"Espessura {valor}")
+            acao.triggered.connect(lambda _=False, v=valor: self._selecionar_espessura(float(v)))
+        self._atualizar_preview_cor()
+
+    def _abrir_menu_estilo(self):
+        self._menu_estilo.exec(self.btn_estilo.mapToGlobal(self.btn_estilo.rect().bottomLeft()))
+
+    def _abrir_menu_espessura(self):
+        self._menu_espessura.exec(self.btn_espessura.mapToGlobal(self.btn_espessura.rect().bottomLeft()))
+
+    def _selecionar_estilo(self, estilo: str):
+        self._estilo = estilo
+        self.estilo_changed.emit(self.valor())
+
+    def _selecionar_espessura(self, espessura: float):
+        self._espessura = espessura
+        self.estilo_changed.emit(self.valor())
+
+    def _adicionar_acao_estilo(self, estilo: str, titulo: str):
+        acao = self._menu_estilo.addAction(QIcon(self._icone_estilo(estilo)), titulo)
+        acao.triggered.connect(lambda _=False, e=estilo: self._selecionar_estilo(e))
+
+    def _icone_estilo(self, estilo: str) -> QPixmap:
+        mapa = {
+            "solid": Qt.SolidLine,
+            "dash": Qt.DashLine,
+            "dot": Qt.DotLine,
+            "dashdot": Qt.DashDotLine,
+            "dashdotdot": Qt.DashDotDotLine,
+        }
+        pix = QPixmap(110, 16)
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
+        try:
+            pen = QPen(QColor("#111111"), 2)
+            pen.setStyle(mapa.get(estilo, Qt.SolidLine))
+            painter.setPen(pen)
+            painter.drawLine(4, 8, 106, 8)
+        finally:
+            painter.end()
+        return pix
+
+    def _icone_espessura(self, espessura: float) -> QPixmap:
+        pix = QPixmap(90, 16)
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
+        try:
+            pen = QPen(QColor("#111111"), espessura)
+            pen.setStyle(Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(4, 8, 86, 8)
+        finally:
+            painter.end()
+        return pix
+
+    def _selecionar_cor(self):
+        cor = QColorDialog.getColor(QColor(self._cor), self, "Selecionar cor da linha")
+        if not cor.isValid():
+            return
+        self._cor = cor.name()
+        self._atualizar_preview_cor()
+        self.estilo_changed.emit(self.valor())
+
+    def _atualizar_preview_cor(self):
+        self.btn_cor.setStyleSheet(
+            f"QPushButton {{ background:{self._cor}; border:1px solid #6b7480; }} QPushButton:hover {{ border:1px solid #1f5f99; }}"
+        )
+
+    def valor(self) -> dict:
+        return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura}
+
+
 class RibbonGroup(QFrame):
     tool_selected = Signal(str)
+    estilo_changed = Signal(dict)
 
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
@@ -131,9 +274,14 @@ class RibbonGroup(QFrame):
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
             for tool in tools:
-                botao = RibbonButton(tool)
-                botao.acionada.connect(self.tool_selected.emit)
-                corpo.addWidget(botao)
+                if tool.tool_id == "cor":
+                    controle_cor = ColorControlWidget()
+                    controle_cor.estilo_changed.connect(self.estilo_changed.emit)
+                    corpo.addWidget(controle_cor)
+                else:
+                    botao = RibbonButton(tool)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    corpo.addWidget(botao)
             corpo.addStretch(1)
 
         raiz.addLayout(corpo)
@@ -165,6 +313,7 @@ class RibbonPage(QWidget):
 
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
+    estilo_changed = Signal(dict)
 
     def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
@@ -187,6 +336,8 @@ class RibbonWidget(QWidget):
                 grupos.append((group.title, [self._tools[tid] for tid in group.tools]))
             pagina = RibbonPage(grupos)
             pagina.tool_selected.connect(self.tool_selected.emit)
+            for grupo in pagina.findChildren(RibbonGroup):
+                grupo.estilo_changed.connect(self.estilo_changed.emit)
             self.paginas.addWidget(pagina)
 
         if include_tabbar:
