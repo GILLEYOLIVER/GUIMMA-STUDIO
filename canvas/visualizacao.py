@@ -223,6 +223,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_cor = "#ff5a00"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
+        self._snap_angular_passo = 15.0
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -870,7 +871,7 @@ class VisualizacaoCanvas(QWidget):
     def _snap_angular(self, origem: QPointF, destino: QPointF, travar_snap_exato: bool = False) -> QPointF:
         if not self._snap_ativo:
             return destino
-        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
@@ -878,7 +879,7 @@ class VisualizacaoCanvas(QWidget):
         if dist <= 0.0001:
             return destino
         ang = degrees(atan2(-dy, dx))
-        passo = 15.0
+        passo = max(1.0, float(self._snap_angular_passo))
         ang_snap = round(ang / passo) * passo
         return QPointF(origem.x() + dist * cos(radians(ang_snap)), origem.y() - dist * sin(radians(ang_snap)))
 
@@ -887,7 +888,7 @@ class VisualizacaoCanvas(QWidget):
         if len(self._pontos_reta) < 2 or not self._snap_resultado:
             return destino
 
-        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
             return destino
 
         ponto_final = self._snap_resultado.ponto
@@ -971,3 +972,6 @@ class VisualizacaoCanvas(QWidget):
         if espessura is not None:
             self._linha_espessura = max(1.0, float(espessura))
         self.update()
+
+    def set_passo_snap_angular(self, passo: float):
+        self._snap_angular_passo = max(1.0, float(passo))

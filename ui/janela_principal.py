@@ -6,7 +6,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -45,6 +45,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
+        self._passo_snap_angular_atual = 15.0
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -162,6 +163,16 @@ class GuimmaStudioMainWindow(QMainWindow):
             lambda ativo: self.lbl_status.setText("Mensagens no log ativas" if ativo else "Mensagens no log ocultas")
         )
         self.menu_visao.addAction(self.action_log)
+        menu_snap_angular = self.menu_visao.addMenu("Snap angular")
+        grupo_passo = QActionGroup(self)
+        grupo_passo.setExclusive(True)
+        for passo in (1, 5, 10, 15, 30):
+            acao = QAction(f"{passo}°", self)
+            acao.setCheckable(True)
+            acao.setChecked(passo == 15)
+            acao.triggered.connect(lambda marcado=False, p=float(passo): self._definir_passo_snap_angular(p) if marcado else None)
+            grupo_passo.addAction(acao)
+            menu_snap_angular.addAction(acao)
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
@@ -462,6 +473,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+        area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -597,6 +609,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
             area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+            area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_painel_auxiliar_posicao(None)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
@@ -623,6 +636,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText(
             f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | Espessura {self._estilo_desenho_atual['espessura']:.0f}"
         )
+
+    def _definir_passo_snap_angular(self, passo: float):
+        self._passo_snap_angular_atual = float(passo)
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
+        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}°")
 
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()
