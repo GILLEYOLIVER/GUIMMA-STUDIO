@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdi
 
 from canvas.cena import CenaDocumento
 from canvas.snap import SnapManager, SnapResult
+from core.line_styles import dash_pattern_for_line, pen_style_for_line
 
 
 class PainelCoordenadas(QFrame):
@@ -509,28 +510,10 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
 
     def _aplicar_estilo_caneta(self, pen: QPen, estilo: str):
-        estilos = {
-            "solid": Qt.SolidLine,
-            "dash": Qt.DashLine,
-            "dot": Qt.DotLine,
-            "dashdot": Qt.DashDotLine,
-            "dashdotdot": Qt.DashDotDotLine,
-            "longdash": Qt.CustomDashLine,
-            "shortdash": Qt.CustomDashLine,
-            "center": Qt.CustomDashLine,
-            "border": Qt.CustomDashLine,
-            "dense_dot": Qt.CustomDashLine,
-        }
-        padroes = {
-            "longdash": [10, 4],
-            "shortdash": [4, 2],
-            "center": [12, 3, 2, 3],
-            "border": [12, 3, 2, 3, 2, 3],
-            "dense_dot": [1, 2],
-        }
-        pen.setStyle(estilos.get(estilo, Qt.SolidLine))
-        if estilo in padroes:
-            pen.setDashPattern(padroes[estilo])
+        pen.setStyle(pen_style_for_line(estilo))
+        padrao = dash_pattern_for_line(estilo)
+        if padrao:
+            pen.setDashPattern(padrao)
 
     def _desenhar_label_angulo_cursor(self, painter: QPainter, origem: QPointF, destino: QPointF):
         dx = destino.x() - origem.x()

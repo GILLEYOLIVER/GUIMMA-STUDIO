@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import ICONS_DIR
+from core.line_styles import LINE_STYLES, dash_pattern_for_line, pen_style_for_line
 
 
 @dataclass(slots=True)
@@ -164,19 +165,7 @@ class ColorControlWidget(QFrame):
             """
         )
         self._menu_estilo = QMenu(self)
-        estilos_disponiveis = [
-            ("solid", "Contínua"),
-            ("dash", "Tracejada"),
-            ("dot", "Pontilhada"),
-            ("dashdot", "Traço-ponto"),
-            ("dashdotdot", "Traço-ponto-ponto"),
-            ("longdash", "Traço longo"),
-            ("shortdash", "Traço curto"),
-            ("center", "Centro"),
-            ("border", "Borda"),
-            ("dense_dot", "Ponto denso"),
-        ]
-        for estilo_id, titulo in estilos_disponiveis:
+        for estilo_id, titulo in LINE_STYLES:
             self._adicionar_acao_estilo(estilo_id, titulo)
         self._menu_espessura = QMenu(self)
         for valor in (1, 2, 3, 4, 5, 6):
@@ -233,33 +222,15 @@ class ColorControlWidget(QFrame):
         menu.addAction(acao)
 
     def _icone_estilo(self, estilo: str) -> QPixmap:
-        mapa = {
-            "solid": Qt.SolidLine,
-            "dash": Qt.DashLine,
-            "dot": Qt.DotLine,
-            "dashdot": Qt.DashDotLine,
-            "dashdotdot": Qt.DashDotDotLine,
-            "longdash": Qt.CustomDashLine,
-            "shortdash": Qt.CustomDashLine,
-            "center": Qt.CustomDashLine,
-            "border": Qt.CustomDashLine,
-            "dense_dot": Qt.CustomDashLine,
-        }
-        padroes = {
-            "longdash": [10, 4],
-            "shortdash": [4, 2],
-            "center": [12, 3, 2, 3],
-            "border": [12, 3, 2, 3, 2, 3],
-            "dense_dot": [1, 2],
-        }
         pix = QPixmap(110, 16)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
         try:
             pen = QPen(QColor("#111111"), 2)
-            pen.setStyle(mapa.get(estilo, Qt.SolidLine))
-            if estilo in padroes:
-                pen.setDashPattern(padroes[estilo])
+            pen.setStyle(pen_style_for_line(estilo))
+            padrao = dash_pattern_for_line(estilo)
+            if padrao:
+                pen.setDashPattern(padrao)
             painter.setPen(pen)
             painter.drawLine(4, 8, 106, 8)
         finally:
