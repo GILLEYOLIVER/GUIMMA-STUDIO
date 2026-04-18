@@ -489,7 +489,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabWidget::pane { border: 1px solid #d7dbe1; }"
             "QTabWidget::tab-bar { alignment: left; }"
             "QTabBar { background: #f9f9f9; }"
-            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 10px; margin-right:1px; }"
+            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 22px 3px 10px; margin-right:1px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
@@ -561,13 +561,13 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _configurar_botao_fechar_aba(self, index: int):
         barra = self.abas_documentos.tabBar()
-        botao = QPushButton("")
+        botao = QPushButton("×")
         botao.setCursor(Qt.PointingHandCursor)
         botao.setFlat(True)
         botao.setFixedSize(18, 18)
         botao.setToolTip("Fechar aba")
         botao.setStyleSheet(
-            "QPushButton { border:none; padding:0; font-size:13px; color:#c62828; font-weight:700; }"
+            "QPushButton { border:none; padding:0; font-size:14px; color:#c62828; font-weight:700; }"
             "QPushButton:hover { background:#ffe9e9; border-radius:9px; color:#9a0000; }"
         )
         botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
