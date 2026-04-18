@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from math import sin
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QIcon, QPen
 from PySide6.QtWidgets import (
     QColorDialog,
     QFrame,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import ICONS_DIR
-from core.line_styles import LINE_STYLES, dash_pattern_for_line, pen_style_for_line
+from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 
 
 @dataclass(slots=True)
@@ -227,12 +228,36 @@ class ColorControlWidget(QFrame):
         painter = QPainter(pix)
         try:
             pen = QPen(QColor("#111111"), 2)
-            pen.setStyle(pen_style_for_line(estilo))
-            padrao = dash_pattern_for_line(estilo)
-            if padrao:
-                pen.setDashPattern(padrao)
             painter.setPen(pen)
-            painter.drawLine(4, 8, 106, 8)
+            if is_geometric_line_style(estilo):
+                path = QPainterPath()
+                path.moveTo(4, 8)
+                if estilo.startswith("zigzag"):
+                    amp = 2.0 if estilo == "zigzag_soft" else 4.0
+                    passo = 10.0 if estilo == "zigzag_soft" else 12.0
+                    x = 4.0
+                    sentido = 1.0
+                    while x < 106.0:
+                        x = min(106.0, x + passo)
+                        path.lineTo(x, 8 + (amp * sentido))
+                        sentido *= -1.0
+                    path.lineTo(106, 8)
+                else:
+                    amp = 2.0 if estilo == "wave_soft" else 4.0
+                    passo = 12.0 if estilo == "wave_soft" else 14.0
+                    for i in range(1, 36):
+                        t = i / 35.0
+                        x = 4.0 + (102.0 * t)
+                        y = 8.0 + (amp * sin((2.0 * 3.14159265359 * (x - 4.0)) / passo))
+                        path.lineTo(x, y)
+                painter.drawPath(path)
+            else:
+                pen.setStyle(pen_style_for_line(estilo))
+                padrao = dash_pattern_for_line(estilo)
+                if padrao:
+                    pen.setDashPattern(padrao)
+                painter.setPen(pen)
+                painter.drawLine(4, 8, 106, 8)
         finally:
             painter.end()
         return pix

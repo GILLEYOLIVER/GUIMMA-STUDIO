@@ -5,12 +5,12 @@ from copy import deepcopy
 from math import atan2, cos, degrees, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.snap import SnapManager, SnapResult
-from core.line_styles import dash_pattern_for_line, pen_style_for_line
+from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 
 
 class PainelCoordenadas(QFrame):
@@ -501,6 +501,9 @@ class VisualizacaoCanvas(QWidget):
         espessura: float = 1.0,
         estilo: str = "solid",
     ):
+        if not tracejado and is_geometric_line_style(estilo):
+            self._desenhar_segmento_geometrico(painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo)
+            return
         pen = QPen(QColor(cor), espessura)
         if tracejado:
             pen.setStyle(Qt.DotLine)
@@ -508,6 +511,56 @@ class VisualizacaoCanvas(QWidget):
             self._aplicar_estilo_caneta(pen, estilo)
         painter.setPen(pen)
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
+
+    def _desenhar_segmento_geometrico(
+        self, painter: QPainter, inicio: QPointF, fim: QPointF, cor: str, espessura: float, estilo: str
+    ):
+        p1 = self._cena_para_tela(inicio)
+        p2 = self._cena_para_tela(fim)
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        comprimento = sqrt(dx * dx + dy * dy)
+        if comprimento <= 0.001:
+            return
+
+        ux = dx / comprimento
+        uy = dy / comprimento
+        nx = -uy
+        ny = ux
+        amp = 2.0
+        passo = 10.0
+        modo = "zigzag"
+        if estilo == "zigzag_strong":
+            amp, passo, modo = 4.0, 12.0, "zigzag"
+        elif estilo == "wave_soft":
+            amp, passo, modo = 2.0, 12.0, "wave"
+        elif estilo == "wave_strong":
+            amp, passo, modo = 4.0, 14.0, "wave"
+
+        path = QPainterPath(p1)
+        if modo == "zigzag":
+            sentido = 1.0
+            t = passo
+            while t < comprimento:
+                px = p1.x() + (ux * t) + (nx * amp * sentido)
+                py = p1.y() + (uy * t) + (ny * amp * sentido)
+                path.lineTo(px, py)
+                sentido *= -1.0
+                t += passo
+            path.lineTo(p2)
+        else:
+            amostras = max(16, int(comprimento / 3.0))
+            for i in range(1, amostras + 1):
+                t = (comprimento * i) / amostras
+                seno = sin((2.0 * 3.14159265359 * t) / passo)
+                px = p1.x() + (ux * t) + (nx * amp * seno)
+                py = p1.y() + (uy * t) + (ny * amp * seno)
+                path.lineTo(px, py)
+
+        pen = QPen(QColor(cor), max(1.0, float(espessura)))
+        pen.setStyle(Qt.SolidLine)
+        painter.setPen(pen)
+        painter.drawPath(path)
 
     def _aplicar_estilo_caneta(self, pen: QPen, estilo: str):
         pen.setStyle(pen_style_for_line(estilo))

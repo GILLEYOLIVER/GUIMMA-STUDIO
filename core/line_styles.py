@@ -23,7 +23,11 @@ LINE_STYLES: list[tuple[str, str]] = [
     ("chain", "Corrente"),
     ("zigzag_soft", "Zigue-zague suave"),
     ("zigzag_strong", "Zigue-zague forte"),
+    ("wave_soft", "Ondulada suave"),
+    ("wave_strong", "Ondulada forte"),
 ]
+
+GEOMETRIC_LINE_STYLES: set[str] = {"zigzag_soft", "zigzag_strong", "wave_soft", "wave_strong"}
 
 _QT_STYLES: dict[str, Qt.PenStyle] = {
     "solid": Qt.SolidLine,
@@ -60,3 +64,7 @@ def pen_style_for_line(estilo: str) -> Qt.PenStyle:
 
 def dash_pattern_for_line(estilo: str) -> list[float] | None:
     return _DASH_PATTERNS.get(estilo)
+
+
+def is_geometric_line_style(estilo: str) -> bool:
+    return estilo in GEOMETRIC_LINE_STYLES
