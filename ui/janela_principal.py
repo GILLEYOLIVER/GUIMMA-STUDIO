@@ -650,7 +650,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
-        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}° (A = livre)")
+        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}° (A/Alt = livre)")
 
     def _alternar_snap_contextual(self, ativo: bool):
         self._snap_contextual_ativo = bool(ativo)

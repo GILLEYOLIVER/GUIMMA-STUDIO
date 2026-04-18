@@ -309,7 +309,7 @@ class VisualizacaoCanvas(QWidget):
                     self._pontos_reta[-1],
                     pos,
                     travar_snap_exato=self._snap_resultado is not None,
-                    liberar_angular=self._tecla_a_livre,
+                    liberar_angular=self._tecla_a_livre or bool(event.modifiers() & Qt.AltModifier),
                 )
                 pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
@@ -346,7 +346,7 @@ class VisualizacaoCanvas(QWidget):
                     self._pontos_reta[-1],
                     snap_pos,
                     travar_snap_exato=self._snap_resultado is not None,
-                    liberar_angular=self._tecla_a_livre,
+                    liberar_angular=self._tecla_a_livre or bool(event.modifiers() & Qt.AltModifier),
                 )
                 self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
@@ -885,6 +885,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado = None
         self._snap_candidatos = []
         self._snap_indice = 0
+        self._tecla_a_livre = False
         self.update()
         super().leaveEvent(event)
 
@@ -1073,3 +1074,7 @@ class VisualizacaoCanvas(QWidget):
             event.accept()
             return
         super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event):  # noqa: N802
+        self._tecla_a_livre = False
+        super().focusOutEvent(event)
