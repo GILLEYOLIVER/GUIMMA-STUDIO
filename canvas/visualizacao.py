@@ -958,6 +958,8 @@ class VisualizacaoCanvas(QWidget):
     ) -> QPointF:
         if not self._snap_ativo:
             return destino
+        if liberar_angular:
+            return destino
         if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
             return destino
         dx = destino.x() - origem.x()
@@ -978,6 +980,102 @@ class VisualizacaoCanvas(QWidget):
         if angulo_dist <= tolerancia_principal:
             return QPointF(origem.x() + dist * cos(radians(ang_principal)), origem.y() - dist * sin(radians(ang_principal)))
         return destino
+
+    def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
+        ponto_anterior = self._pontos_reta[-2]
+        vx = origem.x() - ponto_anterior.x()
+        vy = origem.y() - ponto_anterior.y()
+        dist_ref = sqrt(vx * vx + vy * vy)
+        if dist_ref <= 0.0001:
+            return None
+        ang_ref = degrees(atan2(-vy, vx))
+        candidatos = [ang_ref, ang_ref + 180.0, ang_ref + 90.0, ang_ref - 90.0]
+        melhor = min(candidatos, key=lambda ang: self._dist_angular(ang_atual, ang))
+        if self._dist_angular(ang_atual, melhor) <= 12.0:
+            return melhor
+        return None
+
+    def _dist_angular(self, a: float, b: float) -> float:
+        diff = abs((a - b) % 360.0)
+        return min(diff, 360.0 - diff)
+
+    def _aplicar_guia_fechamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guia_fechamento = None
+        if len(self._pontos_reta) < 2 or not self._snap_resultado:
+            return destino
+
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+
+        ponto_final = self._snap_resultado.ponto
+        ponto_anterior = self._pontos_reta[-2]
+        vec_ref = QPointF(origem.x() - ponto_anterior.x(), origem.y() - ponto_anterior.y())
+        vec_cursor = QPointF(destino.x() - origem.x(), destino.y() - origem.y())
+        mod_ref = sqrt(vec_ref.x() * vec_ref.x() + vec_ref.y() * vec_ref.y())
+        mod_cursor = sqrt(vec_cursor.x() * vec_cursor.x() + vec_cursor.y() * vec_cursor.y())
+        if mod_ref <= 0.0001 or mod_cursor <= 0.0001:
+            return destino
+
+        det = (vec_ref.x() * vec_cursor.y()) - (vec_ref.y() * vec_cursor.x())
+        if abs(det) <= 0.0001:
+            return destino
+
+        delta = QPointF(origem.x() - ponto_final.x(), origem.y() - ponto_final.y())
+        t = ((delta.x() * vec_cursor.y()) - (delta.y() * vec_cursor.x())) / det
+        u = ((delta.x() * vec_ref.y()) - (delta.y() * vec_ref.x())) / det
+        if u < 0:
+            return destino
+
+        intersecao = QPointF(ponto_final.x() + t * vec_ref.x(), ponto_final.y() + t * vec_ref.y())
+        tolerancia_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        dist_intersecao = sqrt((intersecao.x() - destino.x()) ** 2 + (intersecao.y() - destino.y()) ** 2)
+        if dist_intersecao > tolerancia_cena * 4:
+            return destino
+
+        self._guia_fechamento = (ponto_final, intersecao)
+
+        if dist_intersecao <= tolerancia_cena:
+            return intersecao
+        return destino
+
+    def _aplicar_guias_alinhamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guias_alinhamento = []
+        if not self._snap_ativo:
+            return destino
+        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+
+        candidatos: list[QPointF] = []
+        candidatos.extend(self._pontos_reta[:-1])
+        for el in self.cena.elementos:
+            if el.get("tipo") == "polyline":
+                candidatos.extend(QPointF(float(x), float(y)) for x, y in el.get("pontos", []))
+        if not candidatos:
+            return destino
+
+        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        melhor_x: QPointF | None = None
+        melhor_y: QPointF | None = None
+        dist_x = float("inf")
+        dist_y = float("inf")
+        for pt in candidatos:
+            dx = abs(destino.x() - pt.x())
+            dy = abs(destino.y() - pt.y())
+            if dx <= tol and dx < dist_x:
+                melhor_x = pt
+                dist_x = dx
+            if dy <= tol and dy < dist_y:
+                melhor_y = pt
+                dist_y = dy
+
+        ajustado = QPointF(destino)
+        if melhor_x:
+            ajustado.setX(melhor_x.x())
+            self._guias_alinhamento.append((QPointF(melhor_x.x(), melhor_x.y()), QPointF(melhor_x.x(), ajustado.y())))
+        if melhor_y:
+            ajustado.setY(melhor_y.y())
+            self._guias_alinhamento.append((QPointF(melhor_y.x(), melhor_y.y()), QPointF(ajustado.x(), melhor_y.y())))
+        return ajustado
 
     def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
         ponto_anterior = self._pontos_reta[-2]
