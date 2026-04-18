@@ -409,7 +409,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._arquivo_atual = Path(caminho)
         self.backstage.adicionar_recente(caminho)
         self._atualizar_titulo()
+        self._limpar_abas_documentos()
         self._carregar_documentos_canvas()
+        if self.abas_documentos.count() == 0:
+            self._adicionar_aba_documento(nome=self._arquivo_atual.stem)
+        self._renomear_abas_sem_nome(self._arquivo_atual.stem)
         self.backstage.hide()
 
     def _salvar_projeto(self) -> bool:
@@ -499,6 +503,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
 
+    def _limpar_abas_documentos(self):
+        while self.abas_documentos.count():
+            widget = self.abas_documentos.widget(0)
+            self.abas_documentos.removeTab(0)
+            if widget:
+                widget.deleteLater()
+        self._contador_sem_nome = 0
+
     def _fechar_aba_documento(self, index: int):
         if index < 0 or index >= self.abas_documentos.count():
             return
@@ -538,11 +550,20 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _configurar_botao_fechar_aba(self, index: int):
         barra = self.abas_documentos.tabBar()
-        botao = QPushButton("✕")
+        botao = QPushButton("")
         botao.setCursor(Qt.PointingHandCursor)
         botao.setFlat(True)
         botao.setFixedSize(16, 16)
-        botao.setStyleSheet("QPushButton { color:#c62828; border:none; font-weight:700; } QPushButton:hover { color:#ff5252; }")
+        icone_fechar = ICONS_DIR / "excluir.svg"
+        if icone_fechar.exists():
+            botao.setIcon(QIcon(str(icone_fechar)))
+            botao.setIconSize(botao.size())
+        else:
+            botao.setText("✕")
+        botao.setStyleSheet(
+            "QPushButton { border:none; padding:0; }"
+            "QPushButton:hover { background:#ffe9e9; border-radius:8px; }"
+        )
         botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
         barra.setTabButton(index, QTabBar.RightSide, botao)
 
@@ -620,6 +641,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not docs:
             return
 
+        base_nome_arquivo = self._arquivo_atual.stem if self._arquivo_atual else "(Sem nome)"
         for doc in docs:
             area_doc = AreaDocumentoWidget(CenaDocumento(elementos=doc.get("elementos", [])))
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
@@ -636,6 +658,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
             nome = doc.get("nome") or "(Sem nome)"
+            if str(nome).strip().startswith("(Sem nome)"):
+                idx_nome = self.abas_documentos.count() + 1
+                nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
             QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
