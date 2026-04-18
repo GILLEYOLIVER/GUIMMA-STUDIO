@@ -867,6 +867,10 @@ class VisualizacaoCanvas(QWidget):
                     ),
                 )
         if self._snap_candidatos:
+            candidatos_sem_grade = [c for c in self._snap_candidatos if c.tipo != "grade"]
+            if candidatos_sem_grade:
+                self._snap_candidatos = candidatos_sem_grade
+        if self._snap_candidatos:
             self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
             self._snap_resultado = self._snap_candidatos[self._snap_indice]
         else:
