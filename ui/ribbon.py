@@ -161,12 +161,15 @@ class ColorControlWidget(QFrame):
             """
         )
         self._menu_estilo = QMenu(self)
-        self._menu_estilo.addAction("Linha contínua", lambda: self._selecionar_estilo("solid"))
-        self._menu_estilo.addAction("Linha tracejada", lambda: self._selecionar_estilo("dash"))
-        self._menu_estilo.addAction("Linha pontilhada", lambda: self._selecionar_estilo("dot"))
+        self._adicionar_acao_estilo("solid", "Contínua")
+        self._adicionar_acao_estilo("dash", "Tracejada")
+        self._adicionar_acao_estilo("dot", "Pontilhada")
+        self._adicionar_acao_estilo("dashdot", "Traço-ponto")
+        self._adicionar_acao_estilo("dashdotdot", "Traço-ponto-ponto")
         self._menu_espessura = QMenu(self)
         for valor in (1, 2, 3, 4, 5, 6):
-            self._menu_espessura.addAction(f"Espessura {valor}", lambda _=False, v=valor: self._selecionar_espessura(float(v)))
+            acao = self._menu_espessura.addAction(QIcon(self._icone_espessura(float(valor))), f"Espessura {valor}")
+            acao.triggered.connect(lambda _=False, v=valor: self._selecionar_espessura(float(v)))
         self._atualizar_preview_cor()
 
     def _abrir_menu_estilo(self):
@@ -182,6 +185,39 @@ class ColorControlWidget(QFrame):
     def _selecionar_espessura(self, espessura: float):
         self._espessura = espessura
         self.estilo_changed.emit(self.valor())
+
+    def _adicionar_acao_estilo(self, estilo: str, titulo: str):
+        acao = self._menu_estilo.addAction(QIcon(self._icone_estilo(estilo)), titulo)
+        acao.triggered.connect(lambda _=False, e=estilo: self._selecionar_estilo(e))
+
+    def _icone_estilo(self, estilo: str) -> QPixmap:
+        mapa = {
+            "solid": Qt.SolidLine,
+            "dash": Qt.DashLine,
+            "dot": Qt.DotLine,
+            "dashdot": Qt.DashDotLine,
+            "dashdotdot": Qt.DashDotDotLine,
+        }
+        pix = QPixmap(110, 16)
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
+        pen = QPen(QColor("#111111"), 2)
+        pen.setStyle(mapa.get(estilo, Qt.SolidLine))
+        painter.setPen(pen)
+        painter.drawLine(4, 8, 106, 8)
+        painter.end()
+        return pix
+
+    def _icone_espessura(self, espessura: float) -> QPixmap:
+        pix = QPixmap(90, 16)
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
+        pen = QPen(QColor("#111111"), espessura)
+        pen.setStyle(Qt.SolidLine)
+        painter.setPen(pen)
+        painter.drawLine(4, 8, 86, 8)
+        painter.end()
+        return pix
 
     def _selecionar_cor(self):
         cor = QColorDialog.getColor(QColor(self._cor), self, "Selecionar cor da linha")

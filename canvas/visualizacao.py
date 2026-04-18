@@ -477,6 +477,8 @@ class VisualizacaoCanvas(QWidget):
             "solid": Qt.SolidLine,
             "dash": Qt.DashLine,
             "dot": Qt.DotLine,
+            "dashdot": Qt.DashDotLine,
+            "dashdotdot": Qt.DashDotDotLine,
         }
         return estilos.get(estilo, Qt.SolidLine)
 
