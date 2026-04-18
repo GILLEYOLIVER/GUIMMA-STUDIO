@@ -72,7 +72,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                 background: #f6f7f9;
                 color: #101010;
                 border: 1px solid #d7dde5;
-                padding: 6px 18px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 6px 20px;
             }
             QTabBar::tab:selected {
                 background: #ffffff;
@@ -101,7 +103,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
         self.botao_arquivo.setStyleSheet(
             "background:#0b7fb8;color:white;font-weight:700;border:1px solid #0b6fa0;"
-            "border-radius:0;padding:0 8px;"
+            "font-size:13px;border-radius:0;padding:0 8px;"
         )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
 
@@ -116,7 +118,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addStretch(1)
 
         menu_btn_style = (
-            "QToolButton { color:#1b1b1b; font-weight:600; padding:0 6px; border:none; background:transparent; }"
+            "QToolButton { color:#1b1b1b; font-weight:600; font-size:13px; padding:0 6px; border:none; background:transparent; }"
             "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
             "QToolButton:hover { color:#0b5f9e; }"
         )
@@ -562,16 +564,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         botao = QPushButton("")
         botao.setCursor(Qt.PointingHandCursor)
         botao.setFlat(True)
-        botao.setFixedSize(16, 16)
-        icone_fechar = ICONS_DIR / "excluir.svg"
-        if icone_fechar.exists():
-            botao.setIcon(QIcon(str(icone_fechar)))
-            botao.setIconSize(botao.size())
-        else:
-            botao.setText("✕")
+        botao.setFixedSize(18, 18)
+        botao.setToolTip("Fechar aba")
         botao.setStyleSheet(
-            "QPushButton { border:none; padding:0; }"
-            "QPushButton:hover { background:#ffe9e9; border-radius:8px; }"
+            "QPushButton { border:none; padding:0; font-size:13px; color:#c62828; font-weight:700; }"
+            "QPushButton:hover { background:#ffe9e9; border-radius:9px; color:#9a0000; }"
         )
         botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
         barra.setTabButton(index, QTabBar.RightSide, botao)

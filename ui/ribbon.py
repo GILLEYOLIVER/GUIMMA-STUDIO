@@ -51,7 +51,7 @@ class TabDef:
 class RibbonTabBar(QTabBar):
     def tabSizeHint(self, index):  # noqa: N802
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 8, 56), 26)
+        return QSize(max(size.width() + 10, 62), 28)
 
 
 class RibbonButton(QToolButton):
@@ -67,8 +67,8 @@ class RibbonButton(QToolButton):
 
         if compacto:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(14, 14))
-            self.setFixedSize(132, 22)
+            self.setIconSize(QSize(16, 16))
+            self.setFixedSize(146, 24)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -76,8 +76,9 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: 1px solid transparent;
                     color: #1e1e1e;
-                    font-size: 10px;
-                    padding: 0 2px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 0 4px;
                 }
                 QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
                 QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
@@ -86,8 +87,8 @@ class RibbonButton(QToolButton):
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(20, 20))
-        self.setMinimumSize(64, 54)
+        self.setIconSize(QSize(22, 22))
+        self.setMinimumSize(70, 58)
         self.setStyleSheet(
             """
             QToolButton {
@@ -95,7 +96,8 @@ class RibbonButton(QToolButton):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 color: #1e1e1e;
-                font-size: 10px;
+                font-size: 11px;
+                font-weight: 600;
                 padding: 3px;
             }
             QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
@@ -151,7 +153,7 @@ class ColorControlWidget(QFrame):
 
         lbl = QLabel("Cor")
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        lbl.setStyleSheet("font-size: 9px; color:#1e1e1e; padding-left:2px;")
+        lbl.setStyleSheet("font-size: 10px; font-weight:600; color:#1e1e1e; padding-left:2px;")
         layout.addWidget(lbl)
         self.setFixedSize(56, 58)
         self.setStyleSheet(
@@ -278,7 +280,7 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(102)
+        self.setFixedHeight(92)
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 4, 6, 2)
@@ -317,7 +319,7 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setStyleSheet("color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 2px;")
+        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -329,7 +331,7 @@ class RibbonPage(QWidget):
     def __init__(self, grupos: list[tuple[str, list[ToolDef]]], parent: QWidget | None = None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setContentsMargins(5, 1, 5, 1)
         layout.setSpacing(0)
         for titulo, tools in grupos:
             group = RibbonGroup(titulo, tools)
@@ -378,7 +380,9 @@ class RibbonWidget(QWidget):
                 background: #f3f5f8;
                 color: #1e2a36;
                 border: 1px solid #d4dbe4;
-                padding: 6px 10px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 6px 12px;
             }
             QTabBar::tab:selected {
                 background: #e8f2fc;
