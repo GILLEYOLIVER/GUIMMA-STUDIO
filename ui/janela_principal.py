@@ -664,7 +664,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
-        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}° (W = livre)")
+        self.lbl_status.setText(f"Snap angular: {self._passo_snap_angular_atual:.0f}° (W = trava principais)")
 
     def _alternar_snap_contextual(self, ativo: bool):
         self._snap_contextual_ativo = bool(ativo)
@@ -702,8 +702,6 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = {
             "elementos": area.canvas.elementos_para_salvar(),
-            "painel": area.canvas.painel_auxiliar_posicao(),
-            "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
         }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
