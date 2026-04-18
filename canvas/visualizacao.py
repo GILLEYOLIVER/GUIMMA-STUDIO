@@ -278,7 +278,6 @@ class VisualizacaoCanvas(QWidget):
             cursor_cena_antes.x() - (cursor_tela.x() / self.zoom),
             cursor_cena_antes.y() - (cursor_tela.y() / self.zoom),
         )
-        self.zoom_changed.emit(self.zoom)
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
@@ -576,7 +575,7 @@ class VisualizacaoCanvas(QWidget):
             path.lineTo(self._cena_para_tela(p2))
         elif modo == "wave":
             periodos = max(1, int(comprimento / max(passo, 0.0001)))
-            amostras = max(96, periodos * 48)
+            amostras = min(480, max(48, periodos * 24))
             for i in range(1, amostras + 1):
                 t = (comprimento * i) / amostras
                 seno = sin((2.0 * 3.14159265359 * t) / passo)
@@ -587,7 +586,7 @@ class VisualizacaoCanvas(QWidget):
             ciclos = max(1, round(comprimento / max(passo, 0.0001)))
             for ciclo in range(ciclos):
                 base_inicio = passo * ciclo
-                amostras_arco = max(24, int(passo * 16))
+                amostras_arco = min(120, max(14, int(passo * 8)))
                 for i in range(1, amostras_arco + 1):
                     frac = i / amostras_arco
                     base_t = base_inicio + (passo * frac)
@@ -605,7 +604,7 @@ class VisualizacaoCanvas(QWidget):
                     path.lineTo(self._cena_para_tela(fim_resto))
                     break
                 arco = min(passo, restante)
-                amostras_arco = max(20, int(arco * 14))
+                amostras_arco = min(96, max(12, int(arco * 7)))
                 for i in range(1, amostras_arco + 1):
                     frac = i / amostras_arco
                     base_t = t + (arco * frac)

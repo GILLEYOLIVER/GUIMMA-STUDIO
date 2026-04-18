@@ -128,8 +128,9 @@ class ColorControlWidget(QFrame):
         topo.setSpacing(2)
 
         self.btn_cor = QPushButton()
-        self.btn_cor.setFixedSize(30, 30)
+        self.btn_cor.setFixedSize(34, 34)
         self.btn_cor.setCursor(Qt.PointingHandCursor)
+        self.btn_cor.setToolTip("Selecionar cor da linha")
         self.btn_cor.clicked.connect(self._selecionar_cor)
         topo.addWidget(self.btn_cor)
 
@@ -138,23 +139,26 @@ class ColorControlWidget(QFrame):
         coluna_setas.setSpacing(2)
 
         self.btn_estilo = QToolButton()
-        self.btn_estilo.setText("▾")
+        self.btn_estilo.setText("Est")
         self.btn_estilo.setCursor(Qt.PointingHandCursor)
-        self.btn_estilo.setFixedSize(18, 14)
+        self.btn_estilo.setFixedSize(30, 16)
+        self.btn_estilo.setToolTip("Estilo da linha")
         self.btn_estilo.clicked.connect(self._abrir_menu_estilo)
         coluna_setas.addWidget(self.btn_estilo)
 
         self.btn_espessura = QToolButton()
-        self.btn_espessura.setText("▾")
+        self.btn_espessura.setText("Esp")
         self.btn_espessura.setCursor(Qt.PointingHandCursor)
-        self.btn_espessura.setFixedSize(18, 14)
+        self.btn_espessura.setFixedSize(30, 16)
+        self.btn_espessura.setToolTip("Espessura da linha")
         self.btn_espessura.clicked.connect(self._abrir_menu_espessura)
         coluna_setas.addWidget(self.btn_espessura)
 
         self.btn_amplitude = QToolButton()
-        self.btn_amplitude.setText("↕")
+        self.btn_amplitude.setText("Alt")
         self.btn_amplitude.setCursor(Qt.PointingHandCursor)
-        self.btn_amplitude.setFixedSize(18, 14)
+        self.btn_amplitude.setFixedSize(30, 16)
+        self.btn_amplitude.setToolTip("Altura da onda/zig-zag")
         self.btn_amplitude.clicked.connect(self._abrir_menu_amplitude)
         coluna_setas.addWidget(self.btn_amplitude)
 
@@ -165,11 +169,11 @@ class ColorControlWidget(QFrame):
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl.setStyleSheet("font-size: 10px; font-weight:600; color:#1e1e1e; padding-left:2px;")
         layout.addWidget(lbl)
-        self.setFixedSize(56, 58)
+        self.setFixedSize(78, 66)
         self.setStyleSheet(
             """
             QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
-            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:10px; }
+            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:9px; font-weight:700; }
             QToolButton:hover { background:#eef5fd; }
             """
         )
