@@ -161,12 +161,14 @@ class ColorControlWidget(QFrame):
             """
         )
         self._menu_estilo = QMenu(self)
+        self._menu_estilo.setIconSize(QSize(110, 16))
         self._adicionar_acao_estilo("solid", "Contínua")
         self._adicionar_acao_estilo("dash", "Tracejada")
         self._adicionar_acao_estilo("dot", "Pontilhada")
         self._adicionar_acao_estilo("dashdot", "Traço-ponto")
         self._adicionar_acao_estilo("dashdotdot", "Traço-ponto-ponto")
         self._menu_espessura = QMenu(self)
+        self._menu_espessura.setIconSize(QSize(90, 16))
         for valor in (1, 2, 3, 4, 5, 6):
             acao = self._menu_espessura.addAction(QIcon(self._icone_espessura(float(valor))), f"Espessura {valor}")
             acao.triggered.connect(lambda _=False, v=valor: self._selecionar_espessura(float(v)))
