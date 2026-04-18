@@ -225,7 +225,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_espessura = 1.0
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
-        self._tecla_a_livre = False
+        self._tecla_w_livre = False
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -309,7 +309,7 @@ class VisualizacaoCanvas(QWidget):
                     self._pontos_reta[-1],
                     pos,
                     travar_snap_exato=self._snap_resultado is not None,
-                    liberar_angular=self._tecla_a_livre or bool(event.modifiers() & Qt.AltModifier),
+                    liberar_angular=self._tecla_w_livre,
                 )
                 pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
@@ -346,7 +346,7 @@ class VisualizacaoCanvas(QWidget):
                     self._pontos_reta[-1],
                     snap_pos,
                     travar_snap_exato=self._snap_resultado is not None,
-                    liberar_angular=self._tecla_a_livre or bool(event.modifiers() & Qt.AltModifier),
+                    liberar_angular=self._tecla_w_livre,
                 )
                 self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
@@ -885,7 +885,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado = None
         self._snap_candidatos = []
         self._snap_indice = 0
-        self._tecla_a_livre = False
+        self._tecla_w_livre = False
         self.update()
         super().leaveEvent(event)
 
@@ -931,7 +931,7 @@ class VisualizacaoCanvas(QWidget):
             return destino
         if liberar_angular:
             return destino
-        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
@@ -970,7 +970,7 @@ class VisualizacaoCanvas(QWidget):
         if len(self._pontos_reta) < 2 or not self._snap_resultado:
             return destino
 
-        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção", "grade"}:
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
             return destino
 
         ponto_final = self._snap_resultado.ponto
@@ -1062,19 +1062,19 @@ class VisualizacaoCanvas(QWidget):
         self._snap_contextual_ativo = bool(ativo)
 
     def keyPressEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key_A and not event.isAutoRepeat():
-            self._tecla_a_livre = True
+        if event.key() == Qt.Key_W and not event.isAutoRepeat():
+            self._tecla_w_livre = True
             event.accept()
             return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key_A and not event.isAutoRepeat():
-            self._tecla_a_livre = False
+        if event.key() == Qt.Key_W and not event.isAutoRepeat():
+            self._tecla_w_livre = False
             event.accept()
             return
         super().keyReleaseEvent(event)
 
     def focusOutEvent(self, event):  # noqa: N802
-        self._tecla_a_livre = False
+        self._tecla_w_livre = False
         super().focusOutEvent(event)
