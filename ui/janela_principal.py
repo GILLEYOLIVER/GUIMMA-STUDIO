@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTabBar,
     QTabWidget,
     QToolButton,
@@ -43,6 +44,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
+        self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._configurar_atalhos()
@@ -86,8 +88,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra_menu = QWidget()
         sup = QHBoxLayout(barra_menu)
-        sup.setContentsMargins(0, 0, 4, 0)
-        sup.setSpacing(0)
+        sup.setContentsMargins(0, 0, 6, 0)
+        sup.setSpacing(6)
         barra_menu.setFixedHeight(30)
 
         self.botao_arquivo = QPushButton("ARQUIVO")
@@ -106,7 +108,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
-        sup.addWidget(self.ribbon.tabbar, 1)
+        self.ribbon.estilo_changed.connect(self._atualizar_estilo_desenho)
+        sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
+        sup.addStretch(1)
 
         menu_btn_style = (
             "QToolButton { color:#1b1b1b; font-weight:600; padding:0 6px; border:none; background:transparent; }"
@@ -118,6 +122,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setText("VISÃO")
         self.btn_visao.setPopupMode(QToolButton.InstantPopup)
         self.btn_visao.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_visao.setMinimumWidth(86)
+        self.btn_visao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_visao.setStyleSheet(menu_btn_style)
         self.menu_visao = QMenu(self)
         self.menu_visao.setStyleSheet(
@@ -162,6 +168,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_opcoes.setText("OPÇÕES")
         self.btn_opcoes.setPopupMode(QToolButton.InstantPopup)
         self.btn_opcoes.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_opcoes.setMinimumWidth(86)
+        self.btn_opcoes.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_opcoes.setStyleSheet(menu_btn_style)
         menu_opcoes = QMenu(self)
         menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
@@ -173,6 +181,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_janelas.setText("JANELAS")
         self.btn_janelas.setPopupMode(QToolButton.InstantPopup)
         self.btn_janelas.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_janelas.setMinimumWidth(92)
+        self.btn_janelas.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_janelas.setStyleSheet(menu_btn_style)
         menu_janelas = QMenu(self)
         menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
@@ -450,6 +460,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
+        area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -574,8 +585,6 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _carregar_documentos_canvas(self):
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
         if not docs:
-            if self.abas_documentos.count() == 0:
-                self._adicionar_aba_documento(self._arquivo_atual.stem if self._arquivo_atual else None)
             return
 
         for doc in docs:
@@ -586,6 +595,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
             area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
+            area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_painel_auxiliar_posicao(None)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
@@ -603,6 +613,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_atual.canvas.set_ferramenta_ativa(tool_id)
         if tool_id == "selecionar":
             self.lbl_status.setText("Selecionar ativada")
+
+    def _atualizar_estilo_desenho(self, estilo: dict):
+        self._estilo_desenho_atual.update(estilo)
+        area_atual = self._area_documento_atual()
+        if area_atual:
+            area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+        self.lbl_status.setText(
+            f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | Espessura {self._estilo_desenho_atual['espessura']:.0f}"
+        )
 
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()
