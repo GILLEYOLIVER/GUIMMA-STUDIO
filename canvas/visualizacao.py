@@ -226,6 +226,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_cor = "#ff5a00"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
+        self._linha_amplitude = 1.0
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
@@ -444,6 +445,7 @@ class VisualizacaoCanvas(QWidget):
                 cor=cor,
                 espessura=float(elemento.get("espessura", 1.0)),
                 estilo=str(elemento.get("estilo", "solid")),
+                amplitude=float(elemento.get("amplitude", 1.0)),
             )
 
         if self._pontos_reta:
@@ -455,6 +457,7 @@ class VisualizacaoCanvas(QWidget):
                 cor=self._linha_cor,
                 espessura=self._linha_espessura,
                 estilo=self._linha_estilo,
+                amplitude=self._linha_amplitude,
             )
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
                 self._desenhar_segmento(
@@ -465,6 +468,7 @@ class VisualizacaoCanvas(QWidget):
                     cor=self._linha_cor,
                     espessura=self._linha_espessura,
                     estilo=self._linha_estilo,
+                    amplitude=self._linha_amplitude,
                 )
         if self._guia_fechamento:
             self._desenhar_segmento(
@@ -486,10 +490,16 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_marcador_snap(painter, self._snap_resultado)
 
     def _desenhar_polilinha(
-        self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00", espessura: float = 1.0, estilo: str = "solid"
+        self,
+        painter: QPainter,
+        pontos: list[QPointF],
+        cor: str = "#ff5a00",
+        espessura: float = 1.0,
+        estilo: str = "solid",
+        amplitude: float = 1.0,
     ):
         for inicio, fim in zip(pontos, pontos[1:]):
-            self._desenhar_segmento(painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo)
+            self._desenhar_segmento(painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude)
 
     def _desenhar_segmento(
         self,
@@ -500,9 +510,12 @@ class VisualizacaoCanvas(QWidget):
         cor: str = "#ff5a00",
         espessura: float = 1.0,
         estilo: str = "solid",
+        amplitude: float = 1.0,
     ):
         if not tracejado and is_geometric_line_style(estilo):
-            self._desenhar_segmento_geometrico(painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo)
+            self._desenhar_segmento_geometrico(
+                painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo, amplitude=max(0.2, float(amplitude))
+            )
             return
         pen = QPen(QColor(cor), espessura)
         if tracejado:
@@ -513,7 +526,7 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
 
     def _desenhar_segmento_geometrico(
-        self, painter: QPainter, inicio: QPointF, fim: QPointF, cor: str, espessura: float, estilo: str
+        self, painter: QPainter, inicio: QPointF, fim: QPointF, cor: str, espessura: float, estilo: str, amplitude: float
     ):
         # Gera a forma em coordenadas de cena para que o padrão acompanhe o zoom
         # do desenho (sem deformar por depender de pixels de tela).
@@ -529,15 +542,19 @@ class VisualizacaoCanvas(QWidget):
         uy = dy / comprimento
         nx = -uy
         ny = ux
-        amp = max(0.2, comprimento * 0.02)
+        amp = max(0.2, comprimento * 0.02) * amplitude
         passo = max(0.8, comprimento * 0.08)
         modo = "zigzag"
         if estilo == "zigzag_strong":
-            amp, passo, modo = max(0.3, comprimento * 0.03), max(1.0, comprimento * 0.10), "zigzag"
+            amp, passo, modo = max(0.3, comprimento * 0.03) * amplitude, max(1.0, comprimento * 0.10), "zigzag"
         elif estilo == "wave_soft":
-            amp, passo, modo = max(0.18, comprimento * 0.018), max(0.9, comprimento * 0.09), "wave"
+            amp, passo, modo = max(0.18, comprimento * 0.018) * amplitude, max(0.9, comprimento * 0.09), "wave"
         elif estilo == "wave_strong":
-            amp, passo, modo = max(0.3, comprimento * 0.03), max(1.1, comprimento * 0.11), "wave"
+            amp, passo, modo = max(0.3, comprimento * 0.03) * amplitude, max(1.1, comprimento * 0.11), "wave"
+        elif estilo in {"half_moon", "dash_half_moon", "dash_half_moon_alt"}:
+            amp = max(0.25, comprimento * 0.02) * amplitude
+            passo = max(1.1, comprimento * 0.12)
+            modo = "half_moon"
 
         path = QPainterPath(self._cena_para_tela(p1))
         if modo == "zigzag":
@@ -550,14 +567,35 @@ class VisualizacaoCanvas(QWidget):
                 sentido *= -1.0
                 t += passo
             path.lineTo(self._cena_para_tela(p2))
-        else:
-            amostras = max(16, int(comprimento / 3.0))
+        elif modo == "wave":
+            periodos = max(1, int(comprimento / max(passo, 0.0001)))
+            amostras = max(96, periodos * 48)
             for i in range(1, amostras + 1):
                 t = (comprimento * i) / amostras
                 seno = sin((2.0 * 3.14159265359 * t) / passo)
                 px = p1.x() + (ux * t) + (nx * amp * seno)
                 py = p1.y() + (uy * t) + (ny * amp * seno)
                 path.lineTo(self._cena_para_tela(QPointF(px, py)))
+        else:
+            t = 0.0
+            while t < comprimento:
+                arco = min(passo, comprimento - t)
+                amostras_arco = max(20, int(arco * 14))
+                for i in range(1, amostras_arco + 1):
+                    frac = i / amostras_arco
+                    base_t = t + (arco * frac)
+                    theta = 3.14159265359 * frac
+                    altura = amp * sin(theta)
+                    px = p1.x() + (ux * base_t) + (nx * altura)
+                    py = p1.y() + (uy * base_t) + (ny * altura)
+                    path.lineTo(self._cena_para_tela(QPointF(px, py)))
+                if estilo != "half_moon":
+                    gap = passo * (0.45 if estilo == "dash_half_moon" else 0.25)
+                    t += arco + gap
+                    if t < comprimento:
+                        path.moveTo(self._cena_para_tela(QPointF(p1.x() + (ux * t), p1.y() + (uy * t))))
+                else:
+                    t += arco
 
         pen = QPen(QColor(cor), max(1.0, float(espessura)))
         pen.setStyle(Qt.SolidLine)
@@ -696,6 +734,7 @@ class VisualizacaoCanvas(QWidget):
                         "cor": self._linha_cor,
                         "espessura": self._linha_espessura,
                         "estilo": self._linha_estilo,
+                        "amplitude": self._linha_amplitude,
                     }
                 )
             self._registrar_historico()
@@ -754,6 +793,7 @@ class VisualizacaoCanvas(QWidget):
                 "cor": self._linha_cor,
                 "espessura": self._linha_espessura,
                 "estilo": self._linha_estilo,
+                "amplitude": self._linha_amplitude,
             }
             return
 
@@ -1168,6 +1208,7 @@ class VisualizacaoCanvas(QWidget):
                         "cor": self._linha_cor,
                         "espessura": self._linha_espessura,
                         "estilo": self._linha_estilo,
+                        "amplitude": self._linha_amplitude,
                     }
                 )
         return elementos
@@ -1179,13 +1220,17 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
 
-    def set_estilo_linha(self, cor: str | None = None, estilo: str | None = None, espessura: float | None = None):
+    def set_estilo_linha(
+        self, cor: str | None = None, estilo: str | None = None, espessura: float | None = None, amplitude: float | None = None
+    ):
         if cor:
             self._linha_cor = cor
         if estilo:
             self._linha_estilo = estilo
         if espessura is not None:
             self._linha_espessura = max(1.0, float(espessura))
+        if amplitude is not None:
+            self._linha_amplitude = max(0.2, float(amplitude))
         self.update()
 
     def set_passo_snap_angular(self, passo: float):

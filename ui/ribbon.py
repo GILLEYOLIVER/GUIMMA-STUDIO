@@ -117,6 +117,7 @@ class ColorControlWidget(QFrame):
         self._cor = "#ff5a00"
         self._estilo = "solid"
         self._espessura = 1.0
+        self._amplitude = 1.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
@@ -150,6 +151,13 @@ class ColorControlWidget(QFrame):
         self.btn_espessura.clicked.connect(self._abrir_menu_espessura)
         coluna_setas.addWidget(self.btn_espessura)
 
+        self.btn_amplitude = QToolButton()
+        self.btn_amplitude.setText("↕")
+        self.btn_amplitude.setCursor(Qt.PointingHandCursor)
+        self.btn_amplitude.setFixedSize(18, 14)
+        self.btn_amplitude.clicked.connect(self._abrir_menu_amplitude)
+        coluna_setas.addWidget(self.btn_amplitude)
+
         topo.addLayout(coluna_setas)
         layout.addLayout(topo)
 
@@ -176,6 +184,20 @@ class ColorControlWidget(QFrame):
                 f"Espessura {valor}",
                 lambda _=False, v=valor: self._selecionar_espessura(float(v)),
             )
+        self._menu_amplitude = QMenu(self)
+        amplitudes = [
+            (0.5, "Amplitude baixa"),
+            (1.0, "Amplitude normal"),
+            (1.5, "Amplitude alta"),
+            (2.0, "Amplitude muito alta"),
+        ]
+        for valor, rotulo in amplitudes:
+            self._adicionar_acao_menu(
+                self._menu_amplitude,
+                self._icone_estilo("wave_soft", amplitude=valor),
+                rotulo,
+                lambda _=False, v=valor: self._selecionar_amplitude(float(v)),
+            )
         self._atualizar_preview_cor()
 
     def _abrir_menu_estilo(self):
@@ -184,12 +206,19 @@ class ColorControlWidget(QFrame):
     def _abrir_menu_espessura(self):
         self._menu_espessura.exec(self.btn_espessura.mapToGlobal(self.btn_espessura.rect().bottomLeft()))
 
+    def _abrir_menu_amplitude(self):
+        self._menu_amplitude.exec(self.btn_amplitude.mapToGlobal(self.btn_amplitude.rect().bottomLeft()))
+
     def _selecionar_estilo(self, estilo: str):
         self._estilo = estilo
         self.estilo_changed.emit(self.valor())
 
     def _selecionar_espessura(self, espessura: float):
         self._espessura = espessura
+        self.estilo_changed.emit(self.valor())
+
+    def _selecionar_amplitude(self, amplitude: float):
+        self._amplitude = max(0.2, float(amplitude))
         self.estilo_changed.emit(self.valor())
 
     def _adicionar_acao_estilo(self, estilo: str, titulo: str):
@@ -222,7 +251,7 @@ class ColorControlWidget(QFrame):
         acao.setDefaultWidget(botao)
         menu.addAction(acao)
 
-    def _icone_estilo(self, estilo: str) -> QPixmap:
+    def _icone_estilo(self, estilo: str, amplitude: float | None = None) -> QPixmap:
         pix = QPixmap(132, 20)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
@@ -232,11 +261,12 @@ class ColorControlWidget(QFrame):
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
+            amp_scale = max(0.2, float(amplitude if amplitude is not None else self._amplitude))
             if is_geometric_line_style(estilo):
                 path = QPainterPath()
                 path.moveTo(6, 10)
                 if estilo.startswith("zigzag"):
-                    amp = 2.0 if estilo == "zigzag_soft" else 4.0
+                    amp = (2.0 if estilo == "zigzag_soft" else 4.0) * amp_scale
                     passo = 10.0 if estilo == "zigzag_soft" else 12.0
                     x = 6.0
                     sentido = 1.0
@@ -245,14 +275,36 @@ class ColorControlWidget(QFrame):
                         path.lineTo(x, 10 + (amp * sentido))
                         sentido *= -1.0
                     path.lineTo(126, 10)
-                else:
-                    amp = 2.0 if estilo == "wave_soft" else 4.0
+                elif estilo.startswith("wave"):
+                    amp = (2.0 if estilo == "wave_soft" else 4.0) * amp_scale
                     passo = 12.0 if estilo == "wave_soft" else 14.0
                     for i in range(1, 48):
                         t = i / 47.0
                         x = 6.0 + (120.0 * t)
                         y = 10.0 + (amp * sin((2.0 * 3.14159265359 * (x - 6.0)) / passo))
                         path.lineTo(x, y)
+                else:
+                    amp = (3.0 if estilo == "half_moon" else 2.6) * amp_scale
+                    passo = 16.0 if estilo == "half_moon" else 18.0
+                    x = 6.0
+                    while x < 126.0:
+                        raio = passo / 2.0
+                        centro_x = x + raio
+                        inicio = x
+                        fim = min(126.0, x + passo)
+                        subamostras = 10
+                        for i in range(subamostras + 1):
+                            t = i / subamostras
+                            px = inicio + ((fim - inicio) * t)
+                            theta = 3.14159265359 * t
+                            py = 10.0 - (amp * sin(theta))
+                            path.lineTo(px, py)
+                        if estilo != "half_moon":
+                            gap = 7.0 if estilo == "dash_half_moon" else 4.0
+                            path.moveTo(min(126.0, fim + gap), 10.0)
+                            x = fim + gap
+                        else:
+                            x = fim
                 painter.drawPath(path)
             else:
                 pen.setStyle(pen_style_for_line(estilo))
@@ -292,7 +344,7 @@ class ColorControlWidget(QFrame):
         )
 
     def valor(self) -> dict:
-        return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura}
+        return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura, "amplitude": self._amplitude}
 
 
 class RibbonGroup(QFrame):

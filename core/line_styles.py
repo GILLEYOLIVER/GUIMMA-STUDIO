@@ -25,9 +25,20 @@ LINE_STYLES: list[tuple[str, str]] = [
     ("zigzag_strong", "Zigue-zague forte"),
     ("wave_soft", "Ondulada suave"),
     ("wave_strong", "Ondulada forte"),
+    ("dash_half_moon", "Traço-meia lua"),
+    ("dash_half_moon_alt", "Traço meia lua"),
+    ("half_moon", "Meia lua"),
 ]
 
-GEOMETRIC_LINE_STYLES: set[str] = {"zigzag_soft", "zigzag_strong", "wave_soft", "wave_strong"}
+GEOMETRIC_LINE_STYLES: set[str] = {
+    "zigzag_soft",
+    "zigzag_strong",
+    "wave_soft",
+    "wave_strong",
+    "dash_half_moon",
+    "dash_half_moon_alt",
+    "half_moon",
+}
 
 _QT_STYLES: dict[str, Qt.PenStyle] = {
     "solid": Qt.SolidLine,

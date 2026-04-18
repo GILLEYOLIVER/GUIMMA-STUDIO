@@ -44,7 +44,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
-        self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0}
+        self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
         self.setWindowTitle("GUIMMA STUDIO")
@@ -686,7 +686,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if area_atual:
             area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         self.lbl_status.setText(
-            f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | Espessura {self._estilo_desenho_atual['espessura']:.0f}"
+            f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | "
+            f"Espessura {self._estilo_desenho_atual['espessura']:.0f} | Altura {self._estilo_desenho_atual['amplitude']:.1f}"
         )
 
     def _definir_passo_snap_angular(self, passo: float):
