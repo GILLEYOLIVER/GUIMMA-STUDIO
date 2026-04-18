@@ -552,10 +552,16 @@ class VisualizacaoCanvas(QWidget):
             amp, passo, modo = max(0.18, comprimento * 0.018) * amplitude, max(0.9, comprimento * 0.09), "wave"
         elif estilo == "wave_strong":
             amp, passo, modo = max(0.3, comprimento * 0.03) * amplitude, max(1.1, comprimento * 0.11), "wave"
-        elif estilo in {"half_moon", "dash_half_moon", "dash_half_moon_alt"}:
+        elif estilo == "half_moon":
             amp = max(0.25, comprimento * 0.02) * amplitude
             passo = max(1.1, comprimento * 0.12)
-            modo = "half_moon"
+            ciclos = max(1, round(comprimento / passo))
+            passo = comprimento / ciclos
+            modo = "half_moon_full"
+        elif estilo in {"dash_half_moon", "dash_half_moon_alt"}:
+            amp = max(0.25, comprimento * 0.02) * amplitude
+            passo = max(1.1, comprimento * 0.12)
+            modo = "half_moon_dash"
 
         path = QPainterPath(self._cena_para_tela(p1))
         if modo == "zigzag":
@@ -577,6 +583,19 @@ class VisualizacaoCanvas(QWidget):
                 px = p1.x() + (ux * t) + (nx * amp * seno)
                 py = p1.y() + (uy * t) + (ny * amp * seno)
                 path.lineTo(self._cena_para_tela(QPointF(px, py)))
+        elif modo == "half_moon_full":
+            ciclos = max(1, round(comprimento / max(passo, 0.0001)))
+            for ciclo in range(ciclos):
+                base_inicio = passo * ciclo
+                amostras_arco = max(24, int(passo * 16))
+                for i in range(1, amostras_arco + 1):
+                    frac = i / amostras_arco
+                    base_t = base_inicio + (passo * frac)
+                    theta = 3.14159265359 * frac
+                    altura = amp * sin(theta)
+                    px = p1.x() + (ux * base_t) + (nx * altura)
+                    py = p1.y() + (uy * base_t) + (ny * altura)
+                    path.lineTo(self._cena_para_tela(QPointF(px, py)))
         else:
             t = 0.0
             while t < comprimento:

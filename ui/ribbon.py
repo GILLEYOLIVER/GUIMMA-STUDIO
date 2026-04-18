@@ -286,6 +286,9 @@ class ColorControlWidget(QFrame):
                 else:
                     amp = (3.0 if estilo == "half_moon" else 2.6) * amp_scale
                     passo = 16.0 if estilo == "half_moon" else 18.0
+                    if estilo == "half_moon":
+                        ciclos = max(1, round(120.0 / passo))
+                        passo = 120.0 / ciclos
                     x = 6.0
                     while x < 126.0:
                         restante = 126.0 - x
