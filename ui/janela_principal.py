@@ -415,6 +415,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
             return self._salvar_projeto_como()
+        self._renomear_abas_sem_nome(self._arquivo_atual.stem)
         self._sincronizar_documentos_canvas_no_projeto()
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
         self._salvar_thumbnail_projeto(self._arquivo_atual)
@@ -430,6 +431,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if dlg.exec():
             destino = dlg.caminho_destino()
             self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
+            self._renomear_abas_sem_nome(destino.stem)
             self._sincronizar_documentos_canvas_no_projeto()
             GSProjectIO.salvar(self.projeto_atual, destino)
             self._salvar_thumbnail_projeto(destino)
@@ -440,6 +442,17 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._marcar_documentos_como_salvos()
             return True
         return False
+
+    def _renomear_abas_sem_nome(self, nome_arquivo: str):
+        total = self.abas_documentos.count()
+        if total <= 0:
+            return
+        for i in range(total):
+            nome_atual = (self.abas_documentos.tabText(i) or "").strip()
+            if not nome_atual.startswith("(Sem nome)"):
+                continue
+            novo_nome = nome_arquivo if total == 1 else f"{nome_arquivo} -{i + 1}"
+            self.abas_documentos.setTabText(i, novo_nome)
 
     def _atualizar_titulo(self):
         self.setWindowTitle("GUIMMA STUDIO")
