@@ -214,12 +214,14 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_posicao: tuple[int, int] | None = None
         self._painel_coordenadas_visivel = True
         self._aguardando_retorno_selecao = False
+        self._cliques_direito_reta = 0
         self._snap_manager = SnapManager()
         self._snap_ativo = True
         self._snap_resultado: SnapResult | None = None
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
+        self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ff5a00"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
@@ -248,6 +250,7 @@ class VisualizacaoCanvas(QWidget):
     def set_ferramenta_ativa(self, tool_id: str):
         self.ferramenta_ativa = tool_id
         self._aguardando_retorno_selecao = False
+        self._cliques_direito_reta = 0
         self._snap_resultado = None
         self._snap_candidatos = []
         self._snap_indice = 0
@@ -259,6 +262,7 @@ class VisualizacaoCanvas(QWidget):
             self._pontos_reta.clear()
             self._preview_reta = None
             self._guia_fechamento = None
+            self._guias_alinhamento = []
         self.update()
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
@@ -302,6 +306,7 @@ class VisualizacaoCanvas(QWidget):
         if event.button() == Qt.LeftButton:
             self.setFocus(Qt.MouseFocusReason)
             self._aguardando_retorno_selecao = False
+            self._cliques_direito_reta = 0
             if not self._pontos_reta:
                 self._pontos_reta.append(pos)
             else:
@@ -312,6 +317,7 @@ class VisualizacaoCanvas(QWidget):
                     liberar_angular=self._tecla_w_livre,
                 )
                 pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
+                pos = self._aplicar_guias_alinhamento(self._pontos_reta[-1], pos)
                 self._pontos_reta.append(pos)
             self._preview_reta = pos
             if len(self._pontos_reta) >= 2:
@@ -321,16 +327,19 @@ class VisualizacaoCanvas(QWidget):
             return
 
         if event.button() == Qt.RightButton:
-            if self._aguardando_retorno_selecao and len(self._pontos_reta) <= 1:
+            if self._cliques_direito_reta >= 1:
                 self._pontos_reta.clear()
                 self._preview_reta = None
                 self._guia_fechamento = None
+                self._guias_alinhamento = []
                 self._aguardando_retorno_selecao = False
+                self._cliques_direito_reta = 0
                 self.ferramenta_padrao_solicitada.emit("selecionar")
                 self.update()
                 event.accept()
                 return
             self._finalizar_reta_atual()
+            self._cliques_direito_reta = 1
             self.update()
             event.accept()
             return
@@ -349,9 +358,11 @@ class VisualizacaoCanvas(QWidget):
                     liberar_angular=self._tecla_w_livre,
                 )
                 self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
+                self._preview_reta = self._aplicar_guias_alinhamento(self._pontos_reta[-1], self._preview_reta)
                 self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
             else:
                 self._guia_fechamento = None
+                self._guias_alinhamento = []
             self.update()
             event.accept()
             return
@@ -452,6 +463,8 @@ class VisualizacaoCanvas(QWidget):
                 tracejado=True,
                 cor="#ff43ff",
             )
+        for inicio, fim in self._guias_alinhamento:
+            self._desenhar_segmento(painter, inicio, fim, tracejado=True, cor="#5bd3ff")
         for marca in self._marcacoes_temporarias[-10:]:
             self._desenhar_marca_x(painter, marca)
         if self._pontos_reta and self._preview_reta:
@@ -605,6 +618,7 @@ class VisualizacaoCanvas(QWidget):
             self._pontos_reta.clear()
             self._preview_reta = None
             self._guia_fechamento = None
+            self._guias_alinhamento = []
             self._aguardando_retorno_selecao = False
             return
 
@@ -624,6 +638,7 @@ class VisualizacaoCanvas(QWidget):
             self._pontos_reta = [ultimo_ponto]
             self._preview_reta = ultimo_ponto
             self._guia_fechamento = None
+            self._guias_alinhamento = []
             self._aguardando_retorno_selecao = True
 
     def _reposicionar_painel_coordenadas(self):
@@ -1007,6 +1022,45 @@ class VisualizacaoCanvas(QWidget):
         if dist_intersecao <= tolerancia_cena:
             return intersecao
         return destino
+
+    def _aplicar_guias_alinhamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guias_alinhamento = []
+        if not self._snap_ativo:
+            return destino
+        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+
+        candidatos: list[QPointF] = []
+        candidatos.extend(self._pontos_reta[:-1])
+        for el in self.cena.elementos:
+            if el.get("tipo") == "polyline":
+                candidatos.extend(QPointF(float(x), float(y)) for x, y in el.get("pontos", []))
+        if not candidatos:
+            return destino
+
+        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        melhor_x: QPointF | None = None
+        melhor_y: QPointF | None = None
+        dist_x = float("inf")
+        dist_y = float("inf")
+        for pt in candidatos:
+            dx = abs(destino.x() - pt.x())
+            dy = abs(destino.y() - pt.y())
+            if dx <= tol and dx < dist_x:
+                melhor_x = pt
+                dist_x = dx
+            if dy <= tol and dy < dist_y:
+                melhor_y = pt
+                dist_y = dy
+
+        ajustado = QPointF(destino)
+        if melhor_x:
+            ajustado.setX(melhor_x.x())
+            self._guias_alinhamento.append((QPointF(melhor_x.x(), melhor_x.y()), QPointF(melhor_x.x(), ajustado.y())))
+        if melhor_y:
+            ajustado.setY(melhor_y.y())
+            self._guias_alinhamento.append((QPointF(melhor_y.x(), melhor_y.y()), QPointF(ajustado.x(), melhor_y.y())))
+        return ajustado
 
     def _aplicar_coordenadas(self, payload: dict):
         origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
