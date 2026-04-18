@@ -1,0 +1,506 @@
+[
+  {
+    "arquivo": "colar.svg",
+    "rotulo": "colar"
+  },
+  {
+    "arquivo": "copiar.svg",
+    "rotulo": "copiar"
+  },
+  {
+    "arquivo": "excluir.svg",
+    "rotulo": "excluir"
+  },
+  {
+    "arquivo": "selecionar.svg",
+    "rotulo": "selecionar"
+  },
+  {
+    "arquivo": "inverter_selecao.svg",
+    "rotulo": "inverter selecao"
+  },
+  {
+    "arquivo": "selecionar_tudo.svg",
+    "rotulo": "selecionar tudo"
+  },
+  {
+    "arquivo": "inverter_moldes.svg",
+    "rotulo": "inverter moldes"
+  },
+  {
+    "arquivo": "selecionar_moldes.svg",
+    "rotulo": "selecionar moldes"
+  },
+  {
+    "arquivo": "ponto_de_restauracao.svg",
+    "rotulo": "ponto de restauracao"
+  },
+  {
+    "arquivo": "restaurar.svg",
+    "rotulo": "restaurar"
+  },
+  {
+    "arquivo": "restaura_copia.svg",
+    "rotulo": "restaura copia"
+  },
+  {
+    "arquivo": "base_de_conhecimento.svg",
+    "rotulo": "base de conhecimento"
+  },
+  {
+    "arquivo": "abrir_software.svg",
+    "rotulo": "abrir software"
+  },
+  {
+    "arquivo": "abrir.svg",
+    "rotulo": "abrir"
+  },
+  {
+    "arquivo": "reta.svg",
+    "rotulo": "reta"
+  },
+  {
+    "arquivo": "retangulo.svg",
+    "rotulo": "retangulo"
+  },
+  {
+    "arquivo": "por_angulo.svg",
+    "rotulo": "por angulo"
+  },
+  {
+    "arquivo": "estender_reta.svg",
+    "rotulo": "estender reta"
+  },
+  {
+    "arquivo": "estender_ate_elemento.svg",
+    "rotulo": "estender ate elemento"
+  },
+  {
+    "arquivo": "estender_duas_retas.svg",
+    "rotulo": "estender duas retas"
+  },
+  {
+    "arquivo": "curva.svg",
+    "rotulo": "curva"
+  },
+  {
+    "arquivo": "dividir_curva.svg",
+    "rotulo": "dividir curva"
+  },
+  {
+    "arquivo": "pre_definida.svg",
+    "rotulo": "pre-definida"
+  },
+  {
+    "arquivo": "espiral_e_curvas.svg",
+    "rotulo": "espiral e curvas"
+  },
+  {
+    "arquivo": "cadastrar_curva.svg",
+    "rotulo": "cadastrar curva"
+  },
+  {
+    "arquivo": "editar_pontos_de_curva.svg",
+    "rotulo": "editar pontos de curva"
+  },
+  {
+    "arquivo": "por_coordenada.svg",
+    "rotulo": "por coordenada"
+  },
+  {
+    "arquivo": "por_intersecao.svg",
+    "rotulo": "por interseção"
+  },
+  {
+    "arquivo": "no_centro_do_arco.svg",
+    "rotulo": "no centro do arco"
+  },
+  {
+    "arquivo": "no_perimetro.svg",
+    "rotulo": "no perímetro"
+  },
+  {
+    "arquivo": "por_distancia.svg",
+    "rotulo": "por distância"
+  },
+  {
+    "arquivo": "por_raio.svg",
+    "rotulo": "por raio"
+  },
+  {
+    "arquivo": "inserir_texto.svg",
+    "rotulo": "inserir texto"
+  },
+  {
+    "arquivo": "editar_texto.svg",
+    "rotulo": "editar texto"
+  },
+  {
+    "arquivo": "extrair_molde.svg",
+    "rotulo": "extrair molde"
+  },
+  {
+    "arquivo": "criar_molde.svg",
+    "rotulo": "criar molde"
+  },
+  {
+    "arquivo": "digitalizar.svg",
+    "rotulo": "digitalizar"
+  },
+  {
+    "arquivo": "sentido_do_fio.svg",
+    "rotulo": "sentido do fio"
+  },
+  {
+    "arquivo": "encolhimento.svg",
+    "rotulo": "encolhimento"
+  },
+  {
+    "arquivo": "linha_de_simetria.svg",
+    "rotulo": "linha de simetria"
+  },
+  {
+    "arquivo": "bainha.svg",
+    "rotulo": "bainha"
+  },
+  {
+    "arquivo": "dobrar.svg",
+    "rotulo": "dobrar"
+  },
+  {
+    "arquivo": "desdobrar.svg",
+    "rotulo": "desdobrar"
+  },
+  {
+    "arquivo": "costura.svg",
+    "rotulo": "costura"
+  },
+  {
+    "arquivo": "remover_costura.svg",
+    "rotulo": "remover costura"
+  },
+  {
+    "arquivo": "trocar_costura_linha.svg",
+    "rotulo": "trocar costura/linha"
+  },
+  {
+    "arquivo": "converter_em_costura.svg",
+    "rotulo": "converter em costura"
+  },
+  {
+    "arquivo": "pregas.svg",
+    "rotulo": "pregas"
+  },
+  {
+    "arquivo": "pence_no_contorno.svg",
+    "rotulo": "pence no contorno"
+  },
+  {
+    "arquivo": "fechar_pence.svg",
+    "rotulo": "fechar pence"
+  },
+  {
+    "arquivo": "pence_interna.svg",
+    "rotulo": "pence interna"
+  },
+  {
+    "arquivo": "transferir_pence.svg",
+    "rotulo": "transferir pence"
+  },
+  {
+    "arquivo": "multiplas_pences.svg",
+    "rotulo": "múltiplas pences"
+  },
+  {
+    "arquivo": "cortar.svg",
+    "rotulo": "cortar"
+  },
+  {
+    "arquivo": "unir.svg",
+    "rotulo": "unir"
+  },
+  {
+    "arquivo": "remover_regiao.svg",
+    "rotulo": "remover região"
+  },
+  {
+    "arquivo": "inserir.svg",
+    "rotulo": "inserir"
+  },
+  {
+    "arquivo": "remover_pique.svg",
+    "rotulo": "remover pique"
+  },
+  {
+    "arquivo": "pique_texto.svg",
+    "rotulo": "pique texto"
+  },
+  {
+    "arquivo": "multiplos.svg",
+    "rotulo": "múltiplos"
+  },
+  {
+    "arquivo": "alinhar.svg",
+    "rotulo": "alinhar"
+  },
+  {
+    "arquivo": "cadastrar_pique.svg",
+    "rotulo": "cadastrar pique"
+  },
+  {
+    "arquivo": "substituir.svg",
+    "rotulo": "substituir"
+  },
+  {
+    "arquivo": "alterar.svg",
+    "rotulo": "alterar"
+  },
+  {
+    "arquivo": "inserir_ou_remover.svg",
+    "rotulo": "inserir ou remover"
+  },
+  {
+    "arquivo": "corrida.svg",
+    "rotulo": "corrida"
+  },
+  {
+    "arquivo": "localizada.svg",
+    "rotulo": "localizada"
+  },
+  {
+    "arquivo": "tabela.svg",
+    "rotulo": "tabela"
+  },
+  {
+    "arquivo": "automatico.svg",
+    "rotulo": "automático"
+  },
+  {
+    "arquivo": "mouse.svg",
+    "rotulo": "mouse"
+  },
+  {
+    "arquivo": "tangente.svg",
+    "rotulo": "tangente"
+  },
+  {
+    "arquivo": "regras.svg",
+    "rotulo": "regras"
+  },
+  {
+    "arquivo": "criar_regra.svg",
+    "rotulo": "criar regra"
+  },
+  {
+    "arquivo": "remover_graduacao.svg",
+    "rotulo": "remover graduação"
+  },
+  {
+    "arquivo": "separar.svg",
+    "rotulo": "separar"
+  },
+  {
+    "arquivo": "agrupar.svg",
+    "rotulo": "agrupar"
+  },
+  {
+    "arquivo": "deduzir.svg",
+    "rotulo": "deduzir"
+  },
+  {
+    "arquivo": "copiar_graduacao.svg",
+    "rotulo": "copiar graduação"
+  },
+  {
+    "arquivo": "ajustar.svg",
+    "rotulo": "ajustar"
+  },
+  {
+    "arquivo": "graduar_curva.svg",
+    "rotulo": "graduar curva"
+  },
+  {
+    "arquivo": "modificar.svg",
+    "rotulo": "modificar"
+  },
+  {
+    "arquivo": "editar.svg",
+    "rotulo": "editar"
+  },
+  {
+    "arquivo": "mover.svg",
+    "rotulo": "mover"
+  },
+  {
+    "arquivo": "mover_ponto.svg",
+    "rotulo": "mover ponto"
+  },
+  {
+    "arquivo": "manipular_pontos.svg",
+    "rotulo": "manipular pontos"
+  },
+  {
+    "arquivo": "redefinir_perimetro.svg",
+    "rotulo": "redefinir perímetro"
+  },
+  {
+    "arquivo": "dividir_elementos.svg",
+    "rotulo": "dividir elementos"
+  },
+  {
+    "arquivo": "elemento_paralelo.svg",
+    "rotulo": "elemento paralelo"
+  },
+  {
+    "arquivo": "manipulacao_rapida.svg",
+    "rotulo": "manipulação rápida"
+  },
+  {
+    "arquivo": "girar.svg",
+    "rotulo": "girar"
+  },
+  {
+    "arquivo": "dimensionar.svg",
+    "rotulo": "dimensionar"
+  },
+  {
+    "arquivo": "espelhar.svg",
+    "rotulo": "espelhar"
+  },
+  {
+    "arquivo": "definir_cerca.svg",
+    "rotulo": "definir cerca"
+  },
+  {
+    "arquivo": "mover_cerca.svg",
+    "rotulo": "mover cerca"
+  },
+  {
+    "arquivo": "definir_curva.svg",
+    "rotulo": "definir curva"
+  },
+  {
+    "arquivo": "inserir_ponto.svg",
+    "rotulo": "inserir ponto"
+  },
+  {
+    "arquivo": "excluir_ponto.svg",
+    "rotulo": "excluir ponto"
+  },
+  {
+    "arquivo": "transformar_em_elementos.svg",
+    "rotulo": "transformar em elementos"
+  },
+  {
+    "arquivo": "copiar_ou_trocar_elemento.svg",
+    "rotulo": "copiar ou trocar elemento"
+  },
+  {
+    "arquivo": "arredondar_ou_chanfrar.svg",
+    "rotulo": "arredondar ou chanfrar"
+  },
+  {
+    "arquivo": "simplificar_contorno.svg",
+    "rotulo": "simplificar contorno"
+  },
+  {
+    "arquivo": "conferir.svg",
+    "rotulo": "conferir"
+  },
+  {
+    "arquivo": "conferir_multiplos.svg",
+    "rotulo": "conferir múltiplos"
+  },
+  {
+    "arquivo": "controle_curvas.svg",
+    "rotulo": "controle curvas"
+  },
+  {
+    "arquivo": "cota_perimetro.svg",
+    "rotulo": "cota perímetro"
+  },
+  {
+    "arquivo": "perimetro.svg",
+    "rotulo": "perímetro"
+  },
+  {
+    "arquivo": "comparar_perimetros.svg",
+    "rotulo": "comparar perímetros"
+  },
+  {
+    "arquivo": "cota_distancia.svg",
+    "rotulo": "cota distância"
+  },
+  {
+    "arquivo": "distancia.svg",
+    "rotulo": "distância"
+  },
+  {
+    "arquivo": "comparar_distancia.svg",
+    "rotulo": "comparar distância"
+  },
+  {
+    "arquivo": "horizontal_vertical.svg",
+    "rotulo": "horizontal / vertical"
+  },
+  {
+    "arquivo": "angulo.svg",
+    "rotulo": "ângulo"
+  },
+  {
+    "arquivo": "raio.svg",
+    "rotulo": "raio"
+  },
+  {
+    "arquivo": "propriedades.svg",
+    "rotulo": "propriedades"
+  },
+  {
+    "arquivo": "informacoes.svg",
+    "rotulo": "informações"
+  },
+  {
+    "arquivo": "tecidos.svg",
+    "rotulo": "tecidos"
+  },
+  {
+    "arquivo": "autor.svg",
+    "rotulo": "autor"
+  },
+  {
+    "arquivo": "informacoes_dos_moldes.svg",
+    "rotulo": "informações dos moldes"
+  },
+  {
+    "arquivo": "variantes.svg",
+    "rotulo": "variantes"
+  },
+  {
+    "arquivo": "relacionamento_piques.svg",
+    "rotulo": "relacionamento piques"
+  },
+  {
+    "arquivo": "imagens.svg",
+    "rotulo": "imagens"
+  },
+  {
+    "arquivo": "localizar_modelos.svg",
+    "rotulo": "localizar modelos"
+  },
+  {
+    "arquivo": "medida.svg",
+    "rotulo": "medida"
+  },
+  {
+    "arquivo": "criar.svg",
+    "rotulo": "criar"
+  },
+  {
+    "arquivo": "grupos.svg",
+    "rotulo": "grupos"
+  },
+  {
+    "arquivo": "cor.svg",
+    "rotulo": "cor"
+  }
+]
