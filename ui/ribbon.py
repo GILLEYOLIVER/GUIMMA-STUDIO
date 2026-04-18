@@ -139,25 +139,25 @@ class ColorControlWidget(QFrame):
         coluna_setas.setSpacing(2)
 
         self.btn_estilo = QToolButton()
-        self.btn_estilo.setText("Est")
+        self.btn_estilo.setText("Estilo")
         self.btn_estilo.setCursor(Qt.PointingHandCursor)
-        self.btn_estilo.setFixedSize(30, 16)
+        self.btn_estilo.setFixedSize(62, 16)
         self.btn_estilo.setToolTip("Estilo da linha")
         self.btn_estilo.clicked.connect(self._abrir_menu_estilo)
         coluna_setas.addWidget(self.btn_estilo)
 
         self.btn_espessura = QToolButton()
-        self.btn_espessura.setText("Esp")
+        self.btn_espessura.setText("Espess.")
         self.btn_espessura.setCursor(Qt.PointingHandCursor)
-        self.btn_espessura.setFixedSize(30, 16)
+        self.btn_espessura.setFixedSize(62, 16)
         self.btn_espessura.setToolTip("Espessura da linha")
         self.btn_espessura.clicked.connect(self._abrir_menu_espessura)
         coluna_setas.addWidget(self.btn_espessura)
 
         self.btn_amplitude = QToolButton()
-        self.btn_amplitude.setText("Alt")
+        self.btn_amplitude.setText("Amplitude")
         self.btn_amplitude.setCursor(Qt.PointingHandCursor)
-        self.btn_amplitude.setFixedSize(30, 16)
+        self.btn_amplitude.setFixedSize(62, 16)
         self.btn_amplitude.setToolTip("Altura da onda/zig-zag")
         self.btn_amplitude.clicked.connect(self._abrir_menu_amplitude)
         coluna_setas.addWidget(self.btn_amplitude)
@@ -169,7 +169,7 @@ class ColorControlWidget(QFrame):
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lbl.setStyleSheet("font-size: 10px; font-weight:600; color:#1e1e1e; padding-left:2px;")
         layout.addWidget(lbl)
-        self.setFixedSize(78, 66)
+        self.setFixedSize(122, 72)
         self.setStyleSheet(
             """
             QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
