@@ -7,12 +7,12 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QComboBox,
     QColorDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -131,20 +131,19 @@ class ColorControlWidget(QFrame):
         coluna_setas.setContentsMargins(0, 0, 0, 0)
         coluna_setas.setSpacing(2)
 
-        self.cmb_estilo = QComboBox()
-        self.cmb_estilo.setFixedSize(18, 14)
-        self.cmb_estilo.addItem("", "solid")
-        self.cmb_estilo.addItem("", "dash")
-        self.cmb_estilo.addItem("", "dot")
-        self.cmb_estilo.currentIndexChanged.connect(self._on_estilo_changed)
-        coluna_setas.addWidget(self.cmb_estilo)
+        self.btn_estilo = QToolButton()
+        self.btn_estilo.setText("▾")
+        self.btn_estilo.setCursor(Qt.PointingHandCursor)
+        self.btn_estilo.setFixedSize(18, 14)
+        self.btn_estilo.clicked.connect(self._abrir_menu_estilo)
+        coluna_setas.addWidget(self.btn_estilo)
 
-        self.cmb_espessura = QComboBox()
-        self.cmb_espessura.setFixedSize(18, 14)
-        for valor in (1, 2, 3, 4, 5, 6):
-            self.cmb_espessura.addItem("", float(valor))
-        self.cmb_espessura.currentIndexChanged.connect(self._on_espessura_changed)
-        coluna_setas.addWidget(self.cmb_espessura)
+        self.btn_espessura = QToolButton()
+        self.btn_espessura.setText("▾")
+        self.btn_espessura.setCursor(Qt.PointingHandCursor)
+        self.btn_espessura.setFixedSize(18, 14)
+        self.btn_espessura.clicked.connect(self._abrir_menu_espessura)
+        coluna_setas.addWidget(self.btn_espessura)
 
         topo.addLayout(coluna_setas)
         layout.addLayout(topo)
@@ -157,19 +156,31 @@ class ColorControlWidget(QFrame):
         self.setStyleSheet(
             """
             QFrame#ColorControlWidget { background:#ffffff; border:1px solid transparent; }
-            QComboBox { border:1px solid #d1d7de; background:#f8fafc; padding:0; }
-            QComboBox::drop-down { border:none; width:16px; }
-            QComboBox::down-arrow { image: none; border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid #2f4f6f; margin-right:2px; }
+            QToolButton { border:1px solid #d1d7de; background:#f8fafc; color:#2f4f6f; font-size:10px; }
+            QToolButton:hover { background:#eef5fd; }
             """
         )
+        self._menu_estilo = QMenu(self)
+        self._menu_estilo.addAction("Linha contínua", lambda: self._selecionar_estilo("solid"))
+        self._menu_estilo.addAction("Linha tracejada", lambda: self._selecionar_estilo("dash"))
+        self._menu_estilo.addAction("Linha pontilhada", lambda: self._selecionar_estilo("dot"))
+        self._menu_espessura = QMenu(self)
+        for valor in (1, 2, 3, 4, 5, 6):
+            self._menu_espessura.addAction(f"Espessura {valor}", lambda _=False, v=valor: self._selecionar_espessura(float(v)))
         self._atualizar_preview_cor()
 
-    def _on_estilo_changed(self):
-        self._estilo = str(self.cmb_estilo.currentData() or "solid")
+    def _abrir_menu_estilo(self):
+        self._menu_estilo.exec(self.btn_estilo.mapToGlobal(self.btn_estilo.rect().bottomLeft()))
+
+    def _abrir_menu_espessura(self):
+        self._menu_espessura.exec(self.btn_espessura.mapToGlobal(self.btn_espessura.rect().bottomLeft()))
+
+    def _selecionar_estilo(self, estilo: str):
+        self._estilo = estilo
         self.estilo_changed.emit(self.valor())
 
-    def _on_espessura_changed(self):
-        self._espessura = float(self.cmb_espessura.currentData() or 1.0)
+    def _selecionar_espessura(self, espessura: float):
+        self._espessura = espessura
         self.estilo_changed.emit(self.valor())
 
     def _selecionar_cor(self):
