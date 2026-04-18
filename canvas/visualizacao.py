@@ -958,6 +958,8 @@ class VisualizacaoCanvas(QWidget):
     ) -> QPointF:
         if not self._snap_ativo:
             return destino
+        if liberar_angular:
+            return destino
         if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
             return destino
         dx = destino.x() - origem.x()
