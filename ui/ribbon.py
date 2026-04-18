@@ -164,11 +164,20 @@ class ColorControlWidget(QFrame):
             """
         )
         self._menu_estilo = QMenu(self)
-        self._adicionar_acao_estilo("solid", "Contínua")
-        self._adicionar_acao_estilo("dash", "Tracejada")
-        self._adicionar_acao_estilo("dot", "Pontilhada")
-        self._adicionar_acao_estilo("dashdot", "Traço-ponto")
-        self._adicionar_acao_estilo("dashdotdot", "Traço-ponto-ponto")
+        estilos_disponiveis = [
+            ("solid", "Contínua"),
+            ("dash", "Tracejada"),
+            ("dot", "Pontilhada"),
+            ("dashdot", "Traço-ponto"),
+            ("dashdotdot", "Traço-ponto-ponto"),
+            ("longdash", "Traço longo"),
+            ("shortdash", "Traço curto"),
+            ("center", "Centro"),
+            ("border", "Borda"),
+            ("dense_dot", "Ponto denso"),
+        ]
+        for estilo_id, titulo in estilos_disponiveis:
+            self._adicionar_acao_estilo(estilo_id, titulo)
         self._menu_espessura = QMenu(self)
         for valor in (1, 2, 3, 4, 5, 6):
             self._adicionar_acao_menu(
@@ -230,6 +239,18 @@ class ColorControlWidget(QFrame):
             "dot": Qt.DotLine,
             "dashdot": Qt.DashDotLine,
             "dashdotdot": Qt.DashDotDotLine,
+            "longdash": Qt.CustomDashLine,
+            "shortdash": Qt.CustomDashLine,
+            "center": Qt.CustomDashLine,
+            "border": Qt.CustomDashLine,
+            "dense_dot": Qt.CustomDashLine,
+        }
+        padroes = {
+            "longdash": [10, 4],
+            "shortdash": [4, 2],
+            "center": [12, 3, 2, 3],
+            "border": [12, 3, 2, 3, 2, 3],
+            "dense_dot": [1, 2],
         }
         pix = QPixmap(110, 16)
         pix.fill(Qt.transparent)
@@ -237,6 +258,8 @@ class ColorControlWidget(QFrame):
         try:
             pen = QPen(QColor("#111111"), 2)
             pen.setStyle(mapa.get(estilo, Qt.SolidLine))
+            if estilo in padroes:
+                pen.setDashPattern(padroes[estilo])
             painter.setPen(pen)
             painter.drawLine(4, 8, 106, 8)
         finally:
