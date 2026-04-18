@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QTabBar,
     QToolButton,
     QVBoxLayout,
+    QWidgetAction,
     QWidget,
 )
 
@@ -161,17 +162,19 @@ class ColorControlWidget(QFrame):
             """
         )
         self._menu_estilo = QMenu(self)
-        self._menu_estilo.setIconSize(QSize(110, 16))
         self._adicionar_acao_estilo("solid", "Contínua")
         self._adicionar_acao_estilo("dash", "Tracejada")
         self._adicionar_acao_estilo("dot", "Pontilhada")
         self._adicionar_acao_estilo("dashdot", "Traço-ponto")
         self._adicionar_acao_estilo("dashdotdot", "Traço-ponto-ponto")
         self._menu_espessura = QMenu(self)
-        self._menu_espessura.setIconSize(QSize(90, 16))
         for valor in (1, 2, 3, 4, 5, 6):
-            acao = self._menu_espessura.addAction(QIcon(self._icone_espessura(float(valor))), f"Espessura {valor}")
-            acao.triggered.connect(lambda _=False, v=valor: self._selecionar_espessura(float(v)))
+            self._adicionar_acao_menu(
+                self._menu_espessura,
+                self._icone_espessura(float(valor)),
+                f"Espessura {valor}",
+                lambda _=False, v=valor: self._selecionar_espessura(float(v)),
+            )
         self._atualizar_preview_cor()
 
     def _abrir_menu_estilo(self):
@@ -189,8 +192,34 @@ class ColorControlWidget(QFrame):
         self.estilo_changed.emit(self.valor())
 
     def _adicionar_acao_estilo(self, estilo: str, titulo: str):
-        acao = self._menu_estilo.addAction(QIcon(self._icone_estilo(estilo)), titulo)
-        acao.triggered.connect(lambda _=False, e=estilo: self._selecionar_estilo(e))
+        self._adicionar_acao_menu(
+            self._menu_estilo,
+            self._icone_estilo(estilo),
+            titulo,
+            lambda _=False, e=estilo: self._selecionar_estilo(e),
+        )
+
+    def _adicionar_acao_menu(self, menu: QMenu, icone: QPixmap, texto: str, callback):
+        acao = QWidgetAction(menu)
+        botao = QPushButton(texto)
+        botao.setIcon(QIcon(icone))
+        botao.setIconSize(icone.size())
+        botao.setCursor(Qt.PointingHandCursor)
+        botao.setStyleSheet(
+            """
+            QPushButton {
+                text-align: left;
+                border: none;
+                padding: 3px 10px 3px 6px;
+                color: #1b1b1b;
+                background: transparent;
+            }
+            QPushButton:hover { background: #e8f1fb; }
+            """
+        )
+        botao.clicked.connect(lambda: (callback(), menu.close()))
+        acao.setDefaultWidget(botao)
+        menu.addAction(acao)
 
     def _icone_estilo(self, estilo: str) -> QPixmap:
         mapa = {
