@@ -955,7 +955,12 @@ class VisualizacaoCanvas(QWidget):
         destino: QPointF,
         travar_snap_exato: bool = False,
         travar_principais: bool = False,
+        liberar_angular: bool | None = None,
     ) -> QPointF:
+        # Compatibilidade com chamadas antigas que usavam `liberar_angular`.
+        # Regra antiga: True = livre. Regra nova: W pressionado = trava principais.
+        if liberar_angular is not None:
+            travar_principais = not bool(liberar_angular)
         if not self._snap_ativo:
             return destino
         if liberar_angular:
