@@ -409,11 +409,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._arquivo_atual = Path(caminho)
         self.backstage.adicionar_recente(caminho)
         self._atualizar_titulo()
-        self._limpar_abas_documentos()
-        self._carregar_documentos_canvas()
-        if self.abas_documentos.count() == 0:
-            self._adicionar_aba_documento(nome=self._arquivo_atual.stem)
-        self._renomear_abas_sem_nome(self._arquivo_atual.stem)
+        self._adicionar_aba_documento(nome=self._arquivo_atual.stem)
+        area = self._area_documento_atual()
+        docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
+        if area and docs:
+            doc = docs[0]
+            area.canvas.cena.elementos = [dict(el) for el in doc.get("elementos", [])]
+            area.canvas.set_painel_auxiliar_posicao(None)
+            if "painel_coordenadas_visivel" in doc:
+                area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            area.canvas._registrar_historico()
+            QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            area.canvas.update()
+        if area:
+            area.setProperty("assinatura_salva", self._assinatura_canvas(area))
         self.backstage.hide()
 
     def _salvar_projeto(self) -> bool:
