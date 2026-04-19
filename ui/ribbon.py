@@ -69,8 +69,8 @@ class RibbonButton(QToolButton):
 
         if compacto:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(20, 20))
-            self.setFixedSize(124, 30)
+            self.setIconSize(QSize(18, 18))
+            self.setFixedSize(112, 26)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -78,8 +78,8 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: 1px solid transparent;
                     color: #1e1e1e;
-                    font-size: 13px;
-                    padding: 0 6px;
+                    font-size: 12px;
+                    padding: 0 4px;
                 }
                 QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
                 QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
@@ -393,7 +393,7 @@ class RibbonGroup(QFrame):
                     controle_cor.estilo_changed.connect(self.estilo_changed.emit)
                     corpo.addWidget(controle_cor)
                 else:
-                    botao = RibbonButton(tool, compacto=len(tools) >= 4)
+                    botao = RibbonButton(tool)
                     botao.acionada.connect(self.tool_selected.emit)
                     corpo.addWidget(botao)
             corpo.addStretch(1)
