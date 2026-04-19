@@ -9,6 +9,8 @@ from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, Qt, Q
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -279,6 +281,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not tool_def:
             self.lbl_status.setText(f"Ferramenta não encontrada: {tool_id}")
             return
+        if self._abrir_janela_auxiliar_ferramenta(tool_id, tool_def.title):
+            return
 
         module_name = tool_def.module.replace("/", ".").replace(".py", "")
         try:
@@ -307,6 +311,59 @@ class GuimmaStudioMainWindow(QMainWindow):
         func, mensagem = acao
         func()
         self.lbl_status.setText(mensagem)
+        return True
+
+    def _abrir_janela_auxiliar_ferramenta(self, tool_id: str, titulo: str) -> bool:
+        instrucoes = {
+            "estender_reta": (
+                "Estender reta",
+                "1) Clique no endpoint da reta.\n"
+                "2) Clique no novo destino para estender.\n"
+                "Dica: use Snap ativo para maior precisão.",
+            ),
+            "estender_ate_elemento": (
+                "Estender até elemento",
+                "1) Clique no endpoint da reta de origem.\n"
+                "2) Clique no elemento alvo.\n"
+                "A reta será estendida até a interseção.",
+            ),
+            "estender_duas_retas": (
+                "Estender duas retas",
+                "1) Clique na primeira reta.\n"
+                "2) Clique na segunda reta.\n"
+                "As duas serão estendidas para encontrar a interseção.",
+            ),
+            "dividir_curva": (
+                "Dividir curva",
+                "Clique sobre o segmento para inserir um novo ponto de divisão no trecho.",
+            ),
+        }
+        if tool_id not in instrucoes:
+            return False
+        janela = QDialog(self)
+        janela.setWindowTitle(f"{titulo} - Auxiliar")
+        janela.setModal(True)
+        janela.setMinimumWidth(380)
+        layout = QVBoxLayout(janela)
+        texto_titulo, texto_instrucao = instrucoes[tool_id]
+        lbl_titulo = QLabel(f"<b>{texto_titulo}</b>")
+        lbl_titulo.setStyleSheet("font-size: 13px;")
+        layout.addWidget(lbl_titulo)
+        lbl_instrucao = QLabel(texto_instrucao)
+        lbl_instrucao.setWordWrap(True)
+        lbl_instrucao.setStyleSheet("font-size: 12px; color:#2b2b2b;")
+        layout.addWidget(lbl_instrucao)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.button(QDialogButtonBox.Ok).setText("Ativar ferramenta")
+        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        layout.addWidget(botoes)
+        botoes.accepted.connect(janela.accept)
+        botoes.rejected.connect(janela.reject)
+        if janela.exec() != QDialog.Accepted:
+            self.lbl_status.setText(f"{titulo} cancelado.")
+            return True
+        self._ativar_ferramenta_global(tool_id)
+        self.lbl_status.setText(f"{titulo} ativo. Siga os passos da janela auxiliar.")
         return True
 
     def _abrir_menu_importar(self):
