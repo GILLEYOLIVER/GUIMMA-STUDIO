@@ -52,6 +52,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
+        self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
@@ -368,9 +369,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(botoes)
         botoes.accepted.connect(janela.accept)
         botoes.rejected.connect(janela.reject)
+        self._restaurar_posicao_caixa_aux(janela, tool_id)
         if janela.exec() != QDialog.Accepted:
+            self._memorizar_posicao_caixa_aux(janela, tool_id)
             self.lbl_status.setText(f"{titulo} cancelado.")
             return True
+        self._memorizar_posicao_caixa_aux(janela, tool_id)
         self._ativar_ferramenta_global(tool_id)
         self.lbl_status.setText(f"{titulo} ativo. Siga os passos da janela auxiliar.")
         return True
@@ -381,9 +385,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             return False
         if self._janela_aux_curva is None:
             janela = QDialog(self)
-            janela.setWindowTitle(f"{titulo} - Auxiliar")
+            janela.setWindowTitle(titulo)
             janela.setModal(False)
             janela.setMinimumWidth(380)
+            janela.setWindowFlag(Qt.Tool, True)
             janela.setStyleSheet(
                 "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
                 "QRadioButton { color:#2b2b2b; padding:2px; }"
@@ -395,15 +400,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             rb_2p.setChecked(True)
             layout.addWidget(rb_2p)
             layout.addWidget(rb_3p)
-            lbl = QLabel("Direito: finalizar / limpar / soltar ferramenta.\nEsquerdo: define pontos.")
-            lbl.setWordWrap(True)
-            layout.addWidget(lbl)
             rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
             rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
             self._janela_aux_curva = janela
         else:
             janela = self._janela_aux_curva
-            janela.setWindowTitle(f"{titulo} - Auxiliar")
+            janela.setWindowTitle(titulo)
+        self._restaurar_posicao_caixa_aux(janela, "curva")
         area.canvas.set_modo_curva("2p")
         self._ativar_ferramenta_global("curva")
         janela.show()
@@ -416,6 +419,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.set_modo_curva(modo)
+
+    def _restaurar_posicao_caixa_aux(self, janela: QDialog, chave: str):
+        pos = self._posicoes_caixas_aux.get(chave)
+        if pos:
+            janela.move(*pos)
+
+    def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
+        self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
+        self.projeto_atual.preferencias_usuario["posicoes_caixas_aux"] = dict(self._posicoes_caixas_aux)
 
     def _abrir_menu_importar(self):
         botao = self.backstage.botoes.get("Importar ▸")
@@ -546,6 +558,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return
         self.projeto_atual = GSProjectIO.abrir(caminho)
         self._restaurar_estilo_desenho_memorizado()
+        self._posicoes_caixas_aux = self._carregar_posicoes_caixas_aux()
         self._arquivo_atual = Path(caminho)
         self.backstage.adicionar_recente(caminho)
         self._atualizar_titulo()
@@ -816,6 +829,9 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
         self.ribbon.set_active_tool(tool_id)
+        if tool_id != "curva" and self._janela_aux_curva and self._janela_aux_curva.isVisible():
+            self._memorizar_posicao_caixa_aux(self._janela_aux_curva, "curva")
+            self._janela_aux_curva.hide()
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_ferramenta_ativa(tool_id)
@@ -845,6 +861,16 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "amplitude": float(estilo_mem.get("amplitude", self._estilo_desenho_atual["amplitude"])),
             }
         )
+
+    def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:
+        bruto = self.projeto_atual.preferencias_usuario.get("posicoes_caixas_aux", {})
+        if not isinstance(bruto, dict):
+            return {}
+        resultado: dict[str, tuple[int, int]] = {}
+        for chave, valor in bruto.items():
+            if isinstance(valor, (list, tuple)) and len(valor) == 2:
+                resultado[str(chave)] = (int(valor[0]), int(valor[1]))
+        return resultado
 
     def _definir_passo_snap_angular(self, passo: float):
         self._passo_snap_angular_atual = float(passo)

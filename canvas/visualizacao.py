@@ -838,7 +838,7 @@ class VisualizacaoCanvas(QWidget):
                     espessura=esp,
                     estilo=str(elemento.get("estilo", "solid")),
                     amplitude=float(elemento.get("amplitude", 1.0)),
-                    destacar_controles=(idx in self._selecionados or self.ferramenta_ativa in {"curva", "manipular_pontos"}),
+                    destacar_controles=(idx in self._selecionados),
                 )
 
         if self._pontos_reta:
