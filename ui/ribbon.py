@@ -434,15 +434,6 @@ class RibbonGroup(QFrame):
             "por_raio",
         }
 
-        destaque_tools = {
-            "reta",
-            "curva",
-            "retangulo",
-            "por_coordenada",
-            "por_intersecao",
-            "por_raio",
-        }
-
         if len(tools) > 4:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)

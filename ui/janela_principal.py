@@ -802,9 +802,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
             btn.setIcon(QIcon(str(ICONS_DIR / tool.icon)))
             btn.setIconSize(QSize(28, 28))
-            btn.setFixedSize(34, 34)
+            btn.setFixedSize(30, 30)
             btn.setToolTip(tool.title)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                """
+                QToolButton {
+                    border: none;
+                    background: transparent;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QToolButton:hover {
+                    border: none;
+                    background: rgba(20, 120, 200, 0.10);
+                }
+                QToolButton:pressed {
+                    border: none;
+                    background: rgba(20, 120, 200, 0.16);
+                }
+                """
+            )
             btn.clicked.connect(lambda _=False, tid=tool_id: self._abrir_pagina_ferramenta(tid))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
             btn.customContextMenuRequested.connect(
