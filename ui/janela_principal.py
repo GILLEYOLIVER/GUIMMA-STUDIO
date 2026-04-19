@@ -50,6 +50,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
+        self._janela_aux_curva: QDialog | None = None
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
@@ -347,6 +348,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         janela.setWindowTitle(f"{titulo} - Auxiliar")
         janela.setModal(True)
         janela.setMinimumWidth(380)
+        janela.setStyleSheet(
+            "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
+            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; }"
+        )
         layout = QVBoxLayout(janela)
         texto_titulo, texto_instrucao = instrucoes[tool_id]
         lbl_titulo = QLabel(f"<b>{texto_titulo}</b>")
@@ -373,38 +378,43 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if not area:
             return False
-        janela = QDialog(self)
-        janela.setWindowTitle(f"{titulo} - Auxiliar")
-        janela.setModal(True)
-        janela.setMinimumWidth(380)
-        layout = QVBoxLayout(janela)
-        layout.addWidget(QLabel("<b>Configuração da Curva</b>"))
-        rb_2p = QRadioButton("Curva por 2 pontos (início/fim + ajuste de controle)")
-        rb_3p = QRadioButton("Curva por 3 pontos (passando pelos 3 cliques)")
-        rb_2p.setChecked(True)
-        layout.addWidget(rb_2p)
-        layout.addWidget(rb_3p)
-        lbl = QLabel(
-            "Botão direito: mesma lógica da reta (finalizar / limpar / soltar ferramenta).\n"
-            "Botão esquerdo: define os pontos conforme o modo."
-        )
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-size: 12px; color:#2b2b2b;")
-        layout.addWidget(lbl)
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.button(QDialogButtonBox.Ok).setText("Ativar curva")
-        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
-        layout.addWidget(botoes)
-        botoes.accepted.connect(janela.accept)
-        botoes.rejected.connect(janela.reject)
-        if janela.exec() != QDialog.Accepted:
-            self.lbl_status.setText(f"{titulo} cancelado.")
-            return True
-        area.canvas.set_modo_curva("3p" if rb_3p.isChecked() else "2p")
+        if self._janela_aux_curva is None:
+            janela = QDialog(self)
+            janela.setWindowTitle(f"{titulo} - Auxiliar")
+            janela.setModal(False)
+            janela.setMinimumWidth(380)
+            janela.setStyleSheet(
+                "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
+                "QRadioButton { color:#2b2b2b; padding:2px; }"
+            )
+            layout = QVBoxLayout(janela)
+            layout.addWidget(QLabel("<b>(cm) Curva</b>"))
+            rb_2p = QRadioButton("Curva por 2 pontos")
+            rb_3p = QRadioButton("Curva por 3 pontos")
+            rb_2p.setChecked(True)
+            layout.addWidget(rb_2p)
+            layout.addWidget(rb_3p)
+            lbl = QLabel("Direito: finalizar / limpar / soltar ferramenta.\nEsquerdo: define pontos.")
+            lbl.setWordWrap(True)
+            layout.addWidget(lbl)
+            rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
+            rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
+            self._janela_aux_curva = janela
+        else:
+            janela = self._janela_aux_curva
+            janela.setWindowTitle(f"{titulo} - Auxiliar")
+        area.canvas.set_modo_curva("2p")
         self._ativar_ferramenta_global("curva")
-        modo_txt = "3 pontos" if rb_3p.isChecked() else "2 pontos"
-        self.lbl_status.setText(f"{titulo} ativo ({modo_txt}).")
+        janela.show()
+        janela.raise_()
+        janela.activateWindow()
+        self.lbl_status.setText(f"{titulo} ativo (2 pontos).")
         return True
+
+    def _definir_modo_curva_area_atual(self, modo: str):
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.set_modo_curva(modo)
 
     def _abrir_menu_importar(self):
         botao = self.backstage.botoes.get("Importar ▸")
@@ -803,6 +813,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
+        self.ribbon.set_active_tool(tool_id)
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_ferramenta_ativa(tool_id)

@@ -322,11 +322,12 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa not in {"reta", "curva"}:
             if event.button() == Qt.LeftButton:
                 pos = self._ponto_com_snap(event.position())
-                alca = self._alca_curva_em_ponto(pos)
-                if alca is not None:
-                    self._arrastando_alca_curva = alca
-                    event.accept()
-                    return
+                if self.ferramenta_ativa == "manipular_pontos":
+                    alca = self._alca_curva_em_ponto(pos)
+                    if alca is not None:
+                        self._arrastando_alca_curva = alca
+                        event.accept()
+                        return
                 idx = self._indice_elemento_em_ponto(pos)
                 if idx is not None and idx in self._selecionados:
                     self._arrastando_selecao = True
@@ -428,6 +429,12 @@ class VisualizacaoCanvas(QWidget):
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
+        if self._curva_estado == "parada":
+            alca = self._alca_curva_em_ponto(pos)
+            if alca is not None:
+                self._arrastando_alca_curva = alca
+                event.accept()
+                return
         self._cliques_direito_curva = 0
         if self._modo_curva == "3p":
             if self._curva_estado in {"parada", "aguardando_inicial"}:
@@ -776,7 +783,7 @@ class VisualizacaoCanvas(QWidget):
                     espessura=float(elemento.get("espessura", 1.0)),
                     estilo=str(elemento.get("estilo", "solid")),
                     amplitude=float(elemento.get("amplitude", 1.0)),
-                    destacar_controles=(idx in self._selecionados),
+                    destacar_controles=(idx in self._selecionados or self.ferramenta_ativa in {"curva", "manipular_pontos"}),
                 )
 
         if self._pontos_reta:

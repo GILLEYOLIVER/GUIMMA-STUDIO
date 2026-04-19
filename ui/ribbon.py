@@ -63,8 +63,10 @@ class RibbonButton(QToolButton):
         super().__init__(parent)
         self.ferramenta = ferramenta
         self.setCursor(Qt.PointingHandCursor)
+        self.setCheckable(True)
         self.setText(ferramenta.title)
         self.setIcon(_carregar_icone(ferramenta.icon))
+        self.setProperty("tool_id", ferramenta.tool_id)
         self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
 
         if compacto:
@@ -83,6 +85,7 @@ class RibbonButton(QToolButton):
                 }
                 QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
                 QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
+                QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
                 """
             )
             return
@@ -102,6 +105,7 @@ class RibbonButton(QToolButton):
             }
             QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
             QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
+            QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
             """
         )
 
@@ -451,7 +455,7 @@ class RibbonWidget(QWidget):
             for group in tab.groups:
                 grupos.append((group.title, [self._tools[tid] for tid in group.tools]))
             pagina = RibbonPage(grupos)
-            pagina.tool_selected.connect(self.tool_selected.emit)
+            pagina.tool_selected.connect(self._on_tool_selected)
             for grupo in pagina.findChildren(RibbonGroup):
                 grupo.estilo_changed.connect(self.estilo_changed.emit)
             self.paginas.addWidget(pagina)
@@ -480,6 +484,16 @@ class RibbonWidget(QWidget):
 
     def tool_def(self, tool_id: str) -> ToolDef | None:
         return self._tools.get(tool_id)
+
+    def _on_tool_selected(self, tool_id: str):
+        self.set_active_tool(tool_id)
+        self.tool_selected.emit(tool_id)
+
+    def set_active_tool(self, tool_id: str):
+        for botao in self.findChildren(RibbonButton):
+            botao.blockSignals(True)
+            botao.setChecked(bool(botao.property("tool_id") == tool_id))
+            botao.blockSignals(False)
 
     def _atualizar_destaque_aba(self, index: int):
         for i in range(self.paginas.count()):
