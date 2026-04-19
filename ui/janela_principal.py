@@ -48,6 +48,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
+        self._restaurar_estilo_desenho_memorizado()
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
@@ -544,6 +545,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self.backstage.hide()
                 return
         self.projeto_atual = GSProjectIO.abrir(caminho)
+        self._restaurar_estilo_desenho_memorizado()
         self._arquivo_atual = Path(caminho)
         self.backstage.adicionar_recente(caminho)
         self._atualizar_titulo()
@@ -822,12 +824,26 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_estilo_desenho(self, estilo: dict):
         self._estilo_desenho_atual.update(estilo)
+        self.projeto_atual.preferencias_usuario["estilo_desenho"] = dict(self._estilo_desenho_atual)
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         self.lbl_status.setText(
             f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | "
             f"Espessura {self._estilo_desenho_atual['espessura']:.0f} | Altura {self._estilo_desenho_atual['amplitude']:.1f}"
+        )
+
+    def _restaurar_estilo_desenho_memorizado(self):
+        estilo_mem = self.projeto_atual.preferencias_usuario.get("estilo_desenho", {})
+        if not isinstance(estilo_mem, dict):
+            return
+        self._estilo_desenho_atual.update(
+            {
+                "cor": str(estilo_mem.get("cor", self._estilo_desenho_atual["cor"])),
+                "estilo": str(estilo_mem.get("estilo", self._estilo_desenho_atual["estilo"])),
+                "espessura": float(estilo_mem.get("espessura", self._estilo_desenho_atual["espessura"])),
+                "amplitude": float(estilo_mem.get("amplitude", self._estilo_desenho_atual["amplitude"])),
+            }
         )
 
     def _definir_passo_snap_angular(self, passo: float):

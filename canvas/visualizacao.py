@@ -242,6 +242,8 @@ class VisualizacaoCanvas(QWidget):
         self._modo_curva = "2p"
         self._cliques_direito_curva = 0
         self._arrastando_alca_curva: tuple[int, str] | None = None
+        self._ciclo_selecao_indices: list[int] = []
+        self._ciclo_selecao_cursor: QPointF | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -343,6 +345,12 @@ class VisualizacaoCanvas(QWidget):
                 event.accept()
                 return
             if event.button() == Qt.RightButton:
+                if self.ferramenta_ativa == "selecionar":
+                    pos = self._ponto_com_snap(event.position())
+                    if self._alternar_selecao_no(pos):
+                        self.update()
+                        event.accept()
+                        return
                 self._abrir_menu_contexto(event.globalPosition().toPoint())
                 event.accept()
                 return
@@ -630,6 +638,12 @@ class VisualizacaoCanvas(QWidget):
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
+    def _cor_realce(self, cor_hex: str) -> str:
+        cor = QColor(cor_hex)
+        if not cor.isValid():
+            cor = QColor("#d0d0d0")
+        return cor.lighter(135).name()
+
     def _finalizar_curva(self):
         if not (self._curva_p0 and self._curva_p1 and self._curva_p2):
             return
@@ -748,6 +762,44 @@ class VisualizacaoCanvas(QWidget):
         self.update()
         event.accept()
 
+    def _alternar_selecao_no(self, pos: QPointF) -> bool:
+        indices = self._indices_elementos_no_ponto(pos)
+        if len(indices) <= 1:
+            self._ciclo_selecao_indices = []
+            self._ciclo_selecao_cursor = None
+            return False
+        tolerancia = 2.0 / max(self.zoom, 0.001)
+        mesmo_ponto = self._ciclo_selecao_cursor and self._dist(self._ciclo_selecao_cursor, pos) <= tolerancia
+        if not mesmo_ponto or indices != self._ciclo_selecao_indices:
+            self._ciclo_selecao_indices = indices
+            self._ciclo_selecao_cursor = QPointF(pos)
+            self._selecionados = {indices[0]}
+            return True
+        atual = next(iter(self._selecionados), indices[0])
+        try:
+            i = indices.index(atual)
+        except ValueError:
+            i = -1
+        proximo = indices[(i + 1) % len(indices)]
+        self._selecionados = {proximo}
+        return True
+
+    def _indices_elementos_no_ponto(self, pos: QPointF) -> list[int]:
+        tolerancia = 8.0 / max(self.zoom, 0.001)
+        encontrados: list[int] = []
+        for idx, el in enumerate(self.cena.elementos):
+            tipo = el.get("tipo")
+            pontos_referencia: list[QPointF] = []
+            if tipo == "polyline":
+                pontos_referencia = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            elif tipo == "bezier_quadratica":
+                pontos_referencia = [QPointF(*el["p0"]), QPointF(*el["p2"])]
+            for p in pontos_referencia:
+                if self._dist(p, pos) <= tolerancia:
+                    encontrados.append(idx)
+                    break
+        return encontrados
+
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self._reposicionar_painel_coordenadas()
@@ -759,7 +811,10 @@ class VisualizacaoCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         for idx, elemento in enumerate(self.cena.elementos):
-            cor = "#ffd54a" if idx in self._selecionados else elemento.get("cor", "#d0d0d0")
+            cor_base = elemento.get("cor", "#d0d0d0")
+            selecionado = idx in self._selecionados
+            cor = self._cor_realce(cor_base) if selecionado else cor_base
+            esp = float(elemento.get("espessura", 1.0)) + (0.8 if selecionado else 0.0)
             if elemento.get("tipo") == "polyline":
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
@@ -768,7 +823,7 @@ class VisualizacaoCanvas(QWidget):
                     painter,
                     pontos,
                     cor=cor,
-                    espessura=float(elemento.get("espessura", 1.0)),
+                    espessura=esp,
                     estilo=str(elemento.get("estilo", "solid")),
                     amplitude=float(elemento.get("amplitude", 1.0)),
                     fase_inicial=float(elemento.get("fase_inicio", 0.0)),
@@ -780,7 +835,7 @@ class VisualizacaoCanvas(QWidget):
                     QPointF(*elemento["p1"]),
                     QPointF(*elemento["p2"]),
                     cor=cor,
-                    espessura=float(elemento.get("espessura", 1.0)),
+                    espessura=esp,
                     estilo=str(elemento.get("estilo", "solid")),
                     amplitude=float(elemento.get("amplitude", 1.0)),
                     destacar_controles=(idx in self._selecionados or self.ferramenta_ativa in {"curva", "manipular_pontos"}),
