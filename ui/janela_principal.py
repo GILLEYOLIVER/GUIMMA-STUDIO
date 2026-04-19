@@ -52,6 +52,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
@@ -601,6 +602,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
+
+    def _limpar_abas_documentos(self):
+        while self.abas_documentos.count():
+            widget = self.abas_documentos.widget(0)
+            self.abas_documentos.removeTab(0)
+            if widget:
+                widget.deleteLater()
+        self._contador_sem_nome = 0
 
     def _fechar_aba_documento(self, index: int):
         if index < 0 or index >= self.abas_documentos.count():
