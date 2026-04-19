@@ -66,9 +66,14 @@ flowchart LR
 | Construção | Retas | `estender_duas_retas` | Estender duas retas | `tools/construcao.py` | `FerramentaEstenderDuasRetas` | `reta.svg` |
 | Construção | Curvas | `curva` | Curva | `tools/construcao.py` | `FerramentaCurva` | `curva.svg` |
 | Construção | Curvas | `dividir_curva` | Dividir Curva | `tools/dividir_curva_tool.py` | `Ferramenta` | `dividir_curva.svg` |
+| Construção | Curvas | `espiral_e_curvas` | Espiral e Curvas | `tools/espiral_e_curvas_tool.py` | `Ferramenta` | `espiral_e_curvas.svg` |
+| Construção | Curvas | `cadastrar_curva` | Cadastrar Curva | `tools/cadastrar_curva_tool.py` | `Ferramenta` | `cadastrar_curva.svg` |
+| Construção | Curvas | `editar_pontos_de_curva` | Editar Pontos de Curva | `tools/editar_pontos_de_curva_tool.py` | `Ferramenta` | `editar_pontos_de_curva.svg` |
 | Construção | Curvas | `predefinida` | Predefinida | `tools/predefinida_tool.py` | `Ferramenta` | `predefinida.svg` |
 | Construção | Pontos | `por_coordenada` | Por Coordenada | `tools/por_coordenada_tool.py` | `Ferramenta` | `por_coordenada.svg` |
 | Construção | Pontos | `por_intersecao` | Por Intersecao | `tools/por_intersecao_tool.py` | `Ferramenta` | `por_intersecao.svg` |
+| Construção | Pontos | `no_centro_do_arco` | No Centro do Arco | `tools/no_centro_do_arco_tool.py` | `Ferramenta` | `no_centro_do_arco.svg` |
+| Construção | Pontos | `no_perimetro` | No Perimetro | `tools/no_perimetro_tool.py` | `Ferramenta` | `no_perimetro.svg` |
 | Construção | Pontos | `por_distancia` | Por Distancia | `tools/por_distancia_tool.py` | `Ferramenta` | `por_distancia.svg` |
 | Construção | Arcos | `por_raio` | Por Raio | `tools/por_raio_tool.py` | `Ferramenta` | `por_raio.svg` |
 | Construção | Texto | `inserir_texto` | Inserir Texto | `tools/inserir_texto_tool.py` | `Ferramenta` | `inserir_texto.svg` |
