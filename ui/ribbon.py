@@ -138,14 +138,14 @@ class RibbonButton(QToolButton):
                 self.styleSheet()
                 + """
                 QToolButton {
-                    border: 2px solid #86b8ea;
+                    border: 1px solid #c7ced6;
                     border-radius: 4px;
                     font-weight: 700;
                     font-size: 11px;
                     padding: 2px;
-                    background: #eef6ff;
+                    background: #ffffff;
                 }
-                QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
+                QToolButton:hover { background: #f6f8fa; border: 1px solid #b9c2cc; }
                 """
             )
 
@@ -415,7 +415,7 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(92)
+        self.setFixedHeight(102)
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 4, 6, 0)
@@ -482,9 +482,9 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(12)
+        rodape.setFixedHeight(14)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 0px;")
+        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -582,7 +582,7 @@ class RibbonWidget(QWidget):
         for i in range(self.paginas.count()):
             pagina = self.paginas.widget(i)
             if i == index:
-                pagina.setStyleSheet("background: #eaf4ff; border-top: 1px solid #c7ddf3;")
+                pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
             else:
                 pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
 
