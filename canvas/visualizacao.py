@@ -233,6 +233,12 @@ class VisualizacaoCanvas(QWidget):
         self._tecla_w_trava_principal = False
         self._extensao_origem: tuple[int, bool] | None = None
         self._segmento_primeira_reta: tuple[int, int] | None = None
+        self._curva_estado = "parada"
+        self._curva_p0: QPointF | None = None
+        self._curva_p2: QPointF | None = None
+        self._curva_p1: QPointF | None = None
+        self._curva_preview_fim: QPointF | None = None
+        self._arrastando_alca_curva: tuple[int, str] | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -263,11 +269,18 @@ class VisualizacaoCanvas(QWidget):
             if self._painel_coordenadas_visivel:
                 self.painel_coordenadas.show()
             self._reposicionar_painel_coordenadas()
+            if tool_id == "curva":
+                self._pontos_reta.clear()
+                self._preview_reta = None
+                self._guia_fechamento = None
+                self._guias_alinhamento = []
         else:
             self._pontos_reta.clear()
             self._preview_reta = None
             self._guia_fechamento = None
             self._guias_alinhamento = []
+        if tool_id != "curva":
+            self._resetar_estado_curva()
         if tool_id not in {"estender_reta", "estender_ate_elemento"}:
             self._extensao_origem = None
         if tool_id != "estender_duas_retas":
@@ -287,6 +300,9 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
+        if self.ferramenta_ativa == "curva":
+            self._mouse_press_curva(event)
+            return
         if self.ferramenta_ativa == "dividir_curva" and event.button() == Qt.LeftButton:
             self._dividir_segmento_em_clique(self._ponto_com_snap(event.position()))
             event.accept()
@@ -302,6 +318,11 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa not in {"reta", "curva"}:
             if event.button() == Qt.LeftButton:
                 pos = self._ponto_com_snap(event.position())
+                alca = self._alca_curva_em_ponto(pos)
+                if alca is not None:
+                    self._arrastando_alca_curva = alca
+                    event.accept()
+                    return
                 idx = self._indice_elemento_em_ponto(pos)
                 if idx is not None and idx in self._selecionados:
                     self._arrastando_selecao = True
@@ -375,6 +396,39 @@ class VisualizacaoCanvas(QWidget):
             return
 
         super().mousePressEvent(event)
+
+    def _mouse_press_curva(self, event: QMouseEvent):
+        pos = self._ponto_com_snap(event.position())
+        if event.button() == Qt.RightButton:
+            self._resetar_estado_curva()
+            self.update()
+            event.accept()
+            return
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
+        if self._curva_estado in {"parada", "aguardando_inicial"}:
+            self._curva_p0 = pos
+            self._curva_p2 = None
+            self._curva_p1 = None
+            self._curva_preview_fim = None
+            self._curva_estado = "aguardando_final"
+        elif self._curva_estado == "aguardando_final":
+            self._curva_p2 = pos
+            self._curva_p1 = QPointF((self._curva_p0.x() + self._curva_p2.x()) / 2.0, (self._curva_p0.y() + self._curva_p2.y()) / 2.0)
+            self._curva_estado = "aguardando_controle"
+        elif self._curva_estado == "aguardando_controle":
+            self._curva_p1 = pos
+            self._finalizar_curva()
+        self.update()
+        event.accept()
+
+    def _resetar_estado_curva(self):
+        self._curva_estado = "parada"
+        self._curva_p0 = None
+        self._curva_p2 = None
+        self._curva_p1 = None
+        self._curva_preview_fim = None
 
     def _dividir_segmento_em_clique(self, pos: QPointF):
         info = self._segmento_mais_proximo(pos)
@@ -520,9 +574,46 @@ class VisualizacaoCanvas(QWidget):
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
+    def _finalizar_curva(self):
+        if not (self._curva_p0 and self._curva_p1 and self._curva_p2):
+            return
+        self.cena.elementos.append(
+            {
+                "tipo": "bezier_quadratica",
+                "p0": (self._curva_p0.x(), self._curva_p0.y()),
+                "p1": (self._curva_p1.x(), self._curva_p1.y()),
+                "p2": (self._curva_p2.x(), self._curva_p2.y()),
+                "cor": self._linha_cor,
+                "espessura": self._linha_espessura,
+                "estilo": self._linha_estilo,
+                "amplitude": self._linha_amplitude,
+            }
+        )
+        self._registrar_historico()
+        self._resetar_estado_curva()
+
+    def _atualizar_alca_curva(self, idx: int, alca: str, pos: QPointF):
+        if idx < 0 or idx >= len(self.cena.elementos):
+            return
+        el = self.cena.elementos[idx]
+        if el.get("tipo") != "bezier_quadratica":
+            return
+        if alca not in {"p0", "p1", "p2"}:
+            return
+        el[alca] = (pos.x(), pos.y())
+
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
         self._cursor_tela = event.position()
-        if self.ferramenta_ativa in {"reta", "curva"}:
+        if self.ferramenta_ativa == "curva":
+            pos = self._ponto_com_snap(event.position())
+            if self._curva_estado == "aguardando_final":
+                self._curva_preview_fim = pos
+            elif self._curva_estado == "aguardando_controle":
+                self._curva_p1 = pos
+            self.update()
+            event.accept()
+            return
+        if self.ferramenta_ativa == "reta":
             snap_pos = self._ponto_com_snap(event.position())
             if self._pontos_reta:
                 self._preview_reta = self._snap_angular(
@@ -542,6 +633,12 @@ class VisualizacaoCanvas(QWidget):
             return
         if self.ferramenta_ativa not in {"reta", "curva"}:
             pos = self._ponto_com_snap(event.position())
+            if self._arrastando_alca_curva:
+                idx, alca = self._arrastando_alca_curva
+                self._atualizar_alca_curva(idx, alca, pos)
+                self.update()
+                event.accept()
+                return
             if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
                 delta_x = pos.x() - self._ultimo_ponto_arrasto.x()
                 delta_y = pos.y() - self._ultimo_ponto_arrasto.y()
@@ -563,6 +660,12 @@ class VisualizacaoCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
+        if event.button() == Qt.LeftButton and self._arrastando_alca_curva:
+            self._arrastando_alca_curva = None
+            self._registrar_historico()
+            self.update()
+            event.accept()
+            return
         if self.ferramenta_ativa in {"reta", "curva"}:
             return super().mouseReleaseEvent(event)
         if event.button() != Qt.LeftButton:
@@ -595,21 +698,32 @@ class VisualizacaoCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         for idx, elemento in enumerate(self.cena.elementos):
-            if elemento.get("tipo") != "polyline":
-                continue
-            pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
-            if len(pontos) < 2:
-                continue
             cor = "#ffd54a" if idx in self._selecionados else elemento.get("cor", "#d0d0d0")
-            self._desenhar_polilinha(
-                painter,
-                pontos,
-                cor=cor,
-                espessura=float(elemento.get("espessura", 1.0)),
-                estilo=str(elemento.get("estilo", "solid")),
-                amplitude=float(elemento.get("amplitude", 1.0)),
-                fase_inicial=float(elemento.get("fase_inicio", 0.0)),
-            )
+            if elemento.get("tipo") == "polyline":
+                pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
+                if len(pontos) < 2:
+                    continue
+                self._desenhar_polilinha(
+                    painter,
+                    pontos,
+                    cor=cor,
+                    espessura=float(elemento.get("espessura", 1.0)),
+                    estilo=str(elemento.get("estilo", "solid")),
+                    amplitude=float(elemento.get("amplitude", 1.0)),
+                    fase_inicial=float(elemento.get("fase_inicio", 0.0)),
+                )
+            elif elemento.get("tipo") == "bezier_quadratica":
+                self._desenhar_bezier_quadratica(
+                    painter,
+                    QPointF(*elemento["p0"]),
+                    QPointF(*elemento["p1"]),
+                    QPointF(*elemento["p2"]),
+                    cor=cor,
+                    espessura=float(elemento.get("espessura", 1.0)),
+                    estilo=str(elemento.get("estilo", "solid")),
+                    amplitude=float(elemento.get("amplitude", 1.0)),
+                    destacar_controles=(idx in self._selecionados),
+                )
 
         if self._pontos_reta:
             if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
@@ -651,6 +765,29 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado:
             self._desenhar_marcador_snap(painter, self._snap_resultado)
+        self._desenhar_preview_curva(painter)
+
+    def _desenhar_preview_curva(self, painter: QPainter):
+        if self.ferramenta_ativa != "curva":
+            return
+        if self._curva_p0:
+            self._desenhar_marca_x(painter, self._curva_p0, cor="#55e3ff")
+        fim = self._curva_p2 or self._curva_preview_fim
+        if self._curva_p0 and fim:
+            self._desenhar_segmento(painter, self._curva_p0, fim, tracejado=True, cor="#4e92ff")
+            self._desenhar_marca_x(painter, fim, cor="#55e3ff")
+        if self._curva_p0 and self._curva_p1 and self._curva_p2:
+            self._desenhar_bezier_quadratica(
+                painter,
+                self._curva_p0,
+                self._curva_p1,
+                self._curva_p2,
+                cor=self._linha_cor,
+                espessura=self._linha_espessura,
+                estilo=self._linha_estilo,
+                amplitude=self._linha_amplitude,
+                destacar_controles=True,
+            )
 
     def _desenhar_polilinha(
         self,
@@ -667,6 +804,39 @@ class VisualizacaoCanvas(QWidget):
             fase = self._desenhar_segmento(
                 painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude, fase=fase
             )
+
+    def _desenhar_bezier_quadratica(
+        self,
+        painter: QPainter,
+        p0: QPointF,
+        p1: QPointF,
+        p2: QPointF,
+        cor: str,
+        espessura: float,
+        estilo: str,
+        amplitude: float,
+        destacar_controles: bool = False,
+    ):
+        pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
+        self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude)
+        if not destacar_controles:
+            return
+        self._desenhar_segmento(painter, p0, p1, tracejado=True, cor="#6fa8ff")
+        self._desenhar_segmento(painter, p1, p2, tracejado=True, cor="#6fa8ff")
+        self._desenhar_marca_x(painter, p0, cor="#7dffb3")
+        self._desenhar_marca_x(painter, p1, cor="#ff7dd1")
+        self._desenhar_marca_x(painter, p2, cor="#7dffb3")
+
+    def _amostrar_bezier_quadratica(self, p0: QPointF, p1: QPointF, p2: QPointF, segmentos: int = 36) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        n = max(8, int(segmentos))
+        for i in range(n + 1):
+            t = i / n
+            u = 1.0 - t
+            x = (u * u * p0.x()) + (2.0 * u * t * p1.x()) + (t * t * p2.x())
+            y = (u * u * p0.y()) + (2.0 * u * t * p1.y()) + (t * t * p2.y())
+            pontos.append(QPointF(x, y))
+        return pontos
 
     def _desenhar_segmento(
         self,
@@ -1026,12 +1196,20 @@ class VisualizacaoCanvas(QWidget):
                 novo = deepcopy(item)
                 if novo.get("tipo") == "polyline":
                     novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+                elif novo.get("tipo") == "bezier_quadratica":
+                    for chave in ("p0", "p1", "p2"):
+                        x, y = novo[chave]
+                        novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
         else:
             novo = deepcopy(self._buffer_copia)
             if novo.get("tipo") == "polyline":
                 novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+            elif novo.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    x, y = novo[chave]
+                    novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
             self.cena.elementos.append(novo)
             self._selecionados.add(len(self.cena.elementos) - 1)
         self._registrar_historico()
@@ -1058,14 +1236,22 @@ class VisualizacaoCanvas(QWidget):
         return min(inicio.x(), fim.x()), min(inicio.y(), fim.y()), max(inicio.x(), fim.x()), max(inicio.y(), fim.y())
 
     def _bbox_elemento(self, elemento: dict) -> tuple[float, float, float, float] | None:
-        if elemento.get("tipo") != "polyline":
-            return None
-        pontos = elemento.get("pontos", [])
-        if not pontos:
-            return None
-        xs = [p[0] for p in pontos]
-        ys = [p[1] for p in pontos]
-        return min(xs), min(ys), max(xs), max(ys)
+        if elemento.get("tipo") == "polyline":
+            pontos = elemento.get("pontos", [])
+            if not pontos:
+                return None
+            xs = [p[0] for p in pontos]
+            ys = [p[1] for p in pontos]
+            return min(xs), min(ys), max(xs), max(ys)
+        if elemento.get("tipo") == "bezier_quadratica":
+            p0 = QPointF(*elemento["p0"])
+            p1 = QPointF(*elemento["p1"])
+            p2 = QPointF(*elemento["p2"])
+            amostra = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=24)
+            xs = [p.x() for p in amostra]
+            ys = [p.y() for p in amostra]
+            return min(xs), min(ys), max(xs), max(ys)
+        return None
 
     def _atualizar_selecao_por_caixa(self, inicio: QPointF, fim: QPointF):
         x1, y1, x2, y2 = self._retangulo_selecao(inicio, fim)
@@ -1098,11 +1284,29 @@ class VisualizacaoCanvas(QWidget):
                 return idx
         return None
 
+    def _alca_curva_em_ponto(self, ponto: QPointF) -> tuple[int, str] | None:
+        tolerancia = 6 / max(self.zoom, 0.001)
+        for idx in sorted(self._selecionados):
+            if idx < 0 or idx >= len(self.cena.elementos):
+                continue
+            el = self.cena.elementos[idx]
+            if el.get("tipo") != "bezier_quadratica":
+                continue
+            for alca in ("p0", "p1", "p2"):
+                p = QPointF(*el[alca])
+                if self._dist(p, ponto) <= tolerancia:
+                    return idx, alca
+        return None
+
     def _mover_selecionados(self, dx: float, dy: float):
         for idx in self._selecionados:
             el = self.cena.elementos[idx]
             if el.get("tipo") == "polyline":
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
+            elif el.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    x, y = el[chave]
+                    el[chave] = (x + dx, y + dy)
 
     def _desenhar_caixa_selecao(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1 = self._cena_para_tela(inicio)
@@ -1186,12 +1390,28 @@ class VisualizacaoCanvas(QWidget):
         self._snap_candidatos = self._snap_manager.calcular_candidatos(
             self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
         )
+        tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        for idx, el in enumerate(self.cena.elementos):
+            if el.get("tipo") != "bezier_quadratica":
+                continue
+            p0 = QPointF(*el["p0"])
+            p1 = QPointF(*el["p1"])
+            p2 = QPointF(*el["p2"])
+            candidatos = [
+                ("nó", p0),
+                ("controle", p1),
+                ("nó", p2),
+                ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
+            ]
+            for tipo, ponto in candidatos:
+                dist = self._dist(pos_cena, ponto)
+                if dist <= tol_cena:
+                    self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
         if self._ponto_coordenada_aplicada is not None:
             dist = sqrt(
                 (pos_cena.x() - self._ponto_coordenada_aplicada.x()) ** 2
                 + (pos_cena.y() - self._ponto_coordenada_aplicada.y()) ** 2
             )
-            tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
             if dist <= tol_cena:
                 self._snap_candidatos.insert(
                     0,
@@ -1434,9 +1654,9 @@ class VisualizacaoCanvas(QWidget):
                 fase += comprimento
         return elementos
 
-    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF):
+    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00"):
         pt = self._cena_para_tela(ponto)
-        pen = QPen(QColor("#ff5a00"), 1)
+        pen = QPen(QColor(cor), 1)
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
