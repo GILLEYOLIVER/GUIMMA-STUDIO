@@ -100,6 +100,19 @@ class RibbonButton(QToolButton):
                 QToolButton:checked { background: #e7f1ff; border: none; color:#0f4f86; }
                 """
             )
+            if destaque:
+                self.setStyleSheet(
+                    self.styleSheet()
+                    + """
+                    QToolButton {
+                        border: 2px solid #86b8ea;
+                        background: #eef6ff;
+                        font-size: 13px;
+                        font-weight: 700;
+                    }
+                    QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
+                    """
+                )
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
@@ -411,6 +424,15 @@ class RibbonGroup(QFrame):
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 4, 6, 2)
         raiz.setSpacing(3)
+
+        destaque_tools = {
+            "reta",
+            "curva",
+            "retangulo",
+            "por_coordenada",
+            "por_intersecao",
+            "por_raio",
+        }
 
         destaque_tools = {
             "reta",
