@@ -735,6 +735,9 @@ class VisualizacaoCanvas(QWidget):
         self.copiar()
         self.apagar_selecionados()
 
+    def recortar(self):
+        self._recortar_selecionados()
+
     def _desenhar_guia_angular(self, painter: QPainter, origem: QPointF, destino: QPointF):
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()

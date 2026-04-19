@@ -273,6 +273,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         return self.barra_superior.height()
 
     def _abrir_pagina_ferramenta(self, tool_id: str):
+        if self._executar_acao_edicao_ribbon(tool_id):
+            return
         tool_def = self.ribbon.tool_def(tool_id)
         if not tool_def:
             self.lbl_status.setText(f"Ferramenta não encontrada: {tool_id}")
@@ -288,6 +290,24 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(msg)
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
+
+    def _executar_acao_edicao_ribbon(self, tool_id: str) -> bool:
+        area = self._area_documento_atual()
+        if not area:
+            return False
+        acoes = {
+            "copiar": (area.canvas.copiar, "Copiado"),
+            "colar": (area.canvas.colar, "Colado"),
+            "recortar": (area.canvas.recortar, "Recortado"),
+            "excluir": (area.canvas.apagar_selecionados, "Excluído"),
+        }
+        acao = acoes.get(tool_id)
+        if not acao:
+            return False
+        func, mensagem = acao
+        func()
+        self.lbl_status.setText(mensagem)
+        return True
 
     def _abrir_menu_importar(self):
         botao = self.backstage.botoes.get("Importar ▸")
