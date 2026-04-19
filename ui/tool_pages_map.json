@@ -8,13 +8,13 @@
           "title": "Desenho",
           "tools": [
             "cor",
+            "colar",
             "selecionar"
           ]
         },
         {
           "title": "Editar",
           "tools": [
-            "colar",
             "recortar",
             "copiar",
             "excluir"
