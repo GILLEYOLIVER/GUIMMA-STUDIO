@@ -59,18 +59,23 @@ flowchart LR
 | Início | Selecionar | `selecionar_tudo` | Selecionar Tudo | `tools/selecionar_tudo_tool.py` | `Ferramenta` | `selecionar_tudo.svg` |
 | Início | Selecionar | `selecionar_moldes` | Selecionar Moldes | `tools/selecionar_moldes_tool.py` | `Ferramenta` | `selecionar_moldes.svg` |
 | Construção | Retas | `reta` | Reta | `tools/construcao.py` | `FerramentaReta` | `reta.svg` |
-| Construção | Retas | `retangulo` | Retangulo | `tools/construcao.py` | `FerramentaRetangulo` | `retangulo.svg` |
-| Construção | Retas | `por_angulo` | Por Angulo | `tools/construcao.py` | `FerramentaPorAngulo` | `por_angulo.svg` |
+| Construção | Retas | `retangulo` | Retângulo | `tools/construcao.py` | `FerramentaRetangulo` | `retangulo.svg` |
+| Construção | Retas | `por_angulo` | Por Ângulo | `tools/construcao.py` | `FerramentaPorAngulo` | `por_angulo.svg` |
 | Construção | Retas | `estender_reta` | Estender reta | `tools/construcao.py` | `FerramentaEstenderReta` | `reta.svg` |
 | Construção | Retas | `estender_ate_elemento` | Estender até elemento | `tools/construcao.py` | `FerramentaEstenderAteElemento` | `reta.svg` |
 | Construção | Retas | `estender_duas_retas` | Estender duas retas | `tools/construcao.py` | `FerramentaEstenderDuasRetas` | `reta.svg` |
 | Construção | Curvas | `curva` | Curva | `tools/construcao.py` | `FerramentaCurva` | `curva.svg` |
 | Construção | Curvas | `dividir_curva` | Dividir Curva | `tools/dividir_curva_tool.py` | `Ferramenta` | `dividir_curva.svg` |
+| Construção | Curvas | `espiral_e_curvas` | Espiral e Curvas | `tools/espiral_e_curvas_tool.py` | `Ferramenta` | `espiral_e_curvas.svg` |
+| Construção | Curvas | `cadastrar_curva` | Cadastrar curvas | `tools/cadastrar_curva_tool.py` | `Ferramenta` | `cadastrar_curva.svg` |
+| Construção | Curvas | `editar_pontos_de_curva` | Editar Pontos de Curva | `tools/editar_pontos_de_curva_tool.py` | `Ferramenta` | `editar_pontos_de_curva.svg` |
 | Construção | Curvas | `predefinida` | Predefinida | `tools/predefinida_tool.py` | `Ferramenta` | `predefinida.svg` |
 | Construção | Pontos | `por_coordenada` | Por Coordenada | `tools/por_coordenada_tool.py` | `Ferramenta` | `por_coordenada.svg` |
-| Construção | Pontos | `por_intersecao` | Por Intersecao | `tools/por_intersecao_tool.py` | `Ferramenta` | `por_intersecao.svg` |
-| Construção | Pontos | `por_distancia` | Por Distancia | `tools/por_distancia_tool.py` | `Ferramenta` | `por_distancia.svg` |
-| Construção | Arcos | `por_raio` | Por Raio | `tools/por_raio_tool.py` | `Ferramenta` | `por_raio.svg` |
+| Construção | Pontos | `por_intersecao` | Por Interseção | `tools/por_intersecao_tool.py` | `Ferramenta` | `por_intersecao.svg` |
+| Construção | Pontos | `no_centro_do_arco` | No Centro do Arco | `tools/no_centro_do_arco_tool.py` | `Ferramenta` | `no_centro_do_arco.svg` |
+| Construção | Pontos | `no_perimetro` | No Perímetro | `tools/no_perimetro_tool.py` | `Ferramenta` | `no_perimetro.svg` |
+| Construção | Pontos | `por_distancia` | Por Distância | `tools/por_distancia_tool.py` | `Ferramenta` | `por_distancia.svg` |
+| Construção | Arcos | `por_raio` | Por raio | `tools/por_raio_tool.py` | `Ferramenta` | `por_raio.svg` |
 | Construção | Texto | `inserir_texto` | Inserir Texto | `tools/inserir_texto_tool.py` | `Ferramenta` | `inserir_texto.svg` |
 | Construção | Texto | `editar_texto` | Editar Texto | `tools/editar_texto_tool.py` | `Ferramenta` | `editar_texto.svg` |
 | Produção | Definir moldes | `extrair_molde` | Extrair Molde | `tools/extrair_molde_tool.py` | `Ferramenta` | `extrair_molde.svg` |
