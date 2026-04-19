@@ -264,6 +264,11 @@
           ]
         }
       ]
+    },
+    {
+      "id": "usuarios",
+      "title": "Usuários",
+      "groups": []
     }
   ],
   "tools": {
@@ -334,13 +339,13 @@
       "icon": "reta.svg"
     },
     "retangulo": {
-      "title": "Retangulo",
+      "title": "Retângulo",
       "module": "tools/construcao.py",
       "class": "FerramentaRetangulo",
       "icon": "retangulo.svg"
     },
     "por_angulo": {
-      "title": "Por Angulo",
+      "title": "Por Ângulo",
       "module": "tools/construcao.py",
       "class": "FerramentaPorAngulo",
       "icon": "por_angulo.svg"
@@ -364,7 +369,7 @@
       "icon": "espiral_e_curvas.svg"
     },
     "cadastrar_curva": {
-      "title": "Cadastrar Curva",
+      "title": "Cadastrar curvas",
       "module": "tools/cadastrar_curva_tool.py",
       "class": "Ferramenta",
       "icon": "cadastrar_curva.svg"
@@ -388,7 +393,7 @@
       "icon": "por_coordenada.svg"
     },
     "por_intersecao": {
-      "title": "Por Intersecao",
+      "title": "Por Interseção",
       "module": "tools/por_intersecao_tool.py",
       "class": "Ferramenta",
       "icon": "por_intersecao.svg"
@@ -400,19 +405,19 @@
       "icon": "no_centro_do_arco.svg"
     },
     "no_perimetro": {
-      "title": "No Perimetro",
+      "title": "No Perímetro",
       "module": "tools/no_perimetro_tool.py",
       "class": "Ferramenta",
       "icon": "no_perimetro.svg"
     },
     "por_distancia": {
-      "title": "Por Distancia",
+      "title": "Por Distância",
       "module": "tools/por_distancia_tool.py",
       "class": "Ferramenta",
       "icon": "por_distancia.svg"
     },
     "por_raio": {
-      "title": "Por Raio",
+      "title": "Por raio",
       "module": "tools/por_raio_tool.py",
       "class": "Ferramenta",
       "icon": "por_raio.svg"
