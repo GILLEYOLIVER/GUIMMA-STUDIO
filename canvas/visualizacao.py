@@ -238,6 +238,9 @@ class VisualizacaoCanvas(QWidget):
         self._curva_p2: QPointF | None = None
         self._curva_p1: QPointF | None = None
         self._curva_preview_fim: QPointF | None = None
+        self._curva_pmedio: QPointF | None = None
+        self._modo_curva = "2p"
+        self._cliques_direito_curva = 0
         self._arrastando_alca_curva: tuple[int, str] | None = None
 
         self.setMinimumSize(100, 100)
@@ -274,6 +277,7 @@ class VisualizacaoCanvas(QWidget):
                 self._preview_reta = None
                 self._guia_fechamento = None
                 self._guias_alinhamento = []
+                self._cliques_direito_curva = 0
         else:
             self._pontos_reta.clear()
             self._preview_reta = None
@@ -400,12 +404,48 @@ class VisualizacaoCanvas(QWidget):
     def _mouse_press_curva(self, event: QMouseEvent):
         pos = self._ponto_com_snap(event.position())
         if event.button() == Qt.RightButton:
-            self._resetar_estado_curva()
+            if self._cliques_direito_curva >= 2:
+                self._resetar_estado_curva()
+                self._cliques_direito_curva = 0
+                self.ferramenta_padrao_solicitada.emit("selecionar")
+                self.update()
+                event.accept()
+                return
+            if self._cliques_direito_curva >= 1:
+                self._resetar_estado_curva()
+                self._cliques_direito_curva = 2
+                self.update()
+                event.accept()
+                return
+            if self._curva_pronta_para_finalizar():
+                self._finalizar_curva()
+            else:
+                self._resetar_estado_curva()
+            self._cliques_direito_curva = 1
             self.update()
             event.accept()
             return
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
+            return
+        self._cliques_direito_curva = 0
+        if self._modo_curva == "3p":
+            if self._curva_estado in {"parada", "aguardando_inicial"}:
+                self._curva_p0 = pos
+                self._curva_pmedio = None
+                self._curva_p2 = None
+                self._curva_p1 = None
+                self._curva_preview_fim = None
+                self._curva_estado = "aguardando_ponto2"
+            elif self._curva_estado == "aguardando_ponto2":
+                self._curva_pmedio = pos
+                self._curva_estado = "aguardando_ponto3"
+            elif self._curva_estado == "aguardando_ponto3":
+                self._curva_p2 = pos
+                self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
+                self._finalizar_curva()
+            self.update()
+            event.accept()
             return
         if self._curva_estado in {"parada", "aguardando_inicial"}:
             self._curva_p0 = pos
@@ -429,6 +469,15 @@ class VisualizacaoCanvas(QWidget):
         self._curva_p2 = None
         self._curva_p1 = None
         self._curva_preview_fim = None
+        self._curva_pmedio = None
+
+    def _curva_pronta_para_finalizar(self) -> bool:
+        if self._modo_curva == "3p":
+            return bool(self._curva_p0 and self._curva_pmedio and self._curva_p2)
+        return bool(self._curva_p0 and self._curva_p1 and self._curva_p2)
+
+    def _controle_para_tres_pontos(self, p0: QPointF, pm: QPointF, p2: QPointF) -> QPointF:
+        return QPointF((2.0 * pm.x()) - ((p0.x() + p2.x()) / 2.0), (2.0 * pm.y()) - ((p0.y() + p2.y()) / 2.0))
 
     def _dividir_segmento_em_clique(self, pos: QPointF):
         info = self._segmento_mais_proximo(pos)
@@ -589,6 +638,7 @@ class VisualizacaoCanvas(QWidget):
                 "amplitude": self._linha_amplitude,
             }
         )
+        self._selecionados = {len(self.cena.elementos) - 1}
         self._registrar_historico()
         self._resetar_estado_curva()
 
@@ -610,6 +660,10 @@ class VisualizacaoCanvas(QWidget):
                 self._curva_preview_fim = pos
             elif self._curva_estado == "aguardando_controle":
                 self._curva_p1 = pos
+            elif self._curva_estado == "aguardando_ponto3" and self._curva_p0 and self._curva_pmedio:
+                self._curva_preview_fim = pos
+                self._curva_p2 = pos
+                self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
             self.update()
             event.accept()
             return
@@ -788,6 +842,8 @@ class VisualizacaoCanvas(QWidget):
                 amplitude=self._linha_amplitude,
                 destacar_controles=True,
             )
+        if self._modo_curva == "3p" and self._curva_pmedio:
+            self._desenhar_marca_x(painter, self._curva_pmedio, cor="#a8ff7d")
 
     def _desenhar_polilinha(
         self,
@@ -1673,6 +1729,10 @@ class VisualizacaoCanvas(QWidget):
         if amplitude is not None:
             self._linha_amplitude = max(0.2, float(amplitude))
         self.update()
+
+    def set_modo_curva(self, modo: str):
+        self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
+        self._resetar_estado_curva()
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))

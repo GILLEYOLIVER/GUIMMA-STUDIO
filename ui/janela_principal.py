@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QTabBar,
     QTabWidget,
@@ -314,6 +315,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         return True
 
     def _abrir_janela_auxiliar_ferramenta(self, tool_id: str, titulo: str) -> bool:
+        if tool_id == "curva":
+            return self._abrir_janela_auxiliar_curva(titulo)
         instrucoes = {
             "estender_reta": (
                 "Estender reta",
@@ -364,6 +367,43 @@ class GuimmaStudioMainWindow(QMainWindow):
             return True
         self._ativar_ferramenta_global(tool_id)
         self.lbl_status.setText(f"{titulo} ativo. Siga os passos da janela auxiliar.")
+        return True
+
+    def _abrir_janela_auxiliar_curva(self, titulo: str) -> bool:
+        area = self._area_documento_atual()
+        if not area:
+            return False
+        janela = QDialog(self)
+        janela.setWindowTitle(f"{titulo} - Auxiliar")
+        janela.setModal(True)
+        janela.setMinimumWidth(380)
+        layout = QVBoxLayout(janela)
+        layout.addWidget(QLabel("<b>Configuração da Curva</b>"))
+        rb_2p = QRadioButton("Curva por 2 pontos (início/fim + ajuste de controle)")
+        rb_3p = QRadioButton("Curva por 3 pontos (passando pelos 3 cliques)")
+        rb_2p.setChecked(True)
+        layout.addWidget(rb_2p)
+        layout.addWidget(rb_3p)
+        lbl = QLabel(
+            "Botão direito: mesma lógica da reta (finalizar / limpar / soltar ferramenta).\n"
+            "Botão esquerdo: define os pontos conforme o modo."
+        )
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("font-size: 12px; color:#2b2b2b;")
+        layout.addWidget(lbl)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.button(QDialogButtonBox.Ok).setText("Ativar curva")
+        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        layout.addWidget(botoes)
+        botoes.accepted.connect(janela.accept)
+        botoes.rejected.connect(janela.reject)
+        if janela.exec() != QDialog.Accepted:
+            self.lbl_status.setText(f"{titulo} cancelado.")
+            return True
+        area.canvas.set_modo_curva("3p" if rb_3p.isChecked() else "2p")
+        self._ativar_ferramenta_global("curva")
+        modo_txt = "3 pontos" if rb_3p.isChecked() else "2 pontos"
+        self.lbl_status.setText(f"{titulo} ativo ({modo_txt}).")
         return True
 
     def _abrir_menu_importar(self):
