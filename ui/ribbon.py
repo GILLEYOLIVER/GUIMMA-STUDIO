@@ -156,13 +156,6 @@ class RibbonButton(QToolButton):
         if acao == adicionar:
             self.adicionar_usuario.emit(self.ferramenta.tool_id)
 
-    def _abrir_menu_contexto(self, pos: QPoint):
-        menu = QMenu(self)
-        adicionar = menu.addAction("Adicionar à linha Usuários")
-        acao = menu.exec(self.mapToGlobal(pos))
-        if acao == adicionar:
-            self.adicionar_usuario.emit(self.ferramenta.tool_id)
-
 
 class ColorControlWidget(QFrame):
     estilo_changed = Signal(dict)
@@ -438,21 +431,38 @@ class RibbonGroup(QFrame):
         }
 
         if len(tools) > 4:
-            corpo = QGridLayout()
-            corpo.setHorizontalSpacing(4)
-            corpo.setVerticalSpacing(1)
-            for index, tool in enumerate(tools):
-                botao = RibbonButton(tool, compacto=True, destaque=tool.tool_id in destaque_tools)
-                botao.acionada.connect(self.tool_selected.emit)
-                botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
-                linha = index % 3
-                coluna = index // 3
-                corpo.addWidget(botao, linha, coluna)
-            if len(tools) < 6:
-                for linha in range(len(tools), 3):
-                    spacer = QWidget()
-                    spacer.setFixedSize(168, 22)
-                    corpo.addWidget(spacer, linha, 0)
+            corpo = QHBoxLayout()
+            corpo.setSpacing(4)
+            principais = [tool for tool in tools if tool.tool_id in destaque_tools]
+            secundarios = [tool for tool in tools if tool.tool_id not in destaque_tools]
+
+            if principais:
+                bloco_principais = QHBoxLayout()
+                bloco_principais.setSpacing(4)
+                for tool in principais:
+                    botao = RibbonButton(tool, destaque=True)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
+                    bloco_principais.addWidget(botao)
+                wrapper_principais = QWidget()
+                wrapper_principais.setLayout(bloco_principais)
+                corpo.addWidget(wrapper_principais)
+
+            if secundarios:
+                grade_secundarios = QGridLayout()
+                grade_secundarios.setHorizontalSpacing(4)
+                grade_secundarios.setVerticalSpacing(1)
+                for index, tool in enumerate(secundarios):
+                    botao = RibbonButton(tool, compacto=True)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
+                    linha = index % 3
+                    coluna = index // 3
+                    grade_secundarios.addWidget(botao, linha, coluna)
+                wrapper_secundarios = QWidget()
+                wrapper_secundarios.setLayout(grade_secundarios)
+                corpo.addWidget(wrapper_secundarios)
+            corpo.addStretch(1)
         else:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
