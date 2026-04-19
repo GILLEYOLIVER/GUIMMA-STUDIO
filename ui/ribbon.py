@@ -5,7 +5,7 @@ from math import sin
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QIcon, QPen
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -58,56 +58,90 @@ class RibbonTabBar(QTabBar):
 
 class RibbonButton(QToolButton):
     acionada = Signal(str)
+    adicionar_usuario = Signal(str)
 
-    def __init__(self, ferramenta: ToolDef, compacto: bool = False, parent: QWidget | None = None):
+    def __init__(
+        self, ferramenta: ToolDef, compacto: bool = False, destaque: bool = False, parent: QWidget | None = None
+    ):
         super().__init__(parent)
         self.ferramenta = ferramenta
+        self.destaque = destaque
         self.setCursor(Qt.PointingHandCursor)
         self.setCheckable(True)
         self.setText(ferramenta.title)
         self.setIcon(_carregar_icone(ferramenta.icon))
         self.setProperty("tool_id", ferramenta.tool_id)
         self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._abrir_menu_contexto)
 
-        if compacto:
+        if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(18, 18))
-            self.setFixedSize(112, 26)
+            self.setIconSize(QSize(22, 22))
+            self.setFixedSize(210, 30)
             self.setStyleSheet(
                 """
                 QToolButton {
                     text-align: left;
                     background: transparent;
-                    border: 1px solid transparent;
+                    border: none;
                     color: #1e1e1e;
                     font-size: 12px;
-                    padding: 0 4px;
+                    font-weight: 600;
+                    padding: 0 6px;
+                    border-radius: 4px;
                 }
-                QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
-                QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
-                QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
+                QToolButton:hover { background: #eef5ff; border: none; }
+                QToolButton:pressed { background: #e6eefb; border: none; }
+                QToolButton:checked { background: #e7f1ff; border: none; color:#0f4f86; }
                 """
             )
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(26, 26))
-        self.setMinimumSize(78, 66)
+        if destaque:
+            self.setIconSize(QSize(36, 36))
+            self.setFixedSize(120, 78)
+        else:
+            self.setIconSize(QSize(26, 26))
+            self.setMinimumSize(78, 66)
         self.setStyleSheet(
             """
             QToolButton {
                 background: #ffffff;
-                border: 1px solid transparent;
+                border: none;
                 border-radius: 4px;
                 color: #1e1e1e;
                 font-size: 12px;
                 padding: 3px;
             }
-            QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
-            QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
-            QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
+            QToolButton:hover { background: #eef5ff; border: none; }
+            QToolButton:pressed { background: #e6eefb; border: none; }
+            QToolButton:checked { background: #e7f1ff; border: none; color:#0f4f86; }
             """
         )
+        if destaque:
+            self.setStyleSheet(
+                self.styleSheet()
+                + """
+                QToolButton {
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: 700;
+                    font-size: 12px;
+                    padding: 2px;
+                    background: #ffffff;
+                }
+                QToolButton:hover { background: #eef5ff; border: none; }
+                """
+            )
+
+    def _abrir_menu_contexto(self, pos: QPoint):
+        menu = QMenu(self)
+        adicionar = menu.addAction("Adicionar à linha Usuários")
+        acao = menu.exec(self.mapToGlobal(pos))
+        if acao == adicionar:
+            self.adicionar_usuario.emit(self.ferramenta.tool_id)
 
 
 class ColorControlWidget(QFrame):
@@ -363,31 +397,59 @@ class ColorControlWidget(QFrame):
 class RibbonGroup(QFrame):
     tool_selected = Signal(str)
     estilo_changed = Signal(dict)
+    adicionar_usuario = Signal(str)
 
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(92)
+        self.setFixedHeight(102)
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 4, 6, 0)
         raiz.setSpacing(2)
 
+        destaque_tools = {
+            "reta",
+            "curva",
+            "retangulo",
+            "por_coordenada",
+            "por_intersecao",
+            "por_raio",
+        }
+
         if len(tools) > 4:
-            corpo = QGridLayout()
-            corpo.setHorizontalSpacing(4)
-            corpo.setVerticalSpacing(1)
-            for index, tool in enumerate(tools):
-                botao = RibbonButton(tool, compacto=True)
-                botao.acionada.connect(self.tool_selected.emit)
-                linha = index % 3
-                coluna = index // 3
-                corpo.addWidget(botao, linha, coluna)
-            if len(tools) < 6:
-                for linha in range(len(tools), 3):
-                    spacer = QWidget()
-                    spacer.setFixedSize(132, 22)
-                    corpo.addWidget(spacer, linha, 0)
+            corpo = QHBoxLayout()
+            corpo.setSpacing(4)
+            principais = [tool for tool in tools if tool.tool_id in destaque_tools]
+            secundarios = [tool for tool in tools if tool.tool_id not in destaque_tools]
+
+            if principais:
+                bloco_principais = QHBoxLayout()
+                bloco_principais.setSpacing(4)
+                for tool in principais:
+                    botao = RibbonButton(tool, destaque=True)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
+                    bloco_principais.addWidget(botao)
+                wrapper_principais = QWidget()
+                wrapper_principais.setLayout(bloco_principais)
+                corpo.addWidget(wrapper_principais)
+
+            if secundarios:
+                grade_secundarios = QGridLayout()
+                grade_secundarios.setHorizontalSpacing(4)
+                grade_secundarios.setVerticalSpacing(1)
+                for index, tool in enumerate(secundarios):
+                    botao = RibbonButton(tool, compacto=True)
+                    botao.acionada.connect(self.tool_selected.emit)
+                    botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
+                    linha = index % 3
+                    coluna = index // 3
+                    grade_secundarios.addWidget(botao, linha, coluna)
+                wrapper_secundarios = QWidget()
+                wrapper_secundarios.setLayout(grade_secundarios)
+                corpo.addWidget(wrapper_secundarios)
+            corpo.addStretch(1)
         else:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
@@ -399,6 +461,7 @@ class RibbonGroup(QFrame):
                 else:
                     botao = RibbonButton(tool)
                     botao.acionada.connect(self.tool_selected.emit)
+                    botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
                     corpo.addWidget(botao)
             corpo.addStretch(1)
 
@@ -406,9 +469,9 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(12)
+        rodape.setFixedHeight(14)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 0px;")
+        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -416,6 +479,7 @@ class RibbonGroup(QFrame):
 
 class RibbonPage(QWidget):
     tool_selected = Signal(str)
+    adicionar_usuario = Signal(str)
 
     def __init__(self, grupos: list[tuple[str, list[ToolDef]]], parent: QWidget | None = None):
         super().__init__(parent)
@@ -425,6 +489,7 @@ class RibbonPage(QWidget):
         for titulo, tools in grupos:
             group = RibbonGroup(titulo, tools)
             group.tool_selected.connect(self.tool_selected.emit)
+            group.adicionar_usuario.connect(self.adicionar_usuario.emit)
             layout.addWidget(group)
         espaco = QWidget()
         espaco.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -434,6 +499,8 @@ class RibbonPage(QWidget):
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
     estilo_changed = Signal(dict)
+    tab_changed = Signal(str)
+    adicionar_usuario = Signal(str)
 
     def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
@@ -456,6 +523,7 @@ class RibbonWidget(QWidget):
                 grupos.append((group.title, [self._tools[tid] for tid in group.tools]))
             pagina = RibbonPage(grupos)
             pagina.tool_selected.connect(self._on_tool_selected)
+            pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)
             for grupo in pagina.findChildren(RibbonGroup):
                 grupo.estilo_changed.connect(self.estilo_changed.emit)
             self.paginas.addWidget(pagina)
@@ -496,12 +564,28 @@ class RibbonWidget(QWidget):
             botao.blockSignals(False)
 
     def _atualizar_destaque_aba(self, index: int):
+        if 0 <= index < len(self._tabs):
+            self.tab_changed.emit(self._tabs[index].tab_id)
         for i in range(self.paginas.count()):
             pagina = self.paginas.widget(i)
             if i == index:
-                pagina.setStyleSheet("background: #eaf4ff; border-top: 1px solid #c7ddf3;")
+                pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
             else:
                 pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
+
+    def tab_id_at(self, index: int) -> str | None:
+        if 0 <= index < len(self._tabs):
+            return self._tabs[index].tab_id
+        return None
+
+    def current_tab_id(self) -> str | None:
+        return self.tab_id_at(self.tabbar.currentIndex())
+
+    def tool_ids_by_tab(self, tab_id: str) -> list[str]:
+        for tab in self._tabs:
+            if tab.tab_id == tab_id:
+                return [tid for group in tab.groups for tid in group.tools]
+        return []
 
 
 def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:
