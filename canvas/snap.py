@@ -50,19 +50,22 @@ class SnapManager:
             elif tipo in {"circle", "esfera"}:
                 self._candidatos_circulo(idx, elemento, cursor, candidatos)
         self._candidatos_interseccoes(segmentos, cursor, tolerancia_cena, candidatos)
-        self._candidato_grade(cursor, candidatos)
+        self._candidato_grade(cursor, tolerancia_cena, candidatos)
 
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
 
-    def _candidato_grade(self, cursor: QPointF, candidatos: list[SnapResult]):
+    def _candidato_grade(self, cursor: QPointF, tolerancia_cena: float, candidatos: list[SnapResult]):
         if not self.snap_grade:
             return
         gx = round(cursor.x() / self.passo_grade) * self.passo_grade
         gy = round(cursor.y() / self.passo_grade) * self.passo_grade
         ponto_grade = QPointF(gx, gy)
-        candidatos.append(SnapResult(ponto=ponto_grade, tipo="grade", distancia=self._dist(cursor, ponto_grade), elemento_idx=None))
+        distancia = self._dist(cursor, ponto_grade)
+        if distancia > (tolerancia_cena * 0.55):
+            return
+        candidatos.append(SnapResult(ponto=ponto_grade, tipo="grade", distancia=distancia, elemento_idx=None))
 
     def _candidatos_polyline(
         self,
