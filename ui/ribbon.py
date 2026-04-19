@@ -96,6 +96,19 @@ class RibbonButton(QToolButton):
                 QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
                 """
             )
+            if destaque:
+                self.setStyleSheet(
+                    self.styleSheet()
+                    + """
+                    QToolButton {
+                        border: 2px solid #86b8ea;
+                        background: #eef6ff;
+                        font-size: 13px;
+                        font-weight: 700;
+                    }
+                    QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
+                    """
+                )
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
@@ -135,6 +148,13 @@ class RibbonButton(QToolButton):
                 QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
                 """
             )
+
+    def _abrir_menu_contexto(self, pos: QPoint):
+        menu = QMenu(self)
+        adicionar = menu.addAction("Adicionar à linha Usuários")
+        acao = menu.exec(self.mapToGlobal(pos))
+        if acao == adicionar:
+            self.adicionar_usuario.emit(self.ferramenta.tool_id)
 
     def _abrir_menu_contexto(self, pos: QPoint):
         menu = QMenu(self)
