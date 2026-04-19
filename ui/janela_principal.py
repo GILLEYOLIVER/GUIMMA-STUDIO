@@ -56,6 +56,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
         self._ultima_aba_nao_usuario = "construcao"
+        self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
+        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -99,6 +101,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = QVBoxLayout(topo)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.host_barra_usuario_topo = QWidget()
+        self.host_barra_usuario_topo_layout = QVBoxLayout(self.host_barra_usuario_topo)
+        self.host_barra_usuario_topo_layout.setContentsMargins(0, 0, 0, 0)
+        self.host_barra_usuario_topo_layout.setSpacing(0)
+        layout.addWidget(self.host_barra_usuario_topo)
 
         barra_menu = QWidget()
         sup = QHBoxLayout(barra_menu)
@@ -192,6 +199,26 @@ class GuimmaStudioMainWindow(QMainWindow):
             acao.triggered.connect(lambda marcado=False, p=float(passo): self._definir_passo_snap_angular(p) if marcado else None)
             grupo_passo.addAction(acao)
             menu_snap_angular.addAction(acao)
+        menu_barra_usuarios = self.menu_visao.addMenu("Barra de usuários")
+        self.action_barra_usuarios_habilitada = QAction("Exibir barra de usuários", self)
+        self.action_barra_usuarios_habilitada.setCheckable(True)
+        self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+        self.action_barra_usuarios_habilitada.toggled.connect(self._alternar_barra_usuarios_habilitada)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_habilitada)
+        grupo_posicao_barra = QActionGroup(self)
+        grupo_posicao_barra.setExclusive(True)
+        self.action_barra_usuarios_topo = QAction("No topo (acima das abas)", self)
+        self.action_barra_usuarios_topo.setCheckable(True)
+        self.action_barra_usuarios_topo.setChecked(self._barra_usuarios_posicao == "topo")
+        self.action_barra_usuarios_topo.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("topo") if marcado else None)
+        grupo_posicao_barra.addAction(self.action_barra_usuarios_topo)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_topo)
+        self.action_barra_usuarios_area = QAction("Entre botões e régua", self)
+        self.action_barra_usuarios_area.setCheckable(True)
+        self.action_barra_usuarios_area.setChecked(self._barra_usuarios_posicao != "topo")
+        self.action_barra_usuarios_area.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("area") if marcado else None)
+        grupo_posicao_barra.addAction(self.action_barra_usuarios_area)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_area)
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
@@ -633,7 +660,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = QVBoxLayout(area)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
-        layout.addWidget(self._criar_linha_usuarios())
+        self.host_barra_usuario_area = QWidget()
+        self.host_barra_usuario_area_layout = QVBoxLayout(self.host_barra_usuario_area)
+        self.host_barra_usuario_area_layout.setContentsMargins(0, 0, 0, 0)
+        self.host_barra_usuario_area_layout.setSpacing(0)
+        layout.addWidget(self.host_barra_usuario_area)
+        self._criar_linha_usuarios()
         self.abas_documentos = QTabWidget()
         self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
@@ -649,13 +681,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
+        self._reposicionar_barra_usuarios()
         self._atualizar_linha_usuarios()
         self._on_tab_ribbon_alterada(self.ribbon.current_tab_id() or "inicio")
         return area
 
-    def _criar_linha_usuarios(self) -> QWidget:
+    def _criar_linha_usuarios(self):
+        if hasattr(self, "faixa_usuarios"):
+            return
         faixa = QFrame()
-        faixa.setVisible(False)
         faixa.setFixedHeight(52)
         faixa.setStyleSheet("QFrame { background:#f5f9fe; border:1px solid #c9dbef; }")
         lay = QHBoxLayout(faixa)
@@ -681,13 +715,38 @@ class GuimmaStudioMainWindow(QMainWindow):
         lay.addWidget(self.linha_usuario, 1)
 
         self.faixa_usuarios = faixa
-        return faixa
 
     def _on_tab_ribbon_alterada(self, tab_id: str):
         if tab_id != "usuarios":
             self._ultima_aba_nao_usuario = tab_id
+        self._atualizar_visibilidade_barra_usuarios(tab_id)
+
+    def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
+        self._barra_usuarios_habilitada = habilitada
+        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
+        self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+
+    def _definir_posicao_barra_usuarios(self, posicao: str):
+        if posicao not in {"topo", "area"}:
+            return
+        self._barra_usuarios_posicao = posicao
+        self.projeto_atual.preferencias_usuario["barra_usuarios_posicao"] = posicao
+        self._reposicionar_barra_usuarios()
+        self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+
+    def _reposicionar_barra_usuarios(self):
+        if not hasattr(self, "faixa_usuarios"):
+            return
+        if self.faixa_usuarios.parentWidget() is not None:
+            self.faixa_usuarios.setParent(None)
+        if self._barra_usuarios_posicao == "topo":
+            self.host_barra_usuario_topo_layout.addWidget(self.faixa_usuarios)
+        else:
+            self.host_barra_usuario_area_layout.addWidget(self.faixa_usuarios)
+
+    def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
         if hasattr(self, "faixa_usuarios"):
-            self.faixa_usuarios.setVisible(tab_id == "usuarios")
+            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada and tab_id == "usuarios")
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:

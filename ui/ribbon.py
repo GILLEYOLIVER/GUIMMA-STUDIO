@@ -75,22 +75,18 @@ class RibbonButton(QToolButton):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._abrir_menu_contexto)
 
-        if compacto:
+        if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            if destaque:
-                self.setIconSize(QSize(30, 30))
-                self.setFixedSize(202, 40)
-            else:
-                self.setIconSize(QSize(20, 20))
-                self.setFixedSize(168, 30)
+            self.setIconSize(QSize(18, 18))
+            self.setFixedSize(164, 28)
             self.setStyleSheet(
                 """
                 QToolButton {
                     text-align: left;
-                    background: #fcfdff;
+                    background: transparent;
                     border: 1px solid #d2dceb;
                     color: #1e1e1e;
-                    font-size: 12px;
+                    font-size: 11px;
                     font-weight: 600;
                     padding: 0 6px;
                     border-radius: 4px;
@@ -116,8 +112,12 @@ class RibbonButton(QToolButton):
             return
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(26, 26))
-        self.setMinimumSize(78, 66)
+        if destaque:
+            self.setIconSize(QSize(30, 30))
+            self.setFixedSize(84, 74)
+        else:
+            self.setIconSize(QSize(26, 26))
+            self.setMinimumSize(78, 66)
         self.setStyleSheet(
             """
             QToolButton {
@@ -133,6 +133,28 @@ class RibbonButton(QToolButton):
             QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
             """
         )
+        if destaque:
+            self.setStyleSheet(
+                self.styleSheet()
+                + """
+                QToolButton {
+                    border: 2px solid #86b8ea;
+                    border-radius: 4px;
+                    font-weight: 700;
+                    font-size: 11px;
+                    padding: 2px;
+                    background: #eef6ff;
+                }
+                QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
+                """
+            )
+
+    def _abrir_menu_contexto(self, pos: QPoint):
+        menu = QMenu(self)
+        adicionar = menu.addAction("Adicionar à linha Usuários")
+        acao = menu.exec(self.mapToGlobal(pos))
+        if acao == adicionar:
+            self.adicionar_usuario.emit(self.ferramenta.tool_id)
 
     def _abrir_menu_contexto(self, pos: QPoint):
         menu = QMenu(self)
