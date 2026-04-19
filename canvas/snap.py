@@ -19,8 +19,10 @@ class SnapResult:
 class SnapManager:
     """Calcula pontos de captura (snap) para o cursor no canvas."""
 
-    def __init__(self, tolerancia_px: float = 10.0):
+    def __init__(self, tolerancia_px: float = 10.0, snap_grade: bool = True, passo_grade: float = 1.0):
         self.tolerancia_px = tolerancia_px
+        self.snap_grade = snap_grade
+        self.passo_grade = max(0.001, passo_grade)
 
     def calcular(self, cena: CenaDocumento, cursor: QPointF, zoom: float, tolerancia_px: float | None = None) -> SnapResult | None:
         candidatos_validos = self.calcular_candidatos(cena, cursor, zoom, tolerancia_px=tolerancia_px)
@@ -48,10 +50,22 @@ class SnapManager:
             elif tipo in {"circle", "esfera"}:
                 self._candidatos_circulo(idx, elemento, cursor, candidatos)
         self._candidatos_interseccoes(segmentos, cursor, tolerancia_cena, candidatos)
+        self._candidato_grade(cursor, tolerancia_cena, candidatos)
 
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
+
+    def _candidato_grade(self, cursor: QPointF, tolerancia_cena: float, candidatos: list[SnapResult]):
+        if not self.snap_grade:
+            return
+        gx = round(cursor.x() / self.passo_grade) * self.passo_grade
+        gy = round(cursor.y() / self.passo_grade) * self.passo_grade
+        ponto_grade = QPointF(gx, gy)
+        distancia = self._dist(cursor, ponto_grade)
+        if distancia > (tolerancia_cena * 0.55):
+            return
+        candidatos.append(SnapResult(ponto=ponto_grade, tipo="grade", distancia=distancia, elemento_idx=None))
 
     def _candidatos_polyline(
         self,
@@ -176,4 +190,6 @@ class SnapManager:
             return 3
         if tipo == "borda":
             return 4
+        if tipo == "grade":
+            return 5
         return 9
