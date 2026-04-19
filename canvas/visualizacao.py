@@ -1128,7 +1128,7 @@ class VisualizacaoCanvas(QWidget):
             if ang_contextual is not None:
                 return QPointF(origem.x() + dist * cos(radians(ang_contextual)), origem.y() - dist * sin(radians(ang_contextual)))
         angulo_dist = self._dist_angular(ang, ang_principal)
-        tolerancia_principal = max(8.0, min(18.0, self._snap_angular_passo * 0.4))
+        tolerancia_principal = max(1.8, min(5.0, self._snap_angular_passo * 0.12))
         if angulo_dist <= tolerancia_principal:
             return QPointF(origem.x() + dist * cos(radians(ang_principal)), origem.y() - dist * sin(radians(ang_principal)))
         return destino
@@ -1143,7 +1143,7 @@ class VisualizacaoCanvas(QWidget):
         ang_ref = degrees(atan2(-vy, vx))
         candidatos = [ang_ref, ang_ref + 180.0, ang_ref + 90.0, ang_ref - 90.0]
         melhor = min(candidatos, key=lambda ang: self._dist_angular(ang_atual, ang))
-        if self._dist_angular(ang_atual, melhor) <= 12.0:
+        if self._dist_angular(ang_atual, melhor) <= 5.0:
             return melhor
         return None
 

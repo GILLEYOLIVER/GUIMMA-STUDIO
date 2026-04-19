@@ -70,7 +70,7 @@ class RibbonButton(QToolButton):
         if compacto:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.setIconSize(QSize(18, 18))
-            self.setFixedSize(158, 26)
+            self.setFixedSize(112, 26)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -369,7 +369,7 @@ class RibbonGroup(QFrame):
         raiz.setContentsMargins(6, 4, 6, 2)
         raiz.setSpacing(2)
 
-        if len(tools) > 3:
+        if len(tools) > 4:
             corpo = QGridLayout()
             corpo.setHorizontalSpacing(4)
             corpo.setVerticalSpacing(1)
@@ -393,7 +393,7 @@ class RibbonGroup(QFrame):
                     controle_cor.estilo_changed.connect(self.estilo_changed.emit)
                     corpo.addWidget(controle_cor)
                 else:
-                    botao = RibbonButton(tool)
+                    botao = RibbonButton(tool, compacto=len(tools) >= 4)
                     botao.acionada.connect(self.tool_selected.emit)
                     corpo.addWidget(botao)
             corpo.addStretch(1)
@@ -505,9 +505,41 @@ def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:
 
     tabs: list[TabDef] = []
     for tab in dados["tabs"]:
-        groups = [GroupDef(title=g["title"], tools=g["tools"]) for g in tab["groups"]]
+        groups_data = tab["groups"]
+        if tab.get("id") == "inicio":
+            groups_data = _normalizar_grupos_inicio(groups_data)
+        groups = [GroupDef(title=g["title"], tools=g["tools"]) for g in groups_data]
         tabs.append(TabDef(tab_id=tab["id"], title=tab["title"], groups=groups))
     return tabs, tools
+
+
+def _normalizar_grupos_inicio(groups: list[dict]) -> list[dict]:
+    grupos_por_titulo = {g.get("title"): list(g.get("tools", [])) for g in groups}
+    desenho = [tid for tid in grupos_por_titulo.get("Desenho", []) if tid != "colar"]
+    if not desenho:
+        desenho = ["cor", "selecionar"]
+
+    editar_base = [tid for tid in ("colar", "recortar", "copiar", "excluir") if tid in groups_tools_flat(groups)]
+    editar_existentes = [tid for tid in grupos_por_titulo.get("Editar", []) if tid not in editar_base]
+    editar = editar_base + editar_existentes
+
+    saida: list[dict] = []
+    for g in groups:
+        titulo = g.get("title")
+        if titulo == "Desenho":
+            saida.append({"title": "Desenho", "tools": desenho})
+        elif titulo == "Editar":
+            saida.append({"title": "Editar", "tools": editar})
+        else:
+            saida.append(g)
+    return saida
+
+
+def groups_tools_flat(groups: list[dict]) -> set[str]:
+    resultado: set[str] = set()
+    for g in groups:
+        resultado.update(g.get("tools", []))
+    return resultado
 
 
 def _carregar_icone(icon_name: str) -> QIcon:
