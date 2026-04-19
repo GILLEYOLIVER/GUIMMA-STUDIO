@@ -59,6 +59,9 @@
           "tools": [
             "curva",
             "dividir_curva",
+            "espiral_e_curvas",
+            "cadastrar_curva",
+            "editar_pontos_de_curva",
             "predefinida"
           ]
         },
@@ -67,6 +70,8 @@
           "tools": [
             "por_coordenada",
             "por_intersecao",
+            "no_centro_do_arco",
+            "no_perimetro",
             "por_distancia"
           ]
         },
@@ -352,6 +357,24 @@
       "class": "Ferramenta",
       "icon": "dividir_curva.svg"
     },
+    "espiral_e_curvas": {
+      "title": "Espiral e Curvas",
+      "module": "tools/espiral_e_curvas_tool.py",
+      "class": "Ferramenta",
+      "icon": "espiral_e_curvas.svg"
+    },
+    "cadastrar_curva": {
+      "title": "Cadastrar Curva",
+      "module": "tools/cadastrar_curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "cadastrar_curva.svg"
+    },
+    "editar_pontos_de_curva": {
+      "title": "Editar Pontos de Curva",
+      "module": "tools/editar_pontos_de_curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "editar_pontos_de_curva.svg"
+    },
     "predefinida": {
       "title": "Predefinida",
       "module": "tools/predefinida_tool.py",
@@ -369,6 +392,18 @@
       "module": "tools/por_intersecao_tool.py",
       "class": "Ferramenta",
       "icon": "por_intersecao.svg"
+    },
+    "no_centro_do_arco": {
+      "title": "No Centro do Arco",
+      "module": "tools/no_centro_do_arco_tool.py",
+      "class": "Ferramenta",
+      "icon": "no_centro_do_arco.svg"
+    },
+    "no_perimetro": {
+      "title": "No Perimetro",
+      "module": "tools/no_perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "no_perimetro.svg"
     },
     "por_distancia": {
       "title": "Por Distancia",
