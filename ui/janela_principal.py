@@ -700,19 +700,49 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_usuario_add_all.setCursor(Qt.PointingHandCursor)
         self.btn_usuario_add_all.setFixedHeight(34)
         self.btn_usuario_add_all.clicked.connect(self._adicionar_todas_ferramentas_da_aba)
-        lay.addWidget(self.btn_usuario_add_all, 0)
+        self.btn_usuario_add_all.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #111111;
+                font-weight: 400;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
+            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
+            QPushButton:disabled { color: #555555; background: transparent; }
+            """
+        )
 
         self.btn_usuario_limpar = QPushButton("Limpar linha")
         self.btn_usuario_limpar.setCursor(Qt.PointingHandCursor)
         self.btn_usuario_limpar.setFixedHeight(34)
         self.btn_usuario_limpar.clicked.connect(self._limpar_ferramentas_usuario)
-        lay.addWidget(self.btn_usuario_limpar, 0)
+        self.btn_usuario_limpar.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #111111;
+                font-weight: 400;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
+            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
+            QPushButton:disabled { color: #555555; background: transparent; }
+            """
+        )
 
         self.linha_usuario = QWidget()
         self.layout_linha_usuario = QHBoxLayout(self.linha_usuario)
         self.layout_linha_usuario.setContentsMargins(4, 0, 4, 0)
         self.layout_linha_usuario.setSpacing(3)
         lay.addWidget(self.linha_usuario, 1)
+        lay.addWidget(self.btn_usuario_add_all, 0)
+        lay.addWidget(self.btn_usuario_limpar, 0)
 
         self.faixa_usuarios = faixa
 
@@ -790,7 +820,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 widget.deleteLater()
         if not self._ferramentas_usuario_ids:
             vazio = QLabel("Sem ferramentas ainda. Clique com o botão direito em qualquer ferramenta e selecione 'Adicionar à linha Usuários'.")
-            vazio.setStyleSheet("color:#4b6075; font-size:11px;")
+            vazio.setStyleSheet("color:#111111; font-size:11px; font-weight:400;")
             self.layout_linha_usuario.addWidget(vazio)
             self.layout_linha_usuario.addStretch(1)
             return
