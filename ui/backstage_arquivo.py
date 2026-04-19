@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -141,8 +143,10 @@ class BackstageArquivoPanel(QFrame):
     def _atualizar_recentes(self):
         self.lista_recentes.clear()
         for i, caminho in enumerate(self._recentes, start=1):
-            item = QListWidgetItem(f"{i}  {caminho}")
+            nome_exibicao = Path(caminho).name or caminho
+            item = QListWidgetItem(f"{i}  {nome_exibicao}")
             item.setData(Qt.UserRole, caminho)
+            item.setToolTip(caminho)
             self.lista_recentes.addItem(item)
         vazio = len(self._recentes) == 0
         self.lbl_vazio.setVisible(vazio)
