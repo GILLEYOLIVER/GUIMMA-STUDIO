@@ -1,5 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect x="4" y="4" width="56" height="56" rx="10" fill="#4a7fc1"/>
-  <rect x="10" y="10" width="44" height="44" rx="8" fill="#eef4ff"/>
-  <text x="32" y="38" text-anchor="middle" font-size="16" font-family="Arial" fill="#305f99">A</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
+    <defs>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
+      </filter>
+    </defs>
+    <line x1="18" y1="24" x2="18" y2="72" stroke="#96a0a8" stroke-width="2" stroke-linecap="round" /><rect x="26" y="20" width="18" height="14" rx="3" stroke="#4a4a4a" stroke-width="3.2" fill="none" /><rect x="34" y="40" width="24" height="14" rx="3" stroke="#69c7c3" stroke-width="3" fill="none" /><rect x="22" y="60" width="30" height="14" rx="3" stroke="#4a4a4a" stroke-width="3.2" fill="none" />
+    </svg>
