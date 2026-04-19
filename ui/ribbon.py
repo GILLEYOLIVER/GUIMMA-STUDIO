@@ -77,23 +77,23 @@ class RibbonButton(QToolButton):
 
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(18, 18))
-            self.setFixedSize(164, 28)
+            self.setIconSize(QSize(22, 22))
+            self.setFixedSize(210, 30)
             self.setStyleSheet(
                 """
                 QToolButton {
                     text-align: left;
                     background: transparent;
-                    border: 1px solid #d2dceb;
+                    border: none;
                     color: #1e1e1e;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: 600;
                     padding: 0 6px;
                     border-radius: 4px;
                 }
-                QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
-                QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
-                QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
+                QToolButton:hover { background: #eef5ff; border: none; }
+                QToolButton:pressed { background: #e6eefb; border: none; }
+                QToolButton:checked { background: #e7f1ff; border: none; color:#0f4f86; }
                 """
             )
             if destaque:
@@ -113,8 +113,8 @@ class RibbonButton(QToolButton):
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         if destaque:
-            self.setIconSize(QSize(30, 30))
-            self.setFixedSize(84, 74)
+            self.setIconSize(QSize(36, 36))
+            self.setFixedSize(120, 78)
         else:
             self.setIconSize(QSize(26, 26))
             self.setMinimumSize(78, 66)
@@ -122,15 +122,15 @@ class RibbonButton(QToolButton):
             """
             QToolButton {
                 background: #ffffff;
-                border: 1px solid transparent;
+                border: none;
                 border-radius: 4px;
                 color: #1e1e1e;
                 font-size: 12px;
                 padding: 3px;
             }
-            QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
-            QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
-            QToolButton:checked { background: #e7f1ff; border: 1px solid #8cb3df; color:#0f4f86; }
+            QToolButton:hover { background: #eef5ff; border: none; }
+            QToolButton:pressed { background: #e6eefb; border: none; }
+            QToolButton:checked { background: #e7f1ff; border: none; color:#0f4f86; }
             """
         )
         if destaque:
@@ -138,14 +138,14 @@ class RibbonButton(QToolButton):
                 self.styleSheet()
                 + """
                 QToolButton {
-                    border: 1px solid #c7ced6;
+                    border: none;
                     border-radius: 4px;
                     font-weight: 700;
-                    font-size: 11px;
+                    font-size: 12px;
                     padding: 2px;
                     background: #ffffff;
                 }
-                QToolButton:hover { background: #f6f8fa; border: 1px solid #b9c2cc; }
+                QToolButton:hover { background: #eef5ff; border: none; }
                 """
             )
 
