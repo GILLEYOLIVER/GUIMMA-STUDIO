@@ -369,7 +369,7 @@ class RibbonGroup(QFrame):
         raiz.setContentsMargins(6, 4, 6, 0)
         raiz.setSpacing(2)
 
-        if len(tools) > 3:
+        if len(tools) > 4:
             corpo = QGridLayout()
             corpo.setHorizontalSpacing(4)
             corpo.setVerticalSpacing(1)
