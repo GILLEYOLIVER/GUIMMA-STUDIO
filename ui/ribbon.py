@@ -68,7 +68,11 @@ class RibbonButton(QToolButton):
         self.destaque = destaque
         self.setCursor(Qt.PointingHandCursor)
         self.setCheckable(True)
-        self.setText(ferramenta.title)
+        texto = ferramenta.title
+        if destaque and len(texto) > 10 and " " in texto:
+            primeira, resto = texto.split(" ", 1)
+            texto = f"{primeira}\n{resto}"
+        self.setText(texto)
         self.setIcon(_carregar_icone(ferramenta.icon))
         self.setProperty("tool_id", ferramenta.tool_id)
         self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
@@ -77,8 +81,8 @@ class RibbonButton(QToolButton):
 
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(22, 22))
-            self.setFixedSize(210, 30)
+            self.setIconSize(QSize(20, 20))
+            self.setFixedSize(176, 30)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -113,8 +117,8 @@ class RibbonButton(QToolButton):
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         if destaque:
-            self.setIconSize(QSize(36, 36))
-            self.setFixedSize(120, 78)
+            self.setIconSize(QSize(34, 34))
+            self.setFixedSize(108, 72)
         else:
             self.setIconSize(QSize(26, 26))
             self.setMinimumSize(78, 66)
@@ -415,11 +419,20 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(102)
+        self.setFixedHeight(108)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(6, 4, 6, 0)
-        raiz.setSpacing(2)
+        raiz.setContentsMargins(6, 4, 6, 2)
+        raiz.setSpacing(3)
+
+        destaque_tools = {
+            "reta",
+            "curva",
+            "retangulo",
+            "por_coordenada",
+            "por_intersecao",
+            "por_raio",
+        }
 
         destaque_tools = {
             "reta",
@@ -462,7 +475,7 @@ class RibbonGroup(QFrame):
                 wrapper_secundarios = QWidget()
                 wrapper_secundarios.setLayout(grade_secundarios)
                 corpo.addWidget(wrapper_secundarios)
-            corpo.addStretch(1)
+            corpo.addSpacing(2)
         else:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)

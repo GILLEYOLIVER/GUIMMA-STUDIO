@@ -746,7 +746,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
         if hasattr(self, "faixa_usuarios"):
-            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada and tab_id == "usuarios")
+            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada)
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
