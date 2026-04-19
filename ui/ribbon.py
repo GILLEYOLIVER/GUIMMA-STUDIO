@@ -69,8 +69,8 @@ class RibbonButton(QToolButton):
 
         if compacto:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(18, 18))
-            self.setFixedSize(112, 26)
+            self.setIconSize(QSize(20, 20))
+            self.setFixedSize(124, 30)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -78,8 +78,8 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: 1px solid transparent;
                     color: #1e1e1e;
-                    font-size: 12px;
-                    padding: 0 4px;
+                    font-size: 13px;
+                    padding: 0 6px;
                 }
                 QToolButton:hover { background: #f5f8fd; border: 1px solid #cddbf0; }
                 QToolButton:pressed { background: #e6eefb; border: 1px solid #9cb7df; }
@@ -366,7 +366,7 @@ class RibbonGroup(QFrame):
         self.setFixedHeight(92)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(6, 4, 6, 2)
+        raiz.setContentsMargins(6, 4, 6, 0)
         raiz.setSpacing(2)
 
         if len(tools) > 4:
@@ -402,7 +402,9 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setStyleSheet("color: #505050; font-size: 9px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
+        rodape.setFixedHeight(12)
+        rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 0px;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
