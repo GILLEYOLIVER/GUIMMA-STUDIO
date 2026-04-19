@@ -231,6 +231,8 @@ class VisualizacaoCanvas(QWidget):
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
+        self._extensao_origem: tuple[int, bool] | None = None
+        self._segmento_primeira_reta: tuple[int, int] | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -266,6 +268,10 @@ class VisualizacaoCanvas(QWidget):
             self._preview_reta = None
             self._guia_fechamento = None
             self._guias_alinhamento = []
+        if tool_id not in {"estender_reta", "estender_ate_elemento"}:
+            self._extensao_origem = None
+        if tool_id != "estender_duas_retas":
+            self._segmento_primeira_reta = None
         self.update()
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
@@ -281,6 +287,18 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
+        if self.ferramenta_ativa == "dividir_curva" and event.button() == Qt.LeftButton:
+            self._dividir_segmento_em_clique(self._ponto_com_snap(event.position()))
+            event.accept()
+            return
+        if self.ferramenta_ativa in {"estender_reta", "estender_ate_elemento"} and event.button() == Qt.LeftButton:
+            self._processar_estender_reta(self._ponto_com_snap(event.position()), ate_elemento=self.ferramenta_ativa == "estender_ate_elemento")
+            event.accept()
+            return
+        if self.ferramenta_ativa == "estender_duas_retas" and event.button() == Qt.LeftButton:
+            self._processar_estender_duas_retas(self._ponto_com_snap(event.position()))
+            event.accept()
+            return
         if self.ferramenta_ativa not in {"reta", "curva"}:
             if event.button() == Qt.LeftButton:
                 pos = self._ponto_com_snap(event.position())
@@ -357,6 +375,150 @@ class VisualizacaoCanvas(QWidget):
             return
 
         super().mousePressEvent(event)
+
+    def _dividir_segmento_em_clique(self, pos: QPointF):
+        info = self._segmento_mais_proximo(pos)
+        if not info:
+            return
+        idx, seg_idx, a, b, _ = info
+        el = self.cena.elementos[idx]
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if len(pontos) < 2:
+            return
+        proj = self._projecao_em_segmento(pos, a, b)
+        pontos.insert(seg_idx + 1, proj)
+        el["pontos"] = [(p.x(), p.y()) for p in pontos]
+        self._registrar_historico()
+        self.update()
+
+    def _processar_estender_reta(self, pos: QPointF, ate_elemento: bool = False):
+        if self._extensao_origem is None:
+            self._extensao_origem = self._endpoint_proximo(pos)
+            return
+        idx, inicio = self._extensao_origem
+        self._extensao_origem = None
+        el = self.cena.elementos[idx]
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if len(pontos) < 2:
+            return
+        i = 0 if inicio else len(pontos) - 1
+        vizinho = pontos[1] if inicio else pontos[-2]
+        novo_ponto = pos
+        if ate_elemento:
+            alvo = self._segmento_mais_proximo(pos)
+            if alvo:
+                _, _, a2, b2, _ = alvo
+                inter = self._intersecao_linhas(vizinho, pontos[i], a2, b2)
+                if inter is not None:
+                    novo_ponto = inter
+        pontos[i] = novo_ponto
+        el["pontos"] = [(p.x(), p.y()) for p in pontos]
+        self._registrar_historico()
+        self.update()
+
+    def _processar_estender_duas_retas(self, pos: QPointF):
+        seg = self._segmento_mais_proximo(pos)
+        if not seg:
+            return
+        idx, seg_idx, a, b, _ = seg
+        if self._segmento_primeira_reta is None:
+            self._segmento_primeira_reta = (idx, seg_idx)
+            return
+        idx1, seg1 = self._segmento_primeira_reta
+        self._segmento_primeira_reta = None
+        if idx1 == idx and seg1 == seg_idx:
+            return
+        dados1 = self._dados_segmento(idx1, seg1)
+        dados2 = self._dados_segmento(idx, seg_idx)
+        if not dados1 or not dados2:
+            return
+        a1, b1 = dados1
+        a2, b2 = dados2
+        inter = self._intersecao_linhas(a1, b1, a2, b2)
+        if inter is None:
+            return
+        self._mover_ponto_segmento_para_intersecao(idx1, seg1, inter)
+        self._mover_ponto_segmento_para_intersecao(idx, seg_idx, inter)
+        self._registrar_historico()
+        self.update()
+
+    def _mover_ponto_segmento_para_intersecao(self, idx: int, seg_idx: int, inter: QPointF):
+        el = self.cena.elementos[idx]
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if seg_idx < 0 or seg_idx + 1 >= len(pontos):
+            return
+        i1, i2 = seg_idx, seg_idx + 1
+        d1 = self._dist(pontos[i1], inter)
+        d2 = self._dist(pontos[i2], inter)
+        pontos[i1 if d1 <= d2 else i2] = inter
+        el["pontos"] = [(p.x(), p.y()) for p in pontos]
+
+    def _endpoint_proximo(self, pos: QPointF) -> tuple[int, bool] | None:
+        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        melhor: tuple[int, bool] | None = None
+        dist_melhor = float("inf")
+        for idx, el in enumerate(self.cena.elementos):
+            if el.get("tipo") != "polyline":
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if len(pontos) < 2:
+                continue
+            for inicio, ponto in ((True, pontos[0]), (False, pontos[-1])):
+                d = self._dist(ponto, pos)
+                if d < dist_melhor and d <= tol:
+                    dist_melhor = d
+                    melhor = (idx, inicio)
+        return melhor
+
+    def _segmento_mais_proximo(self, pos: QPointF) -> tuple[int, int, QPointF, QPointF, float] | None:
+        tol = (self._tolerancia_snap_px() / max(self.zoom, 0.001)) * 1.2
+        melhor: tuple[int, int, QPointF, QPointF, float] | None = None
+        for idx, el in enumerate(self.cena.elementos):
+            if el.get("tipo") != "polyline":
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
+                proj = self._projecao_em_segmento(pos, a, b)
+                d = self._dist(pos, proj)
+                if d <= tol and (melhor is None or d < melhor[4]):
+                    melhor = (idx, seg_idx, a, b, d)
+        return melhor
+
+    def _dados_segmento(self, idx: int, seg_idx: int) -> tuple[QPointF, QPointF] | None:
+        if idx < 0 or idx >= len(self.cena.elementos):
+            return None
+        el = self.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return None
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if seg_idx < 0 or seg_idx + 1 >= len(pontos):
+            return None
+        return pontos[seg_idx], pontos[seg_idx + 1]
+
+    def _projecao_em_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> QPointF:
+        abx, aby = b.x() - a.x(), b.y() - a.y()
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 0.0000001:
+            return QPointF(a)
+        apx, apy = p.x() - a.x(), p.y() - a.y()
+        t = ((apx * abx) + (apy * aby)) / denom
+        t = max(0.0, min(1.0, t))
+        return QPointF(a.x() + (abx * t), a.y() + (aby * t))
+
+    def _intersecao_linhas(self, a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> QPointF | None:
+        x1, y1 = a1.x(), a1.y()
+        x2, y2 = a2.x(), a2.y()
+        x3, y3 = b1.x(), b1.y()
+        x4, y4 = b2.x(), b2.y()
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 0.0000001:
+            return None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
+        return QPointF(px, py)
+
+    def _dist(self, a: QPointF, b: QPointF) -> float:
+        return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
         self._cursor_tela = event.position()
