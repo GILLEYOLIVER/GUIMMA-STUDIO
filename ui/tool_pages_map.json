@@ -8,14 +8,15 @@
           "title": "Desenho",
           "tools": [
             "cor",
+            "colar",
             "selecionar"
           ]
         },
         {
           "title": "Editar",
           "tools": [
-            "colar",
             "recortar",
+            "copiar",
             "excluir"
           ]
         },
@@ -24,7 +25,16 @@
           "tools": [
             "inverter_selecao",
             "selecionar_tudo",
-            "selecionar_moldes"
+            "selecionar_moldes",
+            "inverter_moldes"
+          ]
+        },
+        {
+          "title": "Restauração",
+          "tools": [
+            "ponto_restauracao",
+            "restaurar",
+            "restaurar_copia"
           ]
         }
       ]
@@ -276,6 +286,12 @@
       "class": "Ferramenta",
       "icon": "recortar.svg"
     },
+    "copiar": {
+      "title": "Copiar",
+      "module": "tools/copiar_tool.py",
+      "class": "Ferramenta",
+      "icon": "colar.svg"
+    },
     "excluir": {
       "title": "Excluir",
       "module": "tools/excluir_tool.py",
@@ -297,6 +313,12 @@
     "selecionar_moldes": {
       "title": "Selecionar Moldes",
       "module": "tools/selecionar_moldes_tool.py",
+      "class": "Ferramenta",
+      "icon": "selecionar_moldes.svg"
+    },
+    "inverter_moldes": {
+      "title": "Inverter Moldes",
+      "module": "tools/inverter_moldes_tool.py",
       "class": "Ferramenta",
       "icon": "selecionar_moldes.svg"
     },
@@ -737,6 +759,24 @@
       "module": "tools/construcao.py",
       "class": "FerramentaEstenderDuasRetas",
       "icon": "reta.svg"
+    },
+    "ponto_restauracao": {
+      "title": "Ponto de Restauração",
+      "module": "tools/ponto_restauracao_tool.py",
+      "class": "Ferramenta",
+      "icon": "snap.svg"
+    },
+    "restaurar": {
+      "title": "Restaurar",
+      "module": "tools/restaurar_tool.py",
+      "class": "Ferramenta",
+      "icon": "remover_graduacao.svg"
+    },
+    "restaurar_copia": {
+      "title": "Restaurar Cópia",
+      "module": "tools/restaurar_copia_tool.py",
+      "class": "Ferramenta",
+      "icon": "substituir.svg"
     }
   }
 }
