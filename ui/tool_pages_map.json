@@ -25,8 +25,8 @@
           "tools": [
             "inverter_selecao",
             "selecionar_tudo",
-            "selecionar_moldes",
-            "inverter_moldes"
+            "inverter_moldes",
+            "selecionar_moldes"
           ]
         },
         {
@@ -290,7 +290,7 @@
       "title": "Copiar",
       "module": "tools/copiar_tool.py",
       "class": "Ferramenta",
-      "icon": "colar.svg"
+      "icon": "copiar.svg"
     },
     "excluir": {
       "title": "Excluir",
@@ -320,7 +320,7 @@
       "title": "Inverter Moldes",
       "module": "tools/inverter_moldes_tool.py",
       "class": "Ferramenta",
-      "icon": "selecionar_moldes.svg"
+      "icon": "inverter_moldes.svg"
     },
     "reta": {
       "title": "Reta",
@@ -764,19 +764,19 @@
       "title": "Ponto de Restauração",
       "module": "tools/ponto_restauracao_tool.py",
       "class": "Ferramenta",
-      "icon": "snap.svg"
+      "icon": "ponto_restauracao.svg"
     },
     "restaurar": {
       "title": "Restaurar",
       "module": "tools/restaurar_tool.py",
       "class": "Ferramenta",
-      "icon": "remover_graduacao.svg"
+      "icon": "restaurar.svg"
     },
     "restaurar_copia": {
       "title": "Restaurar Cópia",
       "module": "tools/restaurar_copia_tool.py",
       "class": "Ferramenta",
-      "icon": "substituir.svg"
+      "icon": "restaurar_copia.svg"
     }
   }
 }
