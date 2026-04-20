@@ -746,32 +746,39 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.layout_linha_usuario.setSpacing(3)
         lay.addWidget(self.linha_usuario, 1)
 
+        self.painel_controles_usuario = QWidget()
+        controles_layout = QHBoxLayout(self.painel_controles_usuario)
+        controles_layout.setContentsMargins(0, 0, 0, 0)
+        controles_layout.setSpacing(4)
+
         lbl_usuario = QLabel("Usuário:")
         lbl_usuario.setStyleSheet("color:#111111; font-size:12px; font-weight:400;")
-        lay.addWidget(lbl_usuario, 0)
+        controles_layout.addWidget(lbl_usuario, 0)
 
         self.combo_perfil_usuario = QComboBox()
         self.combo_perfil_usuario.setMinimumWidth(130)
         self.combo_perfil_usuario.currentTextChanged.connect(self._trocar_perfil_usuario)
-        lay.addWidget(self.combo_perfil_usuario, 0)
+        controles_layout.addWidget(self.combo_perfil_usuario, 0)
 
         self.btn_novo_perfil_usuario = QPushButton("Novo")
         self.btn_novo_perfil_usuario.setCursor(Qt.PointingHandCursor)
         self.btn_novo_perfil_usuario.setFixedHeight(34)
         self.btn_novo_perfil_usuario.clicked.connect(self._criar_novo_perfil_usuario)
         self.btn_novo_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
-        lay.addWidget(self.btn_novo_perfil_usuario, 0)
+        controles_layout.addWidget(self.btn_novo_perfil_usuario, 0)
 
         self.btn_salvar_perfil_usuario = QPushButton("Salvar usuário")
         self.btn_salvar_perfil_usuario.setCursor(Qt.PointingHandCursor)
         self.btn_salvar_perfil_usuario.setFixedHeight(34)
         self.btn_salvar_perfil_usuario.clicked.connect(self._salvar_perfil_usuario_atual)
         self.btn_salvar_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
-        lay.addWidget(self.btn_salvar_perfil_usuario, 0)
+        controles_layout.addWidget(self.btn_salvar_perfil_usuario, 0)
 
-        lay.addWidget(self.btn_usuario_add_all, 0)
-        lay.addWidget(self.btn_usuario_limpar, 0)
+        controles_layout.addWidget(self.btn_usuario_add_all, 0)
+        controles_layout.addWidget(self.btn_usuario_limpar, 0)
+        lay.addWidget(self.painel_controles_usuario, 0)
         self._atualizar_combo_perfis_usuarios()
+        self.painel_controles_usuario.setVisible(False)
 
         self.faixa_usuarios = faixa
 
@@ -779,6 +786,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tab_id != "usuarios":
             self._ultima_aba_nao_usuario = tab_id
         self._atualizar_visibilidade_barra_usuarios(tab_id)
+        if hasattr(self, "painel_controles_usuario"):
+            self.painel_controles_usuario.setVisible(tab_id == "usuarios")
 
     def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
         self._barra_usuarios_habilitada = habilitada
