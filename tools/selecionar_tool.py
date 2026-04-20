@@ -17,9 +17,19 @@ class Ferramenta(FerramentaBase):
         super().__init__()
         self._inicio_caixa: QPointF | None = None
         self._fim_caixa: QPointF | None = None
+        self._arrastando_selecao = False
+        self._ultimo_ponto_arrasto: QPointF | None = None
+        self._movido = False
+        self._hover_idx: int | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._inicio_caixa = None
+        self._fim_caixa = None
+        self._arrastando_selecao = False
+        self._ultimo_ponto_arrasto = None
+        self._movido = False
+        self._hover_idx = None
         self.set_status("Clique para selecionar. Arraste para seleção por área. RMB cicla sobrepostos.")
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -36,6 +46,12 @@ class Ferramenta(FerramentaBase):
         indices = canvas._indices_elementos_em_ponto(pos)
         if indices:
             selecionado = indices[0]
+            if selecionado in canvas._selecionados and not (event.modifiers() & Qt.ShiftModifier):
+                self._arrastando_selecao = True
+                self._ultimo_ponto_arrasto = pos
+                self._movido = False
+                event.accept()
+                return True
             if event.modifiers() & Qt.ShiftModifier:
                 if selecionado in canvas._selecionados:
                     canvas._selecionados.remove(selecionado)
@@ -60,14 +76,42 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
+        pos = canvas._ponto_com_snap(event.position())
+        self._hover_idx = (canvas._indices_elementos_em_ponto(pos) or [None])[0]
+        if self._arrastando_selecao and self._ultimo_ponto_arrasto is not None:
+            dx = pos.x() - self._ultimo_ponto_arrasto.x()
+            dy = pos.y() - self._ultimo_ponto_arrasto.y()
+            if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                self._mover_selecionados(canvas, dx, dy)
+                self._ultimo_ponto_arrasto = pos
+                self._movido = True
+            snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
+            self.set_status(f"Movendo seleção ({len(canvas._selecionados)} elemento(s)){snap_info}")
+            canvas.update()
+            event.accept()
+            return True
         if self._inicio_caixa is None:
-            return False
-        self._fim_caixa = canvas._ponto_com_snap(event.position())
+            if canvas.lbl_status:
+                snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
+                canvas.lbl_status.setText(f"Selecionar | X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
+            canvas.update()
+            return True
+        self._fim_caixa = pos
         canvas.update()
         event.accept()
         return True
 
     def on_mouse_release(self, canvas, event) -> bool:
+        if event.button() == Qt.LeftButton and self._arrastando_selecao:
+            self._arrastando_selecao = False
+            self._ultimo_ponto_arrasto = None
+            if self._movido:
+                canvas._registrar_historico()
+                self.set_status(f"Movimento concluído ({len(canvas._selecionados)} elemento(s)).")
+            self._movido = False
+            canvas.update()
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton or self._inicio_caixa is None or self._fim_caixa is None:
             return False
         x1 = min(self._inicio_caixa.x(), self._fim_caixa.x())
@@ -102,6 +146,7 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_paint_overlay(self, canvas, painter):
+        self._desenhar_realce_elementos(canvas, painter)
         if self._inicio_caixa is None or self._fim_caixa is None:
             return
         p1 = canvas._cena_para_tela(self._inicio_caixa)
@@ -113,3 +158,41 @@ class Ferramenta(FerramentaBase):
         painter.setPen(QPen(QColor("#33c1ff"), 1, Qt.DashLine))
         painter.setBrush(QColor(40, 160, 255, 40))
         painter.drawRect(int(x), int(y), int(w), int(h))
+
+    def _desenhar_realce_elementos(self, canvas, painter):
+        idxs = set(canvas._selecionados)
+        if self._hover_idx is not None:
+            idxs.add(self._hover_idx)
+        for idx in idxs:
+            if idx is None or idx < 0 or idx >= len(canvas.cena.elementos):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                if len(pontos) < 2:
+                    continue
+                cor = "#ff7b39" if idx in canvas._selecionados else "#f6c26f"
+                for a, b in zip(pontos, pontos[1:]):
+                    canvas._desenhar_segmento(painter, a, b, cor=cor, espessura=2.0, tracejado=True)
+            elif el.get("tipo") == "bezier_quadratica":
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                amostra = canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
+                cor = "#ff7b39" if idx in canvas._selecionados else "#f6c26f"
+                for a, b in zip(amostra, amostra[1:]):
+                    canvas._desenhar_segmento(painter, a, b, cor=cor, espessura=2.0, tracejado=True)
+
+    def _mover_selecionados(self, canvas, dx: float, dy: float):
+        for idx in list(canvas._selecionados):
+            if idx < 0 or idx >= len(canvas.cena.elementos):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
+                if "controle_cantos" in el:
+                    el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+            elif el.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    x, y = el[chave]
+                    el[chave] = (x + dx, y + dy)

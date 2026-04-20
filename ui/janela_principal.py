@@ -102,6 +102,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 border-bottom: 2px solid #0b8dd1;
             }
             QTabBar::tab:hover { background: #ecf4fb; }
+            QTabBar::tab:selected:hover {
+                background: #ffffff;
+                color: #0b5f9e;
+                border-bottom: 2px solid #0b8dd1;
+            }
             """
         )
 

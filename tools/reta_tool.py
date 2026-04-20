@@ -397,6 +397,11 @@ class Ferramenta(FerramentaBase):
         if self.ui_flutuante and self.ui_flutuante.isVisible():
             self.ui_flutuante.reposicionar_no_canto_superior_direito()
 
+    def on_deactivate(self, canvas: VisualizacaoCanvas):
+        if self.ui_flutuante:
+            self.ui_flutuante.hide()
+        self._resetar_estado()
+
     def desativar(self):
         if self.ui_flutuante:
             self.ui_flutuante.fechar()
