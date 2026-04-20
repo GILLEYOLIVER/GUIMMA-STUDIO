@@ -347,6 +347,39 @@ class RetaToolUI(QFrame):
     def reposicionar_no_canto_superior_direito(self):
         self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
 
+    def _posicionar_canto_superior_direito(self):
+        tela = self.screen() or QApplication.primaryScreen()
+        if not tela:
+            return
+        area = tela.availableGeometry()
+        margem = 12
+        x = area.right() - self.width() - margem
+        y = area.top() + margem
+        self.move(max(area.left() + margem, x), y)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = event.globalPosition() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            destino = event.globalPosition() - self._drag_offset
+            self.move(int(destino.x()), int(destino.y()))
+            self._posicao_definida_manualmente = True
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def fechar(self):
         self.hide()
         self.fechado.emit()
