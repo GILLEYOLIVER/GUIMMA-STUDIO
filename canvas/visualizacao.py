@@ -101,6 +101,8 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def set_ferramenta_ativa(self, tool_id: str):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
+            self._runtime_tool.on_deactivate(self)
         self.ferramenta_ativa = tool_id
         self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
@@ -600,6 +602,9 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+            if self._runtime_tool.on_key_press(self, event):
+                return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
             self._tecla_w_trava_principal = True
             event.accept()
@@ -607,6 +612,9 @@ class VisualizacaoCanvas(QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_release"):
+            if self._runtime_tool.on_key_release(self, event):
+                return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
             self._tecla_w_trava_principal = False
             event.accept()
