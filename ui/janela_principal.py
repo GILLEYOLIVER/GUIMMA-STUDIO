@@ -9,11 +9,13 @@ from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QSize
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -58,6 +60,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
         self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
+        self._perfis_usuarios: dict[str, list[str]] = {}
+        self._perfil_usuario_atual = "Usuário 1"
+        self._inicializar_perfis_usuarios()
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -162,9 +167,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_barra_mensagem = QAction("Barra de mensagem", self)
         self.action_barra_mensagem.setCheckable(True)
         self.action_barra_mensagem.setChecked(True)
-        self.action_barra_mensagem.toggled.connect(
-            lambda ativo: self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
-        )
+        self.action_barra_mensagem.toggled.connect(self._alternar_barra_mensagem)
         self.menu_visao.addAction(self.action_barra_mensagem)
 
         self.action_menu_moldes = QAction("Menu de moldes", self)
@@ -742,8 +745,33 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.layout_linha_usuario.setContentsMargins(4, 0, 4, 0)
         self.layout_linha_usuario.setSpacing(3)
         lay.addWidget(self.linha_usuario, 1)
+
+        lbl_usuario = QLabel("Usuário:")
+        lbl_usuario.setStyleSheet("color:#111111; font-size:12px; font-weight:400;")
+        lay.addWidget(lbl_usuario, 0)
+
+        self.combo_perfil_usuario = QComboBox()
+        self.combo_perfil_usuario.setMinimumWidth(130)
+        self.combo_perfil_usuario.currentTextChanged.connect(self._trocar_perfil_usuario)
+        lay.addWidget(self.combo_perfil_usuario, 0)
+
+        self.btn_novo_perfil_usuario = QPushButton("Novo")
+        self.btn_novo_perfil_usuario.setCursor(Qt.PointingHandCursor)
+        self.btn_novo_perfil_usuario.setFixedHeight(34)
+        self.btn_novo_perfil_usuario.clicked.connect(self._criar_novo_perfil_usuario)
+        self.btn_novo_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
+        lay.addWidget(self.btn_novo_perfil_usuario, 0)
+
+        self.btn_salvar_perfil_usuario = QPushButton("Salvar usuário")
+        self.btn_salvar_perfil_usuario.setCursor(Qt.PointingHandCursor)
+        self.btn_salvar_perfil_usuario.setFixedHeight(34)
+        self.btn_salvar_perfil_usuario.clicked.connect(self._salvar_perfil_usuario_atual)
+        self.btn_salvar_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
+        lay.addWidget(self.btn_salvar_perfil_usuario, 0)
+
         lay.addWidget(self.btn_usuario_add_all, 0)
         lay.addWidget(self.btn_usuario_limpar, 0)
+        self._atualizar_combo_perfis_usuarios()
 
         self.faixa_usuarios = faixa
 
@@ -783,6 +811,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tool_id not in self._ferramentas_usuario_ids:
             self._ferramentas_usuario_ids.append(tool_id)
             self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+            self._sincronizar_perfil_usuario_atual()
             self._atualizar_linha_usuarios()
         tool = self.ribbon.tool_def(tool_id)
         if tool:
@@ -796,12 +825,14 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._ferramentas_usuario_ids.append(tool_id)
                 adicionadas += 1
         self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+        self._sincronizar_perfil_usuario_atual()
         self._atualizar_linha_usuarios()
         self.lbl_status.setText(f"{adicionadas} ferramenta(s) adicionadas da aba '{tab_id}'.")
 
     def _limpar_ferramentas_usuario(self):
         self._ferramentas_usuario_ids.clear()
         self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = []
+        self._sincronizar_perfil_usuario_atual()
         self._atualizar_linha_usuarios()
         self.lbl_status.setText("Linha Usuários limpa.")
 
@@ -809,7 +840,68 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tool_id in self._ferramentas_usuario_ids:
             self._ferramentas_usuario_ids.remove(tool_id)
             self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+            self._sincronizar_perfil_usuario_atual()
             self._atualizar_linha_usuarios()
+
+    def _inicializar_perfis_usuarios(self):
+        perfis = self.projeto_atual.preferencias_usuario.get("perfis_usuarios")
+        if isinstance(perfis, dict) and perfis:
+            self._perfis_usuarios = {str(nome): list(ids) for nome, ids in perfis.items()}
+        else:
+            self._perfis_usuarios = {"Usuário 1": list(self._ferramentas_usuario_ids)}
+        perfil_atual = self.projeto_atual.preferencias_usuario.get("perfil_usuario_atual")
+        if isinstance(perfil_atual, str) and perfil_atual in self._perfis_usuarios:
+            self._perfil_usuario_atual = perfil_atual
+        else:
+            self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
+        self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(self._perfil_usuario_atual, []))
+
+    def _persistir_perfis_usuarios(self):
+        self.projeto_atual.preferencias_usuario["perfis_usuarios"] = {
+            nome: list(ids) for nome, ids in self._perfis_usuarios.items()
+        }
+        self.projeto_atual.preferencias_usuario["perfil_usuario_atual"] = self._perfil_usuario_atual
+        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+
+    def _sincronizar_perfil_usuario_atual(self):
+        self._perfis_usuarios[self._perfil_usuario_atual] = list(self._ferramentas_usuario_ids)
+        self._persistir_perfis_usuarios()
+
+    def _atualizar_combo_perfis_usuarios(self):
+        if not hasattr(self, "combo_perfil_usuario"):
+            return
+        self.combo_perfil_usuario.blockSignals(True)
+        self.combo_perfil_usuario.clear()
+        self.combo_perfil_usuario.addItems(self._perfis_usuarios.keys())
+        self.combo_perfil_usuario.setCurrentText(self._perfil_usuario_atual)
+        self.combo_perfil_usuario.blockSignals(False)
+
+    def _trocar_perfil_usuario(self, nome_perfil: str):
+        if not nome_perfil or nome_perfil not in self._perfis_usuarios:
+            return
+        self._perfil_usuario_atual = nome_perfil
+        self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(nome_perfil, []))
+        self._persistir_perfis_usuarios()
+        self._atualizar_linha_usuarios()
+        self.lbl_status.setText(f"Perfil '{nome_perfil}' carregado.")
+
+    def _criar_novo_perfil_usuario(self):
+        nome, ok = QInputDialog.getText(self, "Novo usuário", "Nome do usuário/perfil:")
+        nome = (nome or "").strip()
+        if not ok or not nome:
+            return
+        if nome in self._perfis_usuarios:
+            self.lbl_status.setText(f"O perfil '{nome}' já existe.")
+            return
+        self._perfis_usuarios[nome] = list(self._ferramentas_usuario_ids)
+        self._perfil_usuario_atual = nome
+        self._persistir_perfis_usuarios()
+        self._atualizar_combo_perfis_usuarios()
+        self.lbl_status.setText(f"Perfil '{nome}' criado.")
+
+    def _salvar_perfil_usuario_atual(self):
+        self._sincronizar_perfil_usuario_atual()
+        self.lbl_status.setText(f"Perfil '{self._perfil_usuario_atual}' salvo.")
 
     def _atualizar_linha_usuarios(self):
         if not hasattr(self, "layout_linha_usuario"):
@@ -1104,6 +1196,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                 area.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         self.lbl_status.setText("Snap contextual ativo" if self._snap_contextual_ativo else "Snap contextual desativado")
 
+    def _alternar_barra_mensagem(self, ativo: bool):
+        if hasattr(self, "barra_mensagem"):
+            self.barra_mensagem.setVisible(bool(ativo))
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
+
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()
         if not area:
@@ -1219,6 +1317,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
         l.addWidget(self.lbl_escala)
+        self.barra_mensagem = barra
+        self.barra_mensagem.setVisible(self.action_barra_mensagem.isChecked())
         layout.addWidget(barra)
         return container
 
