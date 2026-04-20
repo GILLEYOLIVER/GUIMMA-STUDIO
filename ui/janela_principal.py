@@ -133,6 +133,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tabbar.setUsesScrollButtons(True)
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
+        self.ribbon.tabbar.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ribbon.tabbar.customContextMenuRequested.connect(self._abrir_menu_contexto_aba_ribbon)
         self.ribbon.tab_changed.connect(self._on_tab_ribbon_alterada)
         self.ribbon.adicionar_usuario.connect(self._adicionar_ferramenta_usuario)
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
@@ -311,6 +313,18 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _topo_backstage(self) -> int:
         return self.barra_superior.height()
+
+    def _abrir_menu_contexto_aba_ribbon(self, pos: QPoint):
+        indice = self.ribbon.tabbar.tabAt(pos)
+        tab_id = self.ribbon.tab_id_at(indice) if indice >= 0 else None
+        if not tab_id:
+            return
+        menu = QMenu(self)
+        submenu_usuarios = menu.addMenu("Usuários")
+        acao_add_todas = submenu_usuarios.addAction("Adicionar todas as ferramentas para usuário")
+        acao = menu.exec(self.ribbon.tabbar.mapToGlobal(pos))
+        if acao == acao_add_todas:
+            self._adicionar_todas_ferramentas_da_aba_id(tab_id)
 
     def _abrir_pagina_ferramenta(self, tool_id: str):
         if self._executar_acao_edicao_ribbon(tool_id):
@@ -757,6 +771,23 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.combo_perfil_usuario = QComboBox()
         self.combo_perfil_usuario.setMinimumWidth(130)
+        self.combo_perfil_usuario.setStyleSheet(
+            """
+            QComboBox {
+                color:#111111;
+                background:#ffffff;
+                border:1px solid #b7b7b7;
+                padding: 2px 8px;
+                font-weight: 400;
+            }
+            QComboBox QAbstractItemView {
+                color:#111111;
+                background:#ffffff;
+                selection-background-color:#e9f3ff;
+                selection-color:#111111;
+            }
+            """
+        )
         self.combo_perfil_usuario.currentTextChanged.connect(self._trocar_perfil_usuario)
         controles_layout.addWidget(self.combo_perfil_usuario, 0)
 
@@ -828,6 +859,9 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _adicionar_todas_ferramentas_da_aba(self):
         tab_id = self._ultima_aba_nao_usuario or "construcao"
+        self._adicionar_todas_ferramentas_da_aba_id(tab_id)
+
+    def _adicionar_todas_ferramentas_da_aba_id(self, tab_id: str):
         adicionadas = 0
         for tool_id in self.ribbon.tool_ids_by_tab(tab_id):
             if tool_id not in self._ferramentas_usuario_ids and self.ribbon.tool_def(tool_id):
