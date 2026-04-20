@@ -3,188 +3,17 @@ from __future__ import annotations
 from copy import deepcopy
 from importlib import import_module
 from math import atan2, cos, degrees, radians, sin, sqrt
+from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
+from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
-
-
-class PainelCoordenadas(QFrame):
-    desfazer_ponto = Signal()
-    aplicar = Signal(dict)
-    alternado = Signal(bool)
-    posicao_alterada = Signal(int, int)
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setObjectName("PainelCoordenadas")
-        self.setFixedSize(300, 120)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
-
-        topo = QHBoxLayout()
-        topo.setContentsMargins(0, 0, 0, 0)
-        topo.setSpacing(4)
-
-        titulo = QLabel("(cm) Coordenadas")
-        titulo.setStyleSheet("font-size: 10px; color: #7c7c7c;")
-        topo.addWidget(titulo, 1)
-        btn_fechar = QPushButton("✕")
-        btn_fechar.setFixedSize(16, 16)
-        btn_fechar.clicked.connect(lambda: self._alternar_visibilidade(False))
-        topo.addWidget(btn_fechar, 0, Qt.AlignRight)
-        layout.addLayout(topo)
-
-        grade = QGridLayout()
-        grade.setContentsMargins(0, 0, 0, 0)
-        grade.setHorizontalSpacing(6)
-        grade.setVerticalSpacing(2)
-        self.dx_input = QLineEdit()
-        self.dy_input = QLineEdit()
-        self.a_input = QLineEdit()
-        self.d_input = QLineEdit()
-        for field in (self.dx_input, self.dy_input, self.a_input, self.d_input):
-            field.setFixedHeight(20)
-            field.setStyleSheet("background:#f2f2f2; border:1px solid #a2a2a2;")
-        self.dx_preview = QLabel("0")
-        self.dy_preview = QLabel("0")
-        self.a_preview = QLabel("0°")
-        self.d_preview = QLabel("0")
-        for lbl in (self.dx_preview, self.dy_preview, self.a_preview, self.d_preview):
-            lbl.setStyleSheet("font-size:10px; color:#7c7c7c;")
-            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        grade.addWidget(QLabel("Dx:"), 0, 0)
-        grade.addWidget(self.dx_input, 0, 1)
-        grade.addWidget(self.dx_preview, 0, 2)
-        grade.addWidget(QLabel("Ângulo:"), 0, 3)
-        grade.addWidget(self.a_input, 0, 4)
-        grade.addWidget(self.a_preview, 0, 5)
-        grade.addWidget(QLabel("Dy:"), 1, 0)
-        grade.addWidget(self.dy_input, 1, 1)
-        grade.addWidget(self.dy_preview, 1, 2)
-        grade.addWidget(QLabel("Distância:"), 1, 3)
-        grade.addWidget(self.d_input, 1, 4)
-        grade.addWidget(self.d_preview, 1, 5)
-        layout.addLayout(grade)
-
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        botao_desfazer = QPushButton("Desfaz ponto")
-        botao_desfazer.setFixedHeight(22)
-        botao_desfazer.clicked.connect(self.desfazer_ponto.emit)
-        row.addWidget(botao_desfazer)
-        botao_limpar = QPushButton("Limpar")
-        botao_limpar.setFixedHeight(22)
-        botao_limpar.clicked.connect(self._limpar)
-        row.addWidget(botao_limpar)
-        botao_aplicar = QPushButton("Aplicar")
-        botao_aplicar.setFixedHeight(22)
-        botao_aplicar.clicked.connect(self._emitir_aplicar)
-        row.addWidget(botao_aplicar)
-        layout.addLayout(row)
-        self._offset_arraste: QPointF | None = None
-
-        self.setStyleSheet(
-            """
-            QFrame#PainelCoordenadas {
-                background: #ebebeb;
-                border: 1px solid #9a9a9a;
-                border-radius: 8px;
-                color: #1f1f1f;
-            }
-            QPushButton {
-                background: #f6f6f6;
-                border: 1px solid #9b9b9b;
-                font-size: 10px;
-                font-weight: 600;
-                color: #111111;
-            }
-            QPushButton:hover { background: #ffffff; }
-            QLabel { color: #1f1f1f; }
-            QLineEdit { color: #1a1a1a; selection-background-color: #0b8dd1; }
-            """
-        )
-
-    def _alternar_visibilidade(self, visivel: bool):
-        if visivel:
-            self.show()
-        else:
-            self.hide()
-        self.alternado.emit(visivel)
-
-    def definir_visivel(self, visivel: bool):
-        self._alternar_visibilidade(visivel)
-
-    def _limpar(self):
-        for field in (self.dx_input, self.dy_input, self.a_input, self.d_input):
-            field.clear()
-
-    def _parse(self, txt: str) -> float | None:
-        txt = txt.strip().replace(",", ".")
-        if not txt:
-            return None
-        try:
-            return float(txt)
-        except ValueError:
-            return None
-
-    def _emitir_aplicar(self):
-        self.aplicar.emit(
-            {
-                "dx": self._parse(self.dx_input.text()),
-                "dy": self._parse(self.dy_input.text()),
-                "a": self._parse(self.a_input.text()),
-                "d": self._parse(self.d_input.text()),
-            }
-        )
-
-    def atualizar_preview(self, origem: QPointF | None, destino: QPointF | None):
-        if not origem or not destino:
-            self.dx_preview.setText("0")
-            self.dy_preview.setText("0")
-            self.a_preview.setText("0°")
-            self.d_preview.setText("0")
-            return
-        dx = destino.x() - origem.x()
-        dy = destino.y() - origem.y()
-        ang = degrees(atan2(-dy, dx)) % 360.0
-        dist = sqrt(dx * dx + dy * dy)
-        self.dx_preview.setText(f"{dx:.2f}")
-        self.dy_preview.setText(f"{dy:.2f}")
-        self.a_preview.setText(f"{ang:.0f}°")
-        self.d_preview.setText(f"{dist:.2f}")
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._offset_arraste = event.position()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._offset_arraste is not None and event.buttons() & Qt.LeftButton:
-            destino = self.mapToParent(event.position().toPoint() - self._offset_arraste.toPoint())
-            self.move(destino)
-            self.posicao_alterada.emit(self.x(), self.y())
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._offset_arraste = None
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
 
 class VisualizacaoCanvas(QWidget):
     zoom_changed = Signal(float)
@@ -253,6 +82,9 @@ class VisualizacaoCanvas(QWidget):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
         self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None  # Para ferramenta reta
+        self._rmb_count = 0
+        self._rmb_ultimo_tempo = 0.0
+        self._rmb_ultima_pos = QPointF(0.0, 0.0)
         self.lbl_status = None  # Será definido pela janela principal
 
         self.setMinimumSize(100, 100)
@@ -273,6 +105,8 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def set_ferramenta_ativa(self, tool_id: str):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
+            self._runtime_tool.on_deactivate(self)
         self.ferramenta_ativa = tool_id
         self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
@@ -347,13 +181,10 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas_changed.emit(visivel)
 
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
-        self._painel_coordenadas_posicao = pos
-        if pos and self.painel_coordenadas.isVisible():
-            self.painel_coordenadas.move(*pos)
+        self._painel_coordenadas_posicao = None
+        self._reposicionar_painel_coordenadas()
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
-        if self._painel_coordenadas_posicao:
-            return self._painel_coordenadas_posicao
         if self.painel_coordenadas.isVisible():
             return self.painel_coordenadas.x(), self.painel_coordenadas.y()
         return None
@@ -482,6 +313,87 @@ class VisualizacaoCanvas(QWidget):
         self._registrar_historico()
         self.update()
 
+    def selecionar_tudo(self):
+        self._selecionados = set(range(len(self.cena.elementos)))
+        self.update()
+
+    def selecionar_moldes(self):
+        self._selecionados = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        self.update()
+
+    def inverter_selecao(self):
+        total = set(range(len(self.cena.elementos)))
+        self._selecionados = total - set(self._selecionados)
+        self.update()
+
+    def inverter_selecao_moldes(self):
+        moldes = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        self._selecionados = moldes - (set(self._selecionados) & moldes)
+        self.update()
+
+    def _ativar_ferramenta_janela_principal(self, tool_id: str):
+        parent = self.parentWidget()
+        while parent is not None:
+            if hasattr(parent, "_ativar_ferramenta_global"):
+                parent._ativar_ferramenta_global(tool_id)
+                return
+            parent = parent.parentWidget()
+
+    def _abrir_menu_contexto_canvas(self, pos_global: QPoint):
+        menu = QMenu(self)
+        a_props = menu.addAction("Propriedades\tCtrl+Enter")
+        a_vars = menu.addAction("Variantes")
+        a_infos = menu.addAction("Informações modelo\tCtrl+M")
+        menu.addSeparator()
+        a_excluir = menu.addAction("Excluir\tDel")
+        a_recortar = menu.addAction("Recortar\tCtrl+X")
+        a_copiar = menu.addAction("Copiar\tCtrl+C")
+        a_colar = menu.addAction("Colar\tCtrl+V")
+        menu.addSeparator()
+        a_sel_tudo = menu.addAction("Selecionar tudo\tCtrl+T")
+        a_sel_moldes = menu.addAction("Selecionar moldes")
+        a_inv_sel = menu.addAction("Inverter seleção")
+        a_inv_sel_moldes = menu.addAction("Inverter seleção moldes")
+        menu.addSeparator()
+        a_criar_restore = menu.addAction("Cria ponto de restauração")
+        a_restaurar = menu.addAction("Restaurar")
+        a_restaurar_copia = menu.addAction("Restaura ponto de restauração com cópia")
+
+        tem_sel = bool(self._selecionados)
+        a_excluir.setEnabled(tem_sel)
+        a_recortar.setEnabled(tem_sel)
+        a_copiar.setEnabled(tem_sel)
+        a_criar_restore.setEnabled(False)
+        a_restaurar.setEnabled(False)
+        a_restaurar_copia.setEnabled(False)
+
+        escolhido: QAction | None = menu.exec(pos_global)
+        if escolhido is None:
+            return
+        if escolhido is a_props:
+            self._ativar_ferramenta_janela_principal("propriedades")
+        elif escolhido is a_vars:
+            self._ativar_ferramenta_janela_principal("variantes")
+        elif escolhido is a_infos:
+            self._ativar_ferramenta_janela_principal("informacoes_moldes")
+        elif escolhido is a_excluir:
+            self.apagar_selecionados()
+        elif escolhido is a_recortar:
+            self.copiar()
+            self.apagar_selecionados()
+        elif escolhido is a_copiar:
+            self.copiar()
+        elif escolhido is a_colar:
+            self.colar()
+        elif escolhido is a_sel_tudo:
+            self.selecionar_tudo()
+        elif escolhido is a_sel_moldes:
+            self.selecionar_moldes()
+        elif escolhido is a_inv_sel:
+            self.inverter_selecao()
+        elif escolhido is a_inv_sel_moldes:
+            self.inverter_selecao_moldes()
+
     # ========== Métodos internos ==========
 
     def _registrar_historico(self):
@@ -504,12 +416,20 @@ class VisualizacaoCanvas(QWidget):
     def _reposicionar_painel_coordenadas(self):
         if not self.painel_coordenadas.isVisible():
             return
-        if self._painel_coordenadas_posicao:
-            self.painel_coordenadas.move(*self._painel_coordenadas_posicao)
-            return
         x = max(8, self.width() - self.painel_coordenadas.width() - 12)
         y = 16
         self.painel_coordenadas.move(x, y)
+
+    def calcular_posicao_painel_auxiliar(self, largura: int, altura: int, abaixo_coordenadas: bool = True) -> QPoint:
+        margem_direita = 12
+        margem_topo = 16
+        x = max(8, self.width() - int(largura) - margem_direita)
+        y = margem_topo
+        if abaixo_coordenadas and self.painel_coordenadas.isVisible():
+            y = self.painel_coordenadas.y() + self.painel_coordenadas.height() + 8
+        max_y = max(margem_topo, self.height() - int(altura) - 8)
+        y = max(margem_topo, min(y, max_y))
+        return QPoint(int(x), int(y))
 
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
         return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(),
@@ -756,8 +676,14 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas_changed.emit(visivel)
 
     def _registrar_posicao_painel(self, x: int, y: int):
-        self._painel_coordenadas_posicao = (x, y)
+        self._painel_coordenadas_posicao = None
         self.painel_posicao_changed.emit(x, y)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
 
     def wheelEvent(self, event: QWheelEvent):
         cursor_tela = event.position()
@@ -772,6 +698,9 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+            if self._runtime_tool.on_key_press(self, event):
+                return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
             self._tecla_w_trava_principal = True
             event.accept()
@@ -779,6 +708,9 @@ class VisualizacaoCanvas(QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_release"):
+            if self._runtime_tool.on_key_release(self, event):
+                return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
             self._tecla_w_trava_principal = False
             event.accept()
@@ -798,9 +730,38 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.RightButton and self.ferramenta_ativa != "selecionar":
+            agora = monotonic()
+            pos = event.position()
+            delta_t = agora - self._rmb_ultimo_tempo
+            delta_p = sqrt((pos.x() - self._rmb_ultima_pos.x()) ** 2 + (pos.y() - self._rmb_ultima_pos.y()) ** 2)
+            if delta_t <= 0.55 and delta_p <= 18.0:
+                self._rmb_count += 1
+            else:
+                self._rmb_count = 1
+            self._rmb_ultimo_tempo = agora
+            self._rmb_ultima_pos = QPointF(pos)
+            if self._rmb_count >= 2:
+                self._rmb_count = 0
+                self.ferramenta_padrao_solicitada.emit("selecionar")
+                if self.lbl_status:
+                    self.lbl_status.setText("Ferramenta solta (RMB x2). Voltou para Selecionar.")
+                event.accept()
+                return
+        elif event.button() == Qt.LeftButton:
+            self._rmb_count = 0
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
+        if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
+            if event.modifiers() & Qt.ControlModifier:
+                pos = self._ponto_com_snap(event.position())
+                if self._selecionar_proximo_em_ponto(pos):
+                    event.accept()
+                    return
+            self._abrir_menu_contexto_canvas(event.globalPosition().toPoint())
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -1014,3 +975,57 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
+
+    def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        apx = p.x() - a.x()
+        apy = p.y() - a.y()
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 1e-9:
+            return sqrt((p.x() - a.x()) ** 2 + (p.y() - a.y()) ** 2)
+        t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
+        proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+        return sqrt((p.x() - proj.x()) ** 2 + (p.y() - proj.y()) ** 2)
+
+    def _indices_elementos_em_ponto(self, pos: QPointF) -> list[int]:
+        tolerancia = 8.0 / max(self.zoom, 0.001)
+        candidatos: list[int] = []
+        for idx in range(len(self.cena.elementos) - 1, -1, -1):
+            el = self.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
+                    candidatos.append(idx)
+            elif el.get("tipo") == "bezier_quadratica":
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                amostra = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=40)
+                if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(amostra, amostra[1:])):
+                    candidatos.append(idx)
+        return candidatos
+
+    def _selecionar_proximo_em_ponto(self, pos: QPointF) -> bool:
+        candidatos = self._indices_elementos_em_ponto(pos)
+        if not candidatos:
+            return False
+        mesmo_cursor = (
+            self._ciclo_selecao_cursor is not None
+            and sqrt((self._ciclo_selecao_cursor.x() - pos.x()) ** 2 + (self._ciclo_selecao_cursor.y() - pos.y()) ** 2)
+            <= (8.0 / max(self.zoom, 0.001))
+        )
+        if not mesmo_cursor or candidatos != self._ciclo_selecao_indices:
+            self._ciclo_selecao_indices = candidatos
+            self._ciclo_selecao_cursor = QPointF(pos)
+            proximo = candidatos[0]
+        else:
+            atual = next(iter(self._selecionados), None)
+            if atual in candidatos:
+                idx_atual = candidatos.index(atual)
+                proximo = candidatos[(idx_atual + 1) % len(candidatos)]
+            else:
+                proximo = candidatos[0]
+        self._selecionados = {proximo}
+        self.update()
+        return True

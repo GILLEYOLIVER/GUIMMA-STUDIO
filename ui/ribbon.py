@@ -82,7 +82,7 @@ class RibbonButton(QToolButton):
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.setIconSize(QSize(16, 16))
-            self.setFixedSize(156, 28)
+            self.setFixedSize(172, 32)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -455,8 +455,8 @@ class RibbonGroup(QFrame):
 
             if secundarios:
                 grade_secundarios = QGridLayout()
-                grade_secundarios.setHorizontalSpacing(2)
-                grade_secundarios.setVerticalSpacing(1)
+                grade_secundarios.setHorizontalSpacing(6)
+                grade_secundarios.setVerticalSpacing(4)
                 for index, tool in enumerate(secundarios):
                     botao = RibbonButton(tool, compacto=True)
                     botao.acionada.connect(self.tool_selected.emit)
@@ -564,6 +564,11 @@ class RibbonWidget(QWidget):
                 border: 1px solid #0a74aa;
             }
             QTabBar::tab:hover { background: #dfe8f2; }
+            QTabBar::tab:selected:hover {
+                background: #0b7fb8;
+                color: #ffffff;
+                border: 1px solid #0a74aa;
+            }
             """
         )
         self._atualizar_destaque_aba(self.tabbar.currentIndex())
