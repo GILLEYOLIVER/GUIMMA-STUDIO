@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
-
 from math import atan2, cos, degrees, radians, sin, sqrt
+from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
@@ -224,7 +224,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_indice = 0
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
-        self._linha_cor = "#ff5a00"
+        self._linha_cor = "#ffffff"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
@@ -244,6 +244,9 @@ class VisualizacaoCanvas(QWidget):
         self._arrastando_alca_curva: tuple[int, str] | None = None
         self._ciclo_selecao_indices: list[int] = []
         self._ciclo_selecao_cursor: QPointF | None = None
+        self._retangulo_inicio: QPointF | None = None
+        self._retangulo_preview: QPointF | None = None
+        self._retangulo_criar_molde = True
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -291,7 +294,13 @@ class VisualizacaoCanvas(QWidget):
             self._extensao_origem = None
         if tool_id != "estender_duas_retas":
             self._segmento_primeira_reta = None
+        if tool_id != "retangulo":
+            self._retangulo_inicio = None
+            self._retangulo_preview = None
         self.update()
+
+    def definir_config_retangulo(self, criar_molde: bool):
+        self._retangulo_criar_molde = bool(criar_molde)
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
         cursor_tela = event.position()
@@ -308,6 +317,9 @@ class VisualizacaoCanvas(QWidget):
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
         if self.ferramenta_ativa == "curva":
             self._mouse_press_curva(event)
+            return
+        if self.ferramenta_ativa == "retangulo":
+            self._mouse_press_retangulo(event)
             return
         if self.ferramenta_ativa == "dividir_curva" and event.button() == Qt.LeftButton:
             self._dividir_segmento_em_clique(self._ponto_com_snap(event.position()))
@@ -408,6 +420,26 @@ class VisualizacaoCanvas(QWidget):
             event.accept()
             return
 
+        super().mousePressEvent(event)
+
+    def _mouse_press_retangulo(self, event: QMouseEvent):
+        pos = self._ponto_com_snap(event.position())
+        if event.button() == Qt.LeftButton:
+            if self._retangulo_inicio is None:
+                self._retangulo_inicio = pos
+                self._retangulo_preview = pos
+            else:
+                self._retangulo_preview = pos
+                self._finalizar_retangulo()
+            self.update()
+            event.accept()
+            return
+        if event.button() == Qt.RightButton:
+            self._retangulo_inicio = None
+            self._retangulo_preview = None
+            self.update()
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def _mouse_press_curva(self, event: QMouseEvent):
@@ -706,6 +738,12 @@ class VisualizacaoCanvas(QWidget):
             self.update()
             event.accept()
             return
+        if self.ferramenta_ativa == "retangulo":
+            if self._retangulo_inicio is not None:
+                self._retangulo_preview = self._ponto_com_snap(event.position())
+            self.update()
+            event.accept()
+            return
         if self.ferramenta_ativa not in {"reta", "curva"}:
             pos = self._ponto_com_snap(event.position())
             if self._arrastando_alca_curva:
@@ -877,6 +915,19 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_marca_x(painter, marca)
         if self._pontos_reta and self._preview_reta:
             self._desenhar_label_angulo_cursor(painter, self._pontos_reta[-1], self._preview_reta)
+        if self.ferramenta_ativa == "retangulo" and self._retangulo_inicio and self._retangulo_preview:
+            p1 = self._retangulo_inicio
+            p3 = self._retangulo_preview
+            p2 = QPointF(p3.x(), p1.y())
+            p4 = QPointF(p1.x(), p3.y())
+            self._desenhar_polilinha(
+                painter,
+                [p1, p2, p3, p4, p1],
+                cor=self._linha_cor,
+                espessura=self._linha_espessura,
+                estilo=self._linha_estilo,
+                amplitude=self._linha_amplitude,
+            )
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado:
@@ -1247,6 +1298,69 @@ class VisualizacaoCanvas(QWidget):
             self._guia_fechamento = None
             self._guias_alinhamento = []
             self._aguardando_retorno_selecao = True
+
+    def _pontos_auxiliares_segmento(self, inicio: QPointF, fim: QPointF) -> list[QPointF]:
+        return [
+            QPointF(inicio.x() + ((fim.x() - inicio.x()) * t), inicio.y() + ((fim.y() - inicio.y()) * t))
+            for t in (0.33, 0.66)
+        ]
+
+    def _finalizar_retangulo(self):
+        if not self._retangulo_inicio or not self._retangulo_preview:
+            return
+        p1 = self._retangulo_inicio
+        p3 = self._retangulo_preview
+        if abs(p1.x() - p3.x()) < 0.0001 or abs(p1.y() - p3.y()) < 0.0001:
+            self._retangulo_inicio = None
+            self._retangulo_preview = None
+            return
+        p2 = QPointF(p3.x(), p1.y())
+        p4 = QPointF(p1.x(), p3.y())
+        cantos = [p1, p2, p3, p4]
+        molde_id = str(uuid4()) if self._retangulo_criar_molde else None
+        if self._retangulo_criar_molde:
+            pontos_fechados: list[QPointF] = []
+            for idx, inicio in enumerate(cantos):
+                fim = cantos[(idx + 1) % len(cantos)]
+                pontos_fechados.append(inicio)
+                pontos_fechados.extend(self._pontos_auxiliares_segmento(inicio, fim))
+            pontos_fechados.append(cantos[0])
+            self.cena.elementos.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [(pt.x(), pt.y()) for pt in pontos_fechados],
+                    "cor": self._linha_cor,
+                    "espessura": self._linha_espessura,
+                    "estilo": self._linha_estilo,
+                    "amplitude": self._linha_amplitude,
+                    "fase_inicio": 0.0,
+                    "molde": True,
+                    "molde_id": molde_id,
+                    "fio_angulo": 0.0,
+                    "controle_cantos": [(pt.x(), pt.y()) for pt in cantos],
+                }
+            )
+            self._selecionados = {len(self.cena.elementos) - 1}
+        else:
+            pontos = [p1, p2, p3, p4, p1]
+            fase = 0.0
+            for inicio, fim in zip(pontos, pontos[1:]):
+                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
+                self.cena.elementos.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                        "cor": self._linha_cor,
+                        "espessura": self._linha_espessura,
+                        "estilo": self._linha_estilo,
+                        "amplitude": self._linha_amplitude,
+                        "fase_inicio": fase,
+                    }
+                )
+                fase += comprimento
+        self._registrar_historico()
+        self._retangulo_inicio = None
+        self._retangulo_preview = None
 
     def _reposicionar_painel_coordenadas(self):
         if not self.painel_coordenadas.isVisible():
