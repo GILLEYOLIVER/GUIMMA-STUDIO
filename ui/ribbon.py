@@ -53,7 +53,7 @@ class TabDef:
 class RibbonTabBar(QTabBar):
     def tabSizeHint(self, index):  # noqa: N802
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 20, 80), 36)
+        return QSize(max(size.width() + 24, 90), 40)
 
 
 class RibbonButton(QToolButton):
@@ -82,7 +82,7 @@ class RibbonButton(QToolButton):
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.setIconSize(QSize(16, 16))
-            self.setFixedSize(140, 24)
+            self.setFixedSize(156, 28)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -90,9 +90,9 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: none;
                     color: #1e1e1e;
-                    font-size: 11px;
-                    font-weight: 400;
-                    padding: 0 4px;
+                    font-size: 13px;
+                    font-weight: 500;
+                    padding: 0 6px;
                     border-radius: 4px;
                 }
                 QToolButton:hover { background: #eef5ff; border: none; }
@@ -129,7 +129,7 @@ class RibbonButton(QToolButton):
                 border: none;
                 border-radius: 4px;
                 color: #1e1e1e;
-                font-size: 12px;
+                font-size: 13px;
                 padding: 3px;
             }
             QToolButton:hover { background: #eef5ff; border: none; }
@@ -144,8 +144,8 @@ class RibbonButton(QToolButton):
                 QToolButton {
                     border: none;
                     border-radius: 4px;
-                    font-weight: 400;
-                    font-size: 11px;
+                    font-weight: 600;
+                    font-size: 12px;
                     padding: 1px;
                     background: #ffffff;
                 }
@@ -486,9 +486,9 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(14)
+        rodape.setFixedHeight(20)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        rodape.setStyleSheet("color: #505050; font-size: 8px; border-top: 1px solid #d9d9d9; padding-top: 1px;")
+        rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 600; border-top: 1px solid #d9d9d9;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -554,8 +554,8 @@ class RibbonWidget(QWidget):
                 background: #f3f5f8;
                 color: #1e2a36;
                 border: 1px solid #d4dbe4;
-                font-size: 15px;
-                font-weight: 600;
+                font-size: 17px;
+                font-weight: 700;
                 padding: 8px 16px;
             }
             QTabBar::tab:selected {
