@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from importlib import import_module
 from math import atan2, cos, degrees, radians, sin, sqrt
 from uuid import uuid4
 
@@ -250,6 +251,7 @@ class VisualizacaoCanvas(QWidget):
         self._arrastando_ponto_poly: tuple[int, int] | None = None
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
+        self._runtime_tool = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -271,6 +273,9 @@ class VisualizacaoCanvas(QWidget):
 
     def set_ferramenta_ativa(self, tool_id: str):
         self.ferramenta_ativa = tool_id
+        self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
+            self._runtime_tool.on_activate(self)
         self._aguardando_retorno_selecao = False
         self._cliques_direito_reta = 0
         self._snap_resultado = None
@@ -306,8 +311,18 @@ class VisualizacaoCanvas(QWidget):
             self._guia_ponto_poly = None
         self.update()
 
+    def _carregar_runtime_ferramenta(self, tool_id: str):
+        try:
+            module = import_module(f"tools.{tool_id}_tool")
+            tool_cls = getattr(module, "Ferramenta")
+            return tool_cls()
+        except Exception:
+            return None
+
     def definir_config_retangulo(self, criar_molde: bool):
         self._retangulo_criar_molde = bool(criar_molde)
+        if self._runtime_tool and hasattr(self._runtime_tool, "set_criar_molde"):
+            self._runtime_tool.set_criar_molde(criar_molde)
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
         cursor_tela = event.position()
@@ -322,6 +337,8 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._runtime_tool and self._runtime_tool.on_mouse_press(self, event):
+            return
         if self.ferramenta_ativa == "curva":
             self._mouse_press_curva(event)
             return
@@ -721,6 +738,8 @@ class VisualizacaoCanvas(QWidget):
         el[alca] = (pos.x(), pos.y())
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._runtime_tool and self._runtime_tool.on_mouse_move(self, event):
+            return
         self._cursor_tela = event.position()
         if self.ferramenta_ativa == "curva":
             pos = self._ponto_com_snap(event.position())
@@ -797,6 +816,8 @@ class VisualizacaoCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._runtime_tool and self._runtime_tool.on_mouse_release(self, event):
+            return
         if event.button() == Qt.LeftButton and self._arrastando_ponto_poly is not None:
             self._arrastando_ponto_poly = None
             self._guia_ponto_poly = None
@@ -959,9 +980,8 @@ class VisualizacaoCanvas(QWidget):
                 estilo=self._linha_estilo,
                 amplitude=self._linha_amplitude,
             )
-        self._desenhar_info_moldes(painter)
-        self._desenhar_guia_arrasto_ponto(painter)
-        self._desenhar_hover_ponto_manipulacao(painter)
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
+            self._runtime_tool.on_paint_overlay(self, painter)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado:
