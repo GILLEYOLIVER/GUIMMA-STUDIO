@@ -167,9 +167,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_barra_mensagem = QAction("Barra de mensagem", self)
         self.action_barra_mensagem.setCheckable(True)
         self.action_barra_mensagem.setChecked(True)
-        self.action_barra_mensagem.toggled.connect(
-            lambda ativo: self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
-        )
+        self.action_barra_mensagem.toggled.connect(self._alternar_barra_mensagem)
         self.menu_visao.addAction(self.action_barra_mensagem)
 
         self.action_menu_moldes = QAction("Menu de moldes", self)
@@ -1198,6 +1196,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                 area.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         self.lbl_status.setText("Snap contextual ativo" if self._snap_contextual_ativo else "Snap contextual desativado")
 
+    def _alternar_barra_mensagem(self, ativo: bool):
+        if hasattr(self, "barra_mensagem"):
+            self.barra_mensagem.setVisible(bool(ativo))
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
+
     def _alternar_snap_canvas_atual(self, ativo: bool):
         area = self._area_documento_atual()
         if not area:
@@ -1313,6 +1317,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
         l.addWidget(self.lbl_escala)
+        self.barra_mensagem = barra
+        self.barra_mensagem.setVisible(self.action_barra_mensagem.isChecked())
         layout.addWidget(barra)
         return container
 
