@@ -247,6 +247,9 @@ class VisualizacaoCanvas(QWidget):
         self._retangulo_inicio: QPointF | None = None
         self._retangulo_preview: QPointF | None = None
         self._retangulo_criar_molde = True
+        self._arrastando_ponto_poly: tuple[int, int] | None = None
+        self._hover_ponto_poly: tuple[int, int] | None = None
+        self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -297,6 +300,10 @@ class VisualizacaoCanvas(QWidget):
         if tool_id != "retangulo":
             self._retangulo_inicio = None
             self._retangulo_preview = None
+        if tool_id != "manipular_pontos":
+            self._arrastando_ponto_poly = None
+            self._hover_ponto_poly = None
+            self._guia_ponto_poly = None
         self.update()
 
     def definir_config_retangulo(self, criar_molde: bool):
@@ -340,6 +347,14 @@ class VisualizacaoCanvas(QWidget):
                     alca = self._alca_curva_em_ponto(pos)
                     if alca is not None:
                         self._arrastando_alca_curva = alca
+                        event.accept()
+                        return
+                    ponto_poly = self._ponto_polilinha_em_ponto(pos)
+                    if ponto_poly is not None:
+                        idx, p_idx = ponto_poly
+                        self._arrastando_ponto_poly = (idx, p_idx)
+                        self._hover_ponto_poly = (idx, p_idx)
+                        self._guia_ponto_poly = self._gerar_guia_ponto_polilinha(idx, p_idx)
                         event.accept()
                         return
                 idx = self._indice_elemento_em_ponto(pos)
@@ -752,6 +767,15 @@ class VisualizacaoCanvas(QWidget):
                 self.update()
                 event.accept()
                 return
+            if self.ferramenta_ativa == "manipular_pontos":
+                ponto_poly = self._ponto_polilinha_em_ponto(pos)
+                self._hover_ponto_poly = ponto_poly
+                if self._arrastando_ponto_poly is not None:
+                    idx, p_idx = self._arrastando_ponto_poly
+                    self._atualizar_ponto_polilinha(idx, p_idx, pos)
+                    self.update()
+                    event.accept()
+                    return
             if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
                 delta_x = pos.x() - self._ultimo_ponto_arrasto.x()
                 delta_y = pos.y() - self._ultimo_ponto_arrasto.y()
@@ -773,6 +797,13 @@ class VisualizacaoCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
+        if event.button() == Qt.LeftButton and self._arrastando_ponto_poly is not None:
+            self._arrastando_ponto_poly = None
+            self._guia_ponto_poly = None
+            self._registrar_historico()
+            self.update()
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._arrastando_alca_curva:
             self._arrastando_alca_curva = None
             self._registrar_historico()
@@ -928,6 +959,9 @@ class VisualizacaoCanvas(QWidget):
                 estilo=self._linha_estilo,
                 amplitude=self._linha_amplitude,
             )
+        self._desenhar_info_moldes(painter)
+        self._desenhar_guia_arrasto_ponto(painter)
+        self._desenhar_hover_ponto_manipulacao(painter)
         if self._inicio_selecao and self._fim_selecao:
             self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
         if self._snap_resultado:
@@ -1529,6 +1563,113 @@ class VisualizacaoCanvas(QWidget):
                 if self._dist(p, ponto) <= tolerancia:
                     return idx, alca
         return None
+
+    def _ponto_polilinha_em_ponto(self, ponto: QPointF) -> tuple[int, int] | None:
+        tolerancia = 8.0 / max(self.zoom, 0.001)
+        candidatos = sorted(self._selecionados) if self._selecionados else list(range(len(self.cena.elementos)))
+        for idx in candidatos:
+            if idx < 0 or idx >= len(self.cena.elementos):
+                continue
+            el = self.cena.elementos[idx]
+            if el.get("tipo") != "polyline":
+                continue
+            for p_idx, (x, y) in enumerate(el.get("pontos", [])):
+                if self._dist(QPointF(float(x), float(y)), ponto) <= tolerancia:
+                    return idx, p_idx
+        return None
+
+    def _atualizar_ponto_polilinha(self, idx: int, p_idx: int, pos: QPointF):
+        if idx < 0 or idx >= len(self.cena.elementos):
+            return
+        el = self.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return
+        pontos = list(el.get("pontos", []))
+        if p_idx < 0 or p_idx >= len(pontos):
+            return
+        pontos[p_idx] = (pos.x(), pos.y())
+        if len(pontos) >= 2:
+            primeiro = QPointF(float(pontos[0][0]), float(pontos[0][1]))
+            ultimo = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
+            if self._dist(primeiro, ultimo) <= 0.0001:
+                if p_idx == 0:
+                    pontos[-1] = pontos[0]
+                elif p_idx == len(pontos) - 1:
+                    pontos[0] = pontos[-1]
+        el["pontos"] = pontos
+        if el.get("molde"):
+            controles = el.get("controle_cantos", [])
+            if controles:
+                atualizados: list[tuple[float, float]] = []
+                for cx, cy in controles:
+                    cp = QPointF(float(cx), float(cy))
+                    if self._dist(cp, pos) <= (10.0 / max(self.zoom, 0.001)):
+                        atualizados.append((pos.x(), pos.y()))
+                    else:
+                        atualizados.append((float(cx), float(cy)))
+                el["controle_cantos"] = atualizados
+
+    def _gerar_guia_ponto_polilinha(self, idx: int, p_idx: int) -> tuple[QPointF, QPointF | None, QPointF | None] | None:
+        if idx < 0 or idx >= len(self.cena.elementos):
+            return None
+        el = self.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return None
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if p_idx < 0 or p_idx >= len(pontos):
+            return None
+        anterior = pontos[p_idx - 1] if p_idx > 0 else None
+        proximo = pontos[p_idx + 1] if p_idx + 1 < len(pontos) else None
+        return QPointF(pontos[p_idx]), anterior, proximo
+
+    def _desenhar_info_moldes(self, painter: QPainter):
+        for el in self.cena.elementos:
+            if not el.get("molde"):
+                continue
+            controles = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+            if not controles:
+                continue
+            painter.setPen(QPen(QColor("#ffffff"), 1))
+            for i, pt in enumerate(controles, start=1):
+                pt_tela = self._cena_para_tela(pt)
+                painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
+            xs = [p.x() for p in controles]
+            ys = [p.y() for p in controles]
+            y_meio = (min(ys) + max(ys)) / 2.0
+            x1 = min(xs) + ((max(xs) - min(xs)) * 0.25)
+            x2 = min(xs) + ((max(xs) - min(xs)) * 0.75)
+            origem_fio = QPointF(x1, y_meio)
+            fim_fio = QPointF(x2, y_meio)
+            self._desenhar_segmento(painter, origem_fio, fim_fio, cor="#ffffff", espessura=1.0)
+            painter.drawText(int(self._cena_para_tela(fim_fio).x() + 6), int(self._cena_para_tela(fim_fio).y() + 4), "0°")
+
+    def _desenhar_guia_arrasto_ponto(self, painter: QPainter):
+        if self._guia_ponto_poly is None or self._arrastando_ponto_poly is None:
+            return
+        origem, anterior, proximo = self._guia_ponto_poly
+        if anterior is not None:
+            self._desenhar_segmento(painter, anterior, origem, tracejado=True, cor="#ff48ff", espessura=1.0)
+        if proximo is not None:
+            self._desenhar_segmento(painter, origem, proximo, tracejado=True, cor="#ff48ff", espessura=1.0)
+
+    def _desenhar_hover_ponto_manipulacao(self, painter: QPainter):
+        if self.ferramenta_ativa != "manipular_pontos" or self._hover_ponto_poly is None:
+            return
+        idx, p_idx = self._hover_ponto_poly
+        if idx < 0 or idx >= len(self.cena.elementos):
+            return
+        el = self.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return
+        pontos = el.get("pontos", [])
+        if p_idx < 0 or p_idx >= len(pontos):
+            return
+        x, y = pontos[p_idx]
+        pt = self._cena_para_tela(QPointF(float(x), float(y)))
+        painter.setPen(QPen(QColor("#ff2bd6"), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
 
     def _mover_selecionados(self, dx: float, dy: float):
         for idx in self._selecionados:
