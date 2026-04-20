@@ -82,8 +82,6 @@ class PainelCoordenadas(QFrame):
         botao_aplicar.clicked.connect(self._emitir_aplicar)
         row.addWidget(botao_aplicar)
         layout.addLayout(row)
-        self._offset_arraste: QPointF | None = None
-
         self.setStyleSheet(
             """
             QFrame#PainelCoordenadas {
@@ -155,24 +153,10 @@ class PainelCoordenadas(QFrame):
         self.d_preview.setText(f"{dist:.2f}")
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._offset_arraste = event.position()
-            event.accept()
-            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._offset_arraste is not None and event.buttons() & Qt.LeftButton:
-            destino = self.mapToParent(event.position().toPoint() - self._offset_arraste.toPoint())
-            self.move(destino)
-            self.posicao_alterada.emit(self.x(), self.y())
-            event.accept()
-            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._offset_arraste = None
-            event.accept()
-            return
         super().mouseReleaseEvent(event)

@@ -177,13 +177,10 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas_changed.emit(visivel)
 
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
-        self._painel_coordenadas_posicao = pos
-        if pos and self.painel_coordenadas.isVisible():
-            self.painel_coordenadas.move(*pos)
+        self._painel_coordenadas_posicao = None
+        self._reposicionar_painel_coordenadas()
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
-        if self._painel_coordenadas_posicao:
-            return self._painel_coordenadas_posicao
         if self.painel_coordenadas.isVisible():
             return self.painel_coordenadas.x(), self.painel_coordenadas.y()
         return None
@@ -333,9 +330,6 @@ class VisualizacaoCanvas(QWidget):
 
     def _reposicionar_painel_coordenadas(self):
         if not self.painel_coordenadas.isVisible():
-            return
-        if self._painel_coordenadas_posicao:
-            self.painel_coordenadas.move(*self._painel_coordenadas_posicao)
             return
         x = max(8, self.width() - self.painel_coordenadas.width() - 12)
         y = 16
@@ -586,8 +580,12 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas_changed.emit(visivel)
 
     def _registrar_posicao_painel(self, x: int, y: int):
-        self._painel_coordenadas_posicao = (x, y)
+        self._painel_coordenadas_posicao = None
         self.painel_posicao_changed.emit(x, y)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposicionar_painel_coordenadas()
 
     def wheelEvent(self, event: QWheelEvent):
         cursor_tela = event.position()
