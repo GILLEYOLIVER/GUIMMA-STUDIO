@@ -478,26 +478,6 @@ class VisualizacaoCanvas(QWidget):
             return
         super().mousePressEvent(event)
 
-    def _mouse_press_retangulo(self, event: QMouseEvent):
-        pos = self._ponto_com_snap(event.position())
-        if event.button() == Qt.LeftButton:
-            if self._retangulo_inicio is None:
-                self._retangulo_inicio = pos
-                self._retangulo_preview = pos
-            else:
-                self._retangulo_preview = pos
-                self._finalizar_retangulo()
-            self.update()
-            event.accept()
-            return
-        if event.button() == Qt.RightButton:
-            self._retangulo_inicio = None
-            self._retangulo_preview = None
-            self.update()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
     def _mouse_press_curva(self, event: QMouseEvent):
         pos = self._ponto_com_snap(event.position())
         if event.button() == Qt.RightButton:
@@ -770,12 +750,6 @@ class VisualizacaoCanvas(QWidget):
             return
         if self.ferramenta_ativa == "reta":
             self._mouse_move_reta(event)
-            return
-        if self.ferramenta_ativa == "retangulo":
-            if self._retangulo_inicio is not None:
-                self._retangulo_preview = self._ponto_com_snap(event.position())
-            self.update()
-            event.accept()
             return
         if self.ferramenta_ativa == "retangulo":
             if self._retangulo_inicio is not None:
