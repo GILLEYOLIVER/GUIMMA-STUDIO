@@ -465,7 +465,7 @@ class Ferramenta(FerramentaBase):
 
     def _destino_polar(self, origem: QPointF, comprimento: float, angulo: float) -> QPointF:
         rad = radians(angulo)
-        return QPointF(origem.x() + (cos(rad) * comprimento), origem.y() + (sin(rad) * comprimento))
+        return QPointF(origem.x() + (cos(rad) * comprimento), origem.y() - (sin(rad) * comprimento))
 
     def _angulo_referencia(self) -> float | None:
         if not self.reta_referencia:
@@ -477,13 +477,13 @@ class Ferramenta(FerramentaBase):
         dy = ponto_atual.y() - ponto_anterior.y()
         if abs(dx) < 0.0001 and abs(dy) < 0.0001:
             return ponto_atual
-        angulo = degrees(atan2(dy, dx)) % 360.0
+        angulo = degrees(atan2(-dy, dx)) % 360.0
         angulo_mais_proximo = min(self.ANGULOS_PRINCIPAIS, key=lambda a: min(abs(angulo - a), 360 - abs(angulo - a)))
         diferenca = min(abs(angulo - angulo_mais_proximo), 360 - abs(angulo - angulo_mais_proximo))
         if diferenca <= 7.5:
             comprimento = sqrt((dx * dx) + (dy * dy))
             rad = radians(angulo_mais_proximo)
-            return QPointF(ponto_anterior.x() + (cos(rad) * comprimento), ponto_anterior.y() + (sin(rad) * comprimento))
+            return QPointF(ponto_anterior.x() + (cos(rad) * comprimento), ponto_anterior.y() - (sin(rad) * comprimento))
         return ponto_atual
 
     def _aplicar_modo_referencia(self, ponto_anterior: QPointF, ponto: QPointF) -> QPointF:
@@ -500,7 +500,7 @@ class Ferramenta(FerramentaBase):
         if comprimento <= 0.0001:
             comprimento = max(self.comprimento_fixo, 0.01)
         rad = radians(angulo)
-        return QPointF(ponto_anterior.x() + (cos(rad) * comprimento), ponto_anterior.y() + (sin(rad) * comprimento))
+        return QPointF(ponto_anterior.x() + (cos(rad) * comprimento), ponto_anterior.y() - (sin(rad) * comprimento))
 
     def _aplicar_restricoes(self, ponto_anterior: QPointF, ponto: QPointF) -> QPointF:
         resultado = QPointF(ponto)
@@ -903,5 +903,5 @@ class Ferramenta(FerramentaBase):
         return sqrt(((p2.x() - p1.x()) ** 2) + ((p2.y() - p1.y()) ** 2))
 
     def _angulo_entre(self, p1: QPointF, p2: QPointF) -> float:
-        ang = degrees(atan2(p2.y() - p1.y(), p2.x() - p1.x()))
+        ang = degrees(atan2(-(p2.y() - p1.y()), p2.x() - p1.x()))
         return ang if ang >= 0 else ang + 360.0
