@@ -86,7 +86,6 @@ class BackstageArquivoPanel(QFrame):
             menu_layout.addWidget(botao)
             self.botoes[item] = botao
         menu_layout.addStretch(0)
-        menu_esquerdo.setFixedHeight(menu_layout.sizeHint().height() + 4)
 
         painel_direito = QFrame()
         painel_direito.setStyleSheet("background: #ffffff;")
