@@ -25,6 +25,54 @@ class SalvarComoDialog(QDialog):
         self.setWindowTitle("Salvar como...")
         self.setMinimumSize(760, 520)
         self._pasta = Path(pasta_inicial or Path.home())
+        self.setObjectName("SalvarComoDialog")
+        self.setStyleSheet(
+            """
+            QDialog#SalvarComoDialog {
+                background: #f6f8fb;
+                color: #1b1b1b;
+            }
+            QGroupBox {
+                background: #ffffff;
+                border: 1px solid #cfd6df;
+                border-radius: 4px;
+                margin-top: 10px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #1b1b1b;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+            }
+            QLineEdit, QTextEdit, QComboBox {
+                background: #ffffff;
+                color: #1b1b1b;
+                border: 1px solid #b8c2cc;
+                border-radius: 3px;
+                padding: 4px 6px;
+                selection-background-color: #cfe7ff;
+                selection-color: #1b1b1b;
+            }
+            QLineEdit:read-only {
+                background: #f2f4f7;
+                color: #2f3b46;
+            }
+            QPushButton {
+                background: #f5f7fa;
+                color: #102030;
+                border: 1px solid #b7c1cc;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #e7f1fb; border-color: #8fb4d8; }
+            QPushButton:pressed { background: #dbeaf8; }
+            QCheckBox { color: #1b1b1b; }
+            QLabel { color: #1b1b1b; }
+            """
+        )
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(12, 12, 12, 12)
@@ -79,7 +127,12 @@ class SalvarComoDialog(QDialog):
         raiz.addLayout(botoes)
 
     def _selecionar_pasta(self):
-        pasta = QFileDialog.getExistingDirectory(self, "Selecionar pasta", str(self._pasta))
+        pasta = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar pasta",
+            str(self._pasta),
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog,
+        )
         if pasta:
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))
