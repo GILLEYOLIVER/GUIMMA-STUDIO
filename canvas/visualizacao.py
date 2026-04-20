@@ -342,6 +342,9 @@ class VisualizacaoCanvas(QWidget):
         if self.ferramenta_ativa == "curva":
             self._mouse_press_curva(event)
             return
+        if self.ferramenta_ativa == "reta":
+            self._mouse_press_reta(event)
+            return
         if self.ferramenta_ativa == "retangulo":
             self._mouse_press_retangulo(event)
             return
@@ -400,6 +403,29 @@ class VisualizacaoCanvas(QWidget):
                 return
             return super().mousePressEvent(event)
 
+        self._mouse_press_reta(event)
+
+    def _mouse_press_retangulo(self, event: QMouseEvent):
+        pos = self._ponto_com_snap(event.position())
+        if event.button() == Qt.LeftButton:
+            if self._retangulo_inicio is None:
+                self._retangulo_inicio = pos
+                self._retangulo_preview = pos
+            else:
+                self._retangulo_preview = pos
+                self._finalizar_retangulo()
+            self.update()
+            event.accept()
+            return
+        if event.button() == Qt.RightButton:
+            self._retangulo_inicio = None
+            self._retangulo_preview = None
+            self.update()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _mouse_press_reta(self, event: QMouseEvent):
         pos = self._ponto_com_snap(event.position())
         if event.button() == Qt.LeftButton:
             self.setFocus(Qt.MouseFocusReason)
@@ -423,7 +449,6 @@ class VisualizacaoCanvas(QWidget):
             self.update()
             event.accept()
             return
-
         if event.button() == Qt.RightButton:
             if self._cliques_direito_reta >= 2:
                 self._pontos_reta.clear()
@@ -451,7 +476,6 @@ class VisualizacaoCanvas(QWidget):
             self.update()
             event.accept()
             return
-
         super().mousePressEvent(event)
 
     def _mouse_press_retangulo(self, event: QMouseEvent):
@@ -742,33 +766,14 @@ class VisualizacaoCanvas(QWidget):
             return
         self._cursor_tela = event.position()
         if self.ferramenta_ativa == "curva":
-            pos = self._ponto_com_snap(event.position())
-            if self._curva_estado == "aguardando_final":
-                self._curva_preview_fim = pos
-            elif self._curva_estado == "aguardando_controle":
-                self._curva_p1 = pos
-            elif self._curva_estado == "aguardando_ponto3" and self._curva_p0 and self._curva_pmedio:
-                self._curva_preview_fim = pos
-                self._curva_p2 = pos
-                self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
-            self.update()
-            event.accept()
+            self._mouse_move_curva(event)
             return
         if self.ferramenta_ativa == "reta":
-            snap_pos = self._ponto_com_snap(event.position())
-            if self._pontos_reta:
-                self._preview_reta = self._snap_angular(
-                    self._pontos_reta[-1],
-                    snap_pos,
-                    travar_snap_exato=self._snap_resultado is not None,
-                    travar_principais=self._tecla_w_trava_principal,
-                )
-                self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
-                self._preview_reta = self._aplicar_guias_alinhamento(self._pontos_reta[-1], self._preview_reta)
-                self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
-            else:
-                self._guia_fechamento = None
-                self._guias_alinhamento = []
+            self._mouse_move_reta(event)
+            return
+        if self.ferramenta_ativa == "retangulo":
+            if self._retangulo_inicio is not None:
+                self._retangulo_preview = self._ponto_com_snap(event.position())
             self.update()
             event.accept()
             return
@@ -814,6 +819,37 @@ class VisualizacaoCanvas(QWidget):
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def _mouse_move_curva(self, event: QMouseEvent):
+        pos = self._ponto_com_snap(event.position())
+        if self._curva_estado == "aguardando_final":
+            self._curva_preview_fim = pos
+        elif self._curva_estado == "aguardando_controle":
+            self._curva_p1 = pos
+        elif self._curva_estado == "aguardando_ponto3" and self._curva_p0 and self._curva_pmedio:
+            self._curva_preview_fim = pos
+            self._curva_p2 = pos
+            self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
+        self.update()
+        event.accept()
+
+    def _mouse_move_reta(self, event: QMouseEvent):
+        snap_pos = self._ponto_com_snap(event.position())
+        if self._pontos_reta:
+            self._preview_reta = self._snap_angular(
+                self._pontos_reta[-1],
+                snap_pos,
+                travar_snap_exato=self._snap_resultado is not None,
+                travar_principais=self._tecla_w_trava_principal,
+            )
+            self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
+            self._preview_reta = self._aplicar_guias_alinhamento(self._pontos_reta[-1], self._preview_reta)
+            self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
+        else:
+            self._guia_fechamento = None
+            self._guias_alinhamento = []
+        self.update()
+        event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
         if self._runtime_tool and self._runtime_tool.on_mouse_release(self, event):
