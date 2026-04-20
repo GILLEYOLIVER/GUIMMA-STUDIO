@@ -3,10 +3,9 @@ from __future__ import annotations
 from math import atan2, cos, degrees, radians, sin, sqrt
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
@@ -31,14 +30,14 @@ class RetaToolUI(QFrame):
     fechado = Signal()
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setWindowTitle("Reta - Opções")
         self.setObjectName("RetaToolUI")
-        self.setFixedWidth(312)
-        self._drag_offset: QPointF | None = None
-        self._posicao_definida_manualmente = False
+        self.setFixedWidth(324)
+        self._drag_offset_local: QPoint | None = None
+        self._margem_canvas = 12
 
         self._botoes_modo: dict[str, QPushButton] = {}
         self.modo_atual = "livre"
@@ -298,9 +297,55 @@ class RetaToolUI(QFrame):
         self.status_label.setText(texto)
 
     def showEvent(self, event):
-        if not self._posicao_definida_manualmente:
-            self._posicionar_canto_superior_direito()
         super().showEvent(event)
+        self.reposicionar_no_canto_superior_direito()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton and self._pode_iniciar_arraste(event):
+            self._drag_offset_local = event.position().toPoint()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_offset_local is not None and event.buttons() & Qt.LeftButton:
+            destino = self.pos() + event.position().toPoint() - self._drag_offset_local
+            self.move(self._ajustar_para_canvas(destino))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton and self._drag_offset_local is not None:
+            self._drag_offset_local = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _pode_iniciar_arraste(self, event: QMouseEvent) -> bool:
+        if event.position().y() > 70:
+            return False
+        filho = self.childAt(event.position().toPoint())
+        if isinstance(filho, (QDoubleSpinBox, QPushButton)) and filho is not self:
+            return filho is self.btn_fechar
+        return True
+
+    def _retangulo_util_canvas(self) -> QRect:
+        parent = self.parentWidget()
+        if parent is None:
+            return QRect(0, 0, max(self.width(), 1), max(self.height(), 1))
+        return parent.rect().adjusted(self._margem_canvas, self._margem_canvas, -self._margem_canvas, -self._margem_canvas)
+
+    def _ajustar_para_canvas(self, pos: QPoint) -> QPoint:
+        area = self._retangulo_util_canvas()
+        largura_util = max(0, area.width() - self.width())
+        altura_util = max(0, area.height() - self.height())
+        x = area.left() + max(0, min(pos.x() - area.left(), largura_util))
+        y = area.top() + max(0, min(pos.y() - area.top(), altura_util))
+        return QPoint(x, y)
+
+    def reposicionar_no_canto_superior_direito(self):
+        self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
 
     def _posicionar_canto_superior_direito(self):
         tela = self.screen() or QApplication.primaryScreen()
@@ -373,6 +418,7 @@ class Ferramenta(FerramentaBase):
         self.criar_interface()
         if self.ui_flutuante:
             self.ui_flutuante.raise_()
+            self.ui_flutuante.reposicionar_no_canto_superior_direito()
             self.ui_flutuante.atualizar_status_operacao("Ferramenta pronta.")
 
     def desativar(self):
@@ -384,13 +430,18 @@ class Ferramenta(FerramentaBase):
         super().desativar()
 
     def criar_interface(self):
+        parent = self.canvas if self.canvas is not None else None
         if self.ui_flutuante is None:
-            self.ui_flutuante = RetaToolUI()
+            self.ui_flutuante = RetaToolUI(parent)
             self.ui_flutuante.modo_changed.connect(self._definir_modo)
             self.ui_flutuante.valor_changed.connect(self._aplicar_valores_polar)
             self.ui_flutuante.delta_changed.connect(self._aplicar_valores_delta)
             self.ui_flutuante.fechado.connect(self._ui_fechado)
+        elif parent is not None and self.ui_flutuante.parentWidget() is not parent:
+            self.ui_flutuante.setParent(parent)
         self.ui_flutuante.show()
+        self.ui_flutuante.raise_()
+        self.ui_flutuante.reposicionar_no_canto_superior_direito()
 
     def _ui_fechado(self):
         self.ui_flutuante = None
@@ -605,6 +656,7 @@ class Ferramenta(FerramentaBase):
                 self.canvas.lbl_status.setText("Ferramenta Selecionar ativada")
         if self.ui_flutuante:
             self.ui_flutuante.atualizar_status_operacao("Ferramenta encerrada.")
+            self.ui_flutuante.hide()
 
     def _selecionar_referencia_se_necessario(self, canvas: VisualizacaoCanvas, pos: QPointF) -> bool:
         if self.modo not in {"paralela", "perpendicular"}:
@@ -635,7 +687,10 @@ class Ferramenta(FerramentaBase):
 
         if event.button() == Qt.LeftButton:
             if self._terminado:
-                return True
+                self._terminado = False
+                self._desenhando = False
+                self._pontos_atuais = []
+                canvas._preview_reta = None
 
             if self._selecionar_referencia_se_necessario(canvas, pos):
                 return True
