@@ -7,7 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
@@ -312,6 +312,87 @@ class VisualizacaoCanvas(QWidget):
         self._selecionados.clear()
         self._registrar_historico()
         self.update()
+
+    def selecionar_tudo(self):
+        self._selecionados = set(range(len(self.cena.elementos)))
+        self.update()
+
+    def selecionar_moldes(self):
+        self._selecionados = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        self.update()
+
+    def inverter_selecao(self):
+        total = set(range(len(self.cena.elementos)))
+        self._selecionados = total - set(self._selecionados)
+        self.update()
+
+    def inverter_selecao_moldes(self):
+        moldes = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        self._selecionados = moldes - (set(self._selecionados) & moldes)
+        self.update()
+
+    def _ativar_ferramenta_janela_principal(self, tool_id: str):
+        parent = self.parentWidget()
+        while parent is not None:
+            if hasattr(parent, "_ativar_ferramenta_global"):
+                parent._ativar_ferramenta_global(tool_id)
+                return
+            parent = parent.parentWidget()
+
+    def _abrir_menu_contexto_canvas(self, pos_global: QPoint):
+        menu = QMenu(self)
+        a_props = menu.addAction("Propriedades\tCtrl+Enter")
+        a_vars = menu.addAction("Variantes")
+        a_infos = menu.addAction("Informações modelo\tCtrl+M")
+        menu.addSeparator()
+        a_excluir = menu.addAction("Excluir\tDel")
+        a_recortar = menu.addAction("Recortar\tCtrl+X")
+        a_copiar = menu.addAction("Copiar\tCtrl+C")
+        a_colar = menu.addAction("Colar\tCtrl+V")
+        menu.addSeparator()
+        a_sel_tudo = menu.addAction("Selecionar tudo\tCtrl+T")
+        a_sel_moldes = menu.addAction("Selecionar moldes")
+        a_inv_sel = menu.addAction("Inverter seleção")
+        a_inv_sel_moldes = menu.addAction("Inverter seleção moldes")
+        menu.addSeparator()
+        a_criar_restore = menu.addAction("Cria ponto de restauração")
+        a_restaurar = menu.addAction("Restaurar")
+        a_restaurar_copia = menu.addAction("Restaura ponto de restauração com cópia")
+
+        tem_sel = bool(self._selecionados)
+        a_excluir.setEnabled(tem_sel)
+        a_recortar.setEnabled(tem_sel)
+        a_copiar.setEnabled(tem_sel)
+        a_criar_restore.setEnabled(False)
+        a_restaurar.setEnabled(False)
+        a_restaurar_copia.setEnabled(False)
+
+        escolhido: QAction | None = menu.exec(pos_global)
+        if escolhido is None:
+            return
+        if escolhido is a_props:
+            self._ativar_ferramenta_janela_principal("propriedades")
+        elif escolhido is a_vars:
+            self._ativar_ferramenta_janela_principal("variantes")
+        elif escolhido is a_infos:
+            self._ativar_ferramenta_janela_principal("informacoes_moldes")
+        elif escolhido is a_excluir:
+            self.apagar_selecionados()
+        elif escolhido is a_recortar:
+            self.copiar()
+            self.apagar_selecionados()
+        elif escolhido is a_copiar:
+            self.copiar()
+        elif escolhido is a_colar:
+            self.colar()
+        elif escolhido is a_sel_tudo:
+            self.selecionar_tudo()
+        elif escolhido is a_sel_moldes:
+            self.selecionar_moldes()
+        elif escolhido is a_inv_sel:
+            self.inverter_selecao()
+        elif escolhido is a_inv_sel_moldes:
+            self.inverter_selecao_moldes()
 
     # ========== Métodos internos ==========
 
@@ -673,10 +754,14 @@ class VisualizacaoCanvas(QWidget):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
-            pos = self._ponto_com_snap(event.position())
-            if self._selecionar_proximo_em_ponto(pos):
-                event.accept()
-                return
+            if event.modifiers() & Qt.ControlModifier:
+                pos = self._ponto_com_snap(event.position())
+                if self._selecionar_proximo_em_ponto(pos):
+                    event.accept()
+                    return
+            self._abrir_menu_contexto_canvas(event.globalPosition().toPoint())
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
