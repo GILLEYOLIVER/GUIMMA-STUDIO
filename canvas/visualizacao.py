@@ -162,14 +162,14 @@ class PainelCoordenadas(QFrame):
         self.a_preview.setText(f"{ang:.0f}°")
         self.d_preview.setText(f"{dist:.2f}")
 
-    def mousePressEvent(self, event):  # noqa: N802
+    def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._offset_arraste = event.position()
             event.accept()
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):  # noqa: N802
+    def mouseMoveEvent(self, event):
         if self._offset_arraste is not None and event.buttons() & Qt.LeftButton:
             destino = self.mapToParent(event.position().toPoint() - self._offset_arraste.toPoint())
             self.move(destino)
@@ -178,7 +178,7 @@ class PainelCoordenadas(QFrame):
             return
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):  # noqa: N802
+    def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._offset_arraste = None
             event.accept()
@@ -252,6 +252,8 @@ class VisualizacaoCanvas(QWidget):
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
+        self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None  # Para ferramenta reta
+        self.lbl_status = None  # Será definido pela janela principal
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -266,7 +268,6 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
-        # Faixa operacional de zoom: 0.025x (2,500%) até 5000.000x
         self.zoom = max(0.025, min(zoom, 5000.0))
         self.zoom_changed.emit(self.zoom)
         self.update()
@@ -319,12 +320,446 @@ class VisualizacaoCanvas(QWidget):
         except Exception:
             return None
 
+    # ========== Métodos públicos ==========
+
+    def snap_ativo(self) -> bool:
+        return self._snap_ativo
+
+    def set_snap_ativo(self, ativo: bool):
+        self._snap_ativo = ativo
+        if not ativo:
+            self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
+        self.snap_changed.emit(ativo)
+        self.update()
+
+    def painel_coordenadas_visivel(self) -> bool:
+        return self._painel_coordenadas_visivel
+
+    def definir_painel_coordenadas_visivel(self, visivel: bool):
+        self._painel_coordenadas_visivel = visivel
+        if visivel:
+            self.painel_coordenadas.show()
+            self._reposicionar_painel_coordenadas()
+        else:
+            self.painel_coordenadas.hide()
+        self.painel_coordenadas_changed.emit(visivel)
+
+    def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
+        self._painel_coordenadas_posicao = pos
+        if pos and self.painel_coordenadas.isVisible():
+            self.painel_coordenadas.move(*pos)
+
+    def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
+        if self._painel_coordenadas_posicao:
+            return self._painel_coordenadas_posicao
+        if self.painel_coordenadas.isVisible():
+            return self.painel_coordenadas.x(), self.painel_coordenadas.y()
+        return None
+
+    def set_estilo_linha(self, cor: str | None = None, estilo: str | None = None,
+                         espessura: float | None = None, amplitude: float | None = None):
+        if cor:
+            self._linha_cor = cor
+        if estilo:
+            self._linha_estilo = estilo
+        if espessura is not None:
+            self._linha_espessura = max(1.0, float(espessura))
+        if amplitude is not None:
+            self._linha_amplitude = max(0.2, float(amplitude))
+        self.update()
+
+    def set_modo_curva(self, modo: str):
+        self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
+        self._resetar_estado_curva()
+
+    def set_passo_snap_angular(self, passo: float):
+        self._snap_angular_passo = max(1.0, float(passo))
+
+    def set_snap_contextual_ativo(self, ativo: bool):
+        self._snap_contextual_ativo = bool(ativo)
+
     def definir_config_retangulo(self, criar_molde: bool):
         self._retangulo_criar_molde = bool(criar_molde)
         if self._runtime_tool and hasattr(self._runtime_tool, "set_criar_molde"):
             self._runtime_tool.set_criar_molde(criar_molde)
 
-    def wheelEvent(self, event: QWheelEvent):  # noqa: N802
+    def elementos_para_salvar(self) -> list[dict]:
+        elementos = deepcopy(self.cena.elementos)
+        if len(self._pontos_reta) >= 2:
+            fase = 0.0
+            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
+                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
+                elementos.append({
+                    "tipo": "polyline",
+                    "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                    "cor": self._linha_cor,
+                    "espessura": self._linha_espessura,
+                    "estilo": self._linha_estilo,
+                    "amplitude": self._linha_amplitude,
+                    "fase_inicio": fase,
+                })
+                fase += comprimento
+        return elementos
+
+    def desfazer_acao(self):
+        if self._pontos_reta:
+            self._desfazer_ponto()
+            return
+        if self._indice_historico == 0:
+            return
+        self._indice_historico -= 1
+        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.update()
+
+    def refazer_acao(self):
+        if self._indice_historico >= len(self._historico_elementos) - 1:
+            return
+        self._indice_historico += 1
+        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.update()
+
+    def copiar(self):
+        if self._selecionados:
+            self._buffer_copia = {
+                "tipo": "multiplos",
+                "elementos": [deepcopy(self.cena.elementos[idx]) for idx in sorted(self._selecionados)],
+            }
+            return
+        if self._pontos_reta and len(self._pontos_reta) >= 2:
+            self._buffer_copia = {
+                "tipo": "polyline",
+                "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
+                "cor": self._linha_cor,
+                "espessura": self._linha_espessura,
+                "estilo": self._linha_estilo,
+                "amplitude": self._linha_amplitude,
+                "fase_inicio": 0.0,
+            }
+            return
+        if self.cena.elementos:
+            self._buffer_copia = deepcopy(self.cena.elementos[-1])
+
+    def colar(self):
+        if not self._buffer_copia:
+            return
+        self._offset_colagem += 10
+        self._selecionados.clear()
+        if self._buffer_copia.get("tipo") == "multiplos":
+            for item in self._buffer_copia.get("elementos", []):
+                novo = deepcopy(item)
+                if novo.get("tipo") == "polyline":
+                    novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+                elif novo.get("tipo") == "bezier_quadratica":
+                    for chave in ("p0", "p1", "p2"):
+                        x, y = novo[chave]
+                        novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+                self.cena.elementos.append(novo)
+                self._selecionados.add(len(self.cena.elementos) - 1)
+        else:
+            novo = deepcopy(self._buffer_copia)
+            if novo.get("tipo") == "polyline":
+                novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
+            elif novo.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    x, y = novo[chave]
+                    novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+            self.cena.elementos.append(novo)
+            self._selecionados.add(len(self.cena.elementos) - 1)
+        self._registrar_historico()
+        self.update()
+
+    def recortar(self):
+        self.copiar()
+        self.apagar_selecionados()
+
+    def apagar_selecionados(self):
+        if not self._selecionados:
+            return
+        self.cena.elementos = [el for idx, el in enumerate(self.cena.elementos) if idx not in self._selecionados]
+        self._selecionados.clear()
+        self._registrar_historico()
+        self.update()
+
+    # ========== Métodos internos ==========
+
+    def _registrar_historico(self):
+        snapshot = deepcopy(self.cena.elementos)
+        if self._indice_historico < len(self._historico_elementos) - 1:
+            self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
+        self._historico_elementos.append(snapshot)
+        if len(self._historico_elementos) > 200:
+            self._historico_elementos.pop(0)
+        self._indice_historico = len(self._historico_elementos) - 1
+
+    def _resetar_estado_curva(self):
+        self._curva_estado = "parada"
+        self._curva_p0 = None
+        self._curva_p2 = None
+        self._curva_p1 = None
+        self._curva_preview_fim = None
+        self._curva_pmedio = None
+
+    def _reposicionar_painel_coordenadas(self):
+        if not self.painel_coordenadas.isVisible():
+            return
+        if self._painel_coordenadas_posicao:
+            self.painel_coordenadas.move(*self._painel_coordenadas_posicao)
+            return
+        x = max(8, self.width() - self.painel_coordenadas.width() - 12)
+        y = 16
+        self.painel_coordenadas.move(x, y)
+
+    def _tela_para_cena(self, ponto: QPointF) -> QPointF:
+        return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(),
+                       (ponto.y() / self.zoom) + self.origem_cena.y())
+
+    def _cena_para_tela(self, ponto: QPointF) -> QPointF:
+        return QPointF((ponto.x() - self.origem_cena.x()) * self.zoom,
+                       (ponto.y() - self.origem_cena.y()) * self.zoom)
+
+    def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
+        pos_cena = self._tela_para_cena(pos_tela)
+        self._snap_candidatos = self._snap_manager.calcular_candidatos(
+            self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
+        )
+        tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        for idx, el in enumerate(self.cena.elementos):
+            if el.get("tipo") != "bezier_quadratica":
+                continue
+            p0 = QPointF(*el["p0"])
+            p1 = QPointF(*el["p1"])
+            p2 = QPointF(*el["p2"])
+            candidatos = [
+                ("nó", p0),
+                ("controle", p1),
+                ("nó", p2),
+                ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
+            ]
+            for tipo, ponto in candidatos:
+                dist = self._dist(pos_cena, ponto)
+                if dist <= tol_cena:
+                    self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+        if self._ponto_coordenada_aplicada is not None:
+            dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
+            if dist <= tol_cena:
+                self._snap_candidatos.insert(0, SnapResult(
+                    ponto=QPointF(self._ponto_coordenada_aplicada),
+                    tipo="coord",
+                    distancia=dist,
+                    elemento_idx=None,
+                ))
+        if self._snap_candidatos:
+            candidatos_sem_grade = [c for c in self._snap_candidatos if c.tipo != "grade"]
+            if candidatos_sem_grade:
+                self._snap_candidatos = candidatos_sem_grade
+        if self._snap_candidatos:
+            self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
+            self._snap_resultado = self._snap_candidatos[self._snap_indice]
+        else:
+            self._snap_resultado = None
+            self._snap_indice = 0
+        if self._snap_resultado:
+            return self._snap_resultado.ponto
+        return pos_cena
+
+    def _tolerancia_snap_px(self) -> float:
+        dpi = float(self.logicalDpiX()) if self.logicalDpiX() > 0 else 96.0
+        return (dpi / 2.54) * 0.5
+
+    def _dist(self, a: QPointF, b: QPointF) -> float:
+        return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
+
+    def _snap_angular(self, origem: QPointF, destino: QPointF,
+                      travar_snap_exato: bool = False, travar_principais: bool = False,
+                      liberar_angular: bool | None = None) -> QPointF:
+        if liberar_angular is not None:
+            travar_principais = not bool(liberar_angular)
+        if not self._snap_ativo:
+            return destino
+        if liberar_angular:
+            return destino
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        dist = sqrt(dx * dx + dy * dy)
+        if dist <= 0.0001:
+            return destino
+        ang = degrees(atan2(-dy, dx))
+        ang_principal = round(ang / 45.0) * 45.0
+        if travar_principais:
+            return QPointF(origem.x() + dist * cos(radians(ang_principal)),
+                          origem.y() - dist * sin(radians(ang_principal)))
+        if self._snap_contextual_ativo and len(self._pontos_reta) >= 2:
+            ang_contextual = self._snap_angular_contextual(origem, ang)
+            if ang_contextual is not None:
+                return QPointF(origem.x() + dist * cos(radians(ang_contextual)),
+                              origem.y() - dist * sin(radians(ang_contextual)))
+        angulo_dist = self._dist_angular(ang, ang_principal)
+        tolerancia_principal = max(1.8, min(5.0, self._snap_angular_passo * 0.12))
+        if angulo_dist <= tolerancia_principal:
+            return QPointF(origem.x() + dist * cos(radians(ang_principal)),
+                          origem.y() - dist * sin(radians(ang_principal)))
+        return destino
+
+    def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
+        ponto_anterior = self._pontos_reta[-2]
+        vx = origem.x() - ponto_anterior.x()
+        vy = origem.y() - ponto_anterior.y()
+        dist_ref = sqrt(vx * vx + vy * vy)
+        if dist_ref <= 0.0001:
+            return None
+        ang_ref = degrees(atan2(-vy, vx))
+        candidatos = [ang_ref, ang_ref + 180.0, ang_ref + 90.0, ang_ref - 90.0]
+        melhor = min(candidatos, key=lambda ang: self._dist_angular(ang_atual, ang))
+        if self._dist_angular(ang_atual, melhor) <= 5.0:
+            return melhor
+        return None
+
+    def _dist_angular(self, a: float, b: float) -> float:
+        diff = abs((a - b) % 360.0)
+        return min(diff, 360.0 - diff)
+
+    def _aplicar_guia_fechamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guia_fechamento = None
+        if len(self._pontos_reta) < 2 or not self._snap_resultado:
+            return destino
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+        ponto_final = self._snap_resultado.ponto
+        ponto_anterior = self._pontos_reta[-2]
+        vec_ref = QPointF(origem.x() - ponto_anterior.x(), origem.y() - ponto_anterior.y())
+        vec_cursor = QPointF(destino.x() - origem.x(), destino.y() - origem.y())
+        mod_ref = sqrt(vec_ref.x() * vec_ref.x() + vec_ref.y() * vec_ref.y())
+        mod_cursor = sqrt(vec_cursor.x() * vec_cursor.x() + vec_cursor.y() * vec_cursor.y())
+        if mod_ref <= 0.0001 or mod_cursor <= 0.0001:
+            return destino
+        det = (vec_ref.x() * vec_cursor.y()) - (vec_ref.y() * vec_cursor.x())
+        if abs(det) <= 0.0001:
+            return destino
+        delta = QPointF(origem.x() - ponto_final.x(), origem.y() - ponto_final.y())
+        t = ((delta.x() * vec_cursor.y()) - (delta.y() * vec_cursor.x())) / det
+        u = ((delta.x() * vec_ref.y()) - (delta.y() * vec_ref.x())) / det
+        if u < 0:
+            return destino
+        intersecao = QPointF(ponto_final.x() + t * vec_ref.x(), ponto_final.y() + t * vec_ref.y())
+        tolerancia_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        dist_intersecao = sqrt((intersecao.x() - destino.x()) ** 2 + (intersecao.y() - destino.y()) ** 2)
+        if dist_intersecao > tolerancia_cena * 4:
+            return destino
+        self._guia_fechamento = (ponto_final, intersecao)
+        if dist_intersecao <= tolerancia_cena:
+            return intersecao
+        return destino
+
+    def _aplicar_guias_alinhamento(self, origem: QPointF, destino: QPointF) -> QPointF:
+        self._guias_alinhamento = []
+        if not self._snap_ativo:
+            return destino
+        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+            return destino
+        candidatos: list[QPointF] = []
+        candidatos.extend(self._pontos_reta[:-1])
+        for el in self.cena.elementos:
+            if el.get("tipo") == "polyline":
+                candidatos.extend(QPointF(float(x), float(y)) for x, y in el.get("pontos", []))
+        if not candidatos:
+            return destino
+        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+        melhor_x: QPointF | None = None
+        melhor_y: QPointF | None = None
+        dist_x = float("inf")
+        dist_y = float("inf")
+        for pt in candidatos:
+            dx = abs(destino.x() - pt.x())
+            dy = abs(destino.y() - pt.y())
+            if dx <= tol and dx < dist_x:
+                melhor_x = pt
+                dist_x = dx
+            if dy <= tol and dy < dist_y:
+                melhor_y = pt
+                dist_y = dy
+        ajustado = QPointF(destino)
+        if melhor_x:
+            ajustado.setX(melhor_x.x())
+            self._guias_alinhamento.append((QPointF(melhor_x.x(), melhor_x.y()), QPointF(melhor_x.x(), ajustado.y())))
+        if melhor_y:
+            ajustado.setY(melhor_y.y())
+            self._guias_alinhamento.append((QPointF(melhor_y.x(), melhor_y.y()), QPointF(ajustado.x(), melhor_y.y())))
+        return ajustado
+
+    def _aplicar_coordenadas(self, payload: dict):
+        origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
+        dx = payload.get("dx")
+        dy = payload.get("dy")
+        ang = payload.get("a")
+        dist = payload.get("d")
+        destino: QPointF | None = None
+        if ang is not None and dist is not None:
+            rad = radians(ang)
+            destino = QPointF(origem.x() + (dist * cos(rad)), origem.y() - (dist * sin(rad)))
+        elif dx is not None or dy is not None:
+            destino = QPointF(origem.x() + float(dx or 0.0), origem.y() + float(dy or 0.0))
+        if destino is None:
+            return
+        destino = self._snap_angular(origem, destino)
+        self._ponto_coordenada_aplicada = destino
+        self._marcacoes_temporarias.append(destino)
+        self.painel_coordenadas.atualizar_preview(origem, destino)
+        self.update()
+
+    def _desfazer_ponto(self):
+        if not self._pontos_reta:
+            return
+        self._pontos_reta.pop()
+        if self._pontos_reta:
+            self._preview_reta = self._pontos_reta[-1]
+        else:
+            self._preview_reta = None
+            self._guia_fechamento = None
+        self.update()
+
+    def _finalizar_reta_atual(self):
+        if len(self._pontos_reta) == 1:
+            self._pontos_reta.clear()
+            self._preview_reta = None
+            self._guia_fechamento = None
+            self._guias_alinhamento = []
+            self._aguardando_retorno_selecao = False
+            return
+        if len(self._pontos_reta) >= 2:
+            fase = 0.0
+            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
+                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
+                self.cena.elementos.append({
+                    "tipo": "polyline",
+                    "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                    "cor": self._linha_cor,
+                    "espessura": self._linha_espessura,
+                    "estilo": self._linha_estilo,
+                    "amplitude": self._linha_amplitude,
+                    "fase_inicio": fase,
+                })
+                fase += comprimento
+            self._registrar_historico()
+            ultimo_ponto = self._pontos_reta[-1]
+            self._pontos_reta = [ultimo_ponto]
+            self._preview_reta = ultimo_ponto
+            self._guia_fechamento = None
+            self._guias_alinhamento = []
+            self._aguardando_retorno_selecao = True
+
+    def _set_painel_coordenadas_visivel(self, visivel: bool):
+        self._painel_coordenadas_visivel = visivel
+        self.painel_coordenadas_changed.emit(visivel)
+
+    def _registrar_posicao_painel(self, x: int, y: int):
+        self._painel_coordenadas_posicao = (x, y)
+        self.painel_posicao_changed.emit(x, y)
+
+    def wheelEvent(self, event: QWheelEvent):
         cursor_tela = event.position()
         cursor_cena_antes = self._tela_para_cena(cursor_tela)
         delta = event.angleDelta().y()
@@ -336,579 +771,63 @@ class VisualizacaoCanvas(QWidget):
         )
         event.accept()
 
-    def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
-        if self._runtime_tool and self._runtime_tool.on_mouse_press(self, event):
-            return
-        if self.ferramenta_ativa == "curva":
-            self._mouse_press_curva(event)
-            return
-        if self.ferramenta_ativa == "reta":
-            self._mouse_press_reta(event)
-            return
-        if self.ferramenta_ativa == "retangulo":
-            self._mouse_press_retangulo(event)
-            return
-        if self.ferramenta_ativa == "dividir_curva" and event.button() == Qt.LeftButton:
-            self._dividir_segmento_em_clique(self._ponto_com_snap(event.position()))
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_W and not event.isAutoRepeat():
+            self._tecla_w_trava_principal = True
             event.accept()
             return
-        if self.ferramenta_ativa in {"estender_reta", "estender_ate_elemento"} and event.button() == Qt.LeftButton:
-            self._processar_estender_reta(self._ponto_com_snap(event.position()), ate_elemento=self.ferramenta_ativa == "estender_ate_elemento")
-            event.accept()
-            return
-        if self.ferramenta_ativa == "estender_duas_retas" and event.button() == Qt.LeftButton:
-            self._processar_estender_duas_retas(self._ponto_com_snap(event.position()))
-            event.accept()
-            return
-        if self.ferramenta_ativa not in {"reta", "curva"}:
-            if event.button() == Qt.LeftButton:
-                pos = self._ponto_com_snap(event.position())
-                if self.ferramenta_ativa == "manipular_pontos":
-                    alca = self._alca_curva_em_ponto(pos)
-                    if alca is not None:
-                        self._arrastando_alca_curva = alca
-                        event.accept()
-                        return
-                    ponto_poly = self._ponto_polilinha_em_ponto(pos)
-                    if ponto_poly is not None:
-                        idx, p_idx = ponto_poly
-                        self._arrastando_ponto_poly = (idx, p_idx)
-                        self._hover_ponto_poly = (idx, p_idx)
-                        self._guia_ponto_poly = self._gerar_guia_ponto_polilinha(idx, p_idx)
-                        event.accept()
-                        return
-                idx = self._indice_elemento_em_ponto(pos)
-                if idx is not None and idx in self._selecionados:
-                    self._arrastando_selecao = True
-                    self._ultimo_ponto_arrasto = pos
-                    self._moveu_selecao = False
-                    event.accept()
-                    return
-                self._arrastando_selecao = False
-                self._inicio_selecao = pos
-                self._fim_selecao = pos
-                self._ultimo_ponto_arrasto = None
-                self.update()
-                event.accept()
-                return
-            if event.button() == Qt.RightButton:
-                if self.ferramenta_ativa == "selecionar":
-                    pos = self._ponto_com_snap(event.position())
-                    if self._alternar_selecao_no(pos):
-                        self.update()
-                        event.accept()
-                        return
-                self._abrir_menu_contexto(event.globalPosition().toPoint())
-                event.accept()
-                return
-            return super().mousePressEvent(event)
+        super().keyPressEvent(event)
 
-        self._mouse_press_reta(event)
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_W and not event.isAutoRepeat():
+            self._tecla_w_trava_principal = False
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
-    def _mouse_press_retangulo(self, event: QMouseEvent):
-        pos = self._ponto_com_snap(event.position())
-        if event.button() == Qt.LeftButton:
-            if self._retangulo_inicio is None:
-                self._retangulo_inicio = pos
-                self._retangulo_preview = pos
-            else:
-                self._retangulo_preview = pos
-                self._finalizar_retangulo()
-            self.update()
-            event.accept()
-            return
-        if event.button() == Qt.RightButton:
-            self._retangulo_inicio = None
-            self._retangulo_preview = None
-            self.update()
-            event.accept()
-            return
+    def focusOutEvent(self, event):
+        self._tecla_w_trava_principal = False
+        super().focusOutEvent(event)
+
+    def leaveEvent(self, event):
+        self._snap_resultado = None
+        self._snap_candidatos = []
+        self._snap_indice = 0
+        self._tecla_w_trava_principal = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+            if self._runtime_tool.on_mouse_press(self, event):
+                return
         super().mousePressEvent(event)
 
-    def _mouse_press_reta(self, event: QMouseEvent):
-        pos = self._ponto_com_snap(event.position())
-        if event.button() == Qt.LeftButton:
-            self.setFocus(Qt.MouseFocusReason)
-            self._aguardando_retorno_selecao = False
-            self._cliques_direito_reta = 0
-            if not self._pontos_reta:
-                self._pontos_reta.append(pos)
-            else:
-                pos = self._snap_angular(
-                    self._pontos_reta[-1],
-                    pos,
-                    travar_snap_exato=self._snap_resultado is not None,
-                    travar_principais=self._tecla_w_trava_principal,
-                )
-                pos = self._aplicar_guia_fechamento(self._pontos_reta[-1], pos)
-                pos = self._aplicar_guias_alinhamento(self._pontos_reta[-1], pos)
-                self._pontos_reta.append(pos)
-            self._preview_reta = pos
-            if len(self._pontos_reta) >= 2:
-                self.painel_coordenadas.atualizar_preview(self._pontos_reta[-2], self._pontos_reta[-1])
-            self.update()
-            event.accept()
-            return
-        if event.button() == Qt.RightButton:
-            if self._cliques_direito_reta >= 2:
-                self._pontos_reta.clear()
-                self._preview_reta = None
-                self._guia_fechamento = None
-                self._guias_alinhamento = []
-                self._aguardando_retorno_selecao = False
-                self._cliques_direito_reta = 0
-                self.ferramenta_padrao_solicitada.emit("selecionar")
-                self.update()
-                event.accept()
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_move"):
+            if self._runtime_tool.on_mouse_move(self, event):
                 return
-            if self._cliques_direito_reta >= 1:
-                self._pontos_reta.clear()
-                self._preview_reta = None
-                self._guia_fechamento = None
-                self._guias_alinhamento = []
-                self._aguardando_retorno_selecao = False
-                self._cliques_direito_reta = 2
-                self.update()
-                event.accept()
-                return
-            self._finalizar_reta_atual()
-            self._cliques_direito_reta = 1
-            self.update()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def _mouse_press_curva(self, event: QMouseEvent):
-        pos = self._ponto_com_snap(event.position())
-        if event.button() == Qt.RightButton:
-            if self._cliques_direito_curva >= 2:
-                self._resetar_estado_curva()
-                self._cliques_direito_curva = 0
-                self.ferramenta_padrao_solicitada.emit("selecionar")
-                self.update()
-                event.accept()
-                return
-            if self._cliques_direito_curva >= 1:
-                self._resetar_estado_curva()
-                self._cliques_direito_curva = 2
-                self.update()
-                event.accept()
-                return
-            if self._curva_pronta_para_finalizar():
-                self._finalizar_curva()
-            else:
-                self._resetar_estado_curva()
-            self._cliques_direito_curva = 1
-            self.update()
-            event.accept()
-            return
-        if event.button() != Qt.LeftButton:
-            super().mousePressEvent(event)
-            return
-        if self._curva_estado == "parada":
-            alca = self._alca_curva_em_ponto(pos)
-            if alca is not None:
-                self._arrastando_alca_curva = alca
-                event.accept()
-                return
-        self._cliques_direito_curva = 0
-        if self._modo_curva == "3p":
-            if self._curva_estado in {"parada", "aguardando_inicial"}:
-                self._curva_p0 = pos
-                self._curva_pmedio = None
-                self._curva_p2 = None
-                self._curva_p1 = None
-                self._curva_preview_fim = None
-                self._curva_estado = "aguardando_ponto2"
-            elif self._curva_estado == "aguardando_ponto2":
-                self._curva_pmedio = pos
-                self._curva_estado = "aguardando_ponto3"
-            elif self._curva_estado == "aguardando_ponto3":
-                self._curva_p2 = pos
-                self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
-                self._finalizar_curva()
-            self.update()
-            event.accept()
-            return
-        if self._curva_estado in {"parada", "aguardando_inicial"}:
-            self._curva_p0 = pos
-            self._curva_p2 = None
-            self._curva_p1 = None
-            self._curva_preview_fim = None
-            self._curva_estado = "aguardando_final"
-        elif self._curva_estado == "aguardando_final":
-            self._curva_p2 = pos
-            self._curva_p1 = QPointF((self._curva_p0.x() + self._curva_p2.x()) / 2.0, (self._curva_p0.y() + self._curva_p2.y()) / 2.0)
-            self._curva_estado = "aguardando_controle"
-        elif self._curva_estado == "aguardando_controle":
-            self._curva_p1 = pos
-            self._finalizar_curva()
-        self.update()
-        event.accept()
-
-    def _resetar_estado_curva(self):
-        self._curva_estado = "parada"
-        self._curva_p0 = None
-        self._curva_p2 = None
-        self._curva_p1 = None
-        self._curva_preview_fim = None
-        self._curva_pmedio = None
-
-    def _curva_pronta_para_finalizar(self) -> bool:
-        if self._modo_curva == "3p":
-            return bool(self._curva_p0 and self._curva_pmedio and self._curva_p2)
-        return bool(self._curva_p0 and self._curva_p1 and self._curva_p2)
-
-    def _controle_para_tres_pontos(self, p0: QPointF, pm: QPointF, p2: QPointF) -> QPointF:
-        return QPointF((2.0 * pm.x()) - ((p0.x() + p2.x()) / 2.0), (2.0 * pm.y()) - ((p0.y() + p2.y()) / 2.0))
-
-    def _dividir_segmento_em_clique(self, pos: QPointF):
-        info = self._segmento_mais_proximo(pos)
-        if not info:
-            return
-        idx, seg_idx, a, b, _ = info
-        el = self.cena.elementos[idx]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if len(pontos) < 2:
-            return
-        proj = self._projecao_em_segmento(pos, a, b)
-        pontos.insert(seg_idx + 1, proj)
-        el["pontos"] = [(p.x(), p.y()) for p in pontos]
-        self._registrar_historico()
-        self.update()
-
-    def _processar_estender_reta(self, pos: QPointF, ate_elemento: bool = False):
-        if self._extensao_origem is None:
-            self._extensao_origem = self._endpoint_proximo(pos)
-            return
-        idx, inicio = self._extensao_origem
-        self._extensao_origem = None
-        el = self.cena.elementos[idx]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if len(pontos) < 2:
-            return
-        i = 0 if inicio else len(pontos) - 1
-        vizinho = pontos[1] if inicio else pontos[-2]
-        novo_ponto = pos
-        if ate_elemento:
-            alvo = self._segmento_mais_proximo(pos)
-            if alvo:
-                _, _, a2, b2, _ = alvo
-                inter = self._intersecao_linhas(vizinho, pontos[i], a2, b2)
-                if inter is not None:
-                    novo_ponto = inter
-        pontos[i] = novo_ponto
-        el["pontos"] = [(p.x(), p.y()) for p in pontos]
-        self._registrar_historico()
-        self.update()
-
-    def _processar_estender_duas_retas(self, pos: QPointF):
-        seg = self._segmento_mais_proximo(pos)
-        if not seg:
-            return
-        idx, seg_idx, a, b, _ = seg
-        if self._segmento_primeira_reta is None:
-            self._segmento_primeira_reta = (idx, seg_idx)
-            return
-        idx1, seg1 = self._segmento_primeira_reta
-        self._segmento_primeira_reta = None
-        if idx1 == idx and seg1 == seg_idx:
-            return
-        dados1 = self._dados_segmento(idx1, seg1)
-        dados2 = self._dados_segmento(idx, seg_idx)
-        if not dados1 or not dados2:
-            return
-        a1, b1 = dados1
-        a2, b2 = dados2
-        inter = self._intersecao_linhas(a1, b1, a2, b2)
-        if inter is None:
-            return
-        self._mover_ponto_segmento_para_intersecao(idx1, seg1, inter)
-        self._mover_ponto_segmento_para_intersecao(idx, seg_idx, inter)
-        self._registrar_historico()
-        self.update()
-
-    def _mover_ponto_segmento_para_intersecao(self, idx: int, seg_idx: int, inter: QPointF):
-        el = self.cena.elementos[idx]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if seg_idx < 0 or seg_idx + 1 >= len(pontos):
-            return
-        i1, i2 = seg_idx, seg_idx + 1
-        d1 = self._dist(pontos[i1], inter)
-        d2 = self._dist(pontos[i2], inter)
-        pontos[i1 if d1 <= d2 else i2] = inter
-        el["pontos"] = [(p.x(), p.y()) for p in pontos]
-
-    def _endpoint_proximo(self, pos: QPointF) -> tuple[int, bool] | None:
-        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
-        melhor: tuple[int, bool] | None = None
-        dist_melhor = float("inf")
-        for idx, el in enumerate(self.cena.elementos):
-            if el.get("tipo") != "polyline":
-                continue
-            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            if len(pontos) < 2:
-                continue
-            for inicio, ponto in ((True, pontos[0]), (False, pontos[-1])):
-                d = self._dist(ponto, pos)
-                if d < dist_melhor and d <= tol:
-                    dist_melhor = d
-                    melhor = (idx, inicio)
-        return melhor
-
-    def _segmento_mais_proximo(self, pos: QPointF) -> tuple[int, int, QPointF, QPointF, float] | None:
-        tol = (self._tolerancia_snap_px() / max(self.zoom, 0.001)) * 1.2
-        melhor: tuple[int, int, QPointF, QPointF, float] | None = None
-        for idx, el in enumerate(self.cena.elementos):
-            if el.get("tipo") != "polyline":
-                continue
-            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
-                proj = self._projecao_em_segmento(pos, a, b)
-                d = self._dist(pos, proj)
-                if d <= tol and (melhor is None or d < melhor[4]):
-                    melhor = (idx, seg_idx, a, b, d)
-        return melhor
-
-    def _dados_segmento(self, idx: int, seg_idx: int) -> tuple[QPointF, QPointF] | None:
-        if idx < 0 or idx >= len(self.cena.elementos):
-            return None
-        el = self.cena.elementos[idx]
-        if el.get("tipo") != "polyline":
-            return None
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if seg_idx < 0 or seg_idx + 1 >= len(pontos):
-            return None
-        return pontos[seg_idx], pontos[seg_idx + 1]
-
-    def _projecao_em_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> QPointF:
-        abx, aby = b.x() - a.x(), b.y() - a.y()
-        denom = (abx * abx) + (aby * aby)
-        if denom <= 0.0000001:
-            return QPointF(a)
-        apx, apy = p.x() - a.x(), p.y() - a.y()
-        t = ((apx * abx) + (apy * aby)) / denom
-        t = max(0.0, min(1.0, t))
-        return QPointF(a.x() + (abx * t), a.y() + (aby * t))
-
-    def _intersecao_linhas(self, a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> QPointF | None:
-        x1, y1 = a1.x(), a1.y()
-        x2, y2 = a2.x(), a2.y()
-        x3, y3 = b1.x(), b1.y()
-        x4, y4 = b2.x(), b2.y()
-        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if abs(den) <= 0.0000001:
-            return None
-        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
-        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
-        return QPointF(px, py)
-
-    def _dist(self, a: QPointF, b: QPointF) -> float:
-        return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
-
-    def _cor_realce(self, cor_hex: str) -> str:
-        cor = QColor(cor_hex)
-        if not cor.isValid():
-            cor = QColor("#d0d0d0")
-        return cor.lighter(135).name()
-
-    def _finalizar_curva(self):
-        if not (self._curva_p0 and self._curva_p1 and self._curva_p2):
-            return
-        self.cena.elementos.append(
-            {
-                "tipo": "bezier_quadratica",
-                "p0": (self._curva_p0.x(), self._curva_p0.y()),
-                "p1": (self._curva_p1.x(), self._curva_p1.y()),
-                "p2": (self._curva_p2.x(), self._curva_p2.y()),
-                "cor": self._linha_cor,
-                "espessura": self._linha_espessura,
-                "estilo": self._linha_estilo,
-                "amplitude": self._linha_amplitude,
-            }
-        )
-        self._selecionados = {len(self.cena.elementos) - 1}
-        self._registrar_historico()
-        self._resetar_estado_curva()
-
-    def _atualizar_alca_curva(self, idx: int, alca: str, pos: QPointF):
-        if idx < 0 or idx >= len(self.cena.elementos):
-            return
-        el = self.cena.elementos[idx]
-        if el.get("tipo") != "bezier_quadratica":
-            return
-        if alca not in {"p0", "p1", "p2"}:
-            return
-        el[alca] = (pos.x(), pos.y())
-
-    def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
-        if self._runtime_tool and self._runtime_tool.on_mouse_move(self, event):
-            return
-        self._cursor_tela = event.position()
-        if self.ferramenta_ativa == "curva":
-            self._mouse_move_curva(event)
-            return
-        if self.ferramenta_ativa == "reta":
-            self._mouse_move_reta(event)
-            return
-        if self.ferramenta_ativa == "retangulo":
-            if self._retangulo_inicio is not None:
-                self._retangulo_preview = self._ponto_com_snap(event.position())
-            self.update()
-            event.accept()
-            return
-        if self.ferramenta_ativa not in {"reta", "curva"}:
-            pos = self._ponto_com_snap(event.position())
-            if self._arrastando_alca_curva:
-                idx, alca = self._arrastando_alca_curva
-                self._atualizar_alca_curva(idx, alca, pos)
-                self.update()
-                event.accept()
-                return
-            if self.ferramenta_ativa == "manipular_pontos":
-                ponto_poly = self._ponto_polilinha_em_ponto(pos)
-                self._hover_ponto_poly = ponto_poly
-                if self._arrastando_ponto_poly is not None:
-                    idx, p_idx = self._arrastando_ponto_poly
-                    self._atualizar_ponto_polilinha(idx, p_idx, pos)
-                    self.update()
-                    event.accept()
-                    return
-            if self._arrastando_selecao and self._ultimo_ponto_arrasto and self._selecionados:
-                delta_x = pos.x() - self._ultimo_ponto_arrasto.x()
-                delta_y = pos.y() - self._ultimo_ponto_arrasto.y()
-                self._mover_selecionados(delta_x, delta_y)
-                self._ultimo_ponto_arrasto = pos
-                self._moveu_selecao = True
-                self.update()
-                event.accept()
-                return
-            if self._inicio_selecao:
-                self._fim_selecao = pos
-                self.update()
-                event.accept()
-                return
-            # Em modo seleção, o snap precisa continuar visível/ativo também em hover.
-            self.update()
-            event.accept()
-            return
         super().mouseMoveEvent(event)
 
-    def _mouse_move_curva(self, event: QMouseEvent):
-        pos = self._ponto_com_snap(event.position())
-        if self._curva_estado == "aguardando_final":
-            self._curva_preview_fim = pos
-        elif self._curva_estado == "aguardando_controle":
-            self._curva_p1 = pos
-        elif self._curva_estado == "aguardando_ponto3" and self._curva_p0 and self._curva_pmedio:
-            self._curva_preview_fim = pos
-            self._curva_p2 = pos
-            self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
-        self.update()
-        event.accept()
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_release"):
+            if self._runtime_tool.on_mouse_release(self, event):
+                return
+        super().mouseReleaseEvent(event)
 
-    def _mouse_move_reta(self, event: QMouseEvent):
-        snap_pos = self._ponto_com_snap(event.position())
-        if self._pontos_reta:
-            self._preview_reta = self._snap_angular(
-                self._pontos_reta[-1],
-                snap_pos,
-                travar_snap_exato=self._snap_resultado is not None,
-                travar_principais=self._tecla_w_trava_principal,
-            )
-            self._preview_reta = self._aplicar_guia_fechamento(self._pontos_reta[-1], self._preview_reta)
-            self._preview_reta = self._aplicar_guias_alinhamento(self._pontos_reta[-1], self._preview_reta)
-            self.painel_coordenadas.atualizar_preview(self._pontos_reta[-1], self._preview_reta)
-        else:
-            self._guia_fechamento = None
-            self._guias_alinhamento = []
-        self.update()
-        event.accept()
-
-    def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
-        if self._runtime_tool and self._runtime_tool.on_mouse_release(self, event):
-            return
-        if event.button() == Qt.LeftButton and self._arrastando_ponto_poly is not None:
-            self._arrastando_ponto_poly = None
-            self._guia_ponto_poly = None
-            self._registrar_historico()
-            self.update()
-            event.accept()
-            return
-        if event.button() == Qt.LeftButton and self._arrastando_alca_curva:
-            self._arrastando_alca_curva = None
-            self._registrar_historico()
-            self.update()
-            event.accept()
-            return
-        if self.ferramenta_ativa in {"reta", "curva"}:
-            return super().mouseReleaseEvent(event)
-        if event.button() != Qt.LeftButton:
-            return super().mouseReleaseEvent(event)
-
-        if self._arrastando_selecao:
-            self._arrastando_selecao = False
-            self._ultimo_ponto_arrasto = None
-            if self._moveu_selecao:
-                self._registrar_historico()
-            self._moveu_selecao = False
-            event.accept()
-            return
-
-        if self._inicio_selecao and self._fim_selecao:
-            self._atualizar_selecao_por_caixa(self._inicio_selecao, self._fim_selecao)
-        self._inicio_selecao = None
-        self._fim_selecao = None
-        self.update()
-        event.accept()
-
-    def _alternar_selecao_no(self, pos: QPointF) -> bool:
-        indices = self._indices_elementos_no_ponto(pos)
-        if len(indices) <= 1:
-            self._ciclo_selecao_indices = []
-            self._ciclo_selecao_cursor = None
-            return False
-        tolerancia = 2.0 / max(self.zoom, 0.001)
-        mesmo_ponto = self._ciclo_selecao_cursor and self._dist(self._ciclo_selecao_cursor, pos) <= tolerancia
-        if not mesmo_ponto or indices != self._ciclo_selecao_indices:
-            self._ciclo_selecao_indices = indices
-            self._ciclo_selecao_cursor = QPointF(pos)
-            self._selecionados = {indices[0]}
-            return True
-        atual = next(iter(self._selecionados), indices[0])
-        try:
-            i = indices.index(atual)
-        except ValueError:
-            i = -1
-        proximo = indices[(i + 1) % len(indices)]
-        self._selecionados = {proximo}
-        return True
-
-    def _indices_elementos_no_ponto(self, pos: QPointF) -> list[int]:
-        tolerancia = 8.0 / max(self.zoom, 0.001)
-        encontrados: list[int] = []
-        for idx, el in enumerate(self.cena.elementos):
-            tipo = el.get("tipo")
-            pontos_referencia: list[QPointF] = []
-            if tipo == "polyline":
-                pontos_referencia = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            elif tipo == "bezier_quadratica":
-                pontos_referencia = [QPointF(*el["p0"]), QPointF(*el["p2"])]
-            for p in pontos_referencia:
-                if self._dist(p, pos) <= tolerancia:
-                    encontrados.append(idx)
-                    break
-        return encontrados
-
-    def resizeEvent(self, event):  # noqa: N802
-        super().resizeEvent(event)
-        self._reposicionar_painel_coordenadas()
-
-    def paintEvent(self, event):  # noqa: N802
+    def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000000"))
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # Desenha destaque de reta temporária (para modo paralela/perpendicular)
+        if self._destacar_reta_temporaria:
+            pen = QPen(QColor("#ffaa00"), 3, Qt.DashDotLine)
+            painter.setPen(pen)
+            p1_tela = self._cena_para_tela(self._destacar_reta_temporaria[0])
+            p2_tela = self._cena_para_tela(self._destacar_reta_temporaria[1])
+            painter.drawLine(p1_tela, p2_tela)
 
         for idx, elemento in enumerate(self.cena.elementos):
             cor_base = elemento.get("cor", "#d0d0d0")
@@ -919,137 +838,35 @@ class VisualizacaoCanvas(QWidget):
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
                     continue
-                self._desenhar_polilinha(
-                    painter,
-                    pontos,
-                    cor=cor,
-                    espessura=esp,
-                    estilo=str(elemento.get("estilo", "solid")),
-                    amplitude=float(elemento.get("amplitude", 1.0)),
-                    fase_inicial=float(elemento.get("fase_inicio", 0.0)),
-                )
+                self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
+                                         estilo=str(elemento.get("estilo", "solid")),
+                                         amplitude=float(elemento.get("amplitude", 1.0)),
+                                         fase_inicial=float(elemento.get("fase_inicio", 0.0)))
             elif elemento.get("tipo") == "bezier_quadratica":
-                self._desenhar_bezier_quadratica(
-                    painter,
-                    QPointF(*elemento["p0"]),
-                    QPointF(*elemento["p1"]),
-                    QPointF(*elemento["p2"]),
-                    cor=cor,
-                    espessura=esp,
-                    estilo=str(elemento.get("estilo", "solid")),
-                    amplitude=float(elemento.get("amplitude", 1.0)),
-                    destacar_controles=(idx in self._selecionados),
-                )
+                self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"]),
+                                                 cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
+                                                 amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
 
-        if self._pontos_reta:
-            if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
-                self._desenhar_guia_angular(painter, self._pontos_reta[-1], self._preview_reta)
-            self._desenhar_polilinha(
-                painter,
-                self._pontos_reta,
-                cor=self._linha_cor,
-                espessura=self._linha_espessura,
-                estilo=self._linha_estilo,
-                amplitude=self._linha_amplitude,
-            )
-            if self._preview_reta and self._preview_reta != self._pontos_reta[-1]:
-                self._desenhar_segmento(
-                    painter,
-                    self._pontos_reta[-1],
-                    self._preview_reta,
-                    tracejado=False,
-                    cor=self._linha_cor,
-                    espessura=self._linha_espessura,
-                    estilo=self._linha_estilo,
-                    amplitude=self._linha_amplitude,
-                )
-        if self._guia_fechamento:
-            self._desenhar_segmento(
-                painter,
-                self._guia_fechamento[0],
-                self._guia_fechamento[1],
-                tracejado=True,
-                cor="#ff43ff",
-            )
-        for inicio, fim in self._guias_alinhamento:
-            self._desenhar_segmento(painter, inicio, fim, tracejado=True, cor="#5bd3ff")
-        for marca in self._marcacoes_temporarias[-10:]:
-            self._desenhar_marca_x(painter, marca)
-        if self._pontos_reta and self._preview_reta:
-            self._desenhar_label_angulo_cursor(painter, self._pontos_reta[-1], self._preview_reta)
-        if self.ferramenta_ativa == "retangulo" and self._retangulo_inicio and self._retangulo_preview:
-            p1 = self._retangulo_inicio
-            p3 = self._retangulo_preview
-            p2 = QPointF(p3.x(), p1.y())
-            p4 = QPointF(p1.x(), p3.y())
-            self._desenhar_polilinha(
-                painter,
-                [p1, p2, p3, p4, p1],
-                cor=self._linha_cor,
-                espessura=self._linha_espessura,
-                estilo=self._linha_estilo,
-                amplitude=self._linha_amplitude,
-            )
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
-        if self._inicio_selecao and self._fim_selecao:
-            self._desenhar_caixa_selecao(painter, self._inicio_selecao, self._fim_selecao)
-        if self._snap_resultado:
-            self._desenhar_marcador_snap(painter, self._snap_resultado)
-        self._desenhar_preview_curva(painter)
 
-    def _desenhar_preview_curva(self, painter: QPainter):
-        if self.ferramenta_ativa != "curva":
-            return
-        if self._curva_p0:
-            self._desenhar_marca_x(painter, self._curva_p0, cor="#55e3ff")
-        fim = self._curva_p2 or self._curva_preview_fim
-        if self._curva_p0 and fim:
-            self._desenhar_segmento(painter, self._curva_p0, fim, tracejado=True, cor="#4e92ff")
-            self._desenhar_marca_x(painter, fim, cor="#55e3ff")
-        if self._curva_p0 and self._curva_p1 and self._curva_p2:
-            self._desenhar_bezier_quadratica(
-                painter,
-                self._curva_p0,
-                self._curva_p1,
-                self._curva_p2,
-                cor=self._linha_cor,
-                espessura=self._linha_espessura,
-                estilo=self._linha_estilo,
-                amplitude=self._linha_amplitude,
-                destacar_controles=True,
-            )
-        if self._modo_curva == "3p" and self._curva_pmedio:
-            self._desenhar_marca_x(painter, self._curva_pmedio, cor="#a8ff7d")
+    def _cor_realce(self, cor_hex: str) -> str:
+        cor = QColor(cor_hex)
+        if not cor.isValid():
+            cor = QColor("#d0d0d0")
+        return cor.lighter(135).name()
 
-    def _desenhar_polilinha(
-        self,
-        painter: QPainter,
-        pontos: list[QPointF],
-        cor: str = "#ff5a00",
-        espessura: float = 1.0,
-        estilo: str = "solid",
-        amplitude: float = 1.0,
-        fase_inicial: float = 0.0,
-    ):
+    def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00",
+                            espessura: float = 1.0, estilo: str = "solid", amplitude: float = 1.0,
+                            fase_inicial: float = 0.0):
         fase = fase_inicial
         for inicio, fim in zip(pontos, pontos[1:]):
-            fase = self._desenhar_segmento(
-                painter, inicio, fim, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude, fase=fase
-            )
+            fase = self._desenhar_segmento(painter, inicio, fim, cor=cor, espessura=espessura,
+                                           estilo=estilo, amplitude=amplitude, fase=fase)
 
-    def _desenhar_bezier_quadratica(
-        self,
-        painter: QPainter,
-        p0: QPointF,
-        p1: QPointF,
-        p2: QPointF,
-        cor: str,
-        espessura: float,
-        estilo: str,
-        amplitude: float,
-        destacar_controles: bool = False,
-    ):
+    def _desenhar_bezier_quadratica(self, painter: QPainter, p0: QPointF, p1: QPointF, p2: QPointF,
+                                    cor: str, espessura: float, estilo: str, amplitude: float,
+                                    destacar_controles: bool = False):
         pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
         self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude)
         if not destacar_controles:
@@ -1071,30 +888,13 @@ class VisualizacaoCanvas(QWidget):
             pontos.append(QPointF(x, y))
         return pontos
 
-    def _desenhar_segmento(
-        self,
-        painter: QPainter,
-        inicio: QPointF,
-        fim: QPointF,
-        tracejado: bool = False,
-        cor: str = "#ff5a00",
-        espessura: float = 1.0,
-        estilo: str = "solid",
-        amplitude: float = 1.0,
-        fase: float = 0.0,
-    ) -> float:
+    def _desenhar_segmento(self, painter: QPainter, inicio: QPointF, fim: QPointF, tracejado: bool = False,
+                           cor: str = "#ff5a00", espessura: float = 1.0, estilo: str = "solid",
+                           amplitude: float = 1.0, fase: float = 0.0) -> float:
         comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
         if not tracejado and is_geometric_line_style(estilo):
-            self._desenhar_segmento_geometrico(
-                painter,
-                inicio,
-                fim,
-                cor=cor,
-                espessura=espessura,
-                estilo=estilo,
-                amplitude=max(0.2, float(amplitude)),
-                fase=fase,
-            )
+            self._desenhar_segmento_geometrico(painter, inicio, fim, cor=cor, espessura=espessura,
+                                               estilo=estilo, amplitude=max(0.2, float(amplitude)), fase=fase)
             return fase + comprimento
         pen = QPen(QColor(cor), espessura)
         if tracejado:
@@ -1105,19 +905,8 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(self._cena_para_tela(inicio), self._cena_para_tela(fim))
         return fase + comprimento
 
-    def _desenhar_segmento_geometrico(
-        self,
-        painter: QPainter,
-        inicio: QPointF,
-        fim: QPointF,
-        cor: str,
-        espessura: float,
-        estilo: str,
-        amplitude: float,
-        fase: float,
-    ):
-        # Gera a forma em coordenadas de cena para que o padrão acompanhe o zoom
-        # do desenho (sem deformar por depender de pixels de tela).
+    def _desenhar_segmento_geometrico(self, painter: QPainter, inicio: QPointF, fim: QPointF,
+                                      cor: str, espessura: float, estilo: str, amplitude: float, fase: float):
         p1 = QPointF(inicio)
         p2 = QPointF(fim)
         dx = p2.x() - p1.x()
@@ -1125,7 +914,6 @@ class VisualizacaoCanvas(QWidget):
         comprimento = sqrt(dx * dx + dy * dy)
         if comprimento <= 0.001:
             return
-
         ux = dx / comprimento
         uy = dy / comprimento
         nx = -uy
@@ -1149,7 +937,6 @@ class VisualizacaoCanvas(QWidget):
             amp = max(0.25, comprimento * 0.02) * amplitude
             passo = max(1.1, comprimento * 0.12)
             modo = "half_moon_dash"
-
         path = QPainterPath(self._cena_para_tela(p1))
         if modo == "zigzag":
             t = 0.0
@@ -1207,7 +994,6 @@ class VisualizacaoCanvas(QWidget):
                         path.moveTo(self._cena_para_tela(QPointF(p1.x() + (ux * t), p1.y() + (uy * t))))
                 else:
                     t += arco
-
         pen = QPen(QColor(cor), max(1.0, float(espessura)))
         pen.setStyle(Qt.SolidLine)
         pen.setCapStyle(Qt.RoundCap)
@@ -1222,885 +1008,9 @@ class VisualizacaoCanvas(QWidget):
         if padrao:
             pen.setDashPattern(padrao)
 
-    def _desenhar_label_angulo_cursor(self, painter: QPainter, origem: QPointF, destino: QPointF):
-        dx = destino.x() - origem.x()
-        dy = destino.y() - origem.y()
-        if abs(dx) < 0.0001 and abs(dy) < 0.0001:
-            return
-        ang = degrees(atan2(-dy, dx)) % 360.0
-        texto = f"{ang:.0f}°"
-        metrics = QFontMetrics(painter.font())
-        tw = metrics.horizontalAdvance(texto)
-        th = metrics.height()
-        candidatos = [
-            (int(self._cursor_tela.x() + 14), int(self._cursor_tela.y() - 12)),
-            (int(self._cursor_tela.x() + 14), int(self._cursor_tela.y() + th + 8)),
-            (int(self._cursor_tela.x() - tw - 18), int(self._cursor_tela.y() - 12)),
-            (int(self._cursor_tela.x() - tw - 18), int(self._cursor_tela.y() + th + 8)),
-        ]
-        snap_rect = self._retangulo_label_snap(painter, self._snap_resultado) if self._snap_resultado else None
-        x, y = candidatos[0]
-        for cx, cy in candidatos:
-            ax, ay, aw, ah = cx - 4, cy - th, tw + 8, th + 4
-            if cx < 0 or cy - th < 0 or cx + tw + 4 > self.width() or cy + 4 > self.height():
-                continue
-            if snap_rect and self._retangulos_intersectam((ax, ay, aw, ah), snap_rect):
-                continue
-            x, y = cx, cy
-            break
-        painter.fillRect(x - 4, y - th, tw + 8, th + 4, QColor(0, 0, 0, 180))
-        painter.setPen(QPen(QColor("#ff6a00"), 1))
-        painter.drawText(x, y, texto)
-
-    def _abrir_menu_contexto(self, pos_global):
-        menu = QMenu(self)
-        menu.setStyleSheet(
-            """
-            QMenu { background:#f5f6f8; color:#111111; border:1px solid #9da3aa; }
-            QMenu::item { color:#111111; padding:4px 10px; }
-            QMenu::item:selected { background:#dcecff; color:#111111; }
-            QMenu::item:disabled { color:#5d636a; }
-            QMenu::separator { height:1px; background:#9fa5ad; margin:4px 6px; }
-            """
-        )
-        menu.addAction("Propriedades\tCtrl+Enter", lambda: None)
-        menu.addAction("Variantes", lambda: None)
-        menu.addAction("Informações modelo\tCtrl+M", lambda: None)
-        menu.addSeparator()
-
-        menu.addAction("Excluir\tDel", self.apagar_selecionados)
-        ac_recortar = menu.addAction("Recortar\tCtrl+X", self._recortar_selecionados)
-        ac_recortar.setEnabled(bool(self._selecionados))
-        ac_copiar = menu.addAction("Copiar\tCtrl+C", self.copiar)
-        ac_copiar.setEnabled(bool(self._selecionados or len(self._pontos_reta) >= 2 or self.cena.elementos))
-        menu.addAction("Colar\tCtrl+V", self.colar)
-        menu.addSeparator()
-
-        menu.addAction("Selecionar tudo\tCtrl+T", self._selecionar_tudo)
-        menu.addAction("Selecionar moldes", self._selecionar_tudo)
-        menu.addAction("Inverter seleção", self._inverter_selecao)
-        menu.addAction("Inverter seleção moldes", self._inverter_selecao)
-        menu.addSeparator()
-
-        menu.addAction("Cria ponto de restauração", self._registrar_historico)
-        menu.addAction("Restaurar", self.desfazer_acao)
-        menu.addAction("Restaura ponto de restauração com cópia", self.refazer_acao)
-        menu.exec(pos_global)
-
-    def _selecionar_tudo(self):
-        self._selecionados = set(range(len(self.cena.elementos)))
-        self.update()
-
-    def _inverter_selecao(self):
-        todos = set(range(len(self.cena.elementos)))
-        self._selecionados = todos.difference(self._selecionados)
-        self.update()
-
-    def _recortar_selecionados(self):
-        self.copiar()
-        self.apagar_selecionados()
-
-    def recortar(self):
-        self._recortar_selecionados()
-
-    def _desenhar_guia_angular(self, painter: QPainter, origem: QPointF, destino: QPointF):
-        dx = destino.x() - origem.x()
-        dy = destino.y() - origem.y()
-        dist = sqrt(dx * dx + dy * dy)
-        if dist <= 0.0001:
-            return
-        origem_tela = self._cena_para_tela(origem)
-        raio_tela = dist * self.zoom
-        pen_guia = QPen(QColor("#ff43ff"), 1)
-        pen_guia.setStyle(Qt.DotLine)
-        painter.setPen(pen_guia)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(origem_tela, raio_tela, raio_tela)
-        eixo = QPointF(origem.x() + dist, origem.y())
-        self._desenhar_segmento(painter, origem, eixo, tracejado=True, cor="#ff43ff")
-
-    def _desfazer_ponto(self):
-        if not self._pontos_reta:
-            return
-        self._pontos_reta.pop()
-        if self._pontos_reta:
-            self._preview_reta = self._pontos_reta[-1]
-        else:
-            self._preview_reta = None
-            self._guia_fechamento = None
-        self.update()
-
-    def _finalizar_reta_atual(self):
-        if len(self._pontos_reta) == 1:
-            self._pontos_reta.clear()
-            self._preview_reta = None
-            self._guia_fechamento = None
-            self._guias_alinhamento = []
-            self._aguardando_retorno_selecao = False
-            return
-
-        if len(self._pontos_reta) >= 2:
-            fase = 0.0
-            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
-                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
-                self.cena.elementos.append(
-                    {
-                        "tipo": "polyline",
-                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                        "cor": self._linha_cor,
-                        "espessura": self._linha_espessura,
-                        "estilo": self._linha_estilo,
-                        "amplitude": self._linha_amplitude,
-                        "fase_inicio": fase,
-                    }
-                )
-                fase += comprimento
-            self._registrar_historico()
-            ultimo_ponto = self._pontos_reta[-1]
-            self._pontos_reta = [ultimo_ponto]
-            self._preview_reta = ultimo_ponto
-            self._guia_fechamento = None
-            self._guias_alinhamento = []
-            self._aguardando_retorno_selecao = True
-
-    def _pontos_auxiliares_segmento(self, inicio: QPointF, fim: QPointF) -> list[QPointF]:
-        return [
-            QPointF(inicio.x() + ((fim.x() - inicio.x()) * t), inicio.y() + ((fim.y() - inicio.y()) * t))
-            for t in (0.33, 0.66)
-        ]
-
-    def _finalizar_retangulo(self):
-        if not self._retangulo_inicio or not self._retangulo_preview:
-            return
-        p1 = self._retangulo_inicio
-        p3 = self._retangulo_preview
-        if abs(p1.x() - p3.x()) < 0.0001 or abs(p1.y() - p3.y()) < 0.0001:
-            self._retangulo_inicio = None
-            self._retangulo_preview = None
-            return
-        p2 = QPointF(p3.x(), p1.y())
-        p4 = QPointF(p1.x(), p3.y())
-        cantos = [p1, p2, p3, p4]
-        molde_id = str(uuid4()) if self._retangulo_criar_molde else None
-        if self._retangulo_criar_molde:
-            pontos_fechados: list[QPointF] = []
-            for idx, inicio in enumerate(cantos):
-                fim = cantos[(idx + 1) % len(cantos)]
-                pontos_fechados.append(inicio)
-                pontos_fechados.extend(self._pontos_auxiliares_segmento(inicio, fim))
-            pontos_fechados.append(cantos[0])
-            self.cena.elementos.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [(pt.x(), pt.y()) for pt in pontos_fechados],
-                    "cor": self._linha_cor,
-                    "espessura": self._linha_espessura,
-                    "estilo": self._linha_estilo,
-                    "amplitude": self._linha_amplitude,
-                    "fase_inicio": 0.0,
-                    "molde": True,
-                    "molde_id": molde_id,
-                    "fio_angulo": 0.0,
-                    "controle_cantos": [(pt.x(), pt.y()) for pt in cantos],
-                }
-            )
-            self._selecionados = {len(self.cena.elementos) - 1}
-        else:
-            pontos = [p1, p2, p3, p4, p1]
-            fase = 0.0
-            for inicio, fim in zip(pontos, pontos[1:]):
-                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
-                self.cena.elementos.append(
-                    {
-                        "tipo": "polyline",
-                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                        "cor": self._linha_cor,
-                        "espessura": self._linha_espessura,
-                        "estilo": self._linha_estilo,
-                        "amplitude": self._linha_amplitude,
-                        "fase_inicio": fase,
-                    }
-                )
-                fase += comprimento
-        self._registrar_historico()
-        self._retangulo_inicio = None
-        self._retangulo_preview = None
-
-    def _reposicionar_painel_coordenadas(self):
-        if not self.painel_coordenadas.isVisible():
-            return
-        if self._painel_coordenadas_posicao:
-            self.painel_coordenadas.move(*self._painel_coordenadas_posicao)
-            return
-        x = max(8, self.width() - self.painel_coordenadas.width() - 12)
-        y = 16
-        self.painel_coordenadas.move(x, y)
-
-    def _tela_para_cena(self, ponto: QPointF) -> QPointF:
-        return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(), (ponto.y() / self.zoom) + self.origem_cena.y())
-
-    def _cena_para_tela(self, ponto: QPointF) -> QPointF:
-        return QPointF((ponto.x() - self.origem_cena.x()) * self.zoom, (ponto.y() - self.origem_cena.y()) * self.zoom)
-
-    def desfazer_acao(self):
-        if self._pontos_reta:
-            self._desfazer_ponto()
-            return
-
-        if self._indice_historico == 0:
-            return
-        self._indice_historico -= 1
-        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
-        self.update()
-
-    def refazer_acao(self):
-        if self._indice_historico >= len(self._historico_elementos) - 1:
-            return
-        self._indice_historico += 1
-        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
-        self.update()
-
-    def copiar(self):
-        if self._selecionados:
-            self._buffer_copia = {
-                "tipo": "multiplos",
-                "elementos": [deepcopy(self.cena.elementos[idx]) for idx in sorted(self._selecionados)],
-            }
-            return
-        if self._pontos_reta and len(self._pontos_reta) >= 2:
-            self._buffer_copia = {
-                "tipo": "polyline",
-                "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
-                "cor": self._linha_cor,
-                "espessura": self._linha_espessura,
-                "estilo": self._linha_estilo,
-                "amplitude": self._linha_amplitude,
-                "fase_inicio": 0.0,
-            }
-            return
-
-        if self.cena.elementos:
-            self._buffer_copia = deepcopy(self.cena.elementos[-1])
-
-    def colar(self):
-        if not self._buffer_copia:
-            return
-        self._offset_colagem += 10
-        self._selecionados.clear()
-        if self._buffer_copia.get("tipo") == "multiplos":
-            for item in self._buffer_copia.get("elementos", []):
-                novo = deepcopy(item)
-                if novo.get("tipo") == "polyline":
-                    novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-                elif novo.get("tipo") == "bezier_quadratica":
-                    for chave in ("p0", "p1", "p2"):
-                        x, y = novo[chave]
-                        novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
-                self.cena.elementos.append(novo)
-                self._selecionados.add(len(self.cena.elementos) - 1)
-        else:
-            novo = deepcopy(self._buffer_copia)
-            if novo.get("tipo") == "polyline":
-                novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-            elif novo.get("tipo") == "bezier_quadratica":
-                for chave in ("p0", "p1", "p2"):
-                    x, y = novo[chave]
-                    novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
-            self.cena.elementos.append(novo)
-            self._selecionados.add(len(self.cena.elementos) - 1)
-        self._registrar_historico()
-        self.update()
-
-    def apagar_selecionados(self):
-        if not self._selecionados:
-            return
-        self.cena.elementos = [el for idx, el in enumerate(self.cena.elementos) if idx not in self._selecionados]
-        self._selecionados.clear()
-        self._registrar_historico()
-        self.update()
-
-    def _registrar_historico(self):
-        snapshot = deepcopy(self.cena.elementos)
-        if self._indice_historico < len(self._historico_elementos) - 1:
-            self._historico_elementos = self._historico_elementos[: self._indice_historico + 1]
-        self._historico_elementos.append(snapshot)
-        if len(self._historico_elementos) > 200:
-            self._historico_elementos.pop(0)
-        self._indice_historico = len(self._historico_elementos) - 1
-
-    def _retangulo_selecao(self, inicio: QPointF, fim: QPointF) -> tuple[float, float, float, float]:
-        return min(inicio.x(), fim.x()), min(inicio.y(), fim.y()), max(inicio.x(), fim.x()), max(inicio.y(), fim.y())
-
-    def _bbox_elemento(self, elemento: dict) -> tuple[float, float, float, float] | None:
-        if elemento.get("tipo") == "polyline":
-            pontos = elemento.get("pontos", [])
-            if not pontos:
-                return None
-            xs = [p[0] for p in pontos]
-            ys = [p[1] for p in pontos]
-            return min(xs), min(ys), max(xs), max(ys)
-        if elemento.get("tipo") == "bezier_quadratica":
-            p0 = QPointF(*elemento["p0"])
-            p1 = QPointF(*elemento["p1"])
-            p2 = QPointF(*elemento["p2"])
-            amostra = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=24)
-            xs = [p.x() for p in amostra]
-            ys = [p.y() for p in amostra]
-            return min(xs), min(ys), max(xs), max(ys)
-        return None
-
-    def _atualizar_selecao_por_caixa(self, inicio: QPointF, fim: QPointF):
-        x1, y1, x2, y2 = self._retangulo_selecao(inicio, fim)
-        if abs(x2 - x1) < 1 and abs(y2 - y1) < 1:
-            idx = None
-            if self._snap_resultado and self._snap_resultado.elemento_idx is not None:
-                idx = self._snap_resultado.elemento_idx
-            if idx is None:
-                idx = self._indice_elemento_em_ponto(inicio)
-            self._selecionados = {idx} if idx is not None else set()
-            return
-        selecionados: set[int] = set()
-        for idx, elemento in enumerate(self.cena.elementos):
-            bbox = self._bbox_elemento(elemento)
-            if not bbox:
-                continue
-            bx1, by1, bx2, by2 = bbox
-            if bx1 >= x1 and bx2 <= x2 and by1 >= y1 and by2 <= y2:
-                selecionados.add(idx)
-        self._selecionados = selecionados
-
-    def _indice_elemento_em_ponto(self, ponto: QPointF) -> int | None:
-        tolerancia = 4 / max(self.zoom, 0.001)
-        for idx in range(len(self.cena.elementos) - 1, -1, -1):
-            bbox = self._bbox_elemento(self.cena.elementos[idx])
-            if not bbox:
-                continue
-            x1, y1, x2, y2 = bbox
-            if x1 - tolerancia <= ponto.x() <= x2 + tolerancia and y1 - tolerancia <= ponto.y() <= y2 + tolerancia:
-                return idx
-        return None
-
-    def _alca_curva_em_ponto(self, ponto: QPointF) -> tuple[int, str] | None:
-        tolerancia = 6 / max(self.zoom, 0.001)
-        for idx in sorted(self._selecionados):
-            if idx < 0 or idx >= len(self.cena.elementos):
-                continue
-            el = self.cena.elementos[idx]
-            if el.get("tipo") != "bezier_quadratica":
-                continue
-            for alca in ("p0", "p1", "p2"):
-                p = QPointF(*el[alca])
-                if self._dist(p, ponto) <= tolerancia:
-                    return idx, alca
-        return None
-
-    def _ponto_polilinha_em_ponto(self, ponto: QPointF) -> tuple[int, int] | None:
-        tolerancia = 8.0 / max(self.zoom, 0.001)
-        candidatos = sorted(self._selecionados) if self._selecionados else list(range(len(self.cena.elementos)))
-        for idx in candidatos:
-            if idx < 0 or idx >= len(self.cena.elementos):
-                continue
-            el = self.cena.elementos[idx]
-            if el.get("tipo") != "polyline":
-                continue
-            for p_idx, (x, y) in enumerate(el.get("pontos", [])):
-                if self._dist(QPointF(float(x), float(y)), ponto) <= tolerancia:
-                    return idx, p_idx
-        return None
-
-    def _atualizar_ponto_polilinha(self, idx: int, p_idx: int, pos: QPointF):
-        if idx < 0 or idx >= len(self.cena.elementos):
-            return
-        el = self.cena.elementos[idx]
-        if el.get("tipo") != "polyline":
-            return
-        pontos = list(el.get("pontos", []))
-        if p_idx < 0 or p_idx >= len(pontos):
-            return
-        pontos[p_idx] = (pos.x(), pos.y())
-        if len(pontos) >= 2:
-            primeiro = QPointF(float(pontos[0][0]), float(pontos[0][1]))
-            ultimo = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
-            if self._dist(primeiro, ultimo) <= 0.0001:
-                if p_idx == 0:
-                    pontos[-1] = pontos[0]
-                elif p_idx == len(pontos) - 1:
-                    pontos[0] = pontos[-1]
-        el["pontos"] = pontos
-        if el.get("molde"):
-            controles = el.get("controle_cantos", [])
-            if controles:
-                atualizados: list[tuple[float, float]] = []
-                for cx, cy in controles:
-                    cp = QPointF(float(cx), float(cy))
-                    if self._dist(cp, pos) <= (10.0 / max(self.zoom, 0.001)):
-                        atualizados.append((pos.x(), pos.y()))
-                    else:
-                        atualizados.append((float(cx), float(cy)))
-                el["controle_cantos"] = atualizados
-
-    def _gerar_guia_ponto_polilinha(self, idx: int, p_idx: int) -> tuple[QPointF, QPointF | None, QPointF | None] | None:
-        if idx < 0 or idx >= len(self.cena.elementos):
-            return None
-        el = self.cena.elementos[idx]
-        if el.get("tipo") != "polyline":
-            return None
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if p_idx < 0 or p_idx >= len(pontos):
-            return None
-        anterior = pontos[p_idx - 1] if p_idx > 0 else None
-        proximo = pontos[p_idx + 1] if p_idx + 1 < len(pontos) else None
-        return QPointF(pontos[p_idx]), anterior, proximo
-
-    def _desenhar_info_moldes(self, painter: QPainter):
-        for el in self.cena.elementos:
-            if not el.get("molde"):
-                continue
-            controles = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-            if not controles:
-                continue
-            painter.setPen(QPen(QColor("#ffffff"), 1))
-            for i, pt in enumerate(controles, start=1):
-                pt_tela = self._cena_para_tela(pt)
-                painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
-                painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
-            xs = [p.x() for p in controles]
-            ys = [p.y() for p in controles]
-            y_meio = (min(ys) + max(ys)) / 2.0
-            x1 = min(xs) + ((max(xs) - min(xs)) * 0.25)
-            x2 = min(xs) + ((max(xs) - min(xs)) * 0.75)
-            origem_fio = QPointF(x1, y_meio)
-            fim_fio = QPointF(x2, y_meio)
-            self._desenhar_segmento(painter, origem_fio, fim_fio, cor="#ffffff", espessura=1.0)
-            painter.drawText(int(self._cena_para_tela(fim_fio).x() + 6), int(self._cena_para_tela(fim_fio).y() + 4), "0°")
-
-    def _desenhar_guia_arrasto_ponto(self, painter: QPainter):
-        if self._guia_ponto_poly is None or self._arrastando_ponto_poly is None:
-            return
-        origem, anterior, proximo = self._guia_ponto_poly
-        if anterior is not None:
-            self._desenhar_segmento(painter, anterior, origem, tracejado=True, cor="#ff48ff", espessura=1.0)
-        if proximo is not None:
-            self._desenhar_segmento(painter, origem, proximo, tracejado=True, cor="#ff48ff", espessura=1.0)
-
-    def _desenhar_hover_ponto_manipulacao(self, painter: QPainter):
-        if self.ferramenta_ativa != "manipular_pontos" or self._hover_ponto_poly is None:
-            return
-        idx, p_idx = self._hover_ponto_poly
-        if idx < 0 or idx >= len(self.cena.elementos):
-            return
-        el = self.cena.elementos[idx]
-        if el.get("tipo") != "polyline":
-            return
-        pontos = el.get("pontos", [])
-        if p_idx < 0 or p_idx >= len(pontos):
-            return
-        x, y = pontos[p_idx]
-        pt = self._cena_para_tela(QPointF(float(x), float(y)))
-        painter.setPen(QPen(QColor("#ff2bd6"), 1))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
-
-    def _mover_selecionados(self, dx: float, dy: float):
-        for idx in self._selecionados:
-            el = self.cena.elementos[idx]
-            if el.get("tipo") == "polyline":
-                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
-            elif el.get("tipo") == "bezier_quadratica":
-                for chave in ("p0", "p1", "p2"):
-                    x, y = el[chave]
-                    el[chave] = (x + dx, y + dy)
-
-    def _desenhar_caixa_selecao(self, painter: QPainter, inicio: QPointF, fim: QPointF):
-        p1 = self._cena_para_tela(inicio)
-        p2 = self._cena_para_tela(fim)
-        x1, y1, x2, y2 = min(p1.x(), p2.x()), min(p1.y(), p2.y()), max(p1.x(), p2.x()), max(p1.y(), p2.y())
-        painter.fillRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1), QColor(120, 0, 0, 80))
-        painter.setPen(QPen(QColor("#ff3333"), 1))
-        painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
-
-    def _desenhar_marcador_snap(self, painter: QPainter, snap: SnapResult):
-        pt = self._cena_para_tela(snap.ponto)
-        cor = QColor("#ff6a00")
-        pen = QPen(cor, 1)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(int(pt.x() - 5), int(pt.y() - 5), 10, 10)
-        texto = snap.tipo
-        metrics = QFontMetrics(painter.font())
-        tw = metrics.horizontalAdvance(texto)
-        th = metrics.height()
-
-        offset_x = 10
-        offset_y = -10
-        tx = pt.x() + offset_x
-        ty = pt.y() + offset_y
-        if tx + tw + 8 > self.width():
-            tx = pt.x() - tw - 14
-        if ty - th < 0:
-            ty = pt.y() + th + 8
-
-        bg_x = int(tx - 4)
-        bg_y = int(ty - th + 2)
-        bg_w = int(tw + 8)
-        bg_h = int(th + 4)
-        painter.fillRect(bg_x, bg_y, bg_w, bg_h, QColor(0, 0, 0, 180))
-        painter.setPen(QPen(cor, 1))
-        painter.drawText(int(tx), int(ty), texto)
-
-    def _retangulo_label_snap(self, painter: QPainter, snap: SnapResult | None) -> tuple[int, int, int, int] | None:
-        if not snap:
-            return None
-        pt = self._cena_para_tela(snap.ponto)
-        texto = snap.tipo
-        metrics = QFontMetrics(painter.font())
-        tw = metrics.horizontalAdvance(texto)
-        th = metrics.height()
-        tx = pt.x() + 10
-        ty = pt.y() - 10
-        if tx + tw + 8 > self.width():
-            tx = pt.x() - tw - 14
-        if ty - th < 0:
-            ty = pt.y() + th + 8
-        return int(tx - 4), int(ty - th + 2), int(tw + 8), int(th + 4)
-
-    def _retangulos_intersectam(
-        self,
-        a: tuple[int, int, int, int],
-        b: tuple[int, int, int, int],
-    ) -> bool:
-        ax, ay, aw, ah = a
-        bx, by, bw, bh = b
-        return not (ax + aw < bx or bx + bw < ax or ay + ah < by or by + bh < ay)
-
-    def set_snap_ativo(self, ativo: bool):
-        self._snap_ativo = ativo
-        if not ativo:
-            self._snap_resultado = None
-            self._snap_candidatos = []
-            self._snap_indice = 0
-        self.snap_changed.emit(ativo)
-        self.update()
-
-    def alternar_snap(self):
-        self.set_snap_ativo(not self._snap_ativo)
-
-    def snap_ativo(self) -> bool:
-        return self._snap_ativo
-
-    def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
-        pos_cena = self._tela_para_cena(pos_tela)
-        self._snap_candidatos = self._snap_manager.calcular_candidatos(
-            self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
-        )
-        tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
-        for idx, el in enumerate(self.cena.elementos):
-            if el.get("tipo") != "bezier_quadratica":
-                continue
-            p0 = QPointF(*el["p0"])
-            p1 = QPointF(*el["p1"])
-            p2 = QPointF(*el["p2"])
-            candidatos = [
-                ("nó", p0),
-                ("controle", p1),
-                ("nó", p2),
-                ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
-            ]
-            for tipo, ponto in candidatos:
-                dist = self._dist(pos_cena, ponto)
-                if dist <= tol_cena:
-                    self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
-        if self._ponto_coordenada_aplicada is not None:
-            dist = sqrt(
-                (pos_cena.x() - self._ponto_coordenada_aplicada.x()) ** 2
-                + (pos_cena.y() - self._ponto_coordenada_aplicada.y()) ** 2
-            )
-            if dist <= tol_cena:
-                self._snap_candidatos.insert(
-                    0,
-                    SnapResult(
-                        ponto=QPointF(self._ponto_coordenada_aplicada),
-                        tipo="coord",
-                        distancia=dist,
-                        elemento_idx=None,
-                    ),
-                )
-        if self._snap_candidatos:
-            candidatos_sem_grade = [c for c in self._snap_candidatos if c.tipo != "grade"]
-            if candidatos_sem_grade:
-                self._snap_candidatos = candidatos_sem_grade
-        if self._snap_candidatos:
-            self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
-            self._snap_resultado = self._snap_candidatos[self._snap_indice]
-        else:
-            self._snap_resultado = None
-            self._snap_indice = 0
-        if self._snap_resultado:
-            return self._snap_resultado.ponto
-        return pos_cena
-
-    def _tolerancia_snap_px(self) -> float:
-        # 0,5 cm na tela (aprox.) usando DPI lógico da janela/canvas.
-        dpi = float(self.logicalDpiX()) if self.logicalDpiX() > 0 else 96.0
-        return (dpi / 2.54) * 0.5
-
-    def leaveEvent(self, event):  # noqa: N802
-        self._snap_resultado = None
-        self._snap_candidatos = []
-        self._snap_indice = 0
-        self._tecla_w_trava_principal = False
-        self.update()
-        super().leaveEvent(event)
-
-    def _registrar_posicao_painel(self, x: int, y: int):
-        self._painel_coordenadas_posicao = (x, y)
-        self.painel_posicao_changed.emit(x, y)
-
-    def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
-        if self._painel_coordenadas_posicao:
-            return self._painel_coordenadas_posicao
-        if self.painel_coordenadas.isVisible():
-            return self.painel_coordenadas.x(), self.painel_coordenadas.y()
-        return None
-
-    def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
-        self._painel_coordenadas_posicao = pos
-        if pos and self.painel_coordenadas.isVisible():
-            self.painel_coordenadas.move(*pos)
-
-    def painel_coordenadas_visivel(self) -> bool:
-        return self._painel_coordenadas_visivel
-
-    def definir_painel_coordenadas_visivel(self, visivel: bool):
-        self._painel_coordenadas_visivel = visivel
-        if visivel:
-            self.painel_coordenadas.show()
-            self._reposicionar_painel_coordenadas()
-        else:
-            self.painel_coordenadas.hide()
-        self.painel_coordenadas_changed.emit(visivel)
-
-    def _set_painel_coordenadas_visivel(self, visivel: bool):
-        self._painel_coordenadas_visivel = visivel
-        self.painel_coordenadas_changed.emit(visivel)
-
-    def _snap_angular(
-        self,
-        origem: QPointF,
-        destino: QPointF,
-        travar_snap_exato: bool = False,
-        travar_principais: bool = False,
-        liberar_angular: bool | None = None,
-    ) -> QPointF:
-        # Compatibilidade com chamadas antigas que usavam `liberar_angular`.
-        # Regra antiga: True = livre. Regra nova: W pressionado = trava principais.
-        if liberar_angular is not None:
-            travar_principais = not bool(liberar_angular)
-        if not self._snap_ativo:
-            return destino
-        if liberar_angular:
-            return destino
-        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
-            return destino
-        dx = destino.x() - origem.x()
-        dy = destino.y() - origem.y()
-        dist = sqrt(dx * dx + dy * dy)
-        if dist <= 0.0001:
-            return destino
-        ang = degrees(atan2(-dy, dx))
-        ang_principal = round(ang / 45.0) * 45.0
-        if travar_principais:
-            return QPointF(origem.x() + dist * cos(radians(ang_principal)), origem.y() - dist * sin(radians(ang_principal)))
-        if self._snap_contextual_ativo and len(self._pontos_reta) >= 2:
-            ang_contextual = self._snap_angular_contextual(origem, ang)
-            if ang_contextual is not None:
-                return QPointF(origem.x() + dist * cos(radians(ang_contextual)), origem.y() - dist * sin(radians(ang_contextual)))
-        angulo_dist = self._dist_angular(ang, ang_principal)
-        tolerancia_principal = max(1.8, min(5.0, self._snap_angular_passo * 0.12))
-        if angulo_dist <= tolerancia_principal:
-            return QPointF(origem.x() + dist * cos(radians(ang_principal)), origem.y() - dist * sin(radians(ang_principal)))
-        return destino
-
-    def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
-        ponto_anterior = self._pontos_reta[-2]
-        vx = origem.x() - ponto_anterior.x()
-        vy = origem.y() - ponto_anterior.y()
-        dist_ref = sqrt(vx * vx + vy * vy)
-        if dist_ref <= 0.0001:
-            return None
-        ang_ref = degrees(atan2(-vy, vx))
-        candidatos = [ang_ref, ang_ref + 180.0, ang_ref + 90.0, ang_ref - 90.0]
-        melhor = min(candidatos, key=lambda ang: self._dist_angular(ang_atual, ang))
-        if self._dist_angular(ang_atual, melhor) <= 5.0:
-            return melhor
-        return None
-
-    def _dist_angular(self, a: float, b: float) -> float:
-        diff = abs((a - b) % 360.0)
-        return min(diff, 360.0 - diff)
-
-    def _aplicar_guia_fechamento(self, origem: QPointF, destino: QPointF) -> QPointF:
-        self._guia_fechamento = None
-        if len(self._pontos_reta) < 2 or not self._snap_resultado:
-            return destino
-
-        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
-            return destino
-
-        ponto_final = self._snap_resultado.ponto
-        ponto_anterior = self._pontos_reta[-2]
-        vec_ref = QPointF(origem.x() - ponto_anterior.x(), origem.y() - ponto_anterior.y())
-        vec_cursor = QPointF(destino.x() - origem.x(), destino.y() - origem.y())
-        mod_ref = sqrt(vec_ref.x() * vec_ref.x() + vec_ref.y() * vec_ref.y())
-        mod_cursor = sqrt(vec_cursor.x() * vec_cursor.x() + vec_cursor.y() * vec_cursor.y())
-        if mod_ref <= 0.0001 or mod_cursor <= 0.0001:
-            return destino
-
-        det = (vec_ref.x() * vec_cursor.y()) - (vec_ref.y() * vec_cursor.x())
-        if abs(det) <= 0.0001:
-            return destino
-
-        delta = QPointF(origem.x() - ponto_final.x(), origem.y() - ponto_final.y())
-        t = ((delta.x() * vec_cursor.y()) - (delta.y() * vec_cursor.x())) / det
-        u = ((delta.x() * vec_ref.y()) - (delta.y() * vec_ref.x())) / det
-        if u < 0:
-            return destino
-
-        intersecao = QPointF(ponto_final.x() + t * vec_ref.x(), ponto_final.y() + t * vec_ref.y())
-        tolerancia_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
-        dist_intersecao = sqrt((intersecao.x() - destino.x()) ** 2 + (intersecao.y() - destino.y()) ** 2)
-        if dist_intersecao > tolerancia_cena * 4:
-            return destino
-
-        self._guia_fechamento = (ponto_final, intersecao)
-
-        if dist_intersecao <= tolerancia_cena:
-            return intersecao
-        return destino
-
-    def _aplicar_guias_alinhamento(self, origem: QPointF, destino: QPointF) -> QPointF:
-        self._guias_alinhamento = []
-        if not self._snap_ativo:
-            return destino
-        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
-            return destino
-
-        candidatos: list[QPointF] = []
-        candidatos.extend(self._pontos_reta[:-1])
-        for el in self.cena.elementos:
-            if el.get("tipo") == "polyline":
-                candidatos.extend(QPointF(float(x), float(y)) for x, y in el.get("pontos", []))
-        if not candidatos:
-            return destino
-
-        tol = self._tolerancia_snap_px() / max(self.zoom, 0.001)
-        melhor_x: QPointF | None = None
-        melhor_y: QPointF | None = None
-        dist_x = float("inf")
-        dist_y = float("inf")
-        for pt in candidatos:
-            dx = abs(destino.x() - pt.x())
-            dy = abs(destino.y() - pt.y())
-            if dx <= tol and dx < dist_x:
-                melhor_x = pt
-                dist_x = dx
-            if dy <= tol and dy < dist_y:
-                melhor_y = pt
-                dist_y = dy
-
-        ajustado = QPointF(destino)
-        if melhor_x:
-            ajustado.setX(melhor_x.x())
-            self._guias_alinhamento.append((QPointF(melhor_x.x(), melhor_x.y()), QPointF(melhor_x.x(), ajustado.y())))
-        if melhor_y:
-            ajustado.setY(melhor_y.y())
-            self._guias_alinhamento.append((QPointF(melhor_y.x(), melhor_y.y()), QPointF(ajustado.x(), melhor_y.y())))
-        return ajustado
-
-    def _aplicar_coordenadas(self, payload: dict):
-        origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
-        dx = payload.get("dx")
-        dy = payload.get("dy")
-        ang = payload.get("a")
-        dist = payload.get("d")
-        destino: QPointF | None = None
-        if ang is not None and dist is not None:
-            rad = radians(ang)
-            destino = QPointF(origem.x() + (dist * cos(rad)), origem.y() - (dist * sin(rad)))
-        elif dx is not None or dy is not None:
-            destino = QPointF(origem.x() + float(dx or 0.0), origem.y() + float(dy or 0.0))
-        if destino is None:
-            return
-        destino = self._snap_angular(origem, destino)
-        self._ponto_coordenada_aplicada = destino
-        self._marcacoes_temporarias.append(destino)
-        self.painel_coordenadas.atualizar_preview(origem, destino)
-        self.update()
-
-    def elementos_para_salvar(self) -> list[dict]:
-        elementos = deepcopy(self.cena.elementos)
-        if len(self._pontos_reta) >= 2:
-            fase = 0.0
-            for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
-                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
-                elementos.append(
-                    {
-                        "tipo": "polyline",
-                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                        "cor": self._linha_cor,
-                        "espessura": self._linha_espessura,
-                        "estilo": self._linha_estilo,
-                        "amplitude": self._linha_amplitude,
-                        "fase_inicio": fase,
-                    }
-                )
-                fase += comprimento
-        return elementos
-
     def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00"):
         pt = self._cena_para_tela(ponto)
         pen = QPen(QColor(cor), 1)
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
-
-    def set_estilo_linha(
-        self, cor: str | None = None, estilo: str | None = None, espessura: float | None = None, amplitude: float | None = None
-    ):
-        if cor:
-            self._linha_cor = cor
-        if estilo:
-            self._linha_estilo = estilo
-        if espessura is not None:
-            self._linha_espessura = max(1.0, float(espessura))
-        if amplitude is not None:
-            self._linha_amplitude = max(0.2, float(amplitude))
-        self.update()
-
-    def set_modo_curva(self, modo: str):
-        self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
-        self._resetar_estado_curva()
-
-    def set_passo_snap_angular(self, passo: float):
-        self._snap_angular_passo = max(1.0, float(passo))
-
-    def set_snap_contextual_ativo(self, ativo: bool):
-        self._snap_contextual_ativo = bool(ativo)
-
-    def keyPressEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key_W and not event.isAutoRepeat():
-            self._tecla_w_trava_principal = True
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key_W and not event.isAutoRepeat():
-            self._tecla_w_trava_principal = False
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
-
-    def focusOutEvent(self, event):  # noqa: N802
-        self._tecla_w_trava_principal = False
-        super().focusOutEvent(event)
