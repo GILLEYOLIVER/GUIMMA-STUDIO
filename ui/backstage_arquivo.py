@@ -42,11 +42,11 @@ class BackstageArquivoPanel(QFrame):
         menu_esquerdo.setFixedWidth(190)
         menu_esquerdo.setStyleSheet("background: #f3f3f3; border-right: 1px solid #d8dde3;")
         menu_layout = QVBoxLayout(menu_esquerdo)
-        menu_layout.setContentsMargins(0, 10, 0, 10)
+        menu_layout.setContentsMargins(0, 18, 0, 10)
         menu_layout.setSpacing(1)
 
         titulo = QLabel("ARQUIVO")
-        titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 8px 14px 14px 16px;")
+        titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 0 14px 10px 16px;")
         menu_layout.addWidget(titulo)
 
         self.botoes: dict[str, QPushButton] = {}
@@ -86,7 +86,6 @@ class BackstageArquivoPanel(QFrame):
             menu_layout.addWidget(botao)
             self.botoes[item] = botao
         menu_layout.addStretch(0)
-        menu_esquerdo.setFixedHeight(menu_layout.sizeHint().height() + 4)
 
         painel_direito = QFrame()
         painel_direito.setStyleSheet("background: #ffffff;")
