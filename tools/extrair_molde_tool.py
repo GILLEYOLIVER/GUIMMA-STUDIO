@@ -72,7 +72,14 @@ class Ferramenta(FerramentaBase):
 
             candidatos = canvas._indices_elementos_em_ponto(pos)
             if not candidatos:
-                self.set_status("Selecione um contorno para continuar.")
+                candidatos = self._indices_polylines_contem_ponto(canvas, pos)
+            if not candidatos and canvas._selecionados:
+                candidatos = sorted(
+                    [idx for idx in canvas._selecionados if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("tipo") == "polyline"],
+                    reverse=True,
+                )
+            if not candidatos:
+                self.set_status("Clique na borda ou dentro do contorno (ou pré-selecione) para continuar.")
                 return False
             idx = candidatos[0]
             el = canvas.cena.elementos[idx]
@@ -159,6 +166,36 @@ class Ferramenta(FerramentaBase):
             return
         for a, b in zip(pontos, pontos[1:]):
             canvas._desenhar_segmento(painter, a, b, cor=cor.name(), espessura=esp)
+
+    def _indices_polylines_contem_ponto(self, canvas, pos: QPointF) -> list[int]:
+        candidatos: list[int] = []
+        for idx in range(len(canvas.cena.elementos) - 1, -1, -1):
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") != "polyline":
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if len(pontos) < 3:
+                continue
+            if not self._eh_fechado(pontos):
+                continue
+            if self._ponto_dentro_poligono(pos, pontos):
+                candidatos.append(idx)
+        return candidatos
+
+    def _ponto_dentro_poligono(self, pt: QPointF, pontos: list[QPointF]) -> bool:
+        poligono = pontos if pontos and self._dist(pontos[0], pontos[-1]) <= 0.001 else [*pontos, pontos[0]]
+        inside = False
+        j = len(poligono) - 1
+        x = pt.x()
+        y = pt.y()
+        for i in range(len(poligono)):
+            xi, yi = poligono[i].x(), poligono[i].y()
+            xj, yj = poligono[j].x(), poligono[j].y()
+            intercepta = ((yi > y) != (yj > y)) and (x < ((xj - xi) * (y - yi) / max((yj - yi), 1e-12)) + xi)
+            if intercepta:
+                inside = not inside
+            j = i
+        return inside
 
     def _criar_molde(self, canvas) -> bool:
         if not self._selecoes_manuais:
