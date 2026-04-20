@@ -9,9 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QVBoxLayout,
 )
 
@@ -21,7 +19,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
-    descricao_painel = "Automático: LMB seleciona, RMB extrai, LMB cria. Manual: LMB marca partes."
+    descricao_painel = "Automático: LMB extrai+cria molde. Manual: LMB marca partes, RMB extrai, LMB cria."
 
     def __init__(self):
         super().__init__()
@@ -48,9 +46,10 @@ class Ferramenta(FerramentaBase):
         self._contorno_extraido = None
         self._molde_criado = False
         self._abrir_config(canvas)
-        self.set_status("Defina modo e siga: LMB seleciona | RMB extrai | LMB cria molde")
+        self.set_status("Defina modo e clique no contorno. Automático já extrai e cria o molde.")
 
     def on_deactivate(self, canvas):
+        super().on_deactivate(canvas)
         if self._dialog:
             self._dialog.hide()
         self._idx_selecionado = None
@@ -108,12 +107,12 @@ class Ferramenta(FerramentaBase):
             self._idx_selecionado = idx
             self._selecoes_manuais = {idx}
             canvas._selecionados = {idx}
-            self._contorno_extraido = None
-            self._molde_criado = False
-            self.set_status("Contorno selecionado. RMB para extrair traçado exato.")
+            self._extrair_indice(canvas, idx)
+            ok = self._criar_molde(canvas)
+            self.set_status("Molde criado com sucesso." if ok else "Falha ao criar molde.")
             canvas.update()
             event.accept()
-            return True
+            return ok
 
         if event.button() != Qt.RightButton:
             return False
@@ -131,23 +130,8 @@ class Ferramenta(FerramentaBase):
             canvas.update()
             event.accept()
             return True
-
-        if self._idx_selecionado is None:
-            self.set_status("Selecione um contorno fechado antes de extrair.")
-            return False
-        el = canvas.cena.elementos[self._idx_selecionado]
-        self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        metadados = self._extrair_metadados(self._contorno_extraido)
-        el["extracao_molde"] = metadados
-        if self._cfg["quebrar_auxiliares"]:
-            el["pontos"] = self._remover_segmentos_auxiliares([(p.x(), p.y()) for p in self._contorno_extraido], metadados)
-            self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el["pontos"]]
-        self._molde_criado = False
-        canvas._registrar_historico()
-        self.set_status("Traçado extraído. LMB para criar molde.")
-        canvas.update()
-        event.accept()
-        return True
+        self.set_status("Modo Automático: use LMB para extrair e criar molde em um clique.")
+        return False
 
     def on_paint_overlay(self, canvas, painter: QPainter):
         for idx in self._selecoes_manuais:
@@ -231,6 +215,18 @@ class Ferramenta(FerramentaBase):
             canvas._registrar_historico()
         return criou
 
+    def _extrair_indice(self, canvas, idx: int):
+        if idx < 0 or idx >= len(canvas.cena.elementos):
+            return
+        el = canvas.cena.elementos[idx]
+        self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        metadados = self._extrair_metadados(self._contorno_extraido)
+        el["extracao_molde"] = metadados
+        if self._cfg["quebrar_auxiliares"]:
+            el["pontos"] = self._remover_segmentos_auxiliares([(p.x(), p.y()) for p in self._contorno_extraido], metadados)
+            self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el["pontos"]]
+        self._molde_criado = False
+
     def _proximo_nome_molde(self, canvas) -> str:
         maior = 0
         for el in canvas.cena.elementos:
@@ -280,10 +276,10 @@ class Ferramenta(FerramentaBase):
                     background: #f1f4f8;
                     color: #111111;
                 }
-                QLabel, QCheckBox, QPushButton, QComboBox {
+                QLabel, QCheckBox, QComboBox {
                     color: #111111;
                 }
-                QComboBox, QPushButton {
+                QComboBox {
                     background: #ffffff;
                     border: 1px solid #b9c4cf;
                     border-radius: 4px;
@@ -315,18 +311,14 @@ class Ferramenta(FerramentaBase):
             self.chk_converter.setChecked(bool(self._cfg["converter_auxiliares"]))
             for chk in (self.chk_grad, self.chk_piques, self.chk_aux, self.chk_compor, self.chk_usar, self.chk_quebrar, self.chk_converter):
                 lay.addWidget(chk)
-
-            rod = QHBoxLayout()
-            btn_aplicar = QPushButton("Aplicar")
-            btn_aplicar.clicked.connect(self._salvar_cfg)
-            rod.addStretch(1)
-            rod.addWidget(btn_aplicar)
-            lay.addLayout(rod)
             lay.addWidget(QLabel(""))
+            self.cmb_modo.currentTextChanged.connect(self._salvar_cfg)
+            for chk in (self.chk_grad, self.chk_piques, self.chk_aux, self.chk_compor, self.chk_usar, self.chk_quebrar, self.chk_converter):
+                chk.toggled.connect(self._salvar_cfg)
         self._dialog.show()
         self._dialog.raise_()
 
-    def _salvar_cfg(self):
+    def _salvar_cfg(self, *_):
         self._cfg.update(
             {
                 "modo": self.cmb_modo.currentText(),

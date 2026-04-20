@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 
 class PainelFerramentaBasico(QFrame):
@@ -41,6 +41,21 @@ class PainelFerramentaBasico(QFrame):
                 color: #1f2d3a;
                 font-size: 11px;
             }
+            QPushButton#fechar {
+                background: #ffffff;
+                border: 1px solid #c8d2dc;
+                border-radius: 4px;
+                color: #41566b;
+                min-width: 20px;
+                max-width: 20px;
+                min-height: 20px;
+                max-height: 20px;
+                font-weight: 700;
+            }
+            QPushButton#fechar:hover {
+                background: #e9eef4;
+                border-color: #aebdcb;
+            }
             """
         )
 
@@ -53,6 +68,11 @@ class PainelFerramentaBasico(QFrame):
         titulo_lbl = QLabel(titulo)
         titulo_lbl.setObjectName("titulo")
         cabecalho.addWidget(titulo_lbl, 1)
+        btn_fechar = QPushButton("×")
+        btn_fechar.setObjectName("fechar")
+        btn_fechar.setToolTip("Fechar painel")
+        btn_fechar.clicked.connect(self.hide)
+        cabecalho.addWidget(btn_fechar, 0, Qt.AlignRight)
         layout.addLayout(cabecalho)
 
         descricao_lbl = QLabel(descricao)

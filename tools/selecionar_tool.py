@@ -132,7 +132,7 @@ class Ferramenta(FerramentaBase):
                     pontos = canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=24)
                 else:
                     pontos = []
-                if any(x1 <= p.x() <= x2 and y1 <= p.y() <= y2 for p in pontos):
+                if pontos and all(x1 <= p.x() <= x2 and y1 <= p.y() <= y2 for p in pontos):
                     selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
                 canvas._selecionados |= selecionados_area
