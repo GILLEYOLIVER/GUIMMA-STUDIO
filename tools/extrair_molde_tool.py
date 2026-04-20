@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from math import acos, atan2, sqrt
 
 from PySide6.QtCore import QPointF, Qt
@@ -19,7 +20,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
-    descricao_painel = "Automático: LMB extrai+cria molde. Manual: LMB marca partes, RMB extrai, LMB cria."
+    descricao_painel = "LMB seleciona/valida contorno. RMB pega molde. LMB solta, RMB cancela/volta Selecionar."
 
     def __init__(self):
         super().__init__()
@@ -28,6 +29,9 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais: set[int] = set()
         self._contorno_extraido: list[QPointF] | None = None
         self._molde_criado = False
+        self._arrastando_molde = False
+        self._ultimo_pos_arrasto: QPointF | None = None
+        self._snapshot_cancelamento: dict[int, dict] = {}
         self._cfg = {
             "modo": "Automático",
             "detectar_graduacoes": True,
@@ -45,8 +49,11 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._molde_criado = False
+        self._arrastando_molde = False
+        self._ultimo_pos_arrasto = None
+        self._snapshot_cancelamento = {}
         self._abrir_config(canvas)
-        self.set_status("Defina modo e clique no contorno. Automático já extrai e cria o molde.")
+        self.set_status("Defina modo. LMB seleciona contorno(s), RMB pega molde, LMB solta, RMB cancela.")
 
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
@@ -56,19 +63,37 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._molde_criado = False
+        self._arrastando_molde = False
+        self._ultimo_pos_arrasto = None
+        self._snapshot_cancelamento = {}
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
         modo_manual = self._cfg.get("modo") == "Manual"
 
-        if event.button() == Qt.LeftButton:
-            if self._contorno_extraido and not self._molde_criado:
-                ok = self._criar_molde(canvas)
-                self.set_status("Molde criado com sucesso." if ok else "Falha ao criar molde.")
+        if self._arrastando_molde:
+            if event.button() == Qt.LeftButton:
+                self._arrastando_molde = False
+                self._ultimo_pos_arrasto = None
+                self._snapshot_cancelamento = {}
+                canvas._registrar_historico()
+                self.set_status("Molde solto com sucesso.")
                 canvas.update()
                 event.accept()
-                return ok
+                return True
+            if event.button() == Qt.RightButton:
+                self._restaurar_snapshot(canvas)
+                self._arrastando_molde = False
+                self._ultimo_pos_arrasto = None
+                self._snapshot_cancelamento = {}
+                self._molde_criado = False
+                self.set_status("Movimento cancelado.")
+                canvas.update()
+                event.accept()
+                return True
+            return False
 
+        if event.button() == Qt.LeftButton:
             candidatos = canvas._indices_elementos_em_ponto(pos)
             if not candidatos:
                 candidatos = self._indices_polylines_contem_ponto(canvas, pos)
@@ -102,36 +127,57 @@ class Ferramenta(FerramentaBase):
 
             pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             if not self._eh_fechado(pontos):
-                self.set_status("Contorno está aberto. Feche-o antes de extrair.")
+                self.set_status("O contorno não está completo.")
                 return False
+            if event.modifiers() & Qt.ShiftModifier:
+                self._selecoes_manuais.add(idx)
+            else:
+                self._selecoes_manuais = {idx}
             self._idx_selecionado = idx
-            self._selecoes_manuais = {idx}
-            canvas._selecionados = {idx}
-            self._extrair_indice(canvas, idx)
-            ok = self._criar_molde(canvas)
-            self.set_status("Molde criado com sucesso." if ok else "Falha ao criar molde.")
+            canvas._selecionados = set(self._selecoes_manuais)
+            self._contorno_extraido = pontos
+            self._molde_criado = False
+            self.set_status("Contorno validado e realçado. RMB para pegar molde.")
             canvas.update()
             event.accept()
-            return ok
+            return True
 
         if event.button() != Qt.RightButton:
             return False
 
-        if modo_manual:
-            if not self._selecoes_manuais:
-                self.set_status("Manual: selecione partes com LMB antes de extrair.")
-                return False
-            idx = next(iter(self._selecoes_manuais))
-            el = canvas.cena.elementos[idx]
-            self._idx_selecionado = idx
-            self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            self._molde_criado = False
-            self.set_status("Manual: extração pronta. LMB para criar molde(s).")
-            canvas.update()
+        if not self._selecoes_manuais:
+            self.set_status("Nenhum contorno selecionado. RMB novamente para voltar ao Selecionar.")
+            canvas.ferramenta_padrao_solicitada.emit("selecionar")
             event.accept()
             return True
-        self.set_status("Modo Automático: use LMB para extrair e criar molde em um clique.")
-        return False
+
+        for idx in sorted(self._selecoes_manuais):
+            self._extrair_indice(canvas, idx)
+        ok = self._criar_molde(canvas)
+        if not ok:
+            self.set_status("Falha ao criar molde.")
+            return False
+        self._iniciar_arraste_molde(canvas, pos)
+        self.set_status("Molde em mãos: mova o mouse, LMB solta, RMB cancela.")
+        canvas.update()
+        event.accept()
+        return True
+
+    def on_mouse_move(self, canvas, event) -> bool:
+        if not self._arrastando_molde:
+            return False
+        pos = canvas._ponto_com_snap(event.position())
+        if self._ultimo_pos_arrasto is None:
+            self._ultimo_pos_arrasto = pos
+            return True
+        dx = pos.x() - self._ultimo_pos_arrasto.x()
+        dy = pos.y() - self._ultimo_pos_arrasto.y()
+        if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+            self._aplicar_delta_selecionados(canvas, dx, dy)
+            self._ultimo_pos_arrasto = pos
+            canvas.update()
+        event.accept()
+        return True
 
     def on_paint_overlay(self, canvas, painter: QPainter):
         for idx in self._selecoes_manuais:
@@ -196,7 +242,7 @@ class Ferramenta(FerramentaBase):
             if not self._eh_fechado(pontos):
                 pontos.append(QPointF(pontos[0]))
                 el["pontos"] = [(p.x(), p.y()) for p in pontos]
-            principais = self._ordenar_principais_horario(pontos[:-1])
+            principais = [QPointF(p) for p in pontos[:-1]]
             auxiliares = []
             for i in range(len(principais)):
                 a = principais[i]
@@ -211,8 +257,6 @@ class Ferramenta(FerramentaBase):
             el["pontos_auxiliares"] = auxiliares
             criou = True
         self._molde_criado = criou
-        if criou:
-            canvas._registrar_historico()
         return criou
 
     def _extrair_indice(self, canvas, idx: int):
@@ -226,6 +270,34 @@ class Ferramenta(FerramentaBase):
             el["pontos"] = self._remover_segmentos_auxiliares([(p.x(), p.y()) for p in self._contorno_extraido], metadados)
             self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el["pontos"]]
         self._molde_criado = False
+
+    def _iniciar_arraste_molde(self, canvas, pos: QPointF):
+        self._snapshot_cancelamento = {idx: deepcopy(canvas.cena.elementos[idx]) for idx in self._selecoes_manuais if 0 <= idx < len(canvas.cena.elementos)}
+        self._arrastando_molde = True
+        self._ultimo_pos_arrasto = QPointF(pos)
+
+    def _aplicar_delta_selecionados(self, canvas, dx: float, dy: float):
+        for idx in sorted(self._selecoes_manuais):
+            if idx < 0 or idx >= len(canvas.cena.elementos):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
+                if "controle_cantos" in el:
+                    el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                if "pontos_controle_principais" in el:
+                    for p in el["pontos_controle_principais"]:
+                        p["x"] = float(p.get("x", 0.0)) + dx
+                        p["y"] = float(p.get("y", 0.0)) + dy
+                if "pontos_auxiliares" in el:
+                    for p in el["pontos_auxiliares"]:
+                        p["x"] = float(p.get("x", 0.0)) + dx
+                        p["y"] = float(p.get("y", 0.0)) + dy
+
+    def _restaurar_snapshot(self, canvas):
+        for idx, el in self._snapshot_cancelamento.items():
+            if 0 <= idx < len(canvas.cena.elementos):
+                canvas.cena.elementos[idx] = deepcopy(el)
 
     def _proximo_nome_molde(self, canvas) -> str:
         maior = 0
@@ -284,6 +356,16 @@ class Ferramenta(FerramentaBase):
                     border: 1px solid #b9c4cf;
                     border-radius: 4px;
                     min-height: 24px;
+                }
+                QCheckBox::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid #4f5d6c;
+                    background: #ffffff;
+                }
+                QCheckBox::indicator:checked {
+                    border: 1px solid #145f9b;
+                    background: #ffffff;
                 }
                 """
             )
