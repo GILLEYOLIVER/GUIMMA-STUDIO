@@ -4,7 +4,7 @@ from math import atan2, cos, degrees, radians, sin, sqrt
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
@@ -36,7 +36,9 @@ class RetaToolUI(QFrame):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setWindowTitle("Reta - Opções")
         self.setObjectName("RetaToolUI")
-        self.setMinimumWidth(344)
+        self.setFixedWidth(312)
+        self._drag_offset: QPointF | None = None
+        self._posicao_definida_manualmente = False
 
         self._botoes_modo: dict[str, QPushButton] = {}
         self.modo_atual = "livre"
@@ -51,33 +53,33 @@ class RetaToolUI(QFrame):
             }
             QLabel#title {
                 color: #0f4f86;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: 700;
             }
             QLabel#section {
                 color: #425466;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
             QLabel#hint {
                 color: #66788a;
-                font-size: 10px;
+                font-size: 9px;
             }
             QLabel#mouseCoord, QLabel#statusBox {
                 background: #ffffff;
                 border: 1px solid #d6dee6;
                 border-radius: 6px;
-                padding: 5px 7px;
+                padding: 4px 6px;
                 color: #1f2d3a;
             }
             QDoubleSpinBox {
                 background: #ffffff;
                 border: 1px solid #c6d0da;
                 border-radius: 5px;
-                padding: 4px 6px;
-                min-height: 24px;
+                padding: 3px 5px;
+                min-height: 22px;
                 color: #16202a;
             }
             QDoubleSpinBox:focus {
@@ -87,11 +89,11 @@ class RetaToolUI(QFrame):
                 background: #ffffff;
                 border: 1px solid #c6d0da;
                 border-radius: 6px;
-                padding: 4px 8px;
+                padding: 3px 6px;
                 color: #213140;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 600;
-                min-height: 26px;
+                min-height: 24px;
             }
             QPushButton#modeButton:hover {
                 background: #eff6fc;
@@ -107,9 +109,9 @@ class RetaToolUI(QFrame):
                 border: 1px solid #0a6e9f;
                 border-radius: 6px;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 700;
-                min-height: 28px;
+                min-height: 26px;
             }
             QPushButton#applyButton:hover {
                 background: #0d90cf;
@@ -140,8 +142,8 @@ class RetaToolUI(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 9, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 7, 8, 8)
+        layout.setSpacing(6)
 
         topo = QHBoxLayout()
         topo.setContentsMargins(0, 0, 0, 0)
@@ -296,9 +298,42 @@ class RetaToolUI(QFrame):
         self.status_label.setText(texto)
 
     def showEvent(self, event):
-        cursor = QApplication.cursor().pos()
-        self.move(cursor.x() + 24, cursor.y() + 24)
+        if not self._posicao_definida_manualmente:
+            self._posicionar_canto_superior_direito()
         super().showEvent(event)
+
+    def _posicionar_canto_superior_direito(self):
+        tela = self.screen() or QApplication.primaryScreen()
+        if not tela:
+            return
+        area = tela.availableGeometry()
+        margem = 12
+        x = area.right() - self.width() - margem
+        y = area.top() + margem
+        self.move(max(area.left() + margem, x), y)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = event.globalPosition() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            destino = event.globalPosition() - self._drag_offset
+            self.move(int(destino.x()), int(destino.y()))
+            self._posicao_definida_manualmente = True
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def fechar(self):
         self.hide()
