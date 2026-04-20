@@ -629,6 +629,11 @@ class VisualizacaoCanvas(QWidget):
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
+        if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
+            pos = self._ponto_com_snap(event.position())
+            if self._selecionar_proximo_em_ponto(pos):
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -842,3 +847,57 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
         painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
+
+    def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        apx = p.x() - a.x()
+        apy = p.y() - a.y()
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 1e-9:
+            return sqrt((p.x() - a.x()) ** 2 + (p.y() - a.y()) ** 2)
+        t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
+        proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+        return sqrt((p.x() - proj.x()) ** 2 + (p.y() - proj.y()) ** 2)
+
+    def _indices_elementos_em_ponto(self, pos: QPointF) -> list[int]:
+        tolerancia = 8.0 / max(self.zoom, 0.001)
+        candidatos: list[int] = []
+        for idx in range(len(self.cena.elementos) - 1, -1, -1):
+            el = self.cena.elementos[idx]
+            if el.get("tipo") == "polyline":
+                pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
+                    candidatos.append(idx)
+            elif el.get("tipo") == "bezier_quadratica":
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                amostra = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=40)
+                if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(amostra, amostra[1:])):
+                    candidatos.append(idx)
+        return candidatos
+
+    def _selecionar_proximo_em_ponto(self, pos: QPointF) -> bool:
+        candidatos = self._indices_elementos_em_ponto(pos)
+        if not candidatos:
+            return False
+        mesmo_cursor = (
+            self._ciclo_selecao_cursor is not None
+            and sqrt((self._ciclo_selecao_cursor.x() - pos.x()) ** 2 + (self._ciclo_selecao_cursor.y() - pos.y()) ** 2)
+            <= (8.0 / max(self.zoom, 0.001))
+        )
+        if not mesmo_cursor or candidatos != self._ciclo_selecao_indices:
+            self._ciclo_selecao_indices = candidatos
+            self._ciclo_selecao_cursor = QPointF(pos)
+            proximo = candidatos[0]
+        else:
+            atual = next(iter(self._selecionados), None)
+            if atual in candidatos:
+                idx_atual = candidatos.index(atual)
+                proximo = candidatos[(idx_atual + 1) % len(candidatos)]
+            else:
+                proximo = candidatos[0]
+        self._selecionados = {proximo}
+        self.update()
+        return True
