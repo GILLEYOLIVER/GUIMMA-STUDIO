@@ -94,6 +94,7 @@ class Ferramenta(FerramentaBase):
             if canvas.lbl_status:
                 snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
                 canvas.lbl_status.setText(f"Selecionar | X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
+                self.set_status(f"Cursor X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
             canvas.update()
             return True
         self._fim_caixa = pos

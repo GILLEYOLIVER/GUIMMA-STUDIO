@@ -170,6 +170,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
             "QToolButton:hover { color:#0b5f9e; }"
         )
+        menu_popup_style = (
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; padding:4px; }"
+            "QMenu::item { color:#111111; padding:6px 12px; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
 
         self.btn_visao = QToolButton()
         self.btn_visao.setText("VISÃO")
@@ -179,10 +184,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_visao.setStyleSheet(menu_btn_style)
         self.menu_visao = QMenu(self)
-        self.menu_visao.setStyleSheet(
-            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
-            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
-        )
+        self.menu_visao.setStyleSheet(menu_popup_style)
         self.action_regras = QAction("Réguas", self)
         self.action_regras.setCheckable(True)
         self.action_regras.setChecked(True)
@@ -258,6 +260,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_opcoes.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_opcoes.setStyleSheet(menu_btn_style)
         menu_opcoes = QMenu(self)
+        menu_opcoes.setStyleSheet(menu_popup_style)
         menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
         menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
         self.btn_opcoes.setMenu(menu_opcoes)
@@ -271,6 +274,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_janelas.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_janelas.setStyleSheet(menu_btn_style)
         menu_janelas = QMenu(self)
+        menu_janelas.setStyleSheet(menu_popup_style)
         menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
         menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
         self.btn_janelas.setMenu(menu_janelas)
@@ -540,6 +544,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         pos = self._posicoes_caixas_aux.get(chave)
         if pos:
             janela.move(*pos)
+            return
+        area = self._area_documento_atual()
+        if area:
+            canvas = area.canvas
+            gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
+            gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
+            x = gx + max(8, canvas.width() - janela.width() - 18)
+            y = gy + 16
+            janela.move(x, y)
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
