@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from importlib import import_module
 from math import atan2, cos, degrees, radians, sin, sqrt
+from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -81,6 +82,9 @@ class VisualizacaoCanvas(QWidget):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
         self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None  # Para ferramenta reta
+        self._rmb_count = 0
+        self._rmb_ultimo_tempo = 0.0
+        self._rmb_ultima_pos = QPointF(0.0, 0.0)
         self.lbl_status = None  # Será definido pela janela principal
 
         self.setMinimumSize(100, 100)
@@ -632,6 +636,26 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.RightButton and self.ferramenta_ativa != "selecionar":
+            agora = monotonic()
+            pos = event.position()
+            delta_t = agora - self._rmb_ultimo_tempo
+            delta_p = sqrt((pos.x() - self._rmb_ultima_pos.x()) ** 2 + (pos.y() - self._rmb_ultima_pos.y()) ** 2)
+            if delta_t <= 0.55 and delta_p <= 18.0:
+                self._rmb_count += 1
+            else:
+                self._rmb_count = 1
+            self._rmb_ultimo_tempo = agora
+            self._rmb_ultima_pos = QPointF(pos)
+            if self._rmb_count >= 2:
+                self._rmb_count = 0
+                self.ferramenta_padrao_solicitada.emit("selecionar")
+                if self.lbl_status:
+                    self.lbl_status.setText("Ferramenta solta (RMB x2). Voltou para Selecionar.")
+                event.accept()
+                return
+        elif event.button() == Qt.LeftButton:
+            self._rmb_count = 0
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
