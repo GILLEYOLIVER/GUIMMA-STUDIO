@@ -12,16 +12,20 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "retangulo"
     nome = "Retangulo"
+    descricao_painel = "Clique em dois cantos para criar retângulo. RMB cancela a prévia."
 
     def __init__(self):
+        super().__init__()
         self._inicio: QPointF | None = None
         self._preview: QPointF | None = None
         self._criar_molde = True
 
     def on_activate(self, canvas):
+        super().on_activate(canvas)
         self._inicio = None
         self._preview = None
         self._criar_molde = bool(getattr(canvas, "_retangulo_criar_molde", True))
+        self.set_status("Clique no primeiro canto do retângulo.")
 
     def set_criar_molde(self, criar: bool):
         self._criar_molde = bool(criar)

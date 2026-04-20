@@ -1323,11 +1323,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_coordenadas.blockSignals(False)
 
     def _on_painel_posicao_canvas(self, x: int, y: int):
-        self._painel_coordenadas_pos_global = (x, y)
-        for i in range(self.abas_documentos.count()):
-            area = self.abas_documentos.widget(i)
-            if isinstance(area, AreaDocumentoWidget):
-                area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+        # Painel de coordenadas fixo no lado direito de cada canvas.
+        self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = {
