@@ -419,7 +419,8 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(108)
+        self.setFixedHeight(92)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(4, 3, 4, 1)
@@ -480,7 +481,6 @@ class RibbonGroup(QFrame):
                     botao.acionada.connect(self.tool_selected.emit)
                     botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
                     corpo.addWidget(botao)
-            corpo.addStretch(1)
 
         raiz.addLayout(corpo)
 
