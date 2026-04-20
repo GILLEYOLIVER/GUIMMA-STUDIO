@@ -564,6 +564,11 @@ class RibbonWidget(QWidget):
                 border: 1px solid #0a74aa;
             }
             QTabBar::tab:hover { background: #dfe8f2; }
+            QTabBar::tab:selected:hover {
+                background: #0b7fb8;
+                color: #ffffff;
+                border: 1px solid #0a74aa;
+            }
             """
         )
         self._atualizar_destaque_aba(self.tabbar.currentIndex())

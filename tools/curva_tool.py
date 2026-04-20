@@ -8,6 +8,11 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "curva"
     nome = "Curva"
+    descricao_painel = "Curva 2P/3P. Clique esquerdo marca pontos. Clique direito finaliza/cancela."
+
+    def on_activate(self, canvas):
+        super().on_activate(canvas)
+        self.set_status("Defina os pontos da curva. RMB finaliza e outro RMB retorna para Selecionar.")
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
