@@ -167,7 +167,7 @@ class ColorControlWidget(QFrame):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("ColorControlWidget")
-        self._cor = "#ff5a00"
+        self._cor = "#ffffff"
         self._estilo = "solid"
         self._espessura = 1.0
         self._amplitude = 1.0

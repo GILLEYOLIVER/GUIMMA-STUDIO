@@ -224,7 +224,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_indice = 0
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
-        self._linha_cor = "#ff5a00"
+        self._linha_cor = "#ffffff"
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
@@ -1299,6 +1299,12 @@ class VisualizacaoCanvas(QWidget):
             self._guias_alinhamento = []
             self._aguardando_retorno_selecao = True
 
+    def _pontos_auxiliares_segmento(self, inicio: QPointF, fim: QPointF) -> list[QPointF]:
+        return [
+            QPointF(inicio.x() + ((fim.x() - inicio.x()) * t), inicio.y() + ((fim.y() - inicio.y()) * t))
+            for t in (0.33, 0.66)
+        ]
+
     def _finalizar_retangulo(self):
         if not self._retangulo_inicio or not self._retangulo_preview:
             return
@@ -1310,26 +1316,48 @@ class VisualizacaoCanvas(QWidget):
             return
         p2 = QPointF(p3.x(), p1.y())
         p4 = QPointF(p1.x(), p3.y())
-        pontos = [p1, p2, p3, p4, p1]
-        fase = 0.0
+        cantos = [p1, p2, p3, p4]
         molde_id = str(uuid4()) if self._retangulo_criar_molde else None
-        for inicio, fim in zip(pontos, pontos[1:]):
-            comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
-            elemento = {
-                "tipo": "polyline",
-                "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
-                "cor": self._linha_cor,
-                "espessura": self._linha_espessura,
-                "estilo": self._linha_estilo,
-                "amplitude": self._linha_amplitude,
-                "fase_inicio": fase,
-            }
-            if self._retangulo_criar_molde:
-                elemento["molde"] = True
-                elemento["molde_id"] = molde_id
-                elemento["fio_angulo"] = 0.0
-            self.cena.elementos.append(elemento)
-            fase += comprimento
+        if self._retangulo_criar_molde:
+            pontos_fechados: list[QPointF] = []
+            for idx, inicio in enumerate(cantos):
+                fim = cantos[(idx + 1) % len(cantos)]
+                pontos_fechados.append(inicio)
+                pontos_fechados.extend(self._pontos_auxiliares_segmento(inicio, fim))
+            pontos_fechados.append(cantos[0])
+            self.cena.elementos.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [(pt.x(), pt.y()) for pt in pontos_fechados],
+                    "cor": self._linha_cor,
+                    "espessura": self._linha_espessura,
+                    "estilo": self._linha_estilo,
+                    "amplitude": self._linha_amplitude,
+                    "fase_inicio": 0.0,
+                    "molde": True,
+                    "molde_id": molde_id,
+                    "fio_angulo": 0.0,
+                    "controle_cantos": [(pt.x(), pt.y()) for pt in cantos],
+                }
+            )
+            self._selecionados = {len(self.cena.elementos) - 1}
+        else:
+            pontos = [p1, p2, p3, p4, p1]
+            fase = 0.0
+            for inicio, fim in zip(pontos, pontos[1:]):
+                comprimento = sqrt((fim.x() - inicio.x()) ** 2 + (fim.y() - inicio.y()) ** 2)
+                self.cena.elementos.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(inicio.x(), inicio.y()), (fim.x(), fim.y())],
+                        "cor": self._linha_cor,
+                        "espessura": self._linha_espessura,
+                        "estilo": self._linha_estilo,
+                        "amplitude": self._linha_amplitude,
+                        "fase_inicio": fase,
+                    }
+                )
+                fase += comprimento
         self._registrar_historico()
         self._retangulo_inicio = None
         self._retangulo_preview = None

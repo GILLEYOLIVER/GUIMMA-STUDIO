@@ -50,7 +50,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
         self._modo_navegacao = "cursor"
-        self._estilo_desenho_atual = {"cor": "#ff5a00", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
+        self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
