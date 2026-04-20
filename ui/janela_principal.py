@@ -55,6 +55,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_snap_angular_atual = 45.0
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
+        self._janela_aux_retangulo: QDialog | None = None
+        self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = True
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
@@ -436,40 +438,43 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if not area:
             return False
-        janela = QDialog(self)
-        janela.setWindowTitle("Definir retângulos")
-        janela.setModal(True)
-        janela.setMinimumWidth(280)
-        janela.setStyleSheet(
-            "QDialog { background:#f0f0f0; border:1px solid #bfc7cf; }"
-            "QLabel { color:#1f1f1f; }"
-            "QCheckBox { color:#1f1f1f; font-size:12px; }"
-            "QPushButton { background:#e5ebf2; border:1px solid #9fb1c4; padding:4px 10px; color:#1a1a1a; }"
-        )
-        layout = QVBoxLayout(janela)
-        layout.addWidget(QLabel("<b>Definir retângulos</b>"))
-        chk_criar_molde = QCheckBox("Criar molde")
-        chk_criar_molde.setChecked(self._retangulo_criar_molde)
-        layout.addWidget(chk_criar_molde)
-        layout.addWidget(QLabel("Se marcado, o retângulo já será criado como molde com fio padrão em 0°."), 0)
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.button(QDialogButtonBox.Ok).setText("Ativar ferramenta")
-        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
-        layout.addWidget(botoes)
-        botoes.accepted.connect(janela.accept)
-        botoes.rejected.connect(janela.reject)
+        if self._janela_aux_retangulo is None:
+            janela = QDialog(self)
+            janela.setWindowTitle("Definir retângulos")
+            janela.setModal(False)
+            janela.setWindowFlag(Qt.Tool, True)
+            janela.setMinimumWidth(260)
+            janela.setStyleSheet(
+                "QDialog { background:#f0f0f0; border:1px solid #bfc7cf; }"
+                "QLabel { color:#1f1f1f; }"
+                "QCheckBox { color:#1f1f1f; font-size:12px; }"
+            )
+            layout = QVBoxLayout(janela)
+            layout.addWidget(QLabel("<b>Definir retângulos</b>"))
+            chk_criar_molde = QCheckBox("Criar molde")
+            chk_criar_molde.setChecked(self._retangulo_criar_molde)
+            chk_criar_molde.toggled.connect(self._atualizar_config_retangulo)
+            layout.addWidget(chk_criar_molde)
+            layout.addWidget(QLabel("Se marcado, o retângulo já vira molde com fio padrão em 0°."), 0)
+            self._janela_aux_retangulo = janela
+            self._chk_aux_retangulo_criar_molde = chk_criar_molde
+        janela = self._janela_aux_retangulo
+        if self._chk_aux_retangulo_criar_molde:
+            self._chk_aux_retangulo_criar_molde.setChecked(self._retangulo_criar_molde)
         self._restaurar_posicao_caixa_aux(janela, "retangulo")
-        if janela.exec() != QDialog.Accepted:
-            self._memorizar_posicao_caixa_aux(janela, "retangulo")
-            self.lbl_status.setText(f"{titulo} cancelado.")
-            return True
-        self._memorizar_posicao_caixa_aux(janela, "retangulo")
-        self._retangulo_criar_molde = chk_criar_molde.isChecked()
-        area.canvas.definir_config_retangulo(self._retangulo_criar_molde)
+        janela.show()
+        janela.raise_()
+        janela.activateWindow()
         self._ativar_ferramenta_global("retangulo")
         modo = "molde (fio 0°)" if self._retangulo_criar_molde else "desenho"
         self.lbl_status.setText(f"{titulo} ativo no modo: {modo}.")
         return True
+
+    def _atualizar_config_retangulo(self, criar_molde: bool):
+        self._retangulo_criar_molde = bool(criar_molde)
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.definir_config_retangulo(self._retangulo_criar_molde)
 
     def _abrir_janela_auxiliar_curva(self, titulo: str) -> bool:
         area = self._area_documento_atual()
@@ -1226,6 +1231,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tool_id != "curva" and self._janela_aux_curva and self._janela_aux_curva.isVisible():
             self._memorizar_posicao_caixa_aux(self._janela_aux_curva, "curva")
             self._janela_aux_curva.hide()
+        if tool_id != "retangulo" and self._janela_aux_retangulo and self._janela_aux_retangulo.isVisible():
+            self._memorizar_posicao_caixa_aux(self._janela_aux_retangulo, "retangulo")
+            self._janela_aux_retangulo.hide()
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_ferramenta_ativa(tool_id)

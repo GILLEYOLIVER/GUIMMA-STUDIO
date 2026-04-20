@@ -53,7 +53,7 @@ class TabDef:
 class RibbonTabBar(QTabBar):
     def tabSizeHint(self, index):  # noqa: N802
         size = super().tabSizeHint(index)
-        return QSize(max(size.width() + 24, 90), 40)
+        return QSize(max(size.width() + 16, 92), 34)
 
 
 class RibbonButton(QToolButton):
@@ -551,19 +551,19 @@ class RibbonWidget(QWidget):
         self.tabbar.setStyleSheet(
             """
             QTabBar::tab {
-                background: #f3f5f8;
-                color: #1e2a36;
-                border: 1px solid #d4dbe4;
-                font-size: 17px;
-                font-weight: 700;
-                padding: 8px 16px;
+                background: #e8edf3;
+                color: #0d2746;
+                border: 1px solid #cfd8e2;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 6px 16px;
             }
             QTabBar::tab:selected {
-                background: #e8f2fc;
-                color: #0f4f86;
-                border-bottom: 2px solid #2f9fe8;
+                background: #0b7fb8;
+                color: #ffffff;
+                border: 1px solid #0a74aa;
             }
-            QTabBar::tab:hover { background: #edf5ff; }
+            QTabBar::tab:hover { background: #dfe8f2; }
             """
         )
         self._atualizar_destaque_aba(self.tabbar.currentIndex())
