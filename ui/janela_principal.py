@@ -92,6 +92,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow { background: #eef2f6; }
+            QWidget {
+                color: #111111;
+            }
+            QLabel, QCheckBox, QRadioButton, QPushButton, QToolButton, QLineEdit, QComboBox, QMenu {
+                color: #111111;
+            }
+            QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {
+                background: #ffffff;
+                color: #111111;
+            }
             QTabBar::tab {
                 background: #f6f7f9;
                 color: #101010;
