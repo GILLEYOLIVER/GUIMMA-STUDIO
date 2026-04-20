@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+
+# IDE files
+.idea/
