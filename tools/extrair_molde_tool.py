@@ -21,12 +21,13 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
-    descricao_painel = "LMB seleciona, RMB extrai contorno, LMB cria molde com controles."
+    descricao_painel = "Automático: LMB seleciona, RMB extrai, LMB cria. Manual: LMB marca partes."
 
     def __init__(self):
         super().__init__()
         self._dialog: QDialog | None = None
         self._idx_selecionado: int | None = None
+        self._selecoes_manuais: set[int] = set()
         self._contorno_extraido: list[QPointF] | None = None
         self._molde_criado = False
         self._cfg = {
@@ -43,24 +44,27 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._idx_selecionado = None
+        self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._molde_criado = False
         self._abrir_config(canvas)
-        self.set_status("LMB: seleciona contorno fechado | RMB: extrai | LMB: cria molde")
+        self.set_status("Defina modo e siga: LMB seleciona | RMB extrai | LMB cria molde")
 
     def on_deactivate(self, canvas):
         if self._dialog:
             self._dialog.hide()
         self._idx_selecionado = None
+        self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._molde_criado = False
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
+        modo_manual = self._cfg.get("modo") == "Manual"
 
         if event.button() == Qt.LeftButton:
-            if self._idx_selecionado is not None and self._contorno_extraido and not self._molde_criado:
-                ok = self._criar_molde(canvas, self._idx_selecionado)
+            if self._contorno_extraido and not self._molde_criado:
+                ok = self._criar_molde(canvas)
                 self.set_status("Molde criado com sucesso." if ok else "Falha ao criar molde.")
                 canvas.update()
                 event.accept()
@@ -68,39 +72,64 @@ class Ferramenta(FerramentaBase):
 
             candidatos = canvas._indices_elementos_em_ponto(pos)
             if not candidatos:
-                self.set_status("Selecione um contorno fechado.")
+                self.set_status("Selecione um contorno para continuar.")
                 return False
             idx = candidatos[0]
-            if idx < 0 or idx >= len(canvas.cena.elementos):
-                return False
-
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
-                self.set_status("A extração atual funciona em polyline fechada.")
+                self.set_status("Selecione polyline para extrair molde.")
                 return False
+
+            if modo_manual:
+                if idx in self._selecoes_manuais:
+                    self._selecoes_manuais.remove(idx)
+                else:
+                    self._selecoes_manuais.add(idx)
+                canvas._selecionados = set(self._selecoes_manuais)
+                self._idx_selecionado = next(iter(self._selecoes_manuais), None)
+                self._contorno_extraido = None
+                self._molde_criado = False
+                self.set_status(f"Manual: {len(self._selecoes_manuais)} parte(s) selecionada(s). RMB para extrair.")
+                canvas.update()
+                event.accept()
+                return True
+
             pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             if not self._eh_fechado(pontos):
                 self.set_status("Contorno está aberto. Feche-o antes de extrair.")
                 return False
-
             self._idx_selecionado = idx
+            self._selecoes_manuais = {idx}
+            canvas._selecionados = {idx}
             self._contorno_extraido = None
             self._molde_criado = False
-            canvas._selecionados = {idx}
-            self.set_status("Contorno selecionado. RMB para extrair o traçado exato.")
+            self.set_status("Contorno selecionado. RMB para extrair traçado exato.")
             canvas.update()
             event.accept()
             return True
 
         if event.button() != Qt.RightButton:
             return False
+
+        if modo_manual:
+            if not self._selecoes_manuais:
+                self.set_status("Manual: selecione partes com LMB antes de extrair.")
+                return False
+            idx = next(iter(self._selecoes_manuais))
+            el = canvas.cena.elementos[idx]
+            self._idx_selecionado = idx
+            self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            self._molde_criado = False
+            self.set_status("Manual: extração pronta. LMB para criar molde(s).")
+            canvas.update()
+            event.accept()
+            return True
+
         if self._idx_selecionado is None:
             self.set_status("Selecione um contorno fechado antes de extrair.")
             return False
-
         el = canvas.cena.elementos[self._idx_selecionado]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        self._contorno_extraido = [QPointF(p) for p in pontos]
+        self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
         metadados = self._extrair_metadados(self._contorno_extraido)
         el["extracao_molde"] = metadados
         if self._cfg["quebrar_auxiliares"]:
@@ -108,26 +137,22 @@ class Ferramenta(FerramentaBase):
             self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in el["pontos"]]
         self._molde_criado = False
         canvas._registrar_historico()
-        self.set_status("Traçado extraído. Agora clique esquerdo para criar o molde.")
+        self.set_status("Traçado extraído. LMB para criar molde.")
         canvas.update()
         event.accept()
         return True
 
     def on_paint_overlay(self, canvas, painter: QPainter):
-        if self._idx_selecionado is None:
-            return
-        if self._idx_selecionado < 0 or self._idx_selecionado >= len(canvas.cena.elementos):
-            return
-        el = canvas.cena.elementos[self._idx_selecionado]
-        if el.get("tipo") != "polyline":
-            return
-
-        base = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        self._desenhar_contorno(canvas, painter, base, QColor("#ff2fff"), 2.0)
+        for idx in self._selecoes_manuais:
+            if 0 <= idx < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[idx]
+                if el.get("tipo") == "polyline":
+                    pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                    self._desenhar_contorno(canvas, painter, pts, QColor("#ff2fff"), 2.0)
         if self._contorno_extraido:
             self._desenhar_contorno(canvas, painter, self._contorno_extraido, QColor("#ff2a2a"), 2.0)
-        if self._molde_criado:
-            self._desenhar_controles_molde(canvas, painter, el)
+        if self._molde_criado and self._idx_selecionado is not None and 0 <= self._idx_selecionado < len(canvas.cena.elementos):
+            self._desenhar_controles_molde(canvas, painter, canvas.cena.elementos[self._idx_selecionado])
 
     def _desenhar_contorno(self, canvas, painter, pontos: list[QPointF], cor: QColor, esp: float):
         if len(pontos) < 2:
@@ -135,26 +160,47 @@ class Ferramenta(FerramentaBase):
         for a, b in zip(pontos, pontos[1:]):
             canvas._desenhar_segmento(painter, a, b, cor=cor.name(), espessura=esp)
 
-    def _criar_molde(self, canvas, idx: int) -> bool:
-        el = canvas.cena.elementos[idx]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-        if not self._eh_fechado(pontos):
+    def _criar_molde(self, canvas) -> bool:
+        if not self._selecoes_manuais:
             return False
-        principais = self._ordenar_principais_horario(pontos[:-1])
-        auxiliares = []
-        for i in range(len(principais)):
-            a = principais[i]
-            b = principais[(i + 1) % len(principais)]
-            aux = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
-            auxiliares.append({"x": aux.x(), "y": aux.y(), "oculto": True})
+        idxs = sorted(self._selecoes_manuais)
+        criou = False
+        for idx in idxs:
+            if idx < 0 or idx >= len(canvas.cena.elementos):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") != "polyline":
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if not self._eh_fechado(pontos):
+                pontos.append(QPointF(pontos[0]))
+                el["pontos"] = [(p.x(), p.y()) for p in pontos]
+            principais = self._ordenar_principais_horario(pontos[:-1])
+            auxiliares = []
+            for i in range(len(principais)):
+                a = principais[i]
+                b = principais[(i + 1) % len(principais)]
+                aux = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+                auxiliares.append({"x": aux.x(), "y": aux.y(), "oculto": True})
 
-        el["molde"] = True
-        el["controle_cantos"] = [(p.x(), p.y()) for p in principais]
-        el["pontos_controle_principais"] = [{"indice": i + 1, "x": p.x(), "y": p.y()} for i, p in enumerate(principais)]
-        el["pontos_auxiliares"] = auxiliares
-        self._molde_criado = True
-        canvas._registrar_historico()
-        return True
+            el["molde"] = True
+            el["nome_molde"] = self._proximo_nome_molde(canvas)
+            el["controle_cantos"] = [(p.x(), p.y()) for p in principais]
+            el["pontos_controle_principais"] = [{"indice": i + 1, "x": p.x(), "y": p.y()} for i, p in enumerate(principais)]
+            el["pontos_auxiliares"] = auxiliares
+            criou = True
+        self._molde_criado = criou
+        if criou:
+            canvas._registrar_historico()
+        return criou
+
+    def _proximo_nome_molde(self, canvas) -> str:
+        maior = 0
+        for el in canvas.cena.elementos:
+            nome = str(el.get("nome_molde", ""))
+            if nome.startswith("K") and nome[1:].isdigit():
+                maior = max(maior, int(nome[1:]))
+        return f"K{maior + 1}"
 
     def _desenhar_controles_molde(self, canvas, painter, el: dict):
         principais = [QPointF(float(p["x"]), float(p["y"])) for p in el.get("pontos_controle_principais", [])]
@@ -205,16 +251,6 @@ class Ferramenta(FerramentaBase):
                     border: 1px solid #b9c4cf;
                     border-radius: 4px;
                     min-height: 24px;
-                }
-                QCheckBox::indicator {
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid #4f5d6c;
-                    background: #ffffff;
-                }
-                QCheckBox::indicator:checked {
-                    border: 1px solid #145f9b;
-                    background: #cfe7fb;
                 }
                 """
             )
