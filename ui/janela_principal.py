@@ -118,7 +118,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.botao_arquivo.setFixedSize(88, 26)
         self.botao_arquivo.clicked.connect(self._alternar_backstage)
         self.botao_arquivo.setStyleSheet(
-            "background:#0b7fb8;color:white;font-weight:700;border:1px solid #0b6fa0;"
+            "background:#0b7fb8;color:white;font-weight:400;border:1px solid #0b6fa0;"
             "font-size:13px;border-radius:0;padding:0 8px;"
         )
         sup.addWidget(self.botao_arquivo, 0, Qt.AlignLeft)
@@ -136,7 +136,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addStretch(1)
 
         menu_btn_style = (
-            "QToolButton { color:#1b1b1b; font-weight:600; font-size:13px; padding:0 6px; border:none; background:transparent; }"
+            "QToolButton { color:#1b1b1b; font-weight:400; font-size:13px; padding:0 6px; border:none; background:transparent; }"
             "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
             "QToolButton:hover { color:#0b5f9e; }"
         )

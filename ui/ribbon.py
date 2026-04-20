@@ -81,8 +81,8 @@ class RibbonButton(QToolButton):
 
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(20, 20))
-            self.setFixedSize(176, 30)
+            self.setIconSize(QSize(16, 16))
+            self.setFixedSize(140, 24)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -90,9 +90,9 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: none;
                     color: #1e1e1e;
-                    font-size: 12px;
-                    font-weight: 600;
-                    padding: 0 6px;
+                    font-size: 11px;
+                    font-weight: 400;
+                    padding: 0 4px;
                     border-radius: 4px;
                 }
                 QToolButton:hover { background: #eef5ff; border: none; }
@@ -117,11 +117,11 @@ class RibbonButton(QToolButton):
 
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         if destaque:
-            self.setIconSize(QSize(34, 34))
-            self.setFixedSize(108, 72)
+            self.setIconSize(QSize(24, 24))
+            self.setFixedSize(76, 56)
         else:
-            self.setIconSize(QSize(26, 26))
-            self.setMinimumSize(78, 66)
+            self.setIconSize(QSize(20, 20))
+            self.setMinimumSize(64, 52)
         self.setStyleSheet(
             """
             QToolButton {
@@ -144,9 +144,9 @@ class RibbonButton(QToolButton):
                 QToolButton {
                     border: none;
                     border-radius: 4px;
-                    font-weight: 700;
-                    font-size: 12px;
-                    padding: 2px;
+                    font-weight: 400;
+                    font-size: 11px;
+                    padding: 1px;
                     background: #ffffff;
                 }
                 QToolButton:hover { background: #eef5ff; border: none; }
@@ -422,8 +422,8 @@ class RibbonGroup(QFrame):
         self.setFixedHeight(108)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(6, 4, 6, 2)
-        raiz.setSpacing(3)
+        raiz.setContentsMargins(4, 3, 4, 1)
+        raiz.setSpacing(2)
 
         destaque_tools = {
             "reta",
@@ -442,7 +442,7 @@ class RibbonGroup(QFrame):
 
             if principais:
                 bloco_principais = QHBoxLayout()
-                bloco_principais.setSpacing(4)
+                bloco_principais.setSpacing(2)
                 for tool in principais:
                     botao = RibbonButton(tool, destaque=True)
                     botao.acionada.connect(self.tool_selected.emit)
@@ -454,7 +454,7 @@ class RibbonGroup(QFrame):
 
             if secundarios:
                 grade_secundarios = QGridLayout()
-                grade_secundarios.setHorizontalSpacing(4)
+                grade_secundarios.setHorizontalSpacing(2)
                 grade_secundarios.setVerticalSpacing(1)
                 for index, tool in enumerate(secundarios):
                     botao = RibbonButton(tool, compacto=True)
@@ -466,7 +466,7 @@ class RibbonGroup(QFrame):
                 wrapper_secundarios = QWidget()
                 wrapper_secundarios.setLayout(grade_secundarios)
                 corpo.addWidget(wrapper_secundarios)
-            corpo.addSpacing(2)
+            corpo.addSpacing(0)
         else:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
