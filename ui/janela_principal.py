@@ -43,6 +43,10 @@ from ui.salvar_como_dialog import SalvarComoDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
+    ZOOM_INICIAL_CANVAS = 9.08574
+    ORIGEM_INICIAL_CANVAS_X = 460.0
+    ORIGEM_INICIAL_CANVAS_Y = 200.0
+
     def __init__(self):
         super().__init__()
         self.projeto_atual = Projeto()
@@ -102,6 +106,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 border-bottom: 2px solid #0b8dd1;
             }
             QTabBar::tab:hover { background: #ecf4fb; }
+            QTabBar::tab:selected:hover {
+                background: #ffffff;
+                color: #0b5f9e;
+                border-bottom: 2px solid #0b8dd1;
+            }
             """
         )
 
@@ -609,11 +618,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             event.accept()
             return
         caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
         caixa.setWindowTitle("Fechar programa")
         caixa.setIcon(QMessageBox.Question)
         caixa.setText("Existem alterações não salvas. Deseja salvar antes de sair?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
         caixa.setDefaultButton(QMessageBox.Yes)
+        self._traduzir_botoes_padrao_message_box(caixa)
         resposta = caixa.exec()
         if resposta == QMessageBox.Cancel:
             event.ignore()
@@ -669,7 +680,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
-            QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            if doc.get("elementos"):
+                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             area.setProperty("assinatura_salva", self._assinatura_canvas(area))
@@ -1066,6 +1080,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
+        QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
 
     def _limpar_abas_documentos(self):
         while self.abas_documentos.count():
@@ -1167,17 +1182,59 @@ class GuimmaStudioMainWindow(QMainWindow):
         if isinstance(area, AreaDocumentoWidget) and not self._tem_alteracoes_area(area):
             return True
         caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
         caixa.setWindowTitle("Fechando arquivo")
         caixa.setIcon(QMessageBox.Question)
         caixa.setText(f"O arquivo\n{nome_aba}\nfoi alterado. Deseja salvar as alterações?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
         caixa.setDefaultButton(QMessageBox.Yes)
+        self._traduzir_botoes_padrao_message_box(caixa)
         resposta = caixa.exec()
         if resposta == QMessageBox.Cancel:
             return False
         if resposta == QMessageBox.Yes:
             return self._salvar_projeto()
         return True
+
+    def _estilizar_message_box(self, caixa: QMessageBox):
+        caixa.setStyleSheet(
+            """
+            QMessageBox {
+                background: #f2f5f8;
+                color: #1f2d3a;
+            }
+            QMessageBox QLabel {
+                color: #1f2d3a;
+                font-size: 12px;
+            }
+            QMessageBox QPushButton {
+                min-width: 84px;
+                min-height: 28px;
+                background: #ffffff;
+                border: 1px solid #bcc9d6;
+                border-radius: 6px;
+                color: #1f2d3a;
+                padding: 3px 10px;
+                font-weight: 600;
+            }
+            QMessageBox QPushButton:hover {
+                background: #ebf4fc;
+                border-color: #86b3da;
+            }
+            """
+        )
+
+    def _traduzir_botoes_padrao_message_box(self, caixa: QMessageBox):
+        mapa = {
+            QMessageBox.Yes: "Sim",
+            QMessageBox.No: "Não",
+            QMessageBox.Cancel: "Cancelar",
+            QMessageBox.Ok: "OK",
+        }
+        for botao_padrao, texto in mapa.items():
+            botao = caixa.button(botao_padrao)
+            if botao:
+                botao.setText(texto)
 
     def _sincronizar_documentos_canvas_no_projeto(self):
         documentos_canvas: list[dict] = []
@@ -1222,7 +1279,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
-            QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
+            if doc.get("elementos"):
+                QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
 
     def _ativar_ferramenta_global(self, tool_id: str):
@@ -1323,11 +1383,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_coordenadas.blockSignals(False)
 
     def _on_painel_posicao_canvas(self, x: int, y: int):
-        self._painel_coordenadas_pos_global = (x, y)
-        for i in range(self.abas_documentos.count()):
-            area = self.abas_documentos.widget(i)
-            if isinstance(area, AreaDocumentoWidget):
-                area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+        # Painel de coordenadas fixo no lado direito de cada canvas.
+        self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = {
@@ -1439,9 +1496,17 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _centralizar_area_documento(self, area: AreaDocumentoWidget):
         elementos = area.canvas.cena.elementos
         if not elementos:
+            self._aplicar_viewport_inicial(area)
             return
         self._centralizar_canvas_em_elementos(area.canvas, elementos)
         area._on_zoom_changed(area.canvas.zoom)
+
+    def _aplicar_viewport_inicial(self, area: AreaDocumentoWidget):
+        area.canvas.set_zoom(self.ZOOM_INICIAL_CANVAS)
+        area.canvas.origem_cena.setX(self.ORIGEM_INICIAL_CANVAS_X)
+        area.canvas.origem_cena.setY(self.ORIGEM_INICIAL_CANVAS_Y)
+        area._on_zoom_changed(area.canvas.zoom)
+        area.canvas.update()
 
     def _salvar_thumbnail_projeto(self, destino: Path):
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
