@@ -383,7 +383,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         janela.setMinimumWidth(380)
         janela.setStyleSheet(
             "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
-            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; }"
+            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; color:#1f1f1f; }"
+            "QPushButton:disabled { color:#5f5f5f; background:#d8d8d8; border:1px solid #b3b3b3; }"
         )
         layout = QVBoxLayout(janela)
         texto_titulo, texto_instrucao = instrucoes[tool_id]

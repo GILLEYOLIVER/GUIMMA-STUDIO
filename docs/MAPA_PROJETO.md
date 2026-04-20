@@ -1,6 +1,8 @@
 # MAPA VISUAL DO PROJETO GUIMMA STUDIO
 
 > Documento de orientação para saber **qual botão chama qual arquivo** e onde fica cada parte do código.
+>
+> Para descrições funcionais de cada ferramenta, consulte `docs/MANUAL_DO_PROGRAMA.md`.
 
 ## 1) Fluxo visual principal (botão → código)
 
