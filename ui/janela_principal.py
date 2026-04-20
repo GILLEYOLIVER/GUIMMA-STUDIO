@@ -5,7 +5,7 @@ from importlib import import_module
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -54,6 +54,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janela_aux_curva: QDialog | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
+        self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
+        self._ultima_aba_nao_usuario = "construcao"
+        self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
+        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self._carregar_documentos_canvas()
@@ -97,6 +101,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = QVBoxLayout(topo)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.host_barra_usuario_topo = QWidget()
+        self.host_barra_usuario_topo_layout = QVBoxLayout(self.host_barra_usuario_topo)
+        self.host_barra_usuario_topo_layout.setContentsMargins(0, 0, 0, 0)
+        self.host_barra_usuario_topo_layout.setSpacing(0)
+        layout.addWidget(self.host_barra_usuario_topo)
 
         barra_menu = QWidget()
         sup = QHBoxLayout(barra_menu)
@@ -119,6 +128,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.tabbar.setUsesScrollButtons(True)
         self.ribbon.tabbar.setDrawBase(False)
         self.ribbon.tabbar.currentChanged.connect(lambda _: self.backstage.hide())
+        self.ribbon.tab_changed.connect(self._on_tab_ribbon_alterada)
+        self.ribbon.adicionar_usuario.connect(self._adicionar_ferramenta_usuario)
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         self.ribbon.estilo_changed.connect(self._atualizar_estilo_desenho)
         sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
@@ -188,6 +199,26 @@ class GuimmaStudioMainWindow(QMainWindow):
             acao.triggered.connect(lambda marcado=False, p=float(passo): self._definir_passo_snap_angular(p) if marcado else None)
             grupo_passo.addAction(acao)
             menu_snap_angular.addAction(acao)
+        menu_barra_usuarios = self.menu_visao.addMenu("Barra de usuários")
+        self.action_barra_usuarios_habilitada = QAction("Exibir barra de usuários", self)
+        self.action_barra_usuarios_habilitada.setCheckable(True)
+        self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+        self.action_barra_usuarios_habilitada.toggled.connect(self._alternar_barra_usuarios_habilitada)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_habilitada)
+        grupo_posicao_barra = QActionGroup(self)
+        grupo_posicao_barra.setExclusive(True)
+        self.action_barra_usuarios_topo = QAction("No topo (acima das abas)", self)
+        self.action_barra_usuarios_topo.setCheckable(True)
+        self.action_barra_usuarios_topo.setChecked(self._barra_usuarios_posicao == "topo")
+        self.action_barra_usuarios_topo.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("topo") if marcado else None)
+        grupo_posicao_barra.addAction(self.action_barra_usuarios_topo)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_topo)
+        self.action_barra_usuarios_area = QAction("Entre botões e régua", self)
+        self.action_barra_usuarios_area.setCheckable(True)
+        self.action_barra_usuarios_area.setChecked(self._barra_usuarios_posicao != "topo")
+        self.action_barra_usuarios_area.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("area") if marcado else None)
+        grupo_posicao_barra.addAction(self.action_barra_usuarios_area)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_area)
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
@@ -352,7 +383,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         janela.setMinimumWidth(380)
         janela.setStyleSheet(
             "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
-            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; }"
+            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; color:#1f1f1f; }"
+            "QPushButton:disabled { color:#5f5f5f; background:#d8d8d8; border:1px solid #b3b3b3; }"
         )
         layout = QVBoxLayout(janela)
         texto_titulo, texto_instrucao = instrucoes[tool_id]
@@ -629,6 +661,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = QVBoxLayout(area)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
+        self.host_barra_usuario_area = QWidget()
+        self.host_barra_usuario_area_layout = QVBoxLayout(self.host_barra_usuario_area)
+        self.host_barra_usuario_area_layout.setContentsMargins(0, 0, 0, 0)
+        self.host_barra_usuario_area_layout.setSpacing(0)
+        layout.addWidget(self.host_barra_usuario_area)
+        self._criar_linha_usuarios()
         self.abas_documentos = QTabWidget()
         self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
@@ -644,7 +682,185 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
+        self._reposicionar_barra_usuarios()
+        self._atualizar_linha_usuarios()
+        self._on_tab_ribbon_alterada(self.ribbon.current_tab_id() or "inicio")
         return area
+
+    def _criar_linha_usuarios(self):
+        if hasattr(self, "faixa_usuarios"):
+            return
+        faixa = QFrame()
+        faixa.setFixedHeight(52)
+        faixa.setStyleSheet("QFrame { background:#f5f9fe; border:1px solid #c9dbef; }")
+        lay = QHBoxLayout(faixa)
+        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setSpacing(6)
+
+        self.btn_usuario_add_all = QPushButton("Adicionar todas da aba")
+        self.btn_usuario_add_all.setCursor(Qt.PointingHandCursor)
+        self.btn_usuario_add_all.setFixedHeight(34)
+        self.btn_usuario_add_all.clicked.connect(self._adicionar_todas_ferramentas_da_aba)
+        self.btn_usuario_add_all.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #111111;
+                font-weight: 400;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
+            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
+            QPushButton:disabled { color: #555555; background: transparent; }
+            """
+        )
+
+        self.btn_usuario_limpar = QPushButton("Limpar linha")
+        self.btn_usuario_limpar.setCursor(Qt.PointingHandCursor)
+        self.btn_usuario_limpar.setFixedHeight(34)
+        self.btn_usuario_limpar.clicked.connect(self._limpar_ferramentas_usuario)
+        self.btn_usuario_limpar.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #111111;
+                font-weight: 400;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
+            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
+            QPushButton:disabled { color: #555555; background: transparent; }
+            """
+        )
+
+        self.linha_usuario = QWidget()
+        self.layout_linha_usuario = QHBoxLayout(self.linha_usuario)
+        self.layout_linha_usuario.setContentsMargins(4, 0, 4, 0)
+        self.layout_linha_usuario.setSpacing(3)
+        lay.addWidget(self.linha_usuario, 1)
+        lay.addWidget(self.btn_usuario_add_all, 0)
+        lay.addWidget(self.btn_usuario_limpar, 0)
+
+        self.faixa_usuarios = faixa
+
+    def _on_tab_ribbon_alterada(self, tab_id: str):
+        if tab_id != "usuarios":
+            self._ultima_aba_nao_usuario = tab_id
+        self._atualizar_visibilidade_barra_usuarios(tab_id)
+
+    def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
+        self._barra_usuarios_habilitada = habilitada
+        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
+        self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+
+    def _definir_posicao_barra_usuarios(self, posicao: str):
+        if posicao not in {"topo", "area"}:
+            return
+        self._barra_usuarios_posicao = posicao
+        self.projeto_atual.preferencias_usuario["barra_usuarios_posicao"] = posicao
+        self._reposicionar_barra_usuarios()
+        self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+
+    def _reposicionar_barra_usuarios(self):
+        if not hasattr(self, "faixa_usuarios"):
+            return
+        if self.faixa_usuarios.parentWidget() is not None:
+            self.faixa_usuarios.setParent(None)
+        if self._barra_usuarios_posicao == "topo":
+            self.host_barra_usuario_topo_layout.addWidget(self.faixa_usuarios)
+        else:
+            self.host_barra_usuario_area_layout.addWidget(self.faixa_usuarios)
+
+    def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
+        if hasattr(self, "faixa_usuarios"):
+            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada)
+
+    def _adicionar_ferramenta_usuario(self, tool_id: str):
+        if tool_id not in self._ferramentas_usuario_ids:
+            self._ferramentas_usuario_ids.append(tool_id)
+            self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+            self._atualizar_linha_usuarios()
+        tool = self.ribbon.tool_def(tool_id)
+        if tool:
+            self.lbl_status.setText(f"{tool.title} adicionada à linha Usuários.")
+
+    def _adicionar_todas_ferramentas_da_aba(self):
+        tab_id = self._ultima_aba_nao_usuario or "construcao"
+        adicionadas = 0
+        for tool_id in self.ribbon.tool_ids_by_tab(tab_id):
+            if tool_id not in self._ferramentas_usuario_ids and self.ribbon.tool_def(tool_id):
+                self._ferramentas_usuario_ids.append(tool_id)
+                adicionadas += 1
+        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+        self._atualizar_linha_usuarios()
+        self.lbl_status.setText(f"{adicionadas} ferramenta(s) adicionadas da aba '{tab_id}'.")
+
+    def _limpar_ferramentas_usuario(self):
+        self._ferramentas_usuario_ids.clear()
+        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = []
+        self._atualizar_linha_usuarios()
+        self.lbl_status.setText("Linha Usuários limpa.")
+
+    def _remover_ferramenta_usuario(self, tool_id: str):
+        if tool_id in self._ferramentas_usuario_ids:
+            self._ferramentas_usuario_ids.remove(tool_id)
+            self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+            self._atualizar_linha_usuarios()
+
+    def _atualizar_linha_usuarios(self):
+        if not hasattr(self, "layout_linha_usuario"):
+            return
+        while self.layout_linha_usuario.count():
+            item = self.layout_linha_usuario.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        if not self._ferramentas_usuario_ids:
+            vazio = QLabel("Sem ferramentas ainda. Clique com o botão direito em qualquer ferramenta e selecione 'Adicionar à linha Usuários'.")
+            vazio.setStyleSheet("color:#111111; font-size:11px; font-weight:400;")
+            self.layout_linha_usuario.addWidget(vazio)
+            self.layout_linha_usuario.addStretch(1)
+            return
+        for tool_id in self._ferramentas_usuario_ids:
+            tool = self.ribbon.tool_def(tool_id)
+            if not tool:
+                continue
+            btn = QToolButton()
+            btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            btn.setIcon(QIcon(str(ICONS_DIR / tool.icon)))
+            btn.setIconSize(QSize(28, 28))
+            btn.setFixedSize(30, 30)
+            btn.setToolTip(tool.title)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                """
+                QToolButton {
+                    border: none;
+                    background: transparent;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QToolButton:hover {
+                    border: none;
+                    background: rgba(20, 120, 200, 0.10);
+                }
+                QToolButton:pressed {
+                    border: none;
+                    background: rgba(20, 120, 200, 0.16);
+                }
+                """
+            )
+            btn.clicked.connect(lambda _=False, tid=tool_id: self._abrir_pagina_ferramenta(tid))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(
+                lambda _pos, tid=tool_id: self._remover_ferramenta_usuario(tid)
+            )
+            self.layout_linha_usuario.addWidget(btn)
+        self.layout_linha_usuario.addStretch(1)
 
     def _adicionar_aba_documento(self, nome: str | None = None, caminho_origem: str | None = None):
         if nome is None:
