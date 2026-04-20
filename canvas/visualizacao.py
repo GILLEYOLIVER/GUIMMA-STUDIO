@@ -6,7 +6,7 @@ from math import atan2, cos, degrees, radians, sin, sqrt
 from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
@@ -339,6 +339,17 @@ class VisualizacaoCanvas(QWidget):
         y = 16
         self.painel_coordenadas.move(x, y)
 
+    def calcular_posicao_painel_auxiliar(self, largura: int, altura: int, abaixo_coordenadas: bool = True) -> QPoint:
+        margem_direita = 12
+        margem_topo = 16
+        x = max(8, self.width() - int(largura) - margem_direita)
+        y = margem_topo
+        if abaixo_coordenadas and self.painel_coordenadas.isVisible():
+            y = self.painel_coordenadas.y() + self.painel_coordenadas.height() + 8
+        max_y = max(margem_topo, self.height() - int(altura) - 8)
+        y = max(margem_topo, min(y, max_y))
+        return QPoint(int(x), int(y))
+
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
         return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(),
                        (ponto.y() / self.zoom) + self.origem_cena.y())
@@ -590,6 +601,8 @@ class VisualizacaoCanvas(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
 
     def wheelEvent(self, event: QWheelEvent):
         cursor_tela = event.position()

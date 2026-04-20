@@ -609,11 +609,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             event.accept()
             return
         caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
         caixa.setWindowTitle("Fechar programa")
         caixa.setIcon(QMessageBox.Question)
         caixa.setText("Existem alterações não salvas. Deseja salvar antes de sair?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
         caixa.setDefaultButton(QMessageBox.Yes)
+        self._traduzir_botoes_padrao_message_box(caixa)
         resposta = caixa.exec()
         if resposta == QMessageBox.Cancel:
             event.ignore()
@@ -1167,17 +1169,59 @@ class GuimmaStudioMainWindow(QMainWindow):
         if isinstance(area, AreaDocumentoWidget) and not self._tem_alteracoes_area(area):
             return True
         caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
         caixa.setWindowTitle("Fechando arquivo")
         caixa.setIcon(QMessageBox.Question)
         caixa.setText(f"O arquivo\n{nome_aba}\nfoi alterado. Deseja salvar as alterações?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
         caixa.setDefaultButton(QMessageBox.Yes)
+        self._traduzir_botoes_padrao_message_box(caixa)
         resposta = caixa.exec()
         if resposta == QMessageBox.Cancel:
             return False
         if resposta == QMessageBox.Yes:
             return self._salvar_projeto()
         return True
+
+    def _estilizar_message_box(self, caixa: QMessageBox):
+        caixa.setStyleSheet(
+            """
+            QMessageBox {
+                background: #f2f5f8;
+                color: #1f2d3a;
+            }
+            QMessageBox QLabel {
+                color: #1f2d3a;
+                font-size: 12px;
+            }
+            QMessageBox QPushButton {
+                min-width: 84px;
+                min-height: 28px;
+                background: #ffffff;
+                border: 1px solid #bcc9d6;
+                border-radius: 6px;
+                color: #1f2d3a;
+                padding: 3px 10px;
+                font-weight: 600;
+            }
+            QMessageBox QPushButton:hover {
+                background: #ebf4fc;
+                border-color: #86b3da;
+            }
+            """
+        )
+
+    def _traduzir_botoes_padrao_message_box(self, caixa: QMessageBox):
+        mapa = {
+            QMessageBox.Yes: "Sim",
+            QMessageBox.No: "Não",
+            QMessageBox.Cancel: "Cancelar",
+            QMessageBox.Ok: "OK",
+        }
+        for botao_padrao, texto in mapa.items():
+            botao = caixa.button(botao_padrao)
+            if botao:
+                botao.setText(texto)
 
     def _sincronizar_documentos_canvas_no_projeto(self):
         documentos_canvas: list[dict] = []

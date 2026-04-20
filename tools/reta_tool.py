@@ -345,6 +345,11 @@ class RetaToolUI(QFrame):
         return QPoint(x, y)
 
     def reposicionar_no_canto_superior_direito(self):
+        parent = self.parentWidget()
+        if parent is not None and hasattr(parent, "calcular_posicao_painel_auxiliar"):
+            destino = parent.calcular_posicao_painel_auxiliar(self.width(), self.height(), abaixo_coordenadas=True)
+            self.move(self._ajustar_para_canvas(destino))
+            return
         self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
 
     def fechar(self):
@@ -387,6 +392,10 @@ class Ferramenta(FerramentaBase):
             self.ui_flutuante.raise_()
             self.ui_flutuante.reposicionar_no_canto_superior_direito()
             self.ui_flutuante.atualizar_status_operacao("Ferramenta pronta.")
+
+    def on_canvas_resize(self, canvas: VisualizacaoCanvas):
+        if self.ui_flutuante and self.ui_flutuante.isVisible():
+            self.ui_flutuante.reposicionar_no_canto_superior_direito()
 
     def desativar(self):
         if self.ui_flutuante:

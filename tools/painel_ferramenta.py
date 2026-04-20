@@ -84,6 +84,11 @@ class PainelFerramentaBasico(QFrame):
         return QPoint(x, y)
 
     def reposicionar_no_canto_superior_direito(self):
+        parent = self.parentWidget()
+        if parent is not None and hasattr(parent, "calcular_posicao_painel_auxiliar"):
+            destino = parent.calcular_posicao_painel_auxiliar(self.width(), self.height(), abaixo_coordenadas=True)
+            self.move(self._ajustar_para_canvas(destino))
+            return
         self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
 
     def mousePressEvent(self, event: QMouseEvent):

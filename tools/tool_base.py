@@ -41,6 +41,11 @@ class FerramentaBase:
     def on_paint_overlay(self, canvas, painter) -> None:  # pragma: no cover - hook opcional
         return None
 
+    def on_canvas_resize(self, canvas) -> None:  # pragma: no cover - hook opcional
+        painel = getattr(self, "_painel_auxiliar", None)
+        if painel and painel.isVisible():
+            painel.reposicionar_no_canto_superior_direito()
+
     def set_status(self, texto: str):
         painel = getattr(self, "_painel_auxiliar", None)
         if painel:
