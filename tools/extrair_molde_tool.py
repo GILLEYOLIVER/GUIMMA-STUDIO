@@ -89,6 +89,27 @@ class Ferramenta(FerramentaBase):
             self._dialog.setWindowTitle("Definir contorno")
             self._dialog.setWindowFlags(Qt.Tool)
             self._dialog.setModal(False)
+            self._dialog.setStyleSheet(
+                """
+                QDialog {
+                    background: #f1f4f8;
+                    color: #111111;
+                }
+                QLabel, QCheckBox, QPushButton, QComboBox {
+                    color: #111111;
+                }
+                QComboBox, QPushButton {
+                    background: #ffffff;
+                    border: 1px solid #b9c4cf;
+                    border-radius: 4px;
+                    min-height: 24px;
+                }
+                QCheckBox::indicator {
+                    width: 14px;
+                    height: 14px;
+                }
+                """
+            )
             lay = QVBoxLayout(self._dialog)
             form = QFormLayout()
             self.cmb_modo = QComboBox()

@@ -43,6 +43,10 @@ from ui.salvar_como_dialog import SalvarComoDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
+    ZOOM_INICIAL_CANVAS = 9.08574
+    ORIGEM_INICIAL_CANVAS_X = 460.0
+    ORIGEM_INICIAL_CANVAS_Y = 200.0
+
     def __init__(self):
         super().__init__()
         self.projeto_atual = Projeto()
@@ -88,6 +92,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow { background: #eef2f6; }
+            QWidget {
+                color: #111111;
+            }
+            QLabel, QCheckBox, QRadioButton, QPushButton, QToolButton, QLineEdit, QComboBox, QMenu {
+                color: #111111;
+            }
+            QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {
+                background: #ffffff;
+                color: #111111;
+            }
             QTabBar::tab {
                 background: #f6f7f9;
                 color: #101010;
@@ -156,6 +170,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
             "QToolButton:hover { color:#0b5f9e; }"
         )
+        menu_popup_style = (
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; padding:4px; }"
+            "QMenu::item { color:#111111; padding:6px 12px; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
 
         self.btn_visao = QToolButton()
         self.btn_visao.setText("VISÃO")
@@ -165,10 +184,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_visao.setStyleSheet(menu_btn_style)
         self.menu_visao = QMenu(self)
-        self.menu_visao.setStyleSheet(
-            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
-            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
-        )
+        self.menu_visao.setStyleSheet(menu_popup_style)
         self.action_regras = QAction("Réguas", self)
         self.action_regras.setCheckable(True)
         self.action_regras.setChecked(True)
@@ -244,6 +260,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_opcoes.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_opcoes.setStyleSheet(menu_btn_style)
         menu_opcoes = QMenu(self)
+        menu_opcoes.setStyleSheet(menu_popup_style)
         menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
         menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
         self.btn_opcoes.setMenu(menu_opcoes)
@@ -257,6 +274,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_janelas.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_janelas.setStyleSheet(menu_btn_style)
         menu_janelas = QMenu(self)
+        menu_janelas.setStyleSheet(menu_popup_style)
         menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
         menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
         self.btn_janelas.setMenu(menu_janelas)
@@ -526,6 +544,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         pos = self._posicoes_caixas_aux.get(chave)
         if pos:
             janela.move(*pos)
+            return
+        area = self._area_documento_atual()
+        if area:
+            canvas = area.canvas
+            gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
+            gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
+            x = gx + max(8, canvas.width() - janela.width() - 18)
+            y = gy + 16
+            janela.move(x, y)
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
@@ -676,7 +703,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
-            QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            if doc.get("elementos"):
+                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             area.setProperty("assinatura_salva", self._assinatura_canvas(area))
@@ -1073,6 +1103,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
+        QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
 
     def _limpar_abas_documentos(self):
         while self.abas_documentos.count():
@@ -1271,7 +1302,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
-            QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
+            if doc.get("elementos"):
+                QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
 
     def _ativar_ferramenta_global(self, tool_id: str):
@@ -1485,9 +1519,17 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _centralizar_area_documento(self, area: AreaDocumentoWidget):
         elementos = area.canvas.cena.elementos
         if not elementos:
+            self._aplicar_viewport_inicial(area)
             return
         self._centralizar_canvas_em_elementos(area.canvas, elementos)
         area._on_zoom_changed(area.canvas.zoom)
+
+    def _aplicar_viewport_inicial(self, area: AreaDocumentoWidget):
+        area.canvas.set_zoom(self.ZOOM_INICIAL_CANVAS)
+        area.canvas.origem_cena.setX(self.ORIGEM_INICIAL_CANVAS_X)
+        area.canvas.origem_cena.setY(self.ORIGEM_INICIAL_CANVAS_Y)
+        area._on_zoom_changed(area.canvas.zoom)
+        area.canvas.update()
 
     def _salvar_thumbnail_projeto(self, destino: Path):
         docs = self.projeto_atual.preferencias_usuario.get("documentos_canvas", [])
