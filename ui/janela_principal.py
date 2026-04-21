@@ -63,6 +63,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_snap_angular_atual = 45.0
         self._unidade_medida = str(self.projeto_atual.preferencias_usuario.get("unidade_medida", "cm"))
         self._passo_unidade_medida = float(self.projeto_atual.preferencias_usuario.get("passo_unidade_medida", 0.5))
+        self._unidade_area = str(self.projeto_atual.preferencias_usuario.get("unidade_area", "m"))
+        self._precisao_medida = str(self.projeto_atual.preferencias_usuario.get("precisao_medida", "0.01"))
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
         self._janela_aux_retangulo: QDialog | None = None
@@ -930,10 +932,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
-            if doc.get("elementos"):
-                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
-            else:
-                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
+            QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             area.setProperty("assinatura_salva", self._assinatura_canvas(area))
@@ -1535,10 +1534,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
-            if doc.get("elementos"):
-                QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
-            else:
-                QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
+            QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
 
     def _ativar_ferramenta_global(self, tool_id: str):
@@ -1598,6 +1594,11 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
         menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
+            "QMenu::item { color:#111111; padding:6px 16px; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
         opcoes = [
             ("Milímetros", "mm", 5.0),
             ("Centímetros", "cm", 0.5),
@@ -1624,10 +1625,11 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_dialogo_unidade_medida(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Unidades de medida")
+        dialog.setModal(True)
+        dialog.resize(420, 500)
+        self._aplicar_estilo_claro_dialogo(dialog)
         lay = QVBoxLayout(dialog)
-        grupo = QGroupBox("Linear")
-        glay = QVBoxLayout(grupo)
-        escolhas = [
+        escolhas_linear = [
             ("Milímetros", "mm", 5.0),
             ("Centímetros", "cm", 0.5),
             ("Metros", "m", 0.01),
@@ -1635,26 +1637,71 @@ class GuimmaStudioMainWindow(QMainWindow):
             ("Pés", "ft", 0.25),
             ("Jardas", "yd", 0.25),
         ]
-        botoes: list[QRadioButton] = []
-        for rotulo, sigla, _passo in escolhas:
+
+        topo = QHBoxLayout()
+        grupo_linear = QGroupBox("Linear")
+        glay_linear = QVBoxLayout(grupo_linear)
+        botoes_linear: list[QRadioButton] = []
+        for rotulo, sigla, _passo in escolhas_linear:
             rb = QRadioButton(rotulo)
             rb.setProperty("sigla", sigla)
             rb.setChecked(sigla == self._unidade_medida)
-            glay.addWidget(rb)
-            botoes.append(rb)
-        lay.addWidget(grupo)
-        botoes_dialogo = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        lay.addWidget(botoes_dialogo)
-        botoes_dialogo.accepted.connect(dialog.accept)
-        botoes_dialogo.rejected.connect(dialog.reject)
+            glay_linear.addWidget(rb)
+            botoes_linear.append(rb)
+        topo.addWidget(grupo_linear, 1)
+
+        grupo_area = QGroupBox("Quadrado")
+        glay_area = QVBoxLayout(grupo_area)
+        botoes_area: list[QRadioButton] = []
+        for rotulo, sigla, _passo in escolhas_linear:
+            rb = QRadioButton(rotulo)
+            rb.setProperty("sigla", sigla)
+            rb.setChecked(sigla == self._unidade_area)
+            glay_area.addWidget(rb)
+            botoes_area.append(rb)
+        topo.addWidget(grupo_area, 1)
+        lay.addLayout(topo)
+
+        grupo_prec = QGroupBox("Precisão")
+        grid_prec = QGridLayout(grupo_prec)
+        opcoes_prec = [("0.1", "0.1"), ("1/8", "1/8"), ("0.01", "0.01"), ("1/16", "1/16"), ("0.001", "0.001"), ("1/32", "1/32"), ("0.0001", "0.0001"), ("1/64", "1/64")]
+        botoes_prec: list[QRadioButton] = []
+        for i, (rotulo, valor) in enumerate(opcoes_prec):
+            rb = QRadioButton(rotulo)
+            rb.setProperty("valor", valor)
+            rb.setChecked(valor == self._precisao_medida)
+            grid_prec.addWidget(rb, i // 2, i % 2)
+            botoes_prec.append(rb)
+        lay.addWidget(grupo_prec)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("✓ OK")
+        btn_cancelar = QPushButton("✕ Cancelar")
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancelar.clicked.connect(dialog.reject)
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        lay.addLayout(rodape)
+
         if dialog.exec() != QDialog.Accepted:
             return
-        for rb in botoes:
+        for rb in botoes_linear:
             if rb.isChecked():
                 sigla = str(rb.property("sigla"))
-                passo_padrao = next((p for _, s, p in escolhas if s == sigla), 0.5)
+                passo_padrao = next((p for _, s, p in escolhas_linear if s == sigla), 0.5)
                 self._definir_unidade_medida(sigla, passo_padrao)
-                return
+                break
+        for rb in botoes_area:
+            if rb.isChecked():
+                self._unidade_area = str(rb.property("sigla"))
+                self.projeto_atual.preferencias_usuario["unidade_area"] = self._unidade_area
+                break
+        for rb in botoes_prec:
+            if rb.isChecked():
+                self._precisao_medida = str(rb.property("valor"))
+                self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
+                break
 
     def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:
         bruto = self.projeto_atual.preferencias_usuario.get("posicoes_caixas_aux", {})
@@ -1822,7 +1869,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.set_zoom(area.canvas.zoom * fator)
 
     def _texto_escala(self, zoom: float) -> str:
-        return f"Escala {zoom * 100:.3f}%"
+        base = max(self.ZOOM_INICIAL_CANVAS, 1e-9)
+        percentual = (zoom / base) * 100.0
+        return f"Escala {percentual:.3f}%"
 
     def _centralizar_area_documento(self, area: AreaDocumentoWidget):
         elementos = area.canvas.cena.elementos

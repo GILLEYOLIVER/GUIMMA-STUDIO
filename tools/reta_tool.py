@@ -587,7 +587,7 @@ class Ferramenta(FerramentaBase):
         else:
             comp = self._distancia(self._pontos_atuais[-2], self._pontos_atuais[-1])
             ang = self._angulo_entre(self._pontos_atuais[-2], self._pontos_atuais[-1])
-            msg = f"Segmento inserido: {canvas.formatar_distancia(comp)} | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
+            msg = f"Segmento inserido: {self.canvas.formatar_distancia(comp)} | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
         if self.canvas.lbl_status:
             self.canvas.lbl_status.setText(msg)
         if self.ui_flutuante:
@@ -615,7 +615,7 @@ class Ferramenta(FerramentaBase):
         )
         msg = (
             f"Desenho finalizado com {len(pontos_finalizacao) - 1} segmento(s) | "
-            f"Comprimento total {comprimento_total:.2f} cm. Clique direito novamente para sair."
+            f"Comprimento total {self.canvas.formatar_distancia(comprimento_total)}. Clique direito novamente para sair."
         )
         self._desenhando = False
         self._terminado = True
