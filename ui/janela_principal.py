@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from importlib import import_module
 from pathlib import Path
+from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QSize, Qt, QTimer
@@ -49,6 +50,7 @@ from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
+    ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
     ZOOM_INICIAL_CANVAS = 8.760
     ORIGEM_INICIAL_CANVAS_X = 110.0
     ORIGEM_INICIAL_CANVAS_Y = 0.0
@@ -86,15 +88,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._inicializar_perfis_usuarios()
+        self._opcoes_app = self._carregar_opcoes_app()
         self._timer_salvar_estado = QTimer(self)
         self._timer_salvar_estado.setSingleShot(True)
         self._timer_salvar_estado.timeout.connect(self._salvar_estado_projeto_silenciosamente)
+        self._timer_recovery = QTimer(self)
+        self._timer_recovery.timeout.connect(self._salvar_snapshot_recuperacao)
+        self._aplicar_intervalo_recovery()
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         self._limpar_abas_documentos()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
+        self._oferecer_recuperacao_pos_falha()
         self.showMaximized()
 
     def _carregar_preferencias_app(self) -> dict:
@@ -113,6 +120,24 @@ class GuimmaStudioMainWindow(QMainWindow):
             )
         except Exception:
             pass
+
+    def _carregar_opcoes_app(self) -> dict:
+        op = self.projeto_atual.preferencias_usuario.get("opcoes_app", {})
+        if not isinstance(op, dict):
+            op = {}
+        return {
+            "auto_recuperacao_min": max(1, int(op.get("auto_recuperacao_min", 1))),
+            "antialiasing": bool(op.get("antialiasing", True)),
+            "validar_ponto_cam": bool(op.get("validar_ponto_cam", True)),
+        }
+
+    def _salvar_opcoes_app(self):
+        self.projeto_atual.preferencias_usuario["opcoes_app"] = dict(self._opcoes_app)
+        self._salvar_preferencias_app()
+
+    def _aplicar_intervalo_recovery(self):
+        minutos = max(1, int(self._opcoes_app.get("auto_recuperacao_min", 1)))
+        self._timer_recovery.start(minutos * 60 * 1000)
 
     def _capturar_configuracoes_perfil(self) -> dict:
         return {
@@ -660,7 +685,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu::item { padding: 6px 18px; }"
             "QMenu::item:selected { background: #e6f2ff; }"
         )
-        menu.addAction("Opções", lambda: self.lbl_status.setText("Opções (em breve)"))
+        menu.addAction("Opções", self._abrir_dialogo_opcoes)
         menu.addAction("Unidade de medida\tCtrl+U", self._abrir_dialogo_unidade_medida)
         menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
         menu_regras = menu.addMenu("Regras de graduação")
@@ -682,6 +707,52 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Níveis de impressão", lambda: self.lbl_status.setText("Níveis de impressão (em breve)"))
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
+
+    def _abrir_dialogo_opcoes(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Opções")
+        dialog.setModal(True)
+        dialog.resize(560, 420)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+
+        gb_salvar = QGroupBox("Salvar")
+        grid_salvar = QGridLayout(gb_salvar)
+        chk_auto = QCheckBox("Auto recuperação (min.)")
+        edt_auto = QLineEdit(str(self._opcoes_app.get("auto_recuperacao_min", 1)))
+        edt_auto.setFixedWidth(80)
+        chk_auto.setChecked(True)
+        chk_validar = QCheckBox("Validar se o ponto de cam está definido")
+        chk_validar.setChecked(bool(self._opcoes_app.get("validar_ponto_cam", True)))
+        grid_salvar.addWidget(chk_auto, 0, 0)
+        grid_salvar.addWidget(edt_auto, 0, 1)
+        grid_salvar.addWidget(chk_validar, 1, 0, 1, 2)
+        lay.addWidget(gb_salvar)
+
+        gb_perf = QGroupBox("Performance")
+        grid_perf = QGridLayout(gb_perf)
+        chk_aa = QCheckBox("Usar Antialiasing")
+        chk_aa.setChecked(bool(self._opcoes_app.get("antialiasing", True)))
+        grid_perf.addWidget(chk_aa, 0, 0)
+        lay.addWidget(gb_perf)
+
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        lay.addWidget(botoes)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            mins = int(float(edt_auto.text().strip().replace(",", ".")))
+        except Exception:
+            mins = 1
+        self._opcoes_app["auto_recuperacao_min"] = max(1, mins)
+        self._opcoes_app["antialiasing"] = chk_aa.isChecked()
+        self._opcoes_app["validar_ponto_cam"] = chk_validar.isChecked()
+        self._salvar_opcoes_app()
+        self._aplicar_intervalo_recovery()
+        self.lbl_status.setText("Opções atualizadas.")
 
     def _abrir_dialogo_cores(self):
         area = self._area_documento_atual()
@@ -942,6 +1013,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not self._ha_alteracoes_nao_salvas():
             self._salvar_estado_projeto_silenciosamente()
             self._salvar_preferencias_app()
+            self._limpar_arquivo_recuperacao()
             event.accept()
             return
         caixa = QMessageBox(self)
@@ -960,6 +1032,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             event.ignore()
             return
         self._salvar_preferencias_app()
+        self._limpar_arquivo_recuperacao()
         event.accept()
 
     def _ha_alteracoes_nao_salvas(self) -> bool:
@@ -979,6 +1052,69 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _novo_projeto(self):
         self._adicionar_aba_documento()
         self.backstage.hide()
+
+    def _salvar_snapshot_recuperacao(self):
+        documentos: list[dict] = []
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            payload = self._capturar_estado_documento_canvas(area)
+            payload["nome"] = self.abas_documentos.tabText(i) or "(Sem nome)"
+            documentos.append(payload)
+        if not documentos:
+            return
+        snapshot = {
+            "ts": int(time()),
+            "arquivo_atual": str(self._arquivo_atual) if self._arquivo_atual else None,
+            "documentos": documentos,
+        }
+        try:
+            self.ARQUIVO_RECUPERACAO.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _limpar_arquivo_recuperacao(self):
+        try:
+            if self.ARQUIVO_RECUPERACAO.exists():
+                self.ARQUIVO_RECUPERACAO.unlink()
+        except Exception:
+            pass
+
+    def _oferecer_recuperacao_pos_falha(self):
+        if not self.ARQUIVO_RECUPERACAO.exists():
+            return
+        try:
+            bruto = json.loads(self.ARQUIVO_RECUPERACAO.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        docs = bruto.get("documentos", [])
+        if not isinstance(docs, list) or not docs:
+            return
+        caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
+        caixa.setWindowTitle("Atenção")
+        caixa.setIcon(QMessageBox.Question)
+        caixa.setText("Deseja recuperar arquivo(s) perdido(s)?")
+        caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        self._traduzir_botoes_padrao_message_box(caixa)
+        if caixa.exec() != QMessageBox.Yes:
+            self._limpar_arquivo_recuperacao()
+            return
+        self._limpar_abas_documentos()
+        for doc in docs:
+            nome = str(doc.get("nome") or "(Recuperado)")
+            self._adicionar_aba_documento(nome=nome)
+            area = self._area_documento_atual()
+            if not area:
+                continue
+            area.canvas.cena.elementos = [dict(el) for el in doc.get("elementos", [])]
+            if "painel_coordenadas_visivel" in doc:
+                area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            self._restaurar_viewport_documento_canvas(area, doc)
+            self._marcar_area_como_salva(area)
+            area.canvas.update()
+        self.lbl_status.setText("Recuperação concluída.")
 
     def _abrir_projeto(self):
         caminho, _ = QFileDialog.getOpenFileName(
@@ -1950,6 +2086,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
