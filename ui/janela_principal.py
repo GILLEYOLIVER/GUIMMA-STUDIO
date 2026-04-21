@@ -92,7 +92,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
-        self._adicionar_aba_documento(nome="novo_projeto")
+        self._limpar_abas_documentos()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
@@ -1950,6 +1950,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
