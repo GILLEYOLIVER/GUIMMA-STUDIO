@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QSlider,
 )
 
 from canvas.cena import CenaDocumento
@@ -40,6 +43,7 @@ from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
+from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -299,6 +303,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
+        self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
         self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
@@ -576,6 +581,186 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
+
+    def _abrir_menu_configuracoes(self):
+        botao = self.backstage.botoes.get("Configurações ▸")
+        if botao is None:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #c8d0d8; }"
+            "QMenu::item { padding: 6px 18px; }"
+            "QMenu::item:selected { background: #e6f2ff; }"
+        )
+        menu.addAction("Opções", lambda: self.lbl_status.setText("Opções (em breve)"))
+        menu.addAction("Unidade de medida\tCtrl+U", lambda: self.lbl_status.setText("Unidade de medida (em breve)"))
+        menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
+        menu_regras = menu.addMenu("Regras de graduação")
+        menu_regras.addAction("Regras de Graduação - Nomes...", lambda: self.lbl_status.setText("Regras de Graduação - Nomes (em breve)"))
+        menu_regras.addAction("Regras de Graduação - Valores...", lambda: self.lbl_status.setText("Regras de Graduação - Valores (em breve)"))
+        menu.addAction("Cores", self._abrir_dialogo_cores)
+        menu.addAction("Grade", lambda: self.lbl_status.setText("Grade (em breve)"))
+        menu_snap = menu.addMenu("Snap")
+        menu_snap_classico = menu_snap.addMenu("Clássico")
+        menu_snap_classico.addAction("Configurações", lambda: self.lbl_status.setText("Snap clássico (em breve)"))
+        acao_snap_auto = menu_snap.addAction("Automático")
+        acao_snap_auto.setCheckable(True)
+        acao_snap_auto.setChecked(True)
+        menu_snap.addSeparator()
+        menu_snap.addAction("Configurações\tF4", lambda: self.lbl_status.setText("Configurações de snap (em breve)"))
+        menu.addAction("Paleta de usuário", lambda: self.lbl_status.setText("Paleta de usuário (em breve)"))
+        menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
+        menu.addAction("Teclas de atalho", lambda: self.lbl_status.setText("Teclas de atalho (em breve)"))
+        menu.addAction("Níveis de impressão", lambda: self.lbl_status.setText("Níveis de impressão (em breve)"))
+        pos = botao.mapToGlobal(botao.rect().bottomRight())
+        menu.exec(pos)
+
+    def _abrir_dialogo_cores(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cores")
+        dialog.setModal(False)
+        dialog.resize(520, 760)
+        dialog.setMinimumSize(500, 720)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        def botao_cor(hex_cor: str):
+            btn = QPushButton("")
+            btn.setFixedSize(22, 22)
+            btn.setStyleSheet(f"background:{hex_cor}; border:1px solid #8a8a8a;")
+            return btn
+
+        topo = QHBoxLayout()
+        gb_cores = QGroupBox("Cores")
+        gb_cores_lay = QGridLayout(gb_cores)
+        gb_cores_lay.addWidget(botao_cor("#ea00ff"), 0, 0)
+        gb_cores_lay.addWidget(QLabel("Desenho"), 0, 1)
+        gb_cores_lay.addWidget(botao_cor("#000000"), 0, 2)
+        gb_cores_lay.addWidget(QLabel("Fundo"), 0, 3)
+        gb_cores_lay.addWidget(botao_cor("#ff0000"), 1, 0)
+        gb_cores_lay.addWidget(QLabel("Seleção"), 1, 1)
+        gb_cores_lay.addWidget(botao_cor("#bfbfbf"), 1, 2)
+        gb_cores_lay.addWidget(QLabel("Grade"), 1, 3)
+        topo.addWidget(gb_cores, 1)
+
+        gb_snap = QGroupBox("Cores do snap")
+        gb_snap_lay = QVBoxLayout(gb_snap)
+        chk_auto_snap = QCheckBox("Usar cores automáticas")
+        chk_auto_snap.setChecked(True)
+        gb_snap_lay.addWidget(chk_auto_snap)
+        linha_snap_1 = QHBoxLayout()
+        linha_snap_1.addWidget(botao_cor("#6f6f6f"))
+        linha_snap_1.addWidget(QLabel("Desenho do Snap"))
+        linha_snap_1.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_1)
+        linha_snap_2 = QHBoxLayout()
+        linha_snap_2.addWidget(botao_cor("#d71313"))
+        linha_snap_2.addWidget(QLabel("Referência do Snap"))
+        linha_snap_2.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_2)
+        topo.addWidget(gb_snap, 1)
+        layout.addLayout(topo)
+
+        gb_moldes = QGroupBox("Cores dos moldes")
+        moldes = QGridLayout(gb_moldes)
+        moldes.setHorizontalSpacing(12)
+        moldes.setVerticalSpacing(6)
+        col_esq = ["Piques", "Piques internos", "Fio", "Linhas auxiliares", "Costura", "Molde dobrado", "Nome molde", "Descrição"]
+        col_dir = ["Números", "Observações", "Linha simetria", "Margem", "Tamanhos menores", "Tamanho base", "Tamanho maiores"]
+        for i, txt in enumerate(col_esq):
+            moldes.addWidget(QCheckBox(""), i, 0)
+            moldes.addWidget(botao_cor("#efefef"), i, 1)
+            moldes.addWidget(QLabel(txt), i, 2)
+        for i, txt in enumerate(col_dir):
+            moldes.addWidget(QCheckBox(""), i, 3)
+            moldes.addWidget(botao_cor("#efefef"), i, 4)
+            moldes.addWidget(QLabel(txt), i, 5)
+
+        base_row = max(len(col_esq), len(col_dir)) + 1
+        for idx, texto in enumerate(["Ponto de controle", "Ponto de pique", "Ponto não graduado"]):
+            moldes.addWidget(QCheckBox(""), base_row + idx, 0)
+            moldes.addWidget(botao_cor("#efefef"), base_row + idx, 1)
+            moldes.addWidget(QLabel(texto), base_row + idx, 2)
+            cmb = QComboBox()
+            cmb.addItems(["Círculo preenchido", "Quadrado preenchido", "Losango"])
+            cmb.setCurrentIndex(min(idx, 2))
+            moldes.addWidget(cmb, base_row + idx, 3, 1, 3)
+        layout.addWidget(gb_moldes)
+
+        chk_conforme = QCheckBox("Mostrar conforme definição das ferramentas")
+        chk_conforme.setEnabled(False)
+        layout.addWidget(chk_conforme)
+
+        linha_tecidos = QHBoxLayout()
+        chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
+        chk_cor_tecidos.setChecked(bool(getattr(canvas, "_mostrar_cor_tecidos", False)))
+        linha_tecidos.addWidget(chk_cor_tecidos)
+        btn_config = QPushButton("Configurar cor dos tecidos")
+        linha_tecidos.addWidget(btn_config)
+        linha_tecidos.addStretch(1)
+        layout.addLayout(linha_tecidos)
+
+        layout.addWidget(QCheckBox("Mostrar cor dos tecidos no menu de moldes"))
+
+        linha_opacidade = QHBoxLayout()
+        linha_opacidade.addWidget(QLabel("Opacidade das imagens"))
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        linha_opacidade.addWidget(slider, 1)
+        linha_opacidade.addWidget(QLabel("100 / 100"))
+        layout.addLayout(linha_opacidade)
+
+        linha_estilo = QHBoxLayout()
+        linha_estilo.addWidget(QLabel("Estilo linha costura"))
+        cmb_estilo = QComboBox()
+        cmb_estilo.addItems(["- - - - - -", "_______", "· · · · ·"])
+        linha_estilo.addWidget(cmb_estilo)
+        layout.addLayout(linha_estilo)
+
+        gb_esquema = QGroupBox("Esquema de cores")
+        esquema_lay = QHBoxLayout(gb_esquema)
+        cmb_esquema = QComboBox()
+        esquema_lay.addWidget(cmb_esquema, 1)
+        btn_salvar_esquema = QPushButton("Salvar esquema de cores")
+        btn_salvar_esquema.setEnabled(False)
+        esquema_lay.addWidget(btn_salvar_esquema, 1)
+        layout.addWidget(gb_esquema)
+        layout.addStretch(1)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("✓ OK")
+        btn_cancelar = QPushButton("✕ Cancelar")
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        layout.addLayout(rodape)
+
+        def abrir_config():
+            tecidos = sorted({
+                str(el.get("tecido") or "").strip()
+                for el in canvas.cena.elementos
+                if el.get("molde") and str(el.get("tecido") or "").strip()
+            })
+            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(getattr(canvas, "_cores_tecidos", {})), dialog)
+            if dialog_tecidos.exec() == QDialog.Accepted:
+                canvas._cores_tecidos = dialog_tecidos.cores_tecidos()
+                canvas.update()
+
+        def aplicar_e_fechar():
+            canvas._mostrar_cor_tecidos = chk_cor_tecidos.isChecked()
+            canvas.update()
+            dialog.accept()
+
+        btn_config.clicked.connect(abrir_config)
+        btn_ok.clicked.connect(aplicar_e_fechar)
+        btn_cancelar.clicked.connect(dialog.reject)
+        dialog.exec()
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
@@ -1141,6 +1326,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_coordenadas.blockSignals(True)
             self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
             self.action_coordenadas.blockSignals(False)
+            QTimer.singleShot(0, area.canvas.sincronizar_paineis_auxiliares)
         else:
             self.lbl_escala.setText("Escala --")
 
