@@ -92,6 +92,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
+        self._limpar_abas_documentos()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
