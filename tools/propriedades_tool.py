@@ -48,11 +48,18 @@ class PreviewMoldeWidget(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._molde: dict | None = None
+        self._cores_tecidos: dict[str, str] = {}
+        self._mostrar_cor_tecidos = False
         self.setMinimumHeight(270)
         self._zoom = 1.0
 
     def set_molde(self, molde: dict | None):
         self._molde = molde
+        self.update()
+
+    def set_config_cores_tecidos(self, cores: dict[str, str], mostrar: bool):
+        self._cores_tecidos = dict(cores)
+        self._mostrar_cor_tecidos = bool(mostrar)
         self.update()
 
     def paintEvent(self, event):  # noqa: N802
@@ -96,7 +103,13 @@ class PreviewMoldeWidget(QWidget):
                 offset_y + ((pt.y() - min_y) * escala),
             )
 
-        pen = QPen(QColor("#ffffff"), 1.0)
+        cor_desenho = QColor("#ffffff")
+        if self._mostrar_cor_tecidos:
+            tecido = str(self._molde.get("tecido") or "").strip()
+            cor_tecido = self._cores_tecidos.get(tecido)
+            if cor_tecido:
+                cor_desenho = QColor(cor_tecido)
+        pen = QPen(cor_desenho, 1.0)
         pen.setJoinStyle(Qt.RoundJoin)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
@@ -110,7 +123,7 @@ class PreviewMoldeWidget(QWidget):
         if bool(self._molde.get("visual_preencher", False)):
             painter.save()
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(str(self._molde.get("cor") or "#58dfe3")))
+            painter.setBrush(cor_desenho)
             painter.drawPath(path)
             painter.restore()
             painter.setPen(pen)
@@ -383,6 +396,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         raiz.addWidget(painel_esq, 0)
         raiz.addWidget(painel_dir, 1)
+        self._atualizar_opcoes_tecido()
         self._ajustar_larguras_campos()
 
     def _ajustar_larguras_campos(self):
@@ -395,6 +409,7 @@ class PropriedadesMoldesDialog(QDialog):
             self.cmb_espelhar,
             self.cmb_giro,
             self.cmb_tipo_corte_cam,
+            self.ed_tecido,
         ]
         for combo in combos:
             combo.setMinimumContentsLength(18)
@@ -418,7 +433,9 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_descricao.setFixedHeight(56)
         self.cmb_tipo_corte = QComboBox()
         self.cmb_tipo_corte.addItems(["Completo", "Par", "Espelhado", "Único"])
-        self.ed_tecido = QLineEdit()
+        self.ed_tecido = QComboBox()
+        self.ed_tecido.setEditable(True)
+        self.ed_tecido.setInsertPolicy(QComboBox.NoInsert)
         self.cmb_espelhar = QComboBox()
         self.cmb_espelhar.addItems(["Horizontal", "Vertical", "Nenhum"])
         self.sp_qtd_modelo = QSpinBox()
@@ -696,6 +713,28 @@ class PropriedadesMoldesDialog(QDialog):
         ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
         molde["graduacao_tamanhos_ativos"] = ativos
 
+    def _atualizar_opcoes_tecido(self):
+        tecidos = {
+            str(el.get("tecido") or "").strip()
+            for el in self.canvas.cena.elementos
+            if el.get("molde")
+        }
+        tecidos.update({
+            str(chave).strip()
+            for chave in getattr(self.canvas, "_cores_tecidos", {}).keys()
+            if str(chave).strip()
+        })
+        tecidos.discard("")
+        atual = self.ed_tecido.currentText().strip()
+        self.ed_tecido.blockSignals(True)
+        self.ed_tecido.clear()
+        self.ed_tecido.addItems(sorted(tecidos))
+        if atual:
+            self.ed_tecido.setCurrentText(atual)
+        elif self.ed_tecido.count() == 0:
+            self.ed_tecido.setCurrentText("1")
+        self.ed_tecido.blockSignals(False)
+
     def _criar_tab_visualizacao(self) -> QWidget:
         aba = QWidget()
         layout = QVBoxLayout(aba)
@@ -960,18 +999,23 @@ class PropriedadesMoldesDialog(QDialog):
         return None
 
     def _preencher_campos(self, molde: dict | None):
+        self.preview.set_config_cores_tecidos(
+            getattr(self.canvas, "_cores_tecidos", {}),
+            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+        )
         self.preview.set_molde(molde)
         if molde is None:
             self.ed_nome.clear()
             self.ed_descricao.clear()
-            self.ed_tecido.clear()
+            self.ed_tecido.setCurrentText("1")
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
             return
 
         self.ed_nome.setText(str(molde.get("nome_molde") or ""))
         self.ed_descricao.setPlainText(str(molde.get("descricao") or ""))
-        self.ed_tecido.setText(str(molde.get("tecido") or "1"))
+        self._atualizar_opcoes_tecido()
+        self.ed_tecido.setCurrentText(str(molde.get("tecido") or "1"))
         self.sp_qtd_modelo.setValue(int(molde.get("qtd_modelo", 1) or 1))
         self.chk_par.setChecked(bool(molde.get("par", False)))
         self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
@@ -1009,7 +1053,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         molde["nome_molde"] = self.ed_nome.text().strip() or molde.get("nome_molde") or "N22"
         molde["descricao"] = self.ed_descricao.toPlainText().strip()
-        molde["tecido"] = self.ed_tecido.text().strip()
+        molde["tecido"] = self.ed_tecido.currentText().strip()
         molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
         molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
         molde["par"] = self.chk_par.isChecked()
@@ -1085,7 +1129,10 @@ class PropriedadesMoldesDialog(QDialog):
     def _alternar_cor_tecidos_canvas(self, ativo: bool):
         self.canvas._mostrar_cor_tecidos = bool(ativo)
         self.canvas.update()
-        self.preview.update()
+        self.preview.set_config_cores_tecidos(
+            getattr(self.canvas, "_cores_tecidos", {}),
+            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+        )
 
     def _abrir_config_cor_tecidos(self):
         tecidos = sorted({
@@ -1098,8 +1145,12 @@ class PropriedadesMoldesDialog(QDialog):
         if dialog.exec() != QDialog.Accepted:
             return
         self.canvas._cores_tecidos = dialog.cores_tecidos()
+        self._atualizar_opcoes_tecido()
         self.canvas.update()
-        self.preview.update()
+        self.preview.set_config_cores_tecidos(
+            getattr(self.canvas, "_cores_tecidos", {}),
+            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+        )
 
 
 class ConfigurarCoresTecidosDialog(QDialog):

@@ -546,18 +546,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.set_modo_curva(modo)
 
     def _restaurar_posicao_caixa_aux(self, janela: QDialog, chave: str):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
+        gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
+        min_x = gx + 8
+        min_y = gy + 8
+        max_x = gx + max(8, canvas.width() - janela.width() - 8)
+        max_y = gy + max(8, canvas.height() - janela.height() - 8)
+
         pos = self._posicoes_caixas_aux.get(chave)
         if pos:
-            janela.move(*pos)
-            return
-        area = self._area_documento_atual()
-        if area:
-            canvas = area.canvas
-            gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
-            gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
-            x = gx + max(8, canvas.width() - janela.width() - 18)
-            y = gy + 16
+            x = max(min_x, min(pos[0], max_x))
+            y = max(min_y, min(pos[1], max_y))
             janela.move(x, y)
+            return
+
+        x = gx + max(8, canvas.width() - janela.width() - 18)
+        y = gy + 16
+        janela.move(max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
