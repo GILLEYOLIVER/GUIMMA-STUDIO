@@ -820,6 +820,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"]),
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
+            if selecionado and not is_molde:
+                self._desenhar_bbox_selecao_elemento(painter, elemento)
 
         self._desenhar_overlays_moldes(painter)
 
@@ -894,7 +896,7 @@ class VisualizacaoCanvas(QWidget):
         if not xs or not ys:
             return
 
-        ret_pen = QPen(QColor("#ff3b30"), 1.0, Qt.DashLine)
+        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
         ret_pen.setDashPattern([3.5, 2.5])
         painter.setPen(ret_pen)
         painter.setBrush(Qt.NoBrush)
@@ -917,6 +919,23 @@ class VisualizacaoCanvas(QWidget):
                 QPoint(int(pt.x() - d), int(pt.y())),
             ])
             painter.drawPolygon(diamond)
+
+    def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
+        pontos: list[QPointF] = []
+        if elemento.get("tipo") == "polyline":
+            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
+        if not pontos:
+            return
+        tela = [self._cena_para_tela(p) for p in pontos]
+        xs = [p.x() for p in tela]
+        ys = [p.y() for p in tela]
+        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1_tela = self._cena_para_tela(inicio)

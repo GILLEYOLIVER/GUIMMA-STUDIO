@@ -77,6 +77,7 @@ class Ferramenta(FerramentaBase):
             amplitude=canvas._linha_amplitude,
         )
         self._desenhar_cota_preview(canvas, painter, p1, p2)
+        self._desenhar_cota_preview(canvas, painter, p2, p3)
 
     def _desenhar_cota_preview(self, canvas, painter, inicio: QPointF, fim: QPointF):
         p1 = canvas._cena_para_tela(inicio)
@@ -86,7 +87,9 @@ class Ferramenta(FerramentaBase):
         comprimento = sqrt((dx * dx) + (dy * dy))
         if comprimento <= 1e-6:
             return
-        texto = f"{comprimento:.2f} cm  |  0.0°"
+        horizontal = abs(dx) >= abs(dy)
+        angulo_txt = "0.0°" if horizontal else "90.0°"
+        texto = f"{comprimento:.2f} cm  |  {angulo_txt}"
         cx = (p1.x() + p2.x()) / 2.0
         cy = (p1.y() + p2.y()) / 2.0
 
@@ -101,16 +104,15 @@ class Ferramenta(FerramentaBase):
         tw = fm.horizontalAdvance(texto) + 12
         th = fm.height() + 4
         rx = int(cx - (tw / 2))
-        ry = int(cy - th - 4)
+        ry = int(cy - th - 4) if horizontal else int(cy - (th / 2))
+        if not horizontal:
+            rx = int(cx + 8)
         painter.fillRect(rx, ry, tw, th, QColor(20, 20, 20, 210))
         painter.setPen(QPen(QColor("#ffd35a"), 1))
         painter.drawText(rx + 6, ry + th - 4, texto)
 
     def _pontos_auxiliares_segmento(self, inicio: QPointF, fim: QPointF) -> list[QPointF]:
-        return [
-            QPointF(inicio.x() + ((fim.x() - inicio.x()) * t), inicio.y() + ((fim.y() - inicio.y()) * t))
-            for t in (0.33, 0.66)
-        ]
+        return [QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)]
 
     def _finalizar(self, canvas):
         if not self._inicio or not self._preview:
