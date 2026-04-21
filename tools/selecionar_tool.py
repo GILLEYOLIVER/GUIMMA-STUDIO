@@ -168,21 +168,27 @@ class Ferramenta(FerramentaBase):
             if idx is None or idx < 0 or idx >= len(canvas.cena.elementos):
                 continue
             el = canvas.cena.elementos[idx]
+            pontos: list[QPointF] = []
             if el.get("tipo") == "polyline":
                 pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-                if len(pontos) < 2:
-                    continue
-                cor = "#ff7b39" if idx in canvas._selecionados else "#f6c26f"
-                for a, b in zip(pontos, pontos[1:]):
-                    canvas._desenhar_segmento(painter, a, b, cor=cor, espessura=2.0, tracejado=True)
             elif el.get("tipo") == "bezier_quadratica":
-                p0 = QPointF(*el["p0"])
-                p1 = QPointF(*el["p1"])
-                p2 = QPointF(*el["p2"])
-                amostra = canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
-                cor = "#ff7b39" if idx in canvas._selecionados else "#f6c26f"
-                for a, b in zip(amostra, amostra[1:]):
-                    canvas._desenhar_segmento(painter, a, b, cor=cor, espessura=2.0, tracejado=True)
+                pontos = [QPointF(*el["p0"]), QPointF(*el["p1"]), QPointF(*el["p2"])]
+            if not pontos:
+                continue
+            margem = 5.0
+            min_x = min(p.x() for p in pontos) - margem
+            max_x = max(p.x() for p in pontos) + margem
+            min_y = min(p.y() for p in pontos) - margem
+            max_y = max(p.y() for p in pontos) + margem
+            p1 = canvas._cena_para_tela(QPointF(min_x, min_y))
+            p2 = canvas._cena_para_tela(QPointF(max_x, max_y))
+            x = min(p1.x(), p2.x())
+            y = min(p1.y(), p2.y())
+            w = abs(p2.x() - p1.x())
+            h = abs(p2.y() - p1.y())
+            painter.setPen(QPen(QColor("#33c1ff"), 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(int(x), int(y), int(w), int(h))
 
     def _mover_selecionados(self, canvas, dx: float, dy: float):
         for idx in list(canvas._selecionados):
@@ -193,6 +199,8 @@ class Ferramenta(FerramentaBase):
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
                 if "controle_cantos" in el:
                     el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                if "controle_auxiliares" in el:
+                    el["controle_auxiliares"] = [(x + dx, y + dy) for x, y in el.get("controle_auxiliares", [])]
                 if "fio_origem" in el:
                     fx, fy = el.get("fio_origem", (0.0, 0.0))
                     el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
