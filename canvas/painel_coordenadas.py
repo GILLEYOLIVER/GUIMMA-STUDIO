@@ -16,6 +16,8 @@ class PainelCoordenadas(QFrame):
         super().__init__(parent)
         self.setObjectName("PainelCoordenadas")
         self.setFixedSize(300, 120)
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -25,9 +27,9 @@ class PainelCoordenadas(QFrame):
         topo.setContentsMargins(0, 0, 0, 0)
         topo.setSpacing(4)
 
-        titulo = QLabel("(cm) Coordenadas")
-        titulo.setStyleSheet("font-size: 10px; color: #7c7c7c;")
-        topo.addWidget(titulo, 1)
+        self.titulo = QLabel("(cm) Coordenadas")
+        self.titulo.setStyleSheet("font-size: 10px; color: #7c7c7c;")
+        topo.addWidget(self.titulo, 1)
         btn_fechar = QPushButton("✕")
         btn_fechar.setFixedSize(16, 16)
         btn_fechar.clicked.connect(lambda: self._alternar_visibilidade(False))
@@ -103,6 +105,11 @@ class PainelCoordenadas(QFrame):
             """
         )
 
+    def set_unidade_medida(self, sigla: str, fator_unidade: float):
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator_unidade))
+        self.titulo.setText(f"({self._unidade_sigla}) Coordenadas")
+
     def _alternar_visibilidade(self, visivel: bool):
         if visivel:
             self.show()
@@ -147,10 +154,10 @@ class PainelCoordenadas(QFrame):
         dy = destino.y() - origem.y()
         ang = degrees(atan2(-dy, dx)) % 360.0
         dist = sqrt(dx * dx + dy * dy)
-        self.dx_preview.setText(f"{dx:.2f}")
-        self.dy_preview.setText(f"{dy:.2f}")
+        self.dx_preview.setText(f"{dx / self._unidade_fator:.2f}")
+        self.dy_preview.setText(f"{dy / self._unidade_fator:.2f}")
         self.a_preview.setText(f"{ang:.0f}°")
-        self.d_preview.setText(f"{dist:.2f}")
+        self.d_preview.setText(f"{dist / self._unidade_fator:.2f}")
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
