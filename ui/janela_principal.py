@@ -47,6 +47,7 @@ from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
+    ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ZOOM_INICIAL_CANVAS = 8.760
     ORIGEM_INICIAL_CANVAS_X = 110.0
     ORIGEM_INICIAL_CANVAS_Y = 0.0
@@ -54,6 +55,9 @@ class GuimmaStudioMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.projeto_atual = Projeto()
+        prefs_app = self._carregar_preferencias_app()
+        if prefs_app:
+            self.projeto_atual.preferencias_usuario.update(prefs_app)
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
@@ -77,6 +81,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
         self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", False))
         self._perfis_usuarios: dict[str, list[str]] = {}
+        self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._inicializar_perfis_usuarios()
         self.setWindowTitle("GUIMMA STUDIO")
@@ -85,6 +90,47 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
+
+    def _carregar_preferencias_app(self) -> dict:
+        try:
+            if self.ARQUIVO_PREFS_APP.exists():
+                return json.loads(self.ARQUIVO_PREFS_APP.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return {}
+
+    def _salvar_preferencias_app(self):
+        try:
+            self.ARQUIVO_PREFS_APP.write_text(
+                json.dumps(self.projeto_atual.preferencias_usuario, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _capturar_configuracoes_perfil(self) -> dict:
+        return {
+            "unidade_medida": self._unidade_medida,
+            "passo_unidade_medida": self._passo_unidade_medida,
+            "unidade_area": self._unidade_area,
+            "precisao_medida": self._precisao_medida,
+            "barra_usuarios_habilitada": self._barra_usuarios_habilitada,
+            "barra_usuarios_posicao": self._barra_usuarios_posicao,
+            "estilo_desenho": dict(self._estilo_desenho_atual),
+        }
+
+    def _aplicar_configuracoes_perfil(self, cfg: dict):
+        if not isinstance(cfg, dict):
+            return
+        self._unidade_medida = str(cfg.get("unidade_medida", self._unidade_medida))
+        self._passo_unidade_medida = float(cfg.get("passo_unidade_medida", self._passo_unidade_medida))
+        self._unidade_area = str(cfg.get("unidade_area", self._unidade_area))
+        self._precisao_medida = str(cfg.get("precisao_medida", self._precisao_medida))
+        self._barra_usuarios_habilitada = bool(cfg.get("barra_usuarios_habilitada", self._barra_usuarios_habilitada))
+        self._barra_usuarios_posicao = str(cfg.get("barra_usuarios_posicao", self._barra_usuarios_posicao))
+        estilo = cfg.get("estilo_desenho")
+        if isinstance(estilo, dict):
+            self._estilo_desenho_atual.update(estilo)
 
     def _configurar_interface(self):
         central = QWidget()
@@ -575,6 +621,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
         self.projeto_atual.preferencias_usuario["posicoes_caixas_aux"] = dict(self._posicoes_caixas_aux)
+        self._salvar_preferencias_app()
 
     def _abrir_menu_importar(self):
         botao = self.backstage.botoes.get("Importar ▸")
@@ -867,6 +914,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         if not self._ha_alteracoes_nao_salvas():
+            self._salvar_preferencias_app()
             event.accept()
             return
         caixa = QMessageBox(self)
@@ -884,6 +932,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if resposta == QMessageBox.Yes and not self._salvar_projeto():
             event.ignore()
             return
+        self._salvar_preferencias_app()
         event.accept()
 
     def _ha_alteracoes_nao_salvas(self) -> bool:
@@ -1135,6 +1184,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._barra_usuarios_habilitada = habilitada
         self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._salvar_preferencias_app()
 
     def _definir_posicao_barra_usuarios(self, posicao: str):
         if posicao not in {"topo", "area"}:
@@ -1143,6 +1193,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["barra_usuarios_posicao"] = posicao
         self._reposicionar_barra_usuarios()
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._salvar_preferencias_app()
 
     def _reposicionar_barra_usuarios(self):
         if not hasattr(self, "faixa_usuarios"):
@@ -1210,13 +1261,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         else:
             self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
         self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(self._perfil_usuario_atual, []))
+        cfgs = self.projeto_atual.preferencias_usuario.get("perfis_usuarios_cfg")
+        if isinstance(cfgs, dict):
+            self._perfis_usuarios_cfg = {str(nome): dict(cfg or {}) for nome, cfg in cfgs.items()}
+        else:
+            self._perfis_usuarios_cfg = {}
+        self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(self._perfil_usuario_atual, {}))
 
     def _persistir_perfis_usuarios(self):
         self.projeto_atual.preferencias_usuario["perfis_usuarios"] = {
             nome: list(ids) for nome, ids in self._perfis_usuarios.items()
         }
+        self._perfis_usuarios_cfg[self._perfil_usuario_atual] = self._capturar_configuracoes_perfil()
+        self.projeto_atual.preferencias_usuario["perfis_usuarios_cfg"] = {
+            nome: dict(cfg) for nome, cfg in self._perfis_usuarios_cfg.items()
+        }
         self.projeto_atual.preferencias_usuario["perfil_usuario_atual"] = self._perfil_usuario_atual
         self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+        self._salvar_preferencias_app()
 
     def _sincronizar_perfil_usuario_atual(self):
         self._perfis_usuarios[self._perfil_usuario_atual] = list(self._ferramentas_usuario_ids)
@@ -1236,7 +1298,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         self._perfil_usuario_atual = nome_perfil
         self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(nome_perfil, []))
+        self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(nome_perfil, {}))
         self._persistir_perfis_usuarios()
+        self._reposicionar_barra_usuarios()
+        self._aplicar_config_unidade_global()
+        self._atualizar_estilo_desenho({})
+        if hasattr(self, "action_barra_usuarios_habilitada"):
+            self.action_barra_usuarios_habilitada.blockSignals(True)
+            self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+            self.action_barra_usuarios_habilitada.blockSignals(False)
         self._atualizar_linha_usuarios()
         self.lbl_status.setText(f"Perfil '{nome_perfil}' carregado.")
 
@@ -1249,6 +1319,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(f"O perfil '{nome}' já existe.")
             return
         self._perfis_usuarios[nome] = list(self._ferramentas_usuario_ids)
+        self._perfis_usuarios_cfg[nome] = dict(self._capturar_configuracoes_perfil())
         self._perfil_usuario_atual = nome
         self._persistir_perfis_usuarios()
         self._atualizar_combo_perfis_usuarios()
@@ -1564,6 +1635,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | "
             f"Espessura {self._estilo_desenho_atual['espessura']:.0f} | Altura {self._estilo_desenho_atual['amplitude']:.1f}"
         )
+        self._salvar_preferencias_app()
 
     def _restaurar_estilo_desenho_memorizado(self):
         estilo_mem = self.projeto_atual.preferencias_usuario.get("estilo_desenho", {})
@@ -1592,6 +1664,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        self._salvar_preferencias_app()
 
     def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
         menu = QMenu(self)
@@ -1703,6 +1776,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._precisao_medida = str(rb.property("valor"))
                 self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
                 break
+        self._salvar_preferencias_app()
 
     def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:
         bruto = self.projeto_atual.preferencias_usuario.get("posicoes_caixas_aux", {})
