@@ -40,6 +40,7 @@ from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
+from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -299,6 +300,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
+        self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
         self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
@@ -576,6 +578,71 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
+
+    def _abrir_menu_configuracoes(self):
+        botao = self.backstage.botoes.get("Configurações ▸")
+        if botao is None:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #c8d0d8; }"
+            "QMenu::item { padding: 6px 18px; }"
+            "QMenu::item:selected { background: #e6f2ff; }"
+        )
+        menu.addAction("Cores", self._abrir_dialogo_cores)
+        menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
+        pos = botao.mapToGlobal(botao.rect().bottomRight())
+        menu.exec(pos)
+
+    def _abrir_dialogo_cores(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cores")
+        dialog.setModal(False)
+        dialog.resize(430, 180)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
+        chk_cor_tecidos.setChecked(bool(getattr(canvas, "_mostrar_cor_tecidos", False)))
+        layout.addWidget(chk_cor_tecidos)
+
+        btn_config = QPushButton("Configurar cor dos tecidos")
+        layout.addWidget(btn_config, 0, Qt.AlignLeft)
+        layout.addStretch(1)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("✓ OK")
+        btn_cancelar = QPushButton("✕ Cancelar")
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        layout.addLayout(rodape)
+
+        def abrir_config():
+            tecidos = sorted({
+                str(el.get("tecido") or "").strip()
+                for el in canvas.cena.elementos
+                if el.get("molde") and str(el.get("tecido") or "").strip()
+            })
+            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(getattr(canvas, "_cores_tecidos", {})), dialog)
+            if dialog_tecidos.exec() == QDialog.Accepted:
+                canvas._cores_tecidos = dialog_tecidos.cores_tecidos()
+                canvas.update()
+
+        def aplicar_e_fechar():
+            canvas._mostrar_cor_tecidos = chk_cor_tecidos.isChecked()
+            canvas.update()
+            dialog.accept()
+
+        btn_config.clicked.connect(abrir_config)
+        btn_ok.clicked.connect(aplicar_e_fechar)
+        btn_cancelar.clicked.connect(dialog.reject)
+        dialog.exec()
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
