@@ -41,6 +41,8 @@ class RetaToolUI(QFrame):
 
         self._botoes_modo: dict[str, QPushButton] = {}
         self.modo_atual = "livre"
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
         self.setStyleSheet(
             """
@@ -166,7 +168,7 @@ class RetaToolUI(QFrame):
         layout.addWidget(self._linha())
 
         layout.addWidget(self._section_label("Cursor"))
-        self.mouse_coord_label = QLabel("X 0.00 cm  |  Y 0.00 cm")
+        self.mouse_coord_label = QLabel("X 0.00  |  Y 0.00")
         self.mouse_coord_label.setObjectName("mouseCoord")
         self.mouse_coord_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.mouse_coord_label)
@@ -285,13 +287,23 @@ class RetaToolUI(QFrame):
         self.status_label.setText(textos.get(self.modo_atual, "Modo ativo."))
 
     def _aplicar_valores(self):
+        fator = max(1e-9, float(self._unidade_fator))
         if self.modo_atual in {"comprimento", "comp_ang", "angulo"}:
-            self.valor_changed.emit(self.spin_comprimento.value(), self.spin_angulo.value())
+            self.valor_changed.emit(self.spin_comprimento.value() * fator, self.spin_angulo.value())
         else:
-            self.delta_changed.emit(self.spin_dx.value(), self.spin_dy.value())
+            self.delta_changed.emit(self.spin_dx.value() * fator, self.spin_dy.value() * fator)
 
     def atualizar_coordenadas_mouse(self, x: float, y: float):
-        self.mouse_coord_label.setText(f"X {x:.2f} cm  |  Y {y:.2f} cm")
+        fator = max(1e-9, float(self._unidade_fator))
+        self.mouse_coord_label.setText(f"X {x / fator:.2f} {self._unidade_sigla}  |  Y {y / fator:.2f} {self._unidade_sigla}")
+
+    def set_unidade(self, sigla: str, fator: float):
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator))
+        sufixo = f" {self._unidade_sigla}"
+        self.spin_dx.setSuffix(sufixo)
+        self.spin_dy.setSuffix(sufixo)
+        self.spin_comprimento.setSuffix(sufixo)
 
     def atualizar_status_operacao(self, texto: str):
         self.status_label.setText(texto)
@@ -420,6 +432,11 @@ class Ferramenta(FerramentaBase):
             self.ui_flutuante.fechado.connect(self._ui_fechado)
         elif parent is not None and self.ui_flutuante.parentWidget() is not parent:
             self.ui_flutuante.setParent(parent)
+        if self.canvas and self.ui_flutuante:
+            self.ui_flutuante.set_unidade(
+                getattr(self.canvas, "_unidade_sigla", "cm"),
+                float(getattr(self.canvas, "_unidade_fator", 1.0)),
+            )
         self.ui_flutuante.show()
         self.ui_flutuante.raise_()
         self.ui_flutuante.reposicionar_no_canto_superior_direito()
@@ -587,7 +604,7 @@ class Ferramenta(FerramentaBase):
         else:
             comp = self._distancia(self._pontos_atuais[-2], self._pontos_atuais[-1])
             ang = self._angulo_entre(self._pontos_atuais[-2], self._pontos_atuais[-1])
-            msg = f"Segmento inserido: {comp:.2f} cm | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
+            msg = f"Segmento inserido: {self.canvas.formatar_distancia(comp)} | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
         if self.canvas.lbl_status:
             self.canvas.lbl_status.setText(msg)
         if self.ui_flutuante:
@@ -615,7 +632,7 @@ class Ferramenta(FerramentaBase):
         )
         msg = (
             f"Desenho finalizado com {len(pontos_finalizacao) - 1} segmento(s) | "
-            f"Comprimento total {comprimento_total:.2f} cm. Clique direito novamente para sair."
+            f"Comprimento total {self.canvas.formatar_distancia(comprimento_total)}. Clique direito novamente para sair."
         )
         self._desenhando = False
         self._terminado = True
@@ -753,7 +770,12 @@ class Ferramenta(FerramentaBase):
         if canvas._snap_resultado:
             trava_info.append(f"snap {canvas._snap_resultado.tipo}")
         sufixo = f" | {' | '.join(trava_info)}" if trava_info else ""
-        texto = f"Prévia: {comp:.2f} cm | {ang:.1f}° | Cursor X {pos_real.x():.2f} Y {pos_real.y():.2f}{sufixo}"
+        x_u = canvas.formatar_valor_unidade(pos_real.x())
+        y_u = canvas.formatar_valor_unidade(pos_real.y())
+        texto = (
+            f"Prévia: {canvas.formatar_distancia(comp)} | {ang:.1f}° | "
+            f"Cursor X {x_u} Y {y_u}{sufixo}"
+        )
         if canvas.lbl_status:
             canvas.lbl_status.setText(texto)
         if self.ui_flutuante:
@@ -848,15 +870,18 @@ class Ferramenta(FerramentaBase):
         destino = canvas._preview_reta
         if destino is None:
             return
+        comp = self._distancia(origem, destino)
+        ang = self._angulo_entre(origem, destino)
+
+        self._desenhar_guia_angular(canvas, painter, origem, comp, ang)
+
         pen = QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine)
         painter.setPen(pen)
         painter.drawLine(canvas._cena_para_tela(origem), canvas._cena_para_tela(destino))
 
-        comp = self._distancia(origem, destino)
-        ang = self._angulo_entre(origem, destino)
         meio = QPointF((origem.x() + destino.x()) / 2.0, (origem.y() + destino.y()) / 2.0)
         meio_tela = canvas._cena_para_tela(meio)
-        texto = f"{comp:.2f} cm  |  {ang:.1f}°"
+        texto = f"{canvas.formatar_distancia(comp)}  |  {ang:.1f}°"
 
         font = QFont("Arial", 8)
         font.setBold(True)
@@ -881,6 +906,35 @@ class Ferramenta(FerramentaBase):
             painter.setPen(QPen(QColor("#6bd3b5"), 1.2, Qt.DotLine))
             painter.drawLine(origem_tela.x(), origem_tela.y(), destino_tela.x(), origem_tela.y())
             painter.drawLine(origem_tela.x(), origem_tela.y(), origem_tela.x(), destino_tela.y())
+
+    def _desenhar_guia_angular(
+        self, canvas: VisualizacaoCanvas, painter: QPainter, origem: QPointF, comprimento: float, angulo_graus: float
+    ):
+        if comprimento <= 0.0001:
+            return
+
+        origem_tela = canvas._cena_para_tela(origem)
+        painter.setPen(QPen(QColor("#ff2de1"), 1.2, Qt.DotLine))
+        painter.setBrush(Qt.NoBrush)
+
+        raio_origem = max(5.0, 5.0 * canvas.zoom * 0.05)
+        painter.drawEllipse(origem_tela, raio_origem, raio_origem)
+
+        ref = QPointF(origem.x() + comprimento, origem.y())
+        painter.drawLine(origem_tela, canvas._cena_para_tela(ref))
+
+        passos = max(18, int(angulo_graus / 3.0))
+        pontos_arco: list[QPointF] = []
+        for i in range(passos + 1):
+            t = i / max(passos, 1)
+            a = angulo_graus * t
+            rad = radians(a)
+            px = origem.x() + (comprimento * cos(rad))
+            py = origem.y() - (comprimento * sin(rad))
+            pontos_arco.append(canvas._cena_para_tela(QPointF(px, py)))
+
+        for i in range(len(pontos_arco) - 1):
+            painter.drawLine(pontos_arco[i], pontos_arco[i + 1])
 
     def _encontrar_reta_sob_cursor(self, canvas: VisualizacaoCanvas, pos: QPointF) -> tuple[QPointF, QPointF] | None:
         tolerancia = 10.0 / max(canvas.zoom, 0.001)
