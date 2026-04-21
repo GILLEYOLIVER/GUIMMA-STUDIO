@@ -808,8 +808,86 @@ class VisualizacaoCanvas(QWidget):
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
 
+        self._desenhar_overlays_moldes(painter)
+
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
+
+    def _desenhar_overlays_moldes(self, painter: QPainter):
+        for idx, el in enumerate(self.cena.elementos):
+            if not el.get("molde"):
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if len(pontos) < 3:
+                continue
+            base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
+            if not base:
+                continue
+
+            if el.get("mostrar_nome", True):
+                nome = str(el.get("nome_molde") or "")
+                if nome:
+                    cx = sum(p.x() for p in base) / len(base)
+                    cy = sum(p.y() for p in base) / len(base)
+                    tela = self._cena_para_tela(QPointF(cx, cy))
+                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                    painter.drawText(int(tela.x() - 20), int(tela.y()), nome)
+
+            if el.get("mostrar_fio", True):
+                fio_origem = el.get("fio_origem")
+                fio_fim = el.get("fio_fim")
+                if fio_origem and fio_fim:
+                    p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
+                    p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
+                else:
+                    xs = [p.x() for p in base]
+                    ys = [p.y() for p in base]
+                    cx = sum(xs) / len(xs)
+                    p1 = QPointF(cx, max(ys))
+                    p2 = QPointF(cx, min(ys))
+                self._desenhar_segmento(painter, p1, p2, cor="#ffffff", espessura=1.0)
+                self._desenhar_seta_fio(painter, p1, p2)
+                fim_tela = self._cena_para_tela(p2)
+                ang = float(el.get("fio_angulo", 90.0))
+                painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
+
+            if el.get("mostrar_controles", True):
+                cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+                painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                for i, pt in enumerate(cantos, start=1):
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
+                    painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                principais = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_controle_principais", [])]
+                painter.setPen(QPen(QColor("#6be3ff"), 1.0))
+                painter.setBrush(QColor("#6be3ff"))
+                for pt in principais:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(pt_tela, 2.2, 2.2)
+                auxiliares = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_auxiliares", [])]
+                painter.setPen(QPen(QColor("#ff2a2a"), 1.0))
+                painter.setBrush(QColor("#ff2a2a"))
+                for pt in auxiliares:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(pt_tela, 1.8, 1.8)
+
+    def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
+        dx = fim.x() - inicio.x()
+        dy = fim.y() - inicio.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-6:
+            return
+        ux = dx / comp
+        uy = dy / comp
+        nx = -uy
+        ny = ux
+        tam = max(3.0, 12.0 / max(self.zoom, 0.001))
+        p_base = QPointF(fim.x() - (ux * tam), fim.y() - (uy * tam))
+        p_l = QPointF(p_base.x() + (nx * tam * 0.45), p_base.y() + (ny * tam * 0.45))
+        p_r = QPointF(p_base.x() - (nx * tam * 0.45), p_base.y() - (ny * tam * 0.45))
+        self._desenhar_segmento(painter, p_l, fim, cor="#ffffff", espessura=1.0)
+        self._desenhar_segmento(painter, p_r, fim, cor="#ffffff", espessura=1.0)
 
     def _cor_realce(self, cor_hex: str) -> str:
         cor = QColor(cor_hex)
