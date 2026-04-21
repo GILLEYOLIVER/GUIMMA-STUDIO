@@ -57,6 +57,12 @@ class Ferramenta(FerramentaBase):
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
                 if "controle_cantos" in el:
                     el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                if "fio_origem" in el:
+                    fx, fy = el.get("fio_origem", (0.0, 0.0))
+                    el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
+                if "fio_fim" in el:
+                    fx, fy = el.get("fio_fim", (0.0, 0.0))
+                    el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
             elif el.get("tipo") == "bezier_quadratica":
                 for chave in ("p0", "p1", "p2"):
                     x, y = el[chave]
