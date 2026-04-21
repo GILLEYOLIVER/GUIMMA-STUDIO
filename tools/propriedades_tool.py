@@ -223,9 +223,10 @@ class PreviewMoldeWidget(QWidget):
 class PropriedadesMoldesDialog(QDialog):
     dados_aplicados = Signal()
 
-    def __init__(self, canvas, parent: QWidget | None = None):
+    def __init__(self, canvas, parent: QWidget | None = None, mostrar_tab_ferramentas: bool = True):
         super().__init__(parent)
         self.canvas = canvas
+        self._mostrar_tab_ferramentas = bool(mostrar_tab_ferramentas)
         self._refs: list[MoldeRef] = []
         self._indice_atual: int | None = None
         self._cor_visual = "#ffffff"
@@ -366,6 +367,8 @@ class PropriedadesMoldesDialog(QDialog):
         self.tabs.addTab(self._criar_tab_visualizacao(), "Visualização")
         self.tabs.addTab(self._criar_tab_margem(), "Margem")
         self.tabs.addTab(self._criar_tab_cam(), "Pontos de CAM")
+        self._idx_tab_ferramentas = self.tabs.addTab(self._criar_tab_ferramentas(), "Ferramentas")
+        self.set_exibir_tab_ferramentas(self._mostrar_tab_ferramentas)
         lay_dir.addWidget(self.tabs, 0)
 
         self.preview = PreviewMoldeWidget()
@@ -398,6 +401,13 @@ class PropriedadesMoldesDialog(QDialog):
         raiz.addWidget(painel_dir, 1)
         self._atualizar_opcoes_tecido()
         self._ajustar_larguras_campos()
+
+    def set_exibir_tab_ferramentas(self, exibir: bool):
+        self._mostrar_tab_ferramentas = bool(exibir)
+        if hasattr(self, "tabs") and hasattr(self, "_idx_tab_ferramentas"):
+            self.tabs.setTabVisible(self._idx_tab_ferramentas, self._mostrar_tab_ferramentas)
+            if not self._mostrar_tab_ferramentas and self.tabs.currentIndex() == self._idx_tab_ferramentas:
+                self.tabs.setCurrentIndex(0)
 
     def _ajustar_larguras_campos(self):
         combos = [
@@ -909,6 +919,68 @@ class PropriedadesMoldesDialog(QDialog):
         layout.addStretch(1)
         return aba
 
+    def _criar_tab_ferramentas(self) -> QWidget:
+        aba = QWidget()
+        layout = QVBoxLayout(aba)
+        layout.setContentsMargins(12, 10, 12, 6)
+        layout.setSpacing(8)
+
+        box = QGroupBox("Elementos")
+        grid = QGridLayout(box)
+        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+
+        labels = ["Contorno", "Nome", "Descrição", "Observações", "Fio", "Costura"]
+        cores = ["#ff5a12", "#6b8f1f", "#3f63d8", "#f0d100", "#9d00c7", "#d4d4d4"]
+        self._ferramentas_linhas: list[tuple[QComboBox, QPushButton, QCheckBox]] = []
+        for i, nome in enumerate(labels):
+            lbl = QLabel(nome)
+            cmb = QComboBox()
+            cmb.addItems(["-", "1", "2", "3", "4", "5", "6", "7", "8"])
+            cmb.setCurrentText(str(i + 1 if i < 5 else "-"))
+            btn_cor = QPushButton("")
+            btn_cor.setFixedSize(30, 22)
+            btn_cor.setStyleSheet(f"background:{cores[i]}; border:1px solid #343434;")
+            chk = QCheckBox("Usar")
+            chk.setChecked(i < 5)
+            if nome == "Costura":
+                cmb.setEnabled(False)
+                btn_cor.setEnabled(False)
+                chk.setEnabled(False)
+            grid.addWidget(lbl, i, 0)
+            grid.addWidget(cmb, i, 1)
+            grid.addWidget(btn_cor, i, 2)
+            grid.addWidget(chk, i, 3)
+            self._ferramentas_linhas.append((cmb, btn_cor, chk))
+
+        self.btn_config_ferramentas = QPushButton("Configurar Ferramentas")
+        self.btn_config_defaults = QPushButton("Configurar Defaults")
+        grid.addWidget(self.btn_config_ferramentas, 0, 4, 1, 2)
+        grid.addWidget(self.btn_config_defaults, 1, 4, 1, 2)
+
+        cmb_extra1 = QComboBox()
+        cmb_extra1.addItem("-")
+        cmb_extra2 = QComboBox()
+        cmb_extra2.addItem("-")
+        btn_cor_extra = QPushButton("")
+        btn_cor_extra.setFixedSize(30, 22)
+        btn_cor_extra.setStyleSheet("background:#d6d6d6; border:1px solid #343434;")
+        chk_extra = QCheckBox("Usar")
+        btn_aplicar = QPushButton("Aplicar todos")
+        btn_aplicar.setObjectName("ApplyBlueButton")
+        btn_aplicar.clicked.connect(self._aplicar)
+        grid.addWidget(cmb_extra1, 6, 0, 1, 2)
+        grid.addWidget(cmb_extra2, 6, 2)
+        grid.addWidget(btn_cor_extra, 6, 3)
+        grid.addWidget(chk_extra, 6, 4)
+        grid.addWidget(btn_aplicar, 6, 5)
+        grid.addWidget(QLabel("Aplique a todos os moldes as configurações de ferramentas"), 7, 0, 1, 6)
+
+        layout.addWidget(box)
+        layout.addStretch(1)
+        return aba
+
     def recarregar_lista(self):
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
@@ -1301,10 +1373,13 @@ class Ferramenta(FerramentaBase):
     def _obter_dialog(self, canvas) -> PropriedadesMoldesDialog:
         chave = id(canvas)
         dialog = self._dialog_por_canvas.get(chave)
-        if dialog is not None:
-            return dialog
         parent = canvas.window() if hasattr(canvas, "window") else None
-        dialog = PropriedadesMoldesDialog(canvas, parent)
+        opcoes = getattr(parent, "_opcoes_app", {}) if parent is not None else {}
+        exibir_tab_ferramentas = bool(opcoes.get("usar_ferramentas_moldes", False))
+        if dialog is not None:
+            dialog.set_exibir_tab_ferramentas(exibir_tab_ferramentas)
+            return dialog
+        dialog = PropriedadesMoldesDialog(canvas, parent, mostrar_tab_ferramentas=exibir_tab_ferramentas)
         dialog.dados_aplicados.connect(lambda: self.set_status("Propriedades do molde aplicadas."))
         self._dialog_por_canvas[chave] = dialog
         return dialog
