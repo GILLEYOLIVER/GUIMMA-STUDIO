@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import sqrt
+from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
@@ -32,9 +33,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHeaderView,
+    QToolButton,
 )
 
 from tools.tool_base import FerramentaBase
+
+ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 
 
 @dataclass(slots=True)
@@ -284,6 +288,90 @@ class PreviewMoldeWidget(QWidget):
         super().mouseReleaseEvent(event)
 
 
+class LegendaStatusMoldeWidget(QFrame):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            """
+            QFrame#LegendaStatusMolde {
+                background: #ddebf7;
+                border: 1px solid #aebfd0;
+            }
+            """
+        )
+        self.setObjectName("LegendaStatusMolde")
+        self._timer_auto_close = QTimer(self)
+        self._timer_auto_close.setSingleShot(True)
+        self._timer_auto_close.setInterval(3000)
+        self._timer_auto_close.timeout.connect(self._recolher)
+        self._construir_ui()
+
+    def _construir_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(2)
+
+        topo = QHBoxLayout()
+        topo.setContentsMargins(0, 0, 0, 0)
+        topo.setSpacing(2)
+        self.btn_toggle = QToolButton()
+        self.btn_toggle.setText("Legenda de status do molde:")
+        self.btn_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_toggle.setArrowType(Qt.RightArrow)
+        self.btn_toggle.setCheckable(True)
+        self.btn_toggle.toggled.connect(self._alternar_painel)
+        topo.addWidget(self.btn_toggle, 1)
+
+        self.btn_fechar = QToolButton()
+        self.btn_fechar.setText("X")
+        self.btn_fechar.setFixedSize(16, 16)
+        self.btn_fechar.clicked.connect(self._recolher)
+        topo.addWidget(self.btn_fechar, 0, Qt.AlignRight)
+        layout.addLayout(topo)
+
+        self._conteudo = QWidget()
+        conteudo_layout = QVBoxLayout(self._conteudo)
+        conteudo_layout.setContentsMargins(2, 2, 2, 2)
+        conteudo_layout.setSpacing(3)
+        conteudo_layout.addWidget(self._linha_status("molde-pronto.svg", "Molde pronto"))
+        conteudo_layout.addWidget(self._linha_status("molde-nao-pronto.svg", "Molde não pronto"))
+        conteudo_layout.addWidget(self._linha_status("nome-molde-repetido.svg", "Nome do molde repetido"))
+        conteudo_layout.addWidget(self._linha_status("grade-diferente-modelo.svg", "Grade diferente do modelo"))
+        conteudo_layout.addWidget(self._linha_status("propriedades.svg", "Propriedades não editáveis no Audaces Encaixe"))
+        layout.addWidget(self._conteudo)
+        self._conteudo.hide()
+        self.btn_fechar.hide()
+
+    def _linha_status(self, icon_name: str, texto: str) -> QWidget:
+        row = QWidget()
+        row_l = QHBoxLayout(row)
+        row_l.setContentsMargins(0, 0, 0, 0)
+        row_l.setSpacing(4)
+        lbl_icon = QLabel()
+        lbl_icon.setFixedSize(14, 14)
+        icon_path = ICONS_DIR / icon_name
+        if icon_path.exists():
+            lbl_icon.setPixmap(QIcon(str(icon_path)).pixmap(13, 13))
+        lbl_texto = QLabel(texto)
+        lbl_texto.setStyleSheet("color:#000000;")
+        row_l.addWidget(lbl_icon, 0, Qt.AlignTop)
+        row_l.addWidget(lbl_texto, 1)
+        return row
+
+    def _alternar_painel(self, aberto: bool):
+        self.btn_toggle.setArrowType(Qt.DownArrow if aberto else Qt.RightArrow)
+        self._conteudo.setVisible(aberto)
+        self.btn_fechar.setVisible(aberto)
+        if aberto:
+            self._timer_auto_close.start()
+        else:
+            self._timer_auto_close.stop()
+
+    def _recolher(self):
+        self._timer_auto_close.stop()
+        self.btn_toggle.setChecked(False)
+
+
 class PropriedadesMoldesDialog(QDialog):
     dados_aplicados = Signal()
 
@@ -414,9 +502,8 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_excluir_molde.setFixedHeight(48)
         lay_esq.addWidget(self.btn_excluir_molde)
 
-        lbl_legenda = QLabel("◢ Legenda de status do molde:")
-        lbl_legenda.setStyleSheet("padding-left:2px; color:#111111;")
-        lay_esq.addWidget(lbl_legenda)
+        self.legenda_status = LegendaStatusMoldeWidget()
+        lay_esq.addWidget(self.legenda_status)
 
         painel_dir = QFrame()
         painel_dir.setObjectName("PanelRight")
