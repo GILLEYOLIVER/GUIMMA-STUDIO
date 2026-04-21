@@ -18,6 +18,7 @@ class PainelCoordenadas(QFrame):
         self.setFixedSize(300, 120)
         self._unidade_sigla = "cm"
         self._unidade_fator = 1.0
+        self._casas_decimais = 2
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -110,6 +111,9 @@ class PainelCoordenadas(QFrame):
         self._unidade_fator = max(1e-9, float(fator_unidade))
         self.titulo.setText(f"({self._unidade_sigla}) Coordenadas")
 
+    def set_precisao_medida(self, casas_decimais: int):
+        self._casas_decimais = max(0, min(6, int(casas_decimais)))
+
     def _alternar_visibilidade(self, visivel: bool):
         if visivel:
             self.show()
@@ -154,10 +158,10 @@ class PainelCoordenadas(QFrame):
         dy = destino.y() - origem.y()
         ang = degrees(atan2(-dy, dx)) % 360.0
         dist = sqrt(dx * dx + dy * dy)
-        self.dx_preview.setText(f"{dx / self._unidade_fator:.2f}")
-        self.dy_preview.setText(f"{dy / self._unidade_fator:.2f}")
+        self.dx_preview.setText(f"{dx / self._unidade_fator:.{self._casas_decimais}f}")
+        self.dy_preview.setText(f"{dy / self._unidade_fator:.{self._casas_decimais}f}")
         self.a_preview.setText(f"{ang:.0f}°")
-        self.d_preview.setText(f"{dist / self._unidade_fator:.2f}")
+        self.d_preview.setText(f"{dist / self._unidade_fator:.{self._casas_decimais}f}")
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)

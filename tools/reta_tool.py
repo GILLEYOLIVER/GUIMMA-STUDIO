@@ -770,11 +770,11 @@ class Ferramenta(FerramentaBase):
         if canvas._snap_resultado:
             trava_info.append(f"snap {canvas._snap_resultado.tipo}")
         sufixo = f" | {' | '.join(trava_info)}" if trava_info else ""
-        x_u = canvas.converter_de_cena(pos_real.x())
-        y_u = canvas.converter_de_cena(pos_real.y())
+        x_u = canvas.formatar_valor_unidade(pos_real.x())
+        y_u = canvas.formatar_valor_unidade(pos_real.y())
         texto = (
             f"Prévia: {canvas.formatar_distancia(comp)} | {ang:.1f}° | "
-            f"Cursor X {x_u:.2f} Y {y_u:.2f}{sufixo}"
+            f"Cursor X {x_u} Y {y_u}{sufixo}"
         )
         if canvas.lbl_status:
             canvas.lbl_status.setText(texto)

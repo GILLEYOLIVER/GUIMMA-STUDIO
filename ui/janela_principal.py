@@ -1437,6 +1437,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        area_doc.canvas.set_precisao_medida(self._precisao_medida)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         area_doc.setProperty("arquivo_origem", caminho_origem)
@@ -1632,6 +1633,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+            area_doc.canvas.set_precisao_medida(self._precisao_medida)
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
@@ -1737,10 +1739,12 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _aplicar_config_unidade_global(self):
         self.projeto_atual.preferencias_usuario["unidade_medida"] = self._unidade_medida
         self.projeto_atual.preferencias_usuario["passo_unidade_medida"] = self._passo_unidade_medida
+        self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+                area.canvas.set_precisao_medida(self._precisao_medida)
         self._salvar_preferencias_app()
 
     def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
@@ -1853,6 +1857,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._precisao_medida = str(rb.property("valor"))
                 self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
                 break
+        self._aplicar_config_unidade_global()
         self._salvar_preferencias_app()
 
     def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:

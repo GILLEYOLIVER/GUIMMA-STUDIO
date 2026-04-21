@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from importlib import import_module
-from math import atan2, cos, degrees, radians, sin, sqrt
+from math import atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
 from uuid import uuid4
 
@@ -62,6 +62,8 @@ class VisualizacaoCanvas(QWidget):
         self._linha_amplitude = 1.0
         self._unidade_sigla = "cm"
         self._unidade_fator = 1.0  # 1 unidade de cena = 1 cm
+        self._precisao_medida = "0.01"
+        self._casas_precisao = 2
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
@@ -222,17 +224,39 @@ class VisualizacaoCanvas(QWidget):
         if hasattr(self, "painel_coordenadas"):
             self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
 
+    def set_precisao_medida(self, precisao: str):
+        txt = str(precisao or "0.01").strip()
+        self._precisao_medida = txt
+        if "/" in txt:
+            try:
+                num_txt, den_txt = txt.split("/", 1)
+                num = abs(float(num_txt))
+                den = abs(float(den_txt))
+                valor = num / max(den, 1e-9)
+                self._casas_precisao = max(0, min(6, int(round(-log10(valor))) + 1))
+            except Exception:
+                self._casas_precisao = 2
+        else:
+            if "." in txt:
+                self._casas_precisao = max(0, min(6, len(txt.split(".", 1)[1])))
+            else:
+                self._casas_precisao = 0
+        if hasattr(self, "painel_coordenadas") and hasattr(self.painel_coordenadas, "set_precisao_medida"):
+            self.painel_coordenadas.set_precisao_medida(self._casas_precisao)
+
     def converter_de_cena(self, valor: float) -> float:
         return float(valor) / self._unidade_fator
 
     def converter_para_cena(self, valor: float) -> float:
         return float(valor) * self._unidade_fator
 
-    def formatar_distancia(self, valor_cena: float, casas: int = 2) -> str:
+    def formatar_valor_unidade(self, valor_cena: float, casas: int | None = None) -> str:
+        casas_final = self._casas_precisao if casas is None else max(0, int(casas))
         valor_unidade = self.converter_de_cena(valor_cena)
-        txt = f"{valor_unidade:.{casas}f}"
-        if self._unidade_sigla == "cm":
-            txt = txt.rstrip("0").rstrip(".")
+        return f"{valor_unidade:.{casas_final}f}"
+
+    def formatar_distancia(self, valor_cena: float, casas: int | None = None) -> str:
+        txt = self.formatar_valor_unidade(valor_cena, casas=casas)
         return f"{txt} {self._unidade_sigla}"
 
     def set_passo_snap_angular(self, passo: float):
