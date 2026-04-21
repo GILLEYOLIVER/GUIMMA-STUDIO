@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from importlib import import_module
 from math import atan2, cos, degrees, log10, radians, sin, sqrt
+from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
@@ -89,6 +90,8 @@ class VisualizacaoCanvas(QWidget):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
         self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None  # Para ferramenta reta
+        self._ultimo_clique_direito_ts = 0.0
+        self._sequencia_clique_direito = 0
         self.lbl_status = None  # Será definido pela janela principal
 
         self.setMinimumSize(100, 100)
@@ -118,6 +121,7 @@ class VisualizacaoCanvas(QWidget):
             self._runtime_tool.on_activate(self)
         self._aguardando_retorno_selecao = False
         self._cliques_direito_reta = 0
+        self._sequencia_clique_direito = 0
         self._snap_resultado = None
         self._snap_candidatos = []
         self._snap_indice = 0
@@ -804,6 +808,20 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.RightButton:
+            agora = monotonic()
+            if (agora - self._ultimo_clique_direito_ts) <= 0.45:
+                self._sequencia_clique_direito += 1
+            else:
+                self._sequencia_clique_direito = 1
+            self._ultimo_clique_direito_ts = agora
+            if self.ferramenta_ativa != "selecionar" and self._sequencia_clique_direito >= 2:
+                self._sequencia_clique_direito = 0
+                self.ferramenta_padrao_solicitada.emit("selecionar")
+                event.accept()
+                return
+        elif event.button() == Qt.LeftButton:
+            self._sequencia_clique_direito = 0
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
