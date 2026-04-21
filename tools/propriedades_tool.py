@@ -5,7 +5,7 @@ from math import sqrt
 from random import randint
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
@@ -52,9 +52,20 @@ class PreviewMoldeWidget(QWidget):
         self._mostrar_cor_tecidos = False
         self.setMinimumHeight(270)
         self._zoom = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self._hand_active = False
+        self._panning = False
+        self._last_pan_pos = QPointF(0.0, 0.0)
 
     def set_molde(self, molde: dict | None):
         self._molde = molde
+        self._zoom = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self.update()
+
+    def set_config_cores_tecidos(self, cores: dict[str, str], mostrar: bool):
+        self._cores_tecidos = dict(cores)
+        self._mostrar_cor_tecidos = bool(mostrar)
         self.update()
 
     def set_config_cores_tecidos(self, cores: dict[str, str], mostrar: bool):
@@ -99,8 +110,8 @@ class PreviewMoldeWidget(QWidget):
 
         def mapear(pt: QPointF) -> QPointF:
             return QPointF(
-                offset_x + ((pt.x() - min_x) * escala),
-                offset_y + ((pt.y() - min_y) * escala),
+                self._offset.x() + offset_x + ((pt.x() - min_x) * escala * self._zoom),
+                self._offset.y() + offset_y + ((pt.y() - min_y) * escala * self._zoom),
             )
 
         cor_desenho = QColor("#ffffff")
@@ -218,6 +229,59 @@ class PreviewMoldeWidget(QWidget):
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
             if self._molde.get("mostrar_numeros", False):
                 painter.drawText(int(tela.x() + 4), int(tela.y() - 6), str(i))
+
+    def zoom_in(self):
+        self._zoom = min(20.0, self._zoom * 1.15)
+        self.update()
+
+    def zoom_out(self):
+        self._zoom = max(0.2, self._zoom / 1.15)
+        self.update()
+
+    def reset_view(self):
+        self._zoom = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self.update()
+
+    def set_hand_active(self, ativo: bool):
+        self._hand_active = bool(ativo)
+        self.setCursor(Qt.OpenHandCursor if self._hand_active else Qt.ArrowCursor)
+
+    def wheelEvent(self, event: QWheelEvent):  # noqa: N802
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_in()
+        elif delta < 0:
+            self.zoom_out()
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._hand_active and event.button() == Qt.LeftButton:
+            self._panning = True
+            self._last_pan_pos = event.position()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._panning and self._hand_active:
+            atual = event.position()
+            delta = atual - self._last_pan_pos
+            self._offset = QPointF(self._offset.x() + delta.x(), self._offset.y() + delta.y())
+            self._last_pan_pos = atual
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
+        if self._panning and event.button() == Qt.LeftButton:
+            self._panning = False
+            self.setCursor(Qt.OpenHandCursor if self._hand_active else Qt.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class PropriedadesMoldesDialog(QDialog):
@@ -377,10 +441,26 @@ class PropriedadesMoldesDialog(QDialog):
         barra_preview = QHBoxLayout()
         barra_preview.setContentsMargins(0, 0, 0, 0)
         barra_preview.setSpacing(6)
-        for texto in ("🖐", "⤢", "🔍+", "🔎"):
-            btn = QPushButton(texto)
-            btn.setFixedSize(26, 22)
-            barra_preview.addWidget(btn, 0, Qt.AlignLeft)
+        self.btn_preview_mao = QPushButton("🖐")
+        self.btn_preview_mao.setCheckable(True)
+        self.btn_preview_mao.setFixedSize(26, 22)
+        self.btn_preview_mao.toggled.connect(self.preview.set_hand_active)
+        barra_preview.addWidget(self.btn_preview_mao, 0, Qt.AlignLeft)
+
+        self.btn_preview_ajustar = QPushButton("⤢")
+        self.btn_preview_ajustar.setFixedSize(26, 22)
+        self.btn_preview_ajustar.clicked.connect(self.preview.reset_view)
+        barra_preview.addWidget(self.btn_preview_ajustar, 0, Qt.AlignLeft)
+
+        self.btn_preview_zoom_mais = QPushButton("🔍+")
+        self.btn_preview_zoom_mais.setFixedSize(26, 22)
+        self.btn_preview_zoom_mais.clicked.connect(self.preview.zoom_in)
+        barra_preview.addWidget(self.btn_preview_zoom_mais, 0, Qt.AlignLeft)
+
+        self.btn_preview_zoom_menos = QPushButton("🔎")
+        self.btn_preview_zoom_menos.setFixedSize(26, 22)
+        self.btn_preview_zoom_menos.clicked.connect(self.preview.zoom_out)
+        barra_preview.addWidget(self.btn_preview_zoom_menos, 0, Qt.AlignLeft)
         barra_preview.addStretch(1)
         lay_dir.addLayout(barra_preview)
 
