@@ -184,6 +184,12 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_posicao = None
         self._reposicionar_painel_coordenadas()
 
+    def sincronizar_paineis_auxiliares(self):
+        """Recalcula posições dos painéis flutuantes com o tamanho atual do canvas."""
+        self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
+
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
         if self.painel_coordenadas.isVisible():
             return self.painel_coordenadas.x(), self.painel_coordenadas.y()
