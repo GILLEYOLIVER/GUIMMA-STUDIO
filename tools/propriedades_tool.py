@@ -218,8 +218,8 @@ class PropriedadesMoldesDialog(QDialog):
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.resize(928, 760)
-        self.setMinimumSize(900, 720)
+        self.resize(1060, 780)
+        self.setMinimumSize(1020, 740)
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
@@ -380,6 +380,23 @@ class PropriedadesMoldesDialog(QDialog):
 
         raiz.addWidget(painel_esq, 0)
         raiz.addWidget(painel_dir, 1)
+        self._ajustar_larguras_campos()
+
+    def _ajustar_larguras_campos(self):
+        combos = [
+            self.cmb_aplicar_grade,
+            self.cmb_area_tamanho,
+            self.cmb_grade_tamanhos,
+            self.cmb_elementos_molde,
+            self.cmb_tipo_corte,
+            self.cmb_espelhar,
+            self.cmb_giro,
+            self.cmb_tipo_corte_cam,
+        ]
+        for combo in combos:
+            combo.setMinimumContentsLength(18)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            combo.setMinimumWidth(170)
 
     def _criar_tab_propriedades(self) -> QWidget:
         aba = QWidget()
@@ -493,7 +510,7 @@ class PropriedadesMoldesDialog(QDialog):
         grid_esq.addLayout(botoes)
 
         quadro_dir = QGroupBox()
-        quadro_dir.setFixedWidth(205)
+        quadro_dir.setFixedWidth(320)
         form = QFormLayout(quadro_dir)
         form.setContentsMargins(10, 10, 10, 10)
         form.setSpacing(8)

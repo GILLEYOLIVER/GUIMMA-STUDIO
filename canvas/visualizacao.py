@@ -7,7 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
@@ -183,6 +183,12 @@ class VisualizacaoCanvas(QWidget):
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
         self._painel_coordenadas_posicao = None
         self._reposicionar_painel_coordenadas()
+
+    def sincronizar_paineis_auxiliares(self):
+        """Recalcula posições dos painéis flutuantes com o tamanho atual do canvas."""
+        self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
         if self.painel_coordenadas.isVisible():
@@ -823,6 +829,8 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
+            if idx in self._selecionados:
+                self._desenhar_selecao_molde(painter, base, el)
 
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
@@ -871,6 +879,37 @@ class VisualizacaoCanvas(QWidget):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+
+    def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
+        pontos_tela = [self._cena_para_tela(pt) for pt in base]
+        xs = [p.x() for p in pontos_tela]
+        ys = [p.y() for p in pontos_tela]
+        if not xs or not ys:
+            return
+
+        ret_pen = QPen(QColor("#ff3b30"), 1.0, Qt.DashLine)
+        ret_pen.setDashPattern([3.5, 2.5])
+        painter.setPen(ret_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
+
+        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+        if len(cantos) >= 4:
+            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
+        else:
+            pontos_controle = pontos_tela[:4]
+
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
+        for pt in pontos_controle:
+            d = 4
+            diamond = QPolygon([
+                QPoint(int(pt.x()), int(pt.y() - d)),
+                QPoint(int(pt.x() + d), int(pt.y())),
+                QPoint(int(pt.x()), int(pt.y() + d)),
+                QPoint(int(pt.x() - d), int(pt.y())),
+            ])
+            painter.drawPolygon(diamond)
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1_tela = self._cena_para_tela(inicio)
