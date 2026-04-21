@@ -13,6 +13,16 @@ class MoldResult:
     helper_controls: list[dict]
 
 
+def polygon_signed_area(points: list[tuple[float, float]]) -> float:
+    poly = ensure_closed_polyline(points)
+    if len(poly) < 4:
+        return 0.0
+    acc = 0.0
+    for a, b in zip(poly, poly[1:]):
+        acc += (a[0] * b[1]) - (b[0] * a[1])
+    return 0.5 * acc
+
+
 def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
@@ -40,9 +50,28 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
     return inside
 
 
+def normalize_closed_polyline(points: list[tuple[float, float]], clockwise: bool = True) -> list[tuple[float, float]]:
+    poly = ensure_closed_polyline(points)
+    if len(poly) < 4:
+        return poly
+    area = polygon_signed_area(poly)
+    is_clockwise = area < 0
+    if clockwise != is_clockwise:
+        rev = list(reversed(poly[:-1]))
+        return [*rev, rev[0]]
+    return poly
+
+
+def contour_is_valid(points: list[tuple[float, float]], min_vertices: int = 3, min_abs_area: float = 1e-4) -> bool:
+    poly = ensure_closed_polyline(points)
+    if len(poly) < (min_vertices + 1):
+        return False
+    return abs(polygon_signed_area(poly)) >= min_abs_area
+
+
 def build_shape_from_polyline(points: list[tuple[float, float]]) -> GeoShape:
-    closed_points = ensure_closed_polyline(points)
-    if len(closed_points) < 4:
+    closed_points = normalize_closed_polyline(points, clockwise=True)
+    if not contour_is_valid(closed_points):
         raise ValueError("Polyline fechada precisa de ao menos 3 vértices.")
 
     nodes = [GeoNode(x=p[0], y=p[1]) for p in closed_points[:-1]]

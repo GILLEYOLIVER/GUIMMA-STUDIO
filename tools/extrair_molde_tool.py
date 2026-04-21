@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.geometry.engine import internal_angle
-from core.geometry_bridge import create_mold_payload, element_contains_point
+from core.geometry_bridge import compose_closed_contour, create_mold_payload, element_contains_point
 from tools.tool_base import FerramentaBase
 
 
@@ -107,7 +107,7 @@ class Ferramenta(FerramentaBase):
             if not candidatos:
                 self.set_status("Clique na borda ou dentro do contorno (ou pré-selecione) para continuar.")
                 return False
-            idx = candidatos[0]
+            idx = self._escolher_melhor_candidato(canvas, candidatos)
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 self.set_status("Selecione polyline para extrair molde.")
@@ -214,6 +214,20 @@ class Ferramenta(FerramentaBase):
                 candidatos.append(idx)
         return candidatos
 
+    def _escolher_melhor_candidato(self, canvas, candidatos: list[int]) -> int:
+        """Escolhe o menor contorno válido sob o ponto (comportamento esperado para 'face interna')."""
+        melhor_idx = candidatos[0]
+        melhor_area = float("inf")
+        for idx in candidatos:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in canvas.cena.elementos[idx].get("pontos", [])]
+            area = self._area_poligono(pontos)
+            if 1e-6 < area < melhor_area:
+                melhor_area = area
+                melhor_idx = idx
+        return melhor_idx
+
     def _ponto_dentro_poligono(self, pt: QPointF, pontos: list[QPointF]) -> bool:
         polygon = [(p.x(), p.y()) for p in pontos]
         return element_contains_point({"pontos": polygon}, (pt.x(), pt.y()))
@@ -222,6 +236,8 @@ class Ferramenta(FerramentaBase):
         if not self._selecoes_manuais:
             return False
         idxs = sorted(self._selecoes_manuais)
+        if self._cfg.get("compor_contornos") and len(idxs) > 1:
+            return self._criar_molde_composto(canvas, idxs)
         criou = False
         for idx in idxs:
             if idx < 0 or idx >= len(canvas.cena.elementos):
@@ -229,7 +245,11 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
-            payload = create_mold_payload(el)
+            try:
+                payload = create_mold_payload(el)
+            except ValueError as exc:
+                self.set_status(f"Contorno inválido no elemento {idx + 1}: {exc}")
+                continue
             el["pontos"] = payload["pontos"]
 
             el["molde"] = True
@@ -243,6 +263,40 @@ class Ferramenta(FerramentaBase):
             criou = True
         self._molde_criado = criou
         return criou
+
+    def _criar_molde_composto(self, canvas, idxs: list[int]) -> bool:
+        elementos = [canvas.cena.elementos[idx] for idx in idxs if 0 <= idx < len(canvas.cena.elementos)]
+        elementos = [el for el in elementos if el.get("tipo") == "polyline"]
+        if not elementos:
+            return False
+        try:
+            pontos = compose_closed_contour(elementos)
+            novo = {"tipo": "polyline", "pontos": pontos}
+            payload = create_mold_payload(novo)
+        except ValueError as exc:
+            self.set_status(f"Falha ao compor contorno: {exc}")
+            return False
+
+        novo.update(
+            {
+                "pontos": payload["pontos"],
+                "molde": True,
+                "nome_molde": self._proximo_nome_molde(canvas),
+                "shape_id": payload["shape_id"],
+                "node_ids": payload["node_ids"],
+                "segment_ids": payload["segment_ids"],
+                "controle_cantos": payload["controle_cantos"],
+                "pontos_controle_principais": payload["pontos_controle_principais"],
+                "pontos_auxiliares": payload["pontos_auxiliares"],
+                "origens_contorno": idxs,
+            }
+        )
+        canvas.cena.elementos.append(novo)
+        self._idx_selecionado = len(canvas.cena.elementos) - 1
+        self._selecoes_manuais = {self._idx_selecionado}
+        canvas._selecionados = {self._idx_selecionado}
+        self._molde_criado = True
+        return True
 
     def _extrair_indice(self, canvas, idx: int):
         if idx < 0 or idx >= len(canvas.cena.elementos):
@@ -424,6 +478,15 @@ class Ferramenta(FerramentaBase):
 
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2)
+
+    def _area_poligono(self, pontos: list[QPointF]) -> float:
+        if len(pontos) < 3:
+            return 0.0
+        poly = pontos if self._dist(pontos[0], pontos[-1]) <= 0.001 else [*pontos, pontos[0]]
+        area2 = 0.0
+        for a, b in zip(poly, poly[1:]):
+            area2 += (a.x() * b.y()) - (b.x() * a.y())
+        return abs(area2) * 0.5
 
     def _angulo_interno(self, a: QPointF, b: QPointF, c: QPointF) -> float:
         return internal_angle((a.x(), a.y()), (b.x(), b.y()), (c.x(), c.y()))
