@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-label="Molde não pronto">
+  <path d="M12 3.5L21 20H3L12 3.5z" fill="#F39C12" stroke="#C97D0A" stroke-width="1.2" stroke-linejoin="round"/>
+  <rect x="11" y="8" width="2" height="7" rx="1" fill="#FFFFFF"/>
+  <circle cx="12" cy="17.5" r="1.2" fill="#FFFFFF"/>
+</svg>
