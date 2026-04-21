@@ -806,8 +806,8 @@ class VisualizacaoCanvas(QWidget):
                     cor_base = self._cores_tecidos[tecido]
             selecionado = idx in self._selecionados
             is_molde = bool(elemento.get("molde"))
-            cor = cor_base if (selecionado and is_molde) else (self._cor_realce(cor_base) if selecionado else cor_base)
-            esp = float(elemento.get("espessura", 1.0)) + (0.0 if (selecionado and is_molde) else (0.8 if selecionado else 0.0))
+            cor = cor_base
+            esp = float(elemento.get("espessura", 1.0))
             if elemento.get("tipo") == "polyline":
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
@@ -958,54 +958,6 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
-
-    def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
-        pontos_tela = [self._cena_para_tela(pt) for pt in base]
-        xs = [p.x() for p in pontos_tela]
-        ys = [p.y() for p in pontos_tela]
-        if not xs or not ys:
-            return
-
-        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
-        ret_pen.setDashPattern([3.5, 2.5])
-        painter.setPen(ret_pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
-
-        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-        if len(cantos) >= 4:
-            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
-        else:
-            pontos_controle = pontos_tela[:4]
-
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor("#000000"))
-        for pt in pontos_controle:
-            d = 4
-            diamond = QPolygon([
-                QPoint(int(pt.x()), int(pt.y() - d)),
-                QPoint(int(pt.x() + d), int(pt.y())),
-                QPoint(int(pt.x()), int(pt.y() + d)),
-                QPoint(int(pt.x() - d), int(pt.y())),
-            ])
-            painter.drawPolygon(diamond)
-
-    def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
-        pontos: list[QPointF] = []
-        if elemento.get("tipo") == "polyline":
-            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
-        elif elemento.get("tipo") == "bezier_quadratica":
-            pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
-        if not pontos:
-            return
-        tela = [self._cena_para_tela(p) for p in pontos]
-        xs = [p.x() for p in tela]
-        ys = [p.y() for p in tela]
-        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
-        pen.setDashPattern([3.5, 2.5])
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1_tela = self._cena_para_tela(inicio)
