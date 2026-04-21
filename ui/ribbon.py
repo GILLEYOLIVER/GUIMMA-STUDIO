@@ -82,7 +82,9 @@ class RibbonButton(QToolButton):
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.setIconSize(QSize(16, 16))
-            self.setFixedSize(172, 32)
+            self.setFixedHeight(28)
+            self.setMinimumWidth(118)
+            self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -92,7 +94,7 @@ class RibbonButton(QToolButton):
                     color: #1e1e1e;
                     font-size: 13px;
                     font-weight: 500;
-                    padding: 0 6px;
+                    padding: 0 4px;
                     border-radius: 4px;
                 }
                 QToolButton:hover { background: #eef5ff; border: none; }
@@ -395,7 +397,13 @@ class ColorControlWidget(QFrame):
         return pix
 
     def _selecionar_cor(self):
-        cor = QColorDialog.getColor(QColor(self._cor), self, "Selecionar cor da linha")
+        dialog = QColorDialog(QColor(self._cor), self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Selecionar cor da linha")
+        dialog.setStyleSheet("QColorDialog { background:#f4f4f4; color:#111111; }")
+        if dialog.exec() != QColorDialog.Accepted:
+            return
+        cor = dialog.currentColor()
         if not cor.isValid():
             return
         self._cor = cor.name()
@@ -410,6 +418,15 @@ class ColorControlWidget(QFrame):
     def valor(self) -> dict:
         return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura, "amplitude": self._amplitude}
 
+    def set_valor(self, estilo: dict):
+        if not isinstance(estilo, dict):
+            return
+        self._cor = str(estilo.get("cor", self._cor))
+        self._estilo = str(estilo.get("estilo", self._estilo))
+        self._espessura = float(estilo.get("espessura", self._espessura))
+        self._amplitude = float(estilo.get("amplitude", self._amplitude))
+        self._atualizar_preview_cor()
+
 
 class RibbonGroup(QFrame):
     tool_selected = Signal(str)
@@ -419,7 +436,7 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(92)
+        self.setFixedHeight(100)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         raiz = QVBoxLayout(self)
@@ -486,7 +503,7 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(20)
+        rodape.setFixedHeight(16)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 600; border-top: 1px solid #d9d9d9;")
         raiz.addWidget(rodape)
@@ -609,6 +626,10 @@ class RibbonWidget(QWidget):
             if tab.tab_id == tab_id:
                 return [tid for group in tab.groups for tid in group.tools]
         return []
+
+    def aplicar_estilo(self, estilo: dict):
+        for controle in self.findChildren(ColorControlWidget):
+            controle.set_valor(estilo)
 
 
 def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:
