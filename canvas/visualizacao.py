@@ -105,7 +105,7 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
-        self.zoom = max(0.025, min(zoom, 5000.0))
+        self.zoom = max(0.025, min(zoom, 10000.0))
         self.zoom_changed.emit(self.zoom)
         self.update()
 
@@ -230,7 +230,10 @@ class VisualizacaoCanvas(QWidget):
 
     def formatar_distancia(self, valor_cena: float, casas: int = 2) -> str:
         valor_unidade = self.converter_de_cena(valor_cena)
-        return f"{valor_unidade:.{casas}f} {self._unidade_sigla}"
+        txt = f"{valor_unidade:.{casas}f}"
+        if self._unidade_sigla == "cm":
+            txt = txt.rstrip("0").rstrip(".")
+        return f"{txt} {self._unidade_sigla}"
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))
