@@ -920,7 +920,7 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
             return
-        margem_cm = 5.0
+        margem_cm = 0.5
         min_x = min(pt.x() for pt in base) - margem_cm
         max_x = max(pt.x() for pt in base) + margem_cm
         min_y = min(pt.y() for pt in base) - margem_cm
@@ -964,7 +964,7 @@ class VisualizacaoCanvas(QWidget):
             pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
         if not pontos:
             return
-        margem_cm = 5.0
+        margem_cm = 0.5
         min_x = min(p.x() for p in pontos) - margem_cm
         max_x = max(p.x() for p in pontos) + margem_cm
         min_y = min(p.y() for p in pontos) - margem_cm

@@ -175,7 +175,7 @@ class Ferramenta(FerramentaBase):
                 pontos = [QPointF(*el["p0"]), QPointF(*el["p1"]), QPointF(*el["p2"])]
             if not pontos:
                 continue
-            margem = 5.0
+            margem = 0.5
             min_x = min(p.x() for p in pontos) - margem
             max_x = max(p.x() for p in pontos) + margem
             min_y = min(p.y() for p in pontos) - margem
