@@ -889,9 +889,27 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
         pontos: list[tuple[float, float]] = []
         for el in elementos:
-            if el.get("tipo") != "polyline":
-                continue
-            pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            tipo = el.get("tipo")
+            if tipo == "polyline":
+                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            elif tipo == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    if chave in el:
+                        x, y = el[chave]
+                        pontos.append((float(x), float(y)))
+            elif tipo in {"circle", "esfera"}:
+                centro = el.get("centro")
+                raio = float(el.get("raio", 0.0))
+                if isinstance(centro, (tuple, list)) and len(centro) == 2:
+                    cx, cy = float(centro[0]), float(centro[1])
+                    pontos.extend(
+                        [
+                            (cx - raio, cy - raio),
+                            (cx + raio, cy - raio),
+                            (cx - raio, cy + raio),
+                            (cx + raio, cy + raio),
+                        ]
+                    )
         if not pontos:
             return
         xs = [p[0] for p in pontos]
