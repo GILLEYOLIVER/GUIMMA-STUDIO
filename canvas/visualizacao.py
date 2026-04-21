@@ -799,8 +799,9 @@ class VisualizacaoCanvas(QWidget):
         for idx, elemento in enumerate(self.cena.elementos):
             cor_base = elemento.get("cor", "#d0d0d0")
             selecionado = idx in self._selecionados
-            cor = self._cor_realce(cor_base) if selecionado else cor_base
-            esp = float(elemento.get("espessura", 1.0)) + (0.8 if selecionado else 0.0)
+            is_molde = bool(elemento.get("molde"))
+            cor = cor_base if (selecionado and is_molde) else (self._cor_realce(cor_base) if selecionado else cor_base)
+            esp = float(elemento.get("espessura", 1.0)) + (0.0 if (selecionado and is_molde) else (0.8 if selecionado else 0.0))
             if elemento.get("tipo") == "polyline":
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
@@ -872,7 +873,7 @@ class VisualizacaoCanvas(QWidget):
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
-            if el.get("mostrar_controles", True):
+            if el.get("mostrar_controles", True) and idx not in self._selecionados:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):

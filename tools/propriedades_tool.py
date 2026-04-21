@@ -276,7 +276,7 @@ class PropriedadesMoldesDialog(QDialog):
         QTextEdit { padding: 4px; }
         QGroupBox {
             border: 1px solid #c8c8c8;
-            margin-top: 6px;
+            margin-top: 10px;
             background: #f5f5f5;
             font-weight: 600;
         }
@@ -625,7 +625,7 @@ class PropriedadesMoldesDialog(QDialog):
             self._renderizar_tabela_graduacao()
         elif coluna == 2:
             cor_inicial = QColor(str(item.get("cor") or "#ffffff"))
-            cor = QColorDialog.getColor(cor_inicial, self, "Cor do tamanho")
+            cor = self._selecionar_cor_clara(cor_inicial, "Cor do tamanho")
             if cor.isValid():
                 item["cor"] = cor.name()
                 self._renderizar_tabela_graduacao()
@@ -705,8 +705,8 @@ class PropriedadesMoldesDialog(QDialog):
         topo = QGroupBox("Manipular")
         grid = QGridLayout(topo)
         grid.setContentsMargins(10, 8, 10, 8)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(10)
 
         self.cmb_elementos_molde = QComboBox()
         self.cmb_elementos_molde.addItems(["Nenhum", "Nome", "Descrição", "Observações", "Fio", "Números"])
@@ -735,8 +735,8 @@ class PropriedadesMoldesDialog(QDialog):
         box_vis = QGroupBox("Visualização")
         gvis = QGridLayout(box_vis)
         gvis.setContentsMargins(10, 8, 10, 8)
-        gvis.setHorizontalSpacing(14)
-        gvis.setVerticalSpacing(4)
+        gvis.setHorizontalSpacing(24)
+        gvis.setVerticalSpacing(10)
 
         self.chk_mostrar_nome = QCheckBox("Nome")
         self.chk_preencher = QCheckBox("Preencher")
@@ -790,6 +790,8 @@ class PropriedadesMoldesDialog(QDialog):
         gvis.addWidget(self.chk_giro_visual, 4, 5)
         gvis.addWidget(self.chk_pique, 5, 0)
         gvis.addWidget(self.chk_margem_visual, 5, 3)
+        for linha in range(6):
+            gvis.setRowMinimumHeight(linha, 30)
 
         rodape = QHBoxLayout()
         self.btn_aplicar_visual = QPushButton("Aplicar todos")
@@ -871,15 +873,23 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
+        diretos: list[MoldeRef] = []
         for ref in self._refs:
-            grupo = str(ref.dados.get("grupo_molde") or "")
-            grupos.setdefault(grupo, []).append(ref)
+            tecido = str(ref.dados.get("tecido") or "").strip()
+            grupo = tecido if tecido else str(ref.dados.get("grupo_molde") or "").strip()
+            if not grupo or grupo == "1":
+                diretos.append(ref)
+            else:
+                grupos.setdefault(grupo, []).append(ref)
+
+        for ref in diretos:
+            item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
+            item.setData(0, Qt.UserRole, ref.indice)
+            raiz.addChild(item)
 
         for grupo_nome, itens in grupos.items():
-            pai = raiz
-            if grupo_nome:
-                pai = QTreeWidgetItem([grupo_nome])
-                raiz.addChild(pai)
+            pai = QTreeWidgetItem([grupo_nome])
+            raiz.addChild(pai)
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
@@ -1010,6 +1020,7 @@ class PropriedadesMoldesDialog(QDialog):
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
         self.preview.set_molde(dict(molde))
+        self.recarregar_lista()
         self.dados_aplicados.emit()
         return True
 
@@ -1030,7 +1041,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.recarregar_lista()
 
     def _escolher_cor(self):
-        cor = QColorDialog.getColor(QColor(self._cor_visual), self, "Cor do molde")
+        cor = self._selecionar_cor_clara(QColor(self._cor_visual), "Cor do molde")
         if not cor.isValid():
             return
         self._cor_visual = cor.name()
@@ -1040,6 +1051,26 @@ class PropriedadesMoldesDialog(QDialog):
             clone = dict(molde)
             clone["cor"] = self._cor_visual
             self.preview.set_molde(clone)
+
+    def _selecionar_cor_clara(self, cor_inicial: QColor, titulo: str) -> QColor:
+        dialog = QColorDialog(cor_inicial, self)
+        dialog.setWindowTitle(titulo)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setStyleSheet(
+            """
+            QColorDialog {
+                background: #f4f4f4;
+                color: #101010;
+            }
+            QLabel, QPushButton, QSpinBox, QLineEdit {
+                color: #101010;
+                background: #ffffff;
+            }
+            """
+        )
+        if dialog.exec() == QDialog.Accepted:
+            return dialog.selectedColor()
+        return QColor()
 
 
 class Ferramenta(FerramentaBase):
