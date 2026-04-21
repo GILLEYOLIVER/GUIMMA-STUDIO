@@ -625,6 +625,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog.setModal(False)
         dialog.resize(520, 760)
         dialog.setMinimumSize(500, 720)
+        self._aplicar_estilo_claro_dialogo(dialog)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
@@ -761,6 +762,36 @@ class GuimmaStudioMainWindow(QMainWindow):
         btn_ok.clicked.connect(aplicar_e_fechar)
         btn_cancelar.clicked.connect(dialog.reject)
         dialog.exec()
+
+    def _aplicar_estilo_claro_dialogo(self, dialog: QDialog):
+        dialog.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QGroupBox { border: 1px solid #c8c8c8; margin-top: 10px; background: #f5f5f5; }
+            QGroupBox::title { left: 6px; padding: 0 2px; }
+            QLabel, QCheckBox { color: #111111; }
+            QPushButton, QComboBox, QLineEdit {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                border-radius: 3px;
+                min-height: 22px;
+                padding: 2px 6px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                gridline-color: #d6dbe0;
+            }
+            QHeaderView::section {
+                background: #f1f1f1;
+                color: #111111;
+                border: 1px solid #c2c8cf;
+                padding: 3px;
+            }
+            """
+        )
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {

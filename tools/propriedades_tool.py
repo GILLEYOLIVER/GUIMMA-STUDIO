@@ -1108,6 +1108,32 @@ class ConfigurarCoresTecidosDialog(QDialog):
         self.setWindowTitle("Cores dos tecidos")
         self.resize(430, 520)
         self.setMinimumSize(400, 460)
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel { color: #111111; }
+            QPushButton, QComboBox, QLineEdit {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                border-radius: 3px;
+                min-height: 22px;
+                padding: 2px 6px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                gridline-color: #d6dbe0;
+            }
+            QHeaderView::section {
+                background: #f1f1f1;
+                color: #111111;
+                border: 1px solid #c2c8cf;
+                padding: 3px;
+            }
+            """
+        )
         self._mapa: dict[str, str] = dict(mapa_cores)
         self._contador_novos = 0
         self._construir_ui()
