@@ -166,7 +166,7 @@ class RetaToolUI(QFrame):
         layout.addWidget(self._linha())
 
         layout.addWidget(self._section_label("Cursor"))
-        self.mouse_coord_label = QLabel("X 0.00 cm  |  Y 0.00 cm")
+        self.mouse_coord_label = QLabel("X 0.00  |  Y 0.00")
         self.mouse_coord_label.setObjectName("mouseCoord")
         self.mouse_coord_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.mouse_coord_label)
@@ -291,7 +291,7 @@ class RetaToolUI(QFrame):
             self.delta_changed.emit(self.spin_dx.value(), self.spin_dy.value())
 
     def atualizar_coordenadas_mouse(self, x: float, y: float):
-        self.mouse_coord_label.setText(f"X {x:.2f} cm  |  Y {y:.2f} cm")
+        self.mouse_coord_label.setText(f"X {x:.2f}  |  Y {y:.2f}")
 
     def atualizar_status_operacao(self, texto: str):
         self.status_label.setText(texto)
@@ -587,7 +587,7 @@ class Ferramenta(FerramentaBase):
         else:
             comp = self._distancia(self._pontos_atuais[-2], self._pontos_atuais[-1])
             ang = self._angulo_entre(self._pontos_atuais[-2], self._pontos_atuais[-1])
-            msg = f"Segmento inserido: {comp:.2f} cm | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
+            msg = f"Segmento inserido: {self.canvas.formatar_distancia(comp)} | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
         if self.canvas.lbl_status:
             self.canvas.lbl_status.setText(msg)
         if self.ui_flutuante:
@@ -615,7 +615,7 @@ class Ferramenta(FerramentaBase):
         )
         msg = (
             f"Desenho finalizado com {len(pontos_finalizacao) - 1} segmento(s) | "
-            f"Comprimento total {comprimento_total:.2f} cm. Clique direito novamente para sair."
+            f"Comprimento total {self.canvas.formatar_distancia(comprimento_total)}. Clique direito novamente para sair."
         )
         self._desenhando = False
         self._terminado = True
@@ -753,7 +753,12 @@ class Ferramenta(FerramentaBase):
         if canvas._snap_resultado:
             trava_info.append(f"snap {canvas._snap_resultado.tipo}")
         sufixo = f" | {' | '.join(trava_info)}" if trava_info else ""
-        texto = f"Prévia: {comp:.2f} cm | {ang:.1f}° | Cursor X {pos_real.x():.2f} Y {pos_real.y():.2f}{sufixo}"
+        x_u = canvas.converter_de_cena(pos_real.x())
+        y_u = canvas.converter_de_cena(pos_real.y())
+        texto = (
+            f"Prévia: {canvas.formatar_distancia(comp)} | {ang:.1f}° | "
+            f"Cursor X {x_u:.2f} Y {y_u:.2f}{sufixo}"
+        )
         if canvas.lbl_status:
             canvas.lbl_status.setText(texto)
         if self.ui_flutuante:
@@ -856,7 +861,7 @@ class Ferramenta(FerramentaBase):
         ang = self._angulo_entre(origem, destino)
         meio = QPointF((origem.x() + destino.x()) / 2.0, (origem.y() + destino.y()) / 2.0)
         meio_tela = canvas._cena_para_tela(meio)
-        texto = f"{comp:.2f} cm  |  {ang:.1f}°"
+        texto = f"{canvas.formatar_distancia(comp)}  |  {ang:.1f}°"
 
         font = QFont("Arial", 8)
         font.setBold(True)
