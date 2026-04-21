@@ -301,7 +301,7 @@ class Ferramenta(FerramentaBase):
             except ValueError as exc:
                 self.set_status(f"Contorno inválido no elemento {idx + 1}: {exc}")
                 continue
-            pontos_auxiliares = payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else []
+            pontos_auxiliares: list[dict] = []
             novo = {
                 "tipo": "polyline",
                 "pontos": payload["pontos"],
@@ -311,7 +311,7 @@ class Ferramenta(FerramentaBase):
                 "node_ids": payload["node_ids"],
                 "segment_ids": payload["segment_ids"],
                 "controle_cantos": payload["controle_cantos"],
-                "pontos_controle_principais": payload["pontos_controle_principais"],
+                "pontos_controle_principais": [],
                 "pontos_auxiliares": pontos_auxiliares,
                 "origem_contorno": idx,
             }
@@ -355,8 +355,8 @@ class Ferramenta(FerramentaBase):
                 "node_ids": payload["node_ids"],
                 "segment_ids": payload["segment_ids"],
                 "controle_cantos": payload["controle_cantos"],
-                "pontos_controle_principais": payload["pontos_controle_principais"],
-                "pontos_auxiliares": payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else [],
+                "pontos_controle_principais": [],
+                "pontos_auxiliares": [],
                 "origens_contorno": idxs,
             }
         )
@@ -383,8 +383,8 @@ class Ferramenta(FerramentaBase):
             "node_ids": payload["node_ids"],
             "segment_ids": payload["segment_ids"],
             "controle_cantos": payload["controle_cantos"],
-            "pontos_controle_principais": payload["pontos_controle_principais"],
-            "pontos_auxiliares": payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else [],
+            "pontos_controle_principais": [],
+            "pontos_auxiliares": [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
         }
         self._enriquecer_metadados_molde(novo)
@@ -427,19 +427,17 @@ class Ferramenta(FerramentaBase):
         max_y = max(ys)
         molde.setdefault("molde_id", str(uuid4()))
         molde.setdefault("fio_angulo", 0.0)
-        molde.setdefault("fio_origem", (min(xs), cy))
-        molde.setdefault("fio_fim", (max(xs), cy))
+        largura = max(xs) - min(xs)
+        margem = largura * 0.20
+        molde.setdefault("fio_origem", (min(xs) + margem, cy))
+        molde.setdefault("fio_fim", (max(xs) - margem, cy))
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
         if not molde.get("controle_cantos"):
             molde["controle_cantos"] = [(x, y) for x, y in base]
-        if not molde.get("pontos_controle_principais"):
-            molde["pontos_controle_principais"] = [
-                {"indice": i + 1, "x": x, "y": y} for i, (x, y) in enumerate(base)
-            ]
-        if "pontos_auxiliares" not in molde:
-            molde["pontos_auxiliares"] = []
+        molde.setdefault("pontos_controle_principais", [])
+        molde.setdefault("pontos_auxiliares", [])
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False

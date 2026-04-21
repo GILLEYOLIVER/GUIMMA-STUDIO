@@ -843,8 +843,10 @@ class VisualizacaoCanvas(QWidget):
                     xs = [p.x() for p in base]
                     ys = [p.y() for p in base]
                     cx = sum(xs) / len(xs)
-                    p1 = QPointF(cx, max(ys))
-                    p2 = QPointF(cx, min(ys))
+                    largura = max(xs) - min(xs)
+                    margem = largura * 0.20
+                    p1 = QPointF(min(xs) + margem, sum(ys) / len(ys))
+                    p2 = QPointF(max(xs) - margem, sum(ys) / len(ys))
                 self._desenhar_segmento(painter, p1, p2, cor="#ffffff", espessura=1.0)
                 self._desenhar_seta_fio(painter, p1, p2)
                 fim_tela = self._cena_para_tela(p2)
@@ -859,18 +861,6 @@ class VisualizacaoCanvas(QWidget):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
-                principais = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_controle_principais", [])]
-                painter.setPen(QPen(QColor("#6be3ff"), 1.0))
-                painter.setBrush(QColor("#6be3ff"))
-                for pt in principais:
-                    pt_tela = self._cena_para_tela(pt)
-                    painter.drawEllipse(pt_tela, 2.2, 2.2)
-                auxiliares = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_auxiliares", [])]
-                painter.setPen(QPen(QColor("#ff2a2a"), 1.0))
-                painter.setBrush(QColor("#ff2a2a"))
-                for pt in auxiliares:
-                    pt_tela = self._cena_para_tela(pt)
-                    painter.drawEllipse(pt_tela, 1.8, 1.8)
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         dx = fim.x() - inicio.x()
