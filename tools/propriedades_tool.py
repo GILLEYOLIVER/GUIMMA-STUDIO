@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import sqrt
+from random import randint
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
@@ -215,11 +216,13 @@ class PropriedadesMoldesDialog(QDialog):
         self._refs: list[MoldeRef] = []
         self._indice_atual: int | None = None
         self._cor_visual = "#ffffff"
+        self._graduacao_linhas: list[dict] = []
+        self._contador_novos_tamanhos = 0
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.resize(928, 760)
-        self.setMinimumSize(900, 720)
+        self.resize(1060, 780)
+        self.setMinimumSize(1020, 740)
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
@@ -273,7 +276,7 @@ class PropriedadesMoldesDialog(QDialog):
         QTextEdit { padding: 4px; }
         QGroupBox {
             border: 1px solid #c8c8c8;
-            margin-top: 6px;
+            margin-top: 10px;
             background: #f5f5f5;
             font-weight: 600;
         }
@@ -380,6 +383,23 @@ class PropriedadesMoldesDialog(QDialog):
 
         raiz.addWidget(painel_esq, 0)
         raiz.addWidget(painel_dir, 1)
+        self._ajustar_larguras_campos()
+
+    def _ajustar_larguras_campos(self):
+        combos = [
+            self.cmb_aplicar_grade,
+            self.cmb_area_tamanho,
+            self.cmb_grade_tamanhos,
+            self.cmb_elementos_molde,
+            self.cmb_tipo_corte,
+            self.cmb_espelhar,
+            self.cmb_giro,
+            self.cmb_tipo_corte_cam,
+        ]
+        for combo in combos:
+            combo.setMinimumContentsLength(18)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            combo.setMinimumWidth(170)
 
     def _criar_tab_propriedades(self) -> QWidget:
         aba = QWidget()
@@ -482,18 +502,26 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
+        self.tbl_graduacao.cellClicked.connect(self._on_tabela_graduacao_clicada)
         self._popular_tabela_graduacao()
         grid_esq.addWidget(self.tbl_graduacao)
 
         botoes = QHBoxLayout()
-        for texto in ("⬆ Novo", "Base", "⬇ Novo", "Excluir"):
-            btn = QPushButton(texto)
+        self.btn_novo_cima = QPushButton("⬆ Novo")
+        self.btn_base = QPushButton("Base")
+        self.btn_novo_baixo = QPushButton("⬇ Novo")
+        self.btn_excluir_tamanho = QPushButton("Excluir")
+        self.btn_novo_cima.clicked.connect(self._adicionar_tamanho_acima)
+        self.btn_base.clicked.connect(self._definir_tamanho_base)
+        self.btn_novo_baixo.clicked.connect(self._adicionar_tamanho_abaixo)
+        self.btn_excluir_tamanho.clicked.connect(self._excluir_tamanho_graduacao)
+        for btn in (self.btn_novo_cima, self.btn_base, self.btn_novo_baixo, self.btn_excluir_tamanho):
             btn.setFixedHeight(24)
             botoes.addWidget(btn)
         grid_esq.addLayout(botoes)
 
         quadro_dir = QGroupBox()
-        quadro_dir.setFixedWidth(205)
+        quadro_dir.setFixedWidth(320)
         form = QFormLayout(quadro_dir)
         form.setContentsMargins(10, 10, 10, 10)
         form.setSpacing(8)
@@ -503,6 +531,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.cmb_area_tamanho.addItems(["Manter diferença", "Igual tamanho", "Tamanho intermediário"])
         self.cmb_grade_tamanhos = QComboBox()
         self.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-GG(M)", "PP-XG(M)", "S-L(M)", "S-XL(M)", "1-3(2)", "1-4(2)", "1-5(3)", "2-12(6)", "36-50(40)"])
+        self.cmb_grade_tamanhos.currentTextChanged.connect(self._aplicar_grade_tamanhos)
         form.addRow("Aplicar", self.cmb_aplicar_grade)
         form.addRow("Área do tamanho", self.cmb_area_tamanho)
         form.addRow("Grade de tamanhos", self.cmb_grade_tamanhos)
@@ -513,18 +542,159 @@ class PropriedadesMoldesDialog(QDialog):
         return aba
 
     def _popular_tabela_graduacao(self):
-        dados = [("✓", "P", "#b6ff00"), ("✓", "M", "#1f8cff"), ("✓", "G", "#f3a300")]
-        for linha, (visao, tamanho, cor) in enumerate(dados):
-            item_v = QTableWidgetItem(visao)
+        if not self._graduacao_linhas:
+            grade_inicial = self.cmb_grade_tamanhos.currentText() if hasattr(self, "cmb_grade_tamanhos") else "P-G(M)"
+            self._aplicar_grade_tamanhos(grade_inicial)
+            return
+        self._renderizar_tabela_graduacao()
+
+    def _renderizar_tabela_graduacao(self):
+        linhas = self._graduacao_linhas
+        self.tbl_graduacao.setRowCount(len(linhas))
+        for linha, dado in enumerate(linhas):
+            item_v = QTableWidgetItem("✓" if dado.get("ativo", True) else "")
             item_v.setTextAlignment(Qt.AlignCenter)
+            item_v.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_graduacao.setItem(linha, 0, item_v)
-            item_t = QTableWidgetItem(tamanho)
+
+            item_t = QTableWidgetItem(str(dado.get("tamanho") or ""))
             item_t.setTextAlignment(Qt.AlignCenter)
+            item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            if dado.get("base", False):
+                item_t.setBackground(QColor("#2b7cd3"))
+                item_t.setForeground(QColor("#ffffff"))
             self.tbl_graduacao.setItem(linha, 1, item_t)
+
             item_c = QTableWidgetItem("")
-            item_c.setBackground(QColor(cor))
+            item_c.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item_c.setBackground(QColor(str(dado.get("cor") or "#ffffff")))
             self.tbl_graduacao.setItem(linha, 2, item_c)
-        self.tbl_graduacao.selectRow(1)
+
+        base_idx = next((i for i, d in enumerate(linhas) if d.get("base", False)), 0)
+        if linhas:
+            self.tbl_graduacao.selectRow(base_idx)
+
+    def _aplicar_grade_tamanhos(self, grade_texto: str):
+        tamanhos, base = self._extrair_tamanhos_grade(grade_texto)
+        self._graduacao_linhas = []
+        for tamanho in tamanhos:
+            self._graduacao_linhas.append({
+                "ativo": True,
+                "tamanho": tamanho,
+                "cor": self._gerar_cor_aleatoria(),
+                "base": str(tamanho) == str(base),
+            })
+        if self._graduacao_linhas and not any(l.get("base") for l in self._graduacao_linhas):
+            self._graduacao_linhas[len(self._graduacao_linhas) // 2]["base"] = True
+        self._renderizar_tabela_graduacao()
+        self._sincronizar_gradacao_no_molde()
+
+    def _extrair_tamanhos_grade(self, grade_texto: str) -> tuple[list[str], str | None]:
+        texto = str(grade_texto or "").strip()
+        if not texto or "-" not in texto:
+            return ["P", "M", "G"], "M"
+        base = None
+        if "(" in texto and ")" in texto:
+            base = texto[texto.find("(") + 1:texto.find(")")].strip()
+            texto = texto[:texto.find("(")].strip()
+        inicio, fim = [p.strip() for p in texto.split("-", 1)]
+
+        if inicio.isdigit() and fim.isdigit():
+            n1, n2 = int(inicio), int(fim)
+            passo = 2 if (n2 - n1) % 2 == 0 and abs(n2 - n1) >= 2 else 1
+            vals = list(range(n1, n2 + 1, passo))
+            return [str(v) for v in vals], base
+
+        escalas = [
+            ["PP", "P", "M", "G", "GG", "XG", "XXG"],
+            ["XS", "S", "M", "L", "XL", "XXL"],
+        ]
+        for escala in escalas:
+            if inicio in escala and fim in escala:
+                a, b = escala.index(inicio), escala.index(fim)
+                trecho = escala[min(a, b):max(a, b) + 1]
+                return trecho, base
+        return [inicio, "M", fim], base
+
+    def _on_tabela_graduacao_clicada(self, linha: int, coluna: int):
+        if not (0 <= linha < len(self._graduacao_linhas)):
+            return
+        item = self._graduacao_linhas[linha]
+        if coluna == 0:
+            item["ativo"] = not bool(item.get("ativo", True))
+            self._renderizar_tabela_graduacao()
+        elif coluna == 2:
+            cor_inicial = QColor(str(item.get("cor") or "#ffffff"))
+            cor = self._selecionar_cor_clara(cor_inicial, "Cor do tamanho")
+            if cor.isValid():
+                item["cor"] = cor.name()
+                self._renderizar_tabela_graduacao()
+        self._sincronizar_gradacao_no_molde()
+
+    def _linha_selecionada_graduacao(self) -> int:
+        row = self.tbl_graduacao.currentRow()
+        return row if 0 <= row < len(self._graduacao_linhas) else -1
+
+    def _definir_tamanho_base(self):
+        row = self._linha_selecionada_graduacao()
+        if row < 0:
+            return
+        for idx, linha in enumerate(self._graduacao_linhas):
+            linha["base"] = idx == row
+        self._renderizar_tabela_graduacao()
+        self._sincronizar_gradacao_no_molde()
+
+    def _adicionar_tamanho_acima(self):
+        if not self._graduacao_linhas:
+            return
+        novo = self._novo_tamanho_extremo(acima=True)
+        self._graduacao_linhas.insert(0, {"ativo": True, "tamanho": novo, "cor": self._gerar_cor_aleatoria(), "base": False})
+        self._renderizar_tabela_graduacao()
+        self.tbl_graduacao.selectRow(0)
+        self._sincronizar_gradacao_no_molde()
+
+    def _adicionar_tamanho_abaixo(self):
+        if not self._graduacao_linhas:
+            return
+        novo = self._novo_tamanho_extremo(acima=False)
+        self._graduacao_linhas.append({"ativo": True, "tamanho": novo, "cor": self._gerar_cor_aleatoria(), "base": False})
+        self._renderizar_tabela_graduacao()
+        self.tbl_graduacao.selectRow(len(self._graduacao_linhas) - 1)
+        self._sincronizar_gradacao_no_molde()
+
+    def _excluir_tamanho_graduacao(self):
+        row = self._linha_selecionada_graduacao()
+        if row < 0 or len(self._graduacao_linhas) <= 1:
+            return
+        era_base = bool(self._graduacao_linhas[row].get("base"))
+        del self._graduacao_linhas[row]
+        if era_base:
+            self._graduacao_linhas[min(row, len(self._graduacao_linhas) - 1)]["base"] = True
+        self._renderizar_tabela_graduacao()
+        self._sincronizar_gradacao_no_molde()
+
+    def _novo_tamanho_extremo(self, acima: bool) -> str:
+        tamanhos = [str(l.get("tamanho") or "") for l in self._graduacao_linhas]
+        if tamanhos and all(t.isdigit() for t in tamanhos):
+            nums = [int(t) for t in tamanhos]
+            passo = abs(nums[1] - nums[0]) if len(nums) > 1 else 1
+            passo = max(1, passo)
+            return str(min(nums) - passo) if acima else str(max(nums) + passo)
+        self._contador_novos_tamanhos += 1
+        prefixo = "NOVO_SUP" if acima else "NOVO_INF"
+        return f"{prefixo}_{self._contador_novos_tamanhos}"
+
+    def _gerar_cor_aleatoria(self) -> str:
+        return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
+
+    def _sincronizar_gradacao_no_molde(self):
+        molde = self._molde_atual()
+        if not molde:
+            return
+        molde["graduacao_grade_nome"] = self.cmb_grade_tamanhos.currentText().strip()
+        molde["graduacao_tamanhos"] = [dict(l) for l in self._graduacao_linhas]
+        ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
+        molde["graduacao_tamanhos_ativos"] = ativos
 
     def _criar_tab_visualizacao(self) -> QWidget:
         aba = QWidget()
@@ -535,8 +705,8 @@ class PropriedadesMoldesDialog(QDialog):
         topo = QGroupBox("Manipular")
         grid = QGridLayout(topo)
         grid.setContentsMargins(10, 8, 10, 8)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(10)
 
         self.cmb_elementos_molde = QComboBox()
         self.cmb_elementos_molde.addItems(["Nenhum", "Nome", "Descrição", "Observações", "Fio", "Números"])
@@ -565,8 +735,8 @@ class PropriedadesMoldesDialog(QDialog):
         box_vis = QGroupBox("Visualização")
         gvis = QGridLayout(box_vis)
         gvis.setContentsMargins(10, 8, 10, 8)
-        gvis.setHorizontalSpacing(14)
-        gvis.setVerticalSpacing(4)
+        gvis.setHorizontalSpacing(24)
+        gvis.setVerticalSpacing(10)
 
         self.chk_mostrar_nome = QCheckBox("Nome")
         self.chk_preencher = QCheckBox("Preencher")
@@ -620,6 +790,8 @@ class PropriedadesMoldesDialog(QDialog):
         gvis.addWidget(self.chk_giro_visual, 4, 5)
         gvis.addWidget(self.chk_pique, 5, 0)
         gvis.addWidget(self.chk_margem_visual, 5, 3)
+        for linha in range(6):
+            gvis.setRowMinimumHeight(linha, 30)
 
         rodape = QHBoxLayout()
         self.btn_aplicar_visual = QPushButton("Aplicar todos")
@@ -701,15 +873,23 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
+        diretos: list[MoldeRef] = []
         for ref in self._refs:
-            grupo = str(ref.dados.get("grupo_molde") or "")
-            grupos.setdefault(grupo, []).append(ref)
+            tecido = str(ref.dados.get("tecido") or "").strip()
+            grupo = tecido if tecido else str(ref.dados.get("grupo_molde") or "").strip()
+            if not grupo or grupo == "1":
+                diretos.append(ref)
+            else:
+                grupos.setdefault(grupo, []).append(ref)
+
+        for ref in diretos:
+            item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
+            item.setData(0, Qt.UserRole, ref.indice)
+            raiz.addChild(item)
 
         for grupo_nome, itens in grupos.items():
-            pai = raiz
-            if grupo_nome:
-                pai = QTreeWidgetItem([grupo_nome])
-                raiz.addChild(pai)
+            pai = QTreeWidgetItem([grupo_nome])
+            raiz.addChild(pai)
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
@@ -797,6 +977,19 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_preencher.setChecked(bool(molde.get("visual_preencher", False)))
         self._cor_visual = str(molde.get("cor") or "#ffffff")
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
+        grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
+        if grade_nome:
+            i_grade = self.cmb_grade_tamanhos.findText(grade_nome)
+            if i_grade >= 0:
+                self.cmb_grade_tamanhos.blockSignals(True)
+                self.cmb_grade_tamanhos.setCurrentIndex(i_grade)
+                self.cmb_grade_tamanhos.blockSignals(False)
+        linhas = molde.get("graduacao_tamanhos")
+        if isinstance(linhas, list) and linhas:
+            self._graduacao_linhas = [dict(l) for l in linhas]
+            self._renderizar_tabela_graduacao()
+        else:
+            self._aplicar_grade_tamanhos(self.cmb_grade_tamanhos.currentText())
         self.preview.set_molde(dict(molde))
 
     def _aplicar(self) -> bool:
@@ -821,11 +1014,13 @@ class PropriedadesMoldesDialog(QDialog):
         molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
         molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
+        self._sincronizar_gradacao_no_molde()
 
         self.canvas.update()
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
         self.preview.set_molde(dict(molde))
+        self.recarregar_lista()
         self.dados_aplicados.emit()
         return True
 
@@ -846,7 +1041,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.recarregar_lista()
 
     def _escolher_cor(self):
-        cor = QColorDialog.getColor(QColor(self._cor_visual), self, "Cor do molde")
+        cor = self._selecionar_cor_clara(QColor(self._cor_visual), "Cor do molde")
         if not cor.isValid():
             return
         self._cor_visual = cor.name()
@@ -856,6 +1051,26 @@ class PropriedadesMoldesDialog(QDialog):
             clone = dict(molde)
             clone["cor"] = self._cor_visual
             self.preview.set_molde(clone)
+
+    def _selecionar_cor_clara(self, cor_inicial: QColor, titulo: str) -> QColor:
+        dialog = QColorDialog(cor_inicial, self)
+        dialog.setWindowTitle(titulo)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setStyleSheet(
+            """
+            QColorDialog {
+                background: #f4f4f4;
+                color: #101010;
+            }
+            QLabel, QPushButton, QSpinBox, QLineEdit {
+                color: #101010;
+                background: #ffffff;
+            }
+            """
+        )
+        if dialog.exec() == QDialog.Accepted:
+            return dialog.selectedColor()
+        return QColor()
 
 
 class Ferramenta(FerramentaBase):
