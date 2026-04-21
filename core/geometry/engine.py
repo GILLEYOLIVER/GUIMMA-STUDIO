@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from math import acos, sqrt
+
+from core.geometry.model import GeoNode, GeoSegment, GeoShape
+
+
+@dataclass(slots=True)
+class MoldResult:
+    corner_controls: list[tuple[float, float]]
+    main_controls: list[dict]
+    helper_controls: list[dict]
+
+
+def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
+
+
+def ensure_closed_polyline(points: list[tuple[float, float]], eps: float = 0.001) -> list[tuple[float, float]]:
+    if len(points) < 2:
+        return points
+    if dist(points[0], points[-1]) <= eps:
+        return list(points)
+    return [*points, points[0]]
+
+
+def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
+    poly = ensure_closed_polyline(polygon)
+    inside = False
+    j = len(poly) - 1
+    x, y = point
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        intersect = ((yi > y) != (yj > y)) and (x < ((xj - xi) * (y - yi) / max((yj - yi), 1e-12)) + xi)
+        if intersect:
+            inside = not inside
+        j = i
+    return inside
+
+
+def build_shape_from_polyline(points: list[tuple[float, float]]) -> GeoShape:
+    closed_points = ensure_closed_polyline(points)
+    if len(closed_points) < 4:
+        raise ValueError("Polyline fechada precisa de ao menos 3 vértices.")
+
+    nodes = [GeoNode(x=p[0], y=p[1]) for p in closed_points[:-1]]
+    segments: list[GeoSegment] = []
+    for i, node in enumerate(nodes):
+        nxt = nodes[(i + 1) % len(nodes)]
+        segments.append(GeoSegment(start_node_id=node.id, end_node_id=nxt.id, segment_type="line"))
+    return GeoShape(nodes=nodes, segments=segments, closed=True)
+
+
+def build_mold_from_shape(shape: GeoShape) -> MoldResult:
+    corners = [(n.x, n.y) for n in shape.nodes]
+    mains = [{"id": n.id, "indice": i + 1, "x": n.x, "y": n.y} for i, n in enumerate(shape.nodes)]
+    helpers: list[dict] = []
+    for seg in shape.segments:
+        start = next(n for n in shape.nodes if n.id == seg.start_node_id)
+        end = next(n for n in shape.nodes if n.id == seg.end_node_id)
+        helpers.append(
+            {
+                "segment_id": seg.id,
+                "x": (start.x + end.x) / 2.0,
+                "y": (start.y + end.y) / 2.0,
+                "oculto": True,
+            }
+        )
+    return MoldResult(corner_controls=corners, main_controls=mains, helper_controls=helpers)
+
+
+def internal_angle(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+    bax, bay = a[0] - b[0], a[1] - b[1]
+    bcx, bcy = c[0] - b[0], c[1] - b[1]
+    na = sqrt((bax * bax) + (bay * bay))
+    nb = sqrt((bcx * bcx) + (bcy * bcy))
+    if na <= 1e-9 or nb <= 1e-9:
+        return 180.0
+    cosv = max(-1.0, min(1.0, ((bax * bcx) + (bay * bcy)) / (na * nb)))
+    return acos(cosv) * (180.0 / 3.141592653589793)
