@@ -136,7 +136,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "pique_angulo": float(op.get("pique_angulo", 0.0)),
             "mostrar_furador_iso": bool(op.get("mostrar_furador_iso", False)),
             "permitir_graduacao_altura": bool(op.get("permitir_graduacao_altura", False)),
-            "usar_ferramentas_moldes": bool(op.get("usar_ferramentas_moldes", False)),
+            "usar_ferramentas_moldes": bool(op.get("usar_ferramentas_moldes", True)),
             "rotacionar_duplo_clique": bool(op.get("rotacionar_duplo_clique", True)),
             "exibir_coef_encolhimento": bool(op.get("exibir_coef_encolhimento", True)),
             "exibir_ferramenta_costura": bool(op.get("exibir_ferramenta_costura", False)),
@@ -2261,6 +2261,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 

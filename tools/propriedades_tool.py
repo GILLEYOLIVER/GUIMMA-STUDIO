@@ -268,18 +268,18 @@ class PropriedadesMoldesDialog(QDialog):
             background: transparent;
         }
         QTabBar::tab {
-            background: #ebebeb;
-            border: 1px solid #d2d2d2;
-            padding: 5px 12px;
-            min-width: 62px;
+            background: #f3f3f3;
+            border: 1px solid #d8d8d8;
+            padding: 4px 14px;
+            min-width: 72px;
             margin-right: 1px;
             color: #000000;
         }
         QTabBar::tab:selected {
-            background: #f5f5f5;
-            border-bottom-color: #f5f5f5;
+            background: #ffffff;
+            border-bottom-color: #ffffff;
         }
-        QTabBar::tab:hover { background: #f0f0f0; }
+        QTabBar::tab:hover { background: #ffffff; }
         QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget {
             background: #ffffff;
             border: 1px solid #b5bcc3;
