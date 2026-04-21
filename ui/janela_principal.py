@@ -1317,10 +1317,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
-            if doc.get("elementos"):
-                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
-            else:
-                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
+            QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             self._marcar_area_como_salva(area)
@@ -2264,9 +2261,23 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = {
-            "elementos": area.canvas.elementos_para_salvar(),
-        }
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
     def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
