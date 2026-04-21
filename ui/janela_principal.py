@@ -1141,6 +1141,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_coordenadas.blockSignals(True)
             self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
             self.action_coordenadas.blockSignals(False)
+            QTimer.singleShot(0, area.canvas.sincronizar_paineis_auxiliares)
         else:
             self.lbl_escala.setText("Escala --")
 
