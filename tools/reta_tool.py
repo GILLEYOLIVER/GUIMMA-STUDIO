@@ -870,12 +870,15 @@ class Ferramenta(FerramentaBase):
         destino = canvas._preview_reta
         if destino is None:
             return
+        comp = self._distancia(origem, destino)
+        ang = self._angulo_entre(origem, destino)
+
+        self._desenhar_guia_angular(canvas, painter, origem, comp, ang)
+
         pen = QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine)
         painter.setPen(pen)
         painter.drawLine(canvas._cena_para_tela(origem), canvas._cena_para_tela(destino))
 
-        comp = self._distancia(origem, destino)
-        ang = self._angulo_entre(origem, destino)
         meio = QPointF((origem.x() + destino.x()) / 2.0, (origem.y() + destino.y()) / 2.0)
         meio_tela = canvas._cena_para_tela(meio)
         texto = f"{canvas.formatar_distancia(comp)}  |  {ang:.1f}°"
@@ -903,6 +906,35 @@ class Ferramenta(FerramentaBase):
             painter.setPen(QPen(QColor("#6bd3b5"), 1.2, Qt.DotLine))
             painter.drawLine(origem_tela.x(), origem_tela.y(), destino_tela.x(), origem_tela.y())
             painter.drawLine(origem_tela.x(), origem_tela.y(), origem_tela.x(), destino_tela.y())
+
+    def _desenhar_guia_angular(
+        self, canvas: VisualizacaoCanvas, painter: QPainter, origem: QPointF, comprimento: float, angulo_graus: float
+    ):
+        if comprimento <= 0.0001:
+            return
+
+        origem_tela = canvas._cena_para_tela(origem)
+        painter.setPen(QPen(QColor("#ff2de1"), 1.2, Qt.DotLine))
+        painter.setBrush(Qt.NoBrush)
+
+        raio_origem = max(5.0, 5.0 * canvas.zoom * 0.05)
+        painter.drawEllipse(origem_tela, raio_origem, raio_origem)
+
+        ref = QPointF(origem.x() + comprimento, origem.y())
+        painter.drawLine(origem_tela, canvas._cena_para_tela(ref))
+
+        passos = max(18, int(angulo_graus / 3.0))
+        pontos_arco: list[QPointF] = []
+        for i in range(passos + 1):
+            t = i / max(passos, 1)
+            a = angulo_graus * t
+            rad = radians(a)
+            px = origem.x() + (comprimento * cos(rad))
+            py = origem.y() - (comprimento * sin(rad))
+            pontos_arco.append(canvas._cena_para_tela(QPointF(px, py)))
+
+        for i in range(len(pontos_arco) - 1):
+            painter.drawLine(pontos_arco[i], pontos_arco[i + 1])
 
     def _encontrar_reta_sob_cursor(self, canvas: VisualizacaoCanvas, pos: QPointF) -> tuple[QPointF, QPointF] | None:
         tolerancia = 10.0 / max(canvas.zoom, 0.001)

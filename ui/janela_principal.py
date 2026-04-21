@@ -1607,13 +1607,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if not isinstance(area, AreaDocumentoWidget):
                 continue
-            documentos_canvas.append(
-                {
-                    "nome": self.abas_documentos.tabText(i),
-                    "elementos": area.canvas.elementos_para_salvar(),
-                    "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
-                }
-            )
+            doc_payload = self._capturar_estado_documento_canvas(area)
+            doc_payload["nome"] = self.abas_documentos.tabText(i)
+            documentos_canvas.append(doc_payload)
         self.projeto_atual.preferencias_usuario["documentos_canvas"] = documentos_canvas
 
     def _carregar_documentos_canvas(self):
@@ -1646,8 +1642,49 @@ class GuimmaStudioMainWindow(QMainWindow):
                 nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
-            QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
+            if self._restaurar_viewport_documento_canvas(area_doc, doc):
+                continue
+            if doc.get("elementos"):
+                QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
+
+    def _capturar_estado_documento_canvas(self, area: AreaDocumentoWidget) -> dict:
+        return {
+            "elementos": area.canvas.elementos_para_salvar(),
+            "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
+            "zoom": float(area.canvas.zoom),
+            "origem_cena": {
+                "x": float(area.canvas.origem_cena.x()),
+                "y": float(area.canvas.origem_cena.y()),
+            },
+            "snap_ativo": bool(area.canvas._snap_ativo),
+        }
+
+    def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
+        zoom = doc.get("zoom")
+        origem = doc.get("origem_cena")
+        if not isinstance(zoom, (int, float)) or not isinstance(origem, dict):
+            return False
+        ox = origem.get("x")
+        oy = origem.get("y")
+        if not isinstance(ox, (int, float)) or not isinstance(oy, (int, float)):
+            return False
+
+        snap_ativo = doc.get("snap_ativo")
+        if isinstance(snap_ativo, bool):
+            area.canvas.set_snap_ativo(snap_ativo)
+
+        def _aplicar():
+            area.canvas.set_zoom(float(zoom))
+            area.canvas.origem_cena.setX(float(ox))
+            area.canvas.origem_cena.setY(float(oy))
+            area._on_zoom_changed(area.canvas.zoom)
+            area.canvas.update()
+
+        QTimer.singleShot(0, _aplicar)
+        return True
 
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
@@ -1880,9 +1917,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = {
-            "elementos": area.canvas.elementos_para_salvar(),
-        }
+        payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
     def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
