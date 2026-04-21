@@ -62,6 +62,8 @@ class VisualizacaoCanvas(QWidget):
         self._linha_amplitude = 1.0
         self._unidade_sigla = "cm"
         self._unidade_fator = 1.0  # 1 unidade de cena = 1 cm
+        self._unidade_quadrado_sigla = "m"
+        self._unidade_quadrado_fator = 100.0  # 1 m = 100 cm de cena
         self._precisao_medida = "0.01"
         self._casas_precisao = 2
         self._snap_angular_passo = 45.0
@@ -224,6 +226,10 @@ class VisualizacaoCanvas(QWidget):
         if hasattr(self, "painel_coordenadas"):
             self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
 
+    def set_unidade_quadrado(self, unidade_sigla: str, fator_unidade: float):
+        self._unidade_quadrado_sigla = str(unidade_sigla or "m")
+        self._unidade_quadrado_fator = max(1e-9, float(fator_unidade))
+
     def set_precisao_medida(self, precisao: str):
         txt = str(precisao or "0.01").strip()
         self._precisao_medida = txt
@@ -258,6 +264,12 @@ class VisualizacaoCanvas(QWidget):
     def formatar_distancia(self, valor_cena: float, casas: int | None = None) -> str:
         txt = self.formatar_valor_unidade(valor_cena, casas=casas)
         return f"{txt} {self._unidade_sigla}"
+
+    def formatar_distancia_quadrado(self, valor_cena: float, casas: int | None = None) -> str:
+        casas_final = self._casas_precisao if casas is None else max(0, int(casas))
+        valor_unidade = float(valor_cena) / max(self._unidade_quadrado_fator, 1e-9)
+        txt = f"{valor_unidade:.{casas_final}f}"
+        return f"{txt} {self._unidade_quadrado_sigla}"
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))

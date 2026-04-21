@@ -129,6 +129,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             "auto_recuperacao_min": max(1, int(op.get("auto_recuperacao_min", 1))),
             "antialiasing": bool(op.get("antialiasing", True)),
             "validar_ponto_cam": bool(op.get("validar_ponto_cam", True)),
+            "texto_tamanho_cm": float(op.get("texto_tamanho_cm", 1.0)),
+            "usar_truetype": bool(op.get("usar_truetype", False)),
+            "pique_largura_cm": float(op.get("pique_largura_cm", 0.3)),
+            "pique_altura_cm": float(op.get("pique_altura_cm", 0.3)),
+            "pique_angulo": float(op.get("pique_angulo", 0.0)),
+            "mostrar_furador_iso": bool(op.get("mostrar_furador_iso", False)),
+            "permitir_graduacao_altura": bool(op.get("permitir_graduacao_altura", False)),
+            "usar_ferramentas_moldes": bool(op.get("usar_ferramentas_moldes", False)),
+            "rotacionar_duplo_clique": bool(op.get("rotacionar_duplo_clique", True)),
+            "exibir_coef_encolhimento": bool(op.get("exibir_coef_encolhimento", True)),
+            "exibir_ferramenta_costura": bool(op.get("exibir_ferramenta_costura", False)),
+            "permitir_docar_menus_aux": bool(op.get("permitir_docar_menus_aux", False)),
+            "barra_tarefas_flutuante": bool(op.get("barra_tarefas_flutuante", False)),
+            "tamanho_icone": str(op.get("tamanho_icone", "Grande")),
+            "criar_ponto_restauracao_auto": bool(op.get("criar_ponto_restauracao_auto", False)),
+            "arquivo_backup": bool(op.get("arquivo_backup", False)),
+            "caminho_backup": str(op.get("caminho_backup", "")),
+            "config_compartilhadas": str(op.get("config_compartilhadas", "")),
+            "compartilhar_tecido": bool(op.get("compartilhar_tecido", False)),
+            "compartilhar_regras_graduacao": bool(op.get("compartilhar_regras_graduacao", False)),
+            "compartilhar_plotagem": bool(op.get("compartilhar_plotagem", False)),
         }
 
     def _salvar_opcoes_app(self):
@@ -712,29 +733,141 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Opções")
         dialog.setModal(True)
-        dialog.resize(560, 420)
+        dialog.resize(640, 760)
         self._aplicar_estilo_claro_dialogo(dialog)
         lay = QVBoxLayout(dialog)
 
+        topo = QHBoxLayout()
+        col_esq = QVBoxLayout()
+        col_dir = QVBoxLayout()
+        topo.addLayout(col_esq, 1)
+        topo.addLayout(col_dir, 1)
+        lay.addLayout(topo)
+
+        gb_texto = QGroupBox("Texto")
+        g_texto = QGridLayout(gb_texto)
+        edt_texto_tam = QLineEdit(str(self._opcoes_app.get("texto_tamanho_cm", 1.0)))
+        chk_truetype = QCheckBox("Usar TrueType®")
+        chk_truetype.setChecked(self._opcoes_app.get("usar_truetype", False))
+        g_texto.addWidget(QLabel("Tamanho da letra (cm)"), 0, 0)
+        g_texto.addWidget(edt_texto_tam, 0, 1)
+        g_texto.addWidget(chk_truetype, 1, 0, 1, 2)
+        col_esq.addWidget(gb_texto)
+
         gb_salvar = QGroupBox("Salvar")
-        grid_salvar = QGridLayout(gb_salvar)
+        g_salvar = QGridLayout(gb_salvar)
         chk_auto = QCheckBox("Auto recuperação (min.)")
-        edt_auto = QLineEdit(str(self._opcoes_app.get("auto_recuperacao_min", 1)))
-        edt_auto.setFixedWidth(80)
         chk_auto.setChecked(True)
+        edt_auto = QLineEdit(str(self._opcoes_app.get("auto_recuperacao_min", 1)))
         chk_validar = QCheckBox("Validar se o ponto de cam está definido")
-        chk_validar.setChecked(bool(self._opcoes_app.get("validar_ponto_cam", True)))
-        grid_salvar.addWidget(chk_auto, 0, 0)
-        grid_salvar.addWidget(edt_auto, 0, 1)
-        grid_salvar.addWidget(chk_validar, 1, 0, 1, 2)
-        lay.addWidget(gb_salvar)
+        chk_validar.setChecked(self._opcoes_app.get("validar_ponto_cam", True))
+        g_salvar.addWidget(chk_auto, 0, 0)
+        g_salvar.addWidget(edt_auto, 0, 1)
+        g_salvar.addWidget(chk_validar, 1, 0, 1, 2)
+        col_esq.addWidget(gb_salvar)
+
+        gb_prop = QGroupBox("Propriedades dos moldes")
+        g_prop = QVBoxLayout(gb_prop)
+        chk_grad_alt = QCheckBox("Permitir graduação na altura")
+        chk_grad_alt.setChecked(self._opcoes_app.get("permitir_graduacao_altura", False))
+        chk_usa_ferr = QCheckBox("Usar ferramentas")
+        chk_usa_ferr.setChecked(self._opcoes_app.get("usar_ferramentas_moldes", False))
+        chk_rot_duplo = QCheckBox("Rotacionar com clique duplo")
+        chk_rot_duplo.setChecked(self._opcoes_app.get("rotacionar_duplo_clique", True))
+        chk_coef = QCheckBox("Exibir coeficiente de encolhimento em porcentagem")
+        chk_coef.setChecked(self._opcoes_app.get("exibir_coef_encolhimento", True))
+        for w in (chk_grad_alt, chk_usa_ferr, chk_rot_duplo, chk_coef):
+            g_prop.addWidget(w)
+        col_esq.addWidget(gb_prop)
+
+        gb_pique = QGroupBox("Pique")
+        g_pique = QGridLayout(gb_pique)
+        edt_pique_l = QLineEdit(str(self._opcoes_app.get("pique_largura_cm", 0.3)))
+        edt_pique_a = QLineEdit(str(self._opcoes_app.get("pique_altura_cm", 0.3)))
+        edt_pique_ang = QLineEdit(str(self._opcoes_app.get("pique_angulo", 0.0)))
+        chk_furador_iso = QCheckBox("Mostrar interface furador ISO")
+        chk_furador_iso.setChecked(self._opcoes_app.get("mostrar_furador_iso", False))
+        g_pique.addWidget(QLabel("Largura (cm)"), 0, 0)
+        g_pique.addWidget(edt_pique_l, 0, 1)
+        g_pique.addWidget(QLabel("Altura (cm)"), 1, 0)
+        g_pique.addWidget(edt_pique_a, 1, 1)
+        g_pique.addWidget(QLabel("Ângulo"), 2, 0)
+        g_pique.addWidget(edt_pique_ang, 2, 1)
+        g_pique.addWidget(chk_furador_iso, 3, 0, 1, 2)
+        col_dir.addWidget(gb_pique)
 
         gb_perf = QGroupBox("Performance")
-        grid_perf = QGridLayout(gb_perf)
+        g_perf = QVBoxLayout(gb_perf)
         chk_aa = QCheckBox("Usar Antialiasing")
-        chk_aa.setChecked(bool(self._opcoes_app.get("antialiasing", True)))
-        grid_perf.addWidget(chk_aa, 0, 0)
-        lay.addWidget(gb_perf)
+        chk_aa.setChecked(self._opcoes_app.get("antialiasing", True))
+        g_perf.addWidget(chk_aa)
+        col_dir.addWidget(gb_perf)
+
+        gb_interface = QGroupBox("Interface")
+        g_int = QGridLayout(gb_interface)
+        chk_costura = QCheckBox("Exibir ferramentas de costura estática")
+        chk_costura.setChecked(self._opcoes_app.get("exibir_ferramenta_costura", False))
+        chk_dock = QCheckBox("Permitir docar menus auxiliares")
+        chk_dock.setChecked(self._opcoes_app.get("permitir_docar_menus_aux", False))
+        chk_barra = QCheckBox("Barra de tarefas flutuante")
+        chk_barra.setChecked(self._opcoes_app.get("barra_tarefas_flutuante", False))
+        cmb_tam_icone = QComboBox()
+        cmb_tam_icone.addItems(["Pequeno", "Médio", "Grande"])
+        cmb_tam_icone.setCurrentText(self._opcoes_app.get("tamanho_icone", "Grande"))
+        g_int.addWidget(chk_costura, 0, 0, 1, 2)
+        g_int.addWidget(chk_dock, 1, 0, 1, 2)
+        g_int.addWidget(chk_barra, 2, 0, 1, 2)
+        g_int.addWidget(QLabel("Tamanho do ícone"), 3, 0)
+        g_int.addWidget(cmb_tam_icone, 3, 1)
+        col_dir.addWidget(gb_interface)
+
+        gb_rest = QGroupBox("Ponto de restauração")
+        g_rest = QVBoxLayout(gb_rest)
+        chk_pt_rest = QCheckBox("Criar ponto de restauração ao abrir e salvar arquivo")
+        chk_pt_rest.setChecked(self._opcoes_app.get("criar_ponto_restauracao_auto", False))
+        g_rest.addWidget(chk_pt_rest)
+        lay.addWidget(gb_rest)
+
+        gb_backup = QGroupBox("Configurar arquivo backup")
+        g_backup = QGridLayout(gb_backup)
+        chk_backup = QCheckBox("Arquivo backup")
+        chk_backup.setChecked(self._opcoes_app.get("arquivo_backup", False))
+        edt_backup = QLineEdit(self._opcoes_app.get("caminho_backup", ""))
+        btn_backup = QPushButton("Alterar")
+        def _escolher_backup():
+            caminho, _ = QFileDialog.getSaveFileName(
+                dialog,
+                "Arquivo de backup",
+                edt_backup.text().strip() or str(Path.home() / "guimma_backup.bak"),
+                "Backup (*.bak);;Todos (*.*)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
+            if caminho:
+                edt_backup.setText(caminho)
+        btn_backup.clicked.connect(_escolher_backup)
+        g_backup.addWidget(chk_backup, 0, 0, 1, 2)
+        g_backup.addWidget(edt_backup, 1, 0)
+        g_backup.addWidget(btn_backup, 1, 1)
+        lay.addWidget(gb_backup)
+
+        gb_comp = QGroupBox("Configurações compartilhadas")
+        g_comp = QGridLayout(gb_comp)
+        edt_comp = QLineEdit(self._opcoes_app.get("config_compartilhadas", ""))
+        btn_add_comp = QPushButton("Adicionar")
+        btn_rem_comp = QPushButton("Remover")
+        chk_comp_tecido = QCheckBox("Tecido")
+        chk_comp_tecido.setChecked(self._opcoes_app.get("compartilhar_tecido", False))
+        chk_comp_regra = QCheckBox("Regras de graduação")
+        chk_comp_regra.setChecked(self._opcoes_app.get("compartilhar_regras_graduacao", False))
+        chk_comp_plot = QCheckBox("Plotagem")
+        chk_comp_plot.setChecked(self._opcoes_app.get("compartilhar_plotagem", False))
+        g_comp.addWidget(edt_comp, 0, 0, 1, 2)
+        g_comp.addWidget(btn_add_comp, 0, 2)
+        g_comp.addWidget(chk_comp_tecido, 1, 0)
+        g_comp.addWidget(chk_comp_regra, 1, 1)
+        g_comp.addWidget(chk_comp_plot, 1, 2)
+        g_comp.addWidget(btn_rem_comp, 2, 2)
+        lay.addWidget(gb_comp)
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         botoes.accepted.connect(dialog.accept)
@@ -747,9 +880,35 @@ class GuimmaStudioMainWindow(QMainWindow):
             mins = int(float(edt_auto.text().strip().replace(",", ".")))
         except Exception:
             mins = 1
+        def _float_val(edt: QLineEdit, default: float) -> float:
+            try:
+                return float(edt.text().strip().replace(",", "."))
+            except Exception:
+                return default
         self._opcoes_app["auto_recuperacao_min"] = max(1, mins)
+        self._opcoes_app["texto_tamanho_cm"] = _float_val(edt_texto_tam, 1.0)
+        self._opcoes_app["usar_truetype"] = chk_truetype.isChecked()
+        self._opcoes_app["pique_largura_cm"] = _float_val(edt_pique_l, 0.3)
+        self._opcoes_app["pique_altura_cm"] = _float_val(edt_pique_a, 0.3)
+        self._opcoes_app["pique_angulo"] = _float_val(edt_pique_ang, 0.0)
+        self._opcoes_app["mostrar_furador_iso"] = chk_furador_iso.isChecked()
         self._opcoes_app["antialiasing"] = chk_aa.isChecked()
         self._opcoes_app["validar_ponto_cam"] = chk_validar.isChecked()
+        self._opcoes_app["permitir_graduacao_altura"] = chk_grad_alt.isChecked()
+        self._opcoes_app["usar_ferramentas_moldes"] = chk_usa_ferr.isChecked()
+        self._opcoes_app["rotacionar_duplo_clique"] = chk_rot_duplo.isChecked()
+        self._opcoes_app["exibir_coef_encolhimento"] = chk_coef.isChecked()
+        self._opcoes_app["exibir_ferramenta_costura"] = chk_costura.isChecked()
+        self._opcoes_app["permitir_docar_menus_aux"] = chk_dock.isChecked()
+        self._opcoes_app["barra_tarefas_flutuante"] = chk_barra.isChecked()
+        self._opcoes_app["tamanho_icone"] = cmb_tam_icone.currentText()
+        self._opcoes_app["criar_ponto_restauracao_auto"] = chk_pt_rest.isChecked()
+        self._opcoes_app["arquivo_backup"] = chk_backup.isChecked()
+        self._opcoes_app["caminho_backup"] = edt_backup.text().strip()
+        self._opcoes_app["config_compartilhadas"] = edt_comp.text().strip()
+        self._opcoes_app["compartilhar_tecido"] = chk_comp_tecido.isChecked()
+        self._opcoes_app["compartilhar_regras_graduacao"] = chk_comp_regra.isChecked()
+        self._opcoes_app["compartilhar_plotagem"] = chk_comp_plot.isChecked()
         self._salvar_opcoes_app()
         self._aplicar_intervalo_recovery()
         self.lbl_status.setText("Opções atualizadas.")
@@ -1587,6 +1746,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
         area_doc.canvas.set_precisao_medida(self._precisao_medida)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         self._marcar_area_como_salva(area_doc)
@@ -1785,6 +1945,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+            area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
             area_doc.canvas.set_precisao_medida(self._precisao_medida)
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
@@ -1861,6 +2022,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _atualizar_estilo_desenho(self, estilo: dict):
         self._estilo_desenho_atual.update(estilo)
         self.projeto_atual.preferencias_usuario["estilo_desenho"] = dict(self._estilo_desenho_atual)
+        self._sincronizar_perfil_usuario_atual()
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
@@ -1893,13 +2055,26 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _aplicar_config_unidade_global(self):
         self.projeto_atual.preferencias_usuario["unidade_medida"] = self._unidade_medida
         self.projeto_atual.preferencias_usuario["passo_unidade_medida"] = self._passo_unidade_medida
+        self.projeto_atual.preferencias_usuario["unidade_area"] = self._unidade_area
         self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
                 area.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+                area.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
                 area.canvas.set_precisao_medida(self._precisao_medida)
         self._salvar_preferencias_app()
+
+    def _fator_unidade_sigla(self, sigla: str) -> float:
+        mapa_fator = {
+            "mm": 0.1,
+            "cm": 1.0,
+            "m": 100.0,
+            "pol": 2.54,
+            "ft": 30.48,
+            "yd": 91.44,
+        }
+        return float(mapa_fator.get(str(sigla or "cm"), 1.0))
 
     def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
         menu = QMenu(self)
@@ -2086,6 +2261,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
