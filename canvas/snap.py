@@ -19,7 +19,7 @@ class SnapResult:
 class SnapManager:
     """Calcula pontos de captura (snap) para o cursor no canvas."""
 
-    def __init__(self, tolerancia_px: float = 10.0, snap_grade: bool = True, passo_grade: float = 1.0):
+    def __init__(self, tolerancia_px: float = 10.0, snap_grade: bool = False, passo_grade: float = 0.1):
         self.tolerancia_px = tolerancia_px
         self.snap_grade = snap_grade
         self.passo_grade = max(0.001, passo_grade)
