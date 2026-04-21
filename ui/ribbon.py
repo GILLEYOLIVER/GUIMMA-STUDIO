@@ -419,7 +419,7 @@ class RibbonGroup(QFrame):
     def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(92)
+        self.setFixedHeight(100)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         raiz = QVBoxLayout(self)
@@ -486,7 +486,7 @@ class RibbonGroup(QFrame):
 
         rodape = QLabel(titulo)
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(20)
+        rodape.setFixedHeight(16)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 600; border-top: 1px solid #d9d9d9;")
         raiz.addWidget(rodape)

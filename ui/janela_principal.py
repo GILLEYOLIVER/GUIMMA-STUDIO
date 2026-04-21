@@ -1006,7 +1006,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabWidget::pane { border: 1px solid #d7dbe1; }"
             "QTabWidget::tab-bar { alignment: left; }"
             "QTabBar { background: #f9f9f9; }"
-            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 22px 3px 10px; margin-right:1px; }"
+            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
@@ -1019,15 +1019,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         if hasattr(self, "faixa_usuarios"):
             return
         faixa = QFrame()
-        faixa.setFixedHeight(52)
+        faixa.setFixedHeight(42)
         faixa.setStyleSheet("QFrame { background:#f5f9fe; border:1px solid #c9dbef; }")
         lay = QHBoxLayout(faixa)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 2, 8, 2)
         lay.setSpacing(6)
 
         self.btn_usuario_add_all = QPushButton("Adicionar todas da aba")
         self.btn_usuario_add_all.setCursor(Qt.PointingHandCursor)
-        self.btn_usuario_add_all.setFixedHeight(34)
+        self.btn_usuario_add_all.setFixedHeight(26)
         self.btn_usuario_add_all.clicked.connect(self._adicionar_todas_ferramentas_da_aba)
         self.btn_usuario_add_all.setStyleSheet(
             """
@@ -1047,7 +1047,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_usuario_limpar = QPushButton("Limpar linha")
         self.btn_usuario_limpar.setCursor(Qt.PointingHandCursor)
-        self.btn_usuario_limpar.setFixedHeight(34)
+        self.btn_usuario_limpar.setFixedHeight(26)
         self.btn_usuario_limpar.clicked.connect(self._limpar_ferramentas_usuario)
         self.btn_usuario_limpar.setStyleSheet(
             """
@@ -1104,14 +1104,14 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_novo_perfil_usuario = QPushButton("Novo")
         self.btn_novo_perfil_usuario.setCursor(Qt.PointingHandCursor)
-        self.btn_novo_perfil_usuario.setFixedHeight(34)
+        self.btn_novo_perfil_usuario.setFixedHeight(26)
         self.btn_novo_perfil_usuario.clicked.connect(self._criar_novo_perfil_usuario)
         self.btn_novo_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
         controles_layout.addWidget(self.btn_novo_perfil_usuario, 0)
 
         self.btn_salvar_perfil_usuario = QPushButton("Salvar usuário")
         self.btn_salvar_perfil_usuario.setCursor(Qt.PointingHandCursor)
-        self.btn_salvar_perfil_usuario.setFixedHeight(34)
+        self.btn_salvar_perfil_usuario.setFixedHeight(26)
         self.btn_salvar_perfil_usuario.clicked.connect(self._salvar_perfil_usuario_atual)
         self.btn_salvar_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
         controles_layout.addWidget(self.btn_salvar_perfil_usuario, 0)
