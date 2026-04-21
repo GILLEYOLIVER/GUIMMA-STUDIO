@@ -914,7 +914,10 @@ class Ferramenta(FerramentaBase):
             return
 
         origem_tela = canvas._cena_para_tela(origem)
-        painter.setPen(QPen(QColor("#ff2de1"), 1.2, Qt.DotLine))
+        cor_guia = QColor(getattr(canvas, "_linha_cor", "#ff2de1"))
+        if not cor_guia.isValid():
+            cor_guia = QColor("#ff2de1")
+        painter.setPen(QPen(cor_guia, 1.2, Qt.DotLine))
         painter.setBrush(Qt.NoBrush)
 
         raio_origem = max(5.0, 5.0 * canvas.zoom * 0.05)
