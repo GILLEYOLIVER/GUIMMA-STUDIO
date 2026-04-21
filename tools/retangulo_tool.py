@@ -89,7 +89,7 @@ class Ferramenta(FerramentaBase):
             return
         horizontal = abs(dx) >= abs(dy)
         angulo_txt = "0.0°" if horizontal else "90.0°"
-        texto = f"{comprimento:.2f} cm  |  {angulo_txt}"
+        texto = f"{canvas.formatar_distancia(comprimento)}  |  {angulo_txt}"
         cx = (p1.x() + p2.x()) / 2.0
         cy = (p1.y() + p2.y()) / 2.0
 

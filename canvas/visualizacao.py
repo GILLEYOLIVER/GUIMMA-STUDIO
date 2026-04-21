@@ -60,6 +60,8 @@ class VisualizacaoCanvas(QWidget):
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 10.0  # 1 unidade de cena = 1 mm
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
@@ -99,6 +101,7 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.aplicar.connect(self._aplicar_coordenadas)
         self.painel_coordenadas.alternado.connect(self._set_painel_coordenadas_visivel)
         self.painel_coordenadas.posicao_alterada.connect(self._registrar_posicao_painel)
+        self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
         self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
@@ -212,6 +215,22 @@ class VisualizacaoCanvas(QWidget):
     def set_modo_curva(self, modo: str):
         self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
         self._resetar_estado_curva()
+
+    def set_unidade_medida(self, unidade_sigla: str, fator_unidade: float):
+        self._unidade_sigla = str(unidade_sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator_unidade))
+        if hasattr(self, "painel_coordenadas"):
+            self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
+
+    def converter_de_cena(self, valor: float) -> float:
+        return float(valor) / self._unidade_fator
+
+    def converter_para_cena(self, valor: float) -> float:
+        return float(valor) * self._unidade_fator
+
+    def formatar_distancia(self, valor_cena: float, casas: int = 2) -> str:
+        valor_unidade = self.converter_de_cena(valor_cena)
+        return f"{valor_unidade:.{casas}f} {self._unidade_sigla}"
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))
@@ -620,10 +639,13 @@ class VisualizacaoCanvas(QWidget):
 
     def _aplicar_coordenadas(self, payload: dict):
         origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
-        dx = payload.get("dx")
-        dy = payload.get("dy")
+        dx_u = payload.get("dx")
+        dy_u = payload.get("dy")
         ang = payload.get("a")
-        dist = payload.get("d")
+        dist_u = payload.get("d")
+        dx = self.converter_para_cena(dx_u) if dx_u is not None else None
+        dy = self.converter_para_cena(dy_u) if dy_u is not None else None
+        dist = self.converter_para_cena(dist_u) if dist_u is not None else None
         destino: QPointF | None = None
         if ang is not None and dist is not None:
             rad = radians(ang)

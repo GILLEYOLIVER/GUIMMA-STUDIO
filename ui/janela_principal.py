@@ -61,6 +61,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
         self._passo_snap_angular_atual = 45.0
+        self._unidade_medida = str(self.projeto_atual.preferencias_usuario.get("unidade_medida", "cm"))
+        self._passo_unidade_medida = float(self.projeto_atual.preferencias_usuario.get("passo_unidade_medida", 0.5))
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
         self._janela_aux_retangulo: QDialog | None = None
@@ -192,7 +194,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_regras = QAction("Réguas", self)
         self.action_regras.setCheckable(True)
         self.action_regras.setChecked(True)
-        self.action_regras.toggled.connect(lambda ativo: self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas"))
+        self.action_regras.toggled.connect(self._alternar_reguas)
         self.menu_visao.addAction(self.action_regras)
 
         self.action_barra_mensagem = QAction("Barra de mensagem", self)
@@ -602,7 +604,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu::item:selected { background: #e6f2ff; }"
         )
         menu.addAction("Opções", lambda: self.lbl_status.setText("Opções (em breve)"))
-        menu.addAction("Unidade de medida\tCtrl+U", lambda: self.lbl_status.setText("Unidade de medida (em breve)"))
+        menu.addAction("Unidade de medida\tCtrl+U", self._abrir_dialogo_unidade_medida)
         menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
         menu_regras = menu.addMenu("Regras de graduação")
         menu_regras.addAction("Regras de Graduação - Nomes...", lambda: self.lbl_status.setText("Regras de Graduação - Nomes (em breve)"))
@@ -1323,6 +1325,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+        area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         area_doc.setProperty("arquivo_origem", caminho_origem)
         index = self.abas_documentos.addTab(area_doc, nome)
@@ -1400,6 +1404,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
+        QShortcut(QKeySequence("Ctrl+U"), self, activated=self._abrir_dialogo_unidade_medida)
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -1519,6 +1524,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+            area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+            area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
@@ -1573,6 +1580,81 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "amplitude": float(estilo_mem.get("amplitude", self._estilo_desenho_atual["amplitude"])),
             }
         )
+
+    def _alternar_reguas(self, ativo: bool):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.set_reguas_visiveis(ativo)
+        self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas")
+
+    def _aplicar_config_unidade_global(self):
+        self.projeto_atual.preferencias_usuario["unidade_medida"] = self._unidade_medida
+        self.projeto_atual.preferencias_usuario["passo_unidade_medida"] = self._passo_unidade_medida
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+
+    def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
+        menu = QMenu(self)
+        opcoes = [
+            ("Milímetros", "mm", 5.0),
+            ("Centímetros", "cm", 0.5),
+            ("Metros", "m", 0.01),
+            ("Polegadas", "pol", 0.25),
+            ("Pés", "ft", 0.25),
+            ("Jardas", "yd", 0.25),
+        ]
+        for rotulo, sigla, passo in opcoes:
+            acao = menu.addAction(rotulo)
+            acao.setCheckable(True)
+            acao.setChecked(self._unidade_medida == sigla)
+            acao.triggered.connect(lambda _=False, s=sigla, p=passo: self._definir_unidade_medida(s, p))
+        menu.addSeparator()
+        menu.addAction("Esconder régua", lambda: self.action_regras.setChecked(False))
+        menu.exec(QPoint(gx, gy))
+
+    def _definir_unidade_medida(self, sigla: str, passo: float):
+        self._unidade_medida = sigla
+        self._passo_unidade_medida = float(passo)
+        self._aplicar_config_unidade_global()
+        self.lbl_status.setText(f"Unidade ativa: {sigla} | passo {passo:g}")
+
+    def _abrir_dialogo_unidade_medida(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Unidades de medida")
+        lay = QVBoxLayout(dialog)
+        grupo = QGroupBox("Linear")
+        glay = QVBoxLayout(grupo)
+        escolhas = [
+            ("Milímetros", "mm", 5.0),
+            ("Centímetros", "cm", 0.5),
+            ("Metros", "m", 0.01),
+            ("Polegadas", "pol", 0.25),
+            ("Pés", "ft", 0.25),
+            ("Jardas", "yd", 0.25),
+        ]
+        botoes: list[QRadioButton] = []
+        for rotulo, sigla, _passo in escolhas:
+            rb = QRadioButton(rotulo)
+            rb.setProperty("sigla", sigla)
+            rb.setChecked(sigla == self._unidade_medida)
+            glay.addWidget(rb)
+            botoes.append(rb)
+        lay.addWidget(grupo)
+        botoes_dialogo = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(botoes_dialogo)
+        botoes_dialogo.accepted.connect(dialog.accept)
+        botoes_dialogo.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        for rb in botoes:
+            if rb.isChecked():
+                sigla = str(rb.property("sigla"))
+                passo_padrao = next((p for _, s, p in escolhas if s == sigla), 0.5)
+                self._definir_unidade_medida(sigla, passo_padrao)
+                return
 
     def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:
         bruto = self.projeto_atual.preferencias_usuario.get("posicoes_caixas_aux", {})
