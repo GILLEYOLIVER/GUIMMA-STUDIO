@@ -903,7 +903,7 @@ class VisualizacaoCanvas(QWidget):
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
-            if el.get("mostrar_controles", True):
+            if el.get("mostrar_controles", True) and idx not in self._selecionados:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):
