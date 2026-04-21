@@ -397,7 +397,13 @@ class ColorControlWidget(QFrame):
         return pix
 
     def _selecionar_cor(self):
-        cor = QColorDialog.getColor(QColor(self._cor), self, "Selecionar cor da linha")
+        dialog = QColorDialog(QColor(self._cor), self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Selecionar cor da linha")
+        dialog.setStyleSheet("QColorDialog { background:#f4f4f4; color:#111111; }")
+        if dialog.exec() != QColorDialog.Accepted:
+            return
+        cor = dialog.currentColor()
         if not cor.isValid():
             return
         self._cor = cor.name()
@@ -411,6 +417,15 @@ class ColorControlWidget(QFrame):
 
     def valor(self) -> dict:
         return {"cor": self._cor, "estilo": self._estilo, "espessura": self._espessura, "amplitude": self._amplitude}
+
+    def set_valor(self, estilo: dict):
+        if not isinstance(estilo, dict):
+            return
+        self._cor = str(estilo.get("cor", self._cor))
+        self._estilo = str(estilo.get("estilo", self._estilo))
+        self._espessura = float(estilo.get("espessura", self._espessura))
+        self._amplitude = float(estilo.get("amplitude", self._amplitude))
+        self._atualizar_preview_cor()
 
 
 class RibbonGroup(QFrame):
@@ -611,6 +626,10 @@ class RibbonWidget(QWidget):
             if tab.tab_id == tab_id:
                 return [tid for group in tab.groups for tid in group.tools]
         return []
+
+    def aplicar_estilo(self, estilo: dict):
+        for controle in self.findChildren(ColorControlWidget):
+            controle.set_valor(estilo)
 
 
 def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:

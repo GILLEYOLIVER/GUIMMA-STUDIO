@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
+    QLineEdit,
     QLabel,
     QMainWindow,
     QMenu,
@@ -86,6 +87,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._inicializar_perfis_usuarios()
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
@@ -980,7 +982,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
                 self.abas_documentos.setCurrentIndex(i)
-                QMessageBox.information(self, "Arquivo já aberto", f"O arquivo já está aberto:\n{Path(caminho).name}")
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Arquivo já aberto")
+                caixa.setIcon(QMessageBox.Information)
+                caixa.setText(f"O arquivo já está aberto:\n{Path(caminho).name}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
                 self.backstage.hide()
                 return
         self.projeto_atual = GSProjectIO.abrir(caminho)
@@ -1321,6 +1330,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._reposicionar_barra_usuarios()
         self._aplicar_config_unidade_global()
         self._atualizar_estilo_desenho({})
+        self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         if hasattr(self, "action_barra_usuarios_habilitada"):
             self.action_barra_usuarios_habilitada.blockSignals(True)
             self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
@@ -1329,9 +1339,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText(f"Perfil '{nome_perfil}' carregado.")
 
     def _criar_novo_perfil_usuario(self):
-        nome, ok = QInputDialog.getText(self, "Novo usuário", "Nome do usuário/perfil:")
-        nome = (nome or "").strip()
-        if not ok or not nome:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Novo usuário")
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        lay.addWidget(QLabel("Nome do usuário/perfil:"))
+        entrada = QLineEdit()
+        lay.addWidget(entrada)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(botoes)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        nome = entrada.text().strip()
+        if not nome:
             return
         if nome in self._perfis_usuarios:
             self.lbl_status.setText(f"O perfil '{nome}' já existe.")

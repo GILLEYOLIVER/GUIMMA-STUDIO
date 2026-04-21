@@ -41,6 +41,8 @@ class RetaToolUI(QFrame):
 
         self._botoes_modo: dict[str, QPushButton] = {}
         self.modo_atual = "livre"
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
         self.setStyleSheet(
             """
@@ -285,13 +287,23 @@ class RetaToolUI(QFrame):
         self.status_label.setText(textos.get(self.modo_atual, "Modo ativo."))
 
     def _aplicar_valores(self):
+        fator = max(1e-9, float(self._unidade_fator))
         if self.modo_atual in {"comprimento", "comp_ang", "angulo"}:
-            self.valor_changed.emit(self.spin_comprimento.value(), self.spin_angulo.value())
+            self.valor_changed.emit(self.spin_comprimento.value() * fator, self.spin_angulo.value())
         else:
-            self.delta_changed.emit(self.spin_dx.value(), self.spin_dy.value())
+            self.delta_changed.emit(self.spin_dx.value() * fator, self.spin_dy.value() * fator)
 
     def atualizar_coordenadas_mouse(self, x: float, y: float):
-        self.mouse_coord_label.setText(f"X {x:.2f}  |  Y {y:.2f}")
+        fator = max(1e-9, float(self._unidade_fator))
+        self.mouse_coord_label.setText(f"X {x / fator:.2f} {self._unidade_sigla}  |  Y {y / fator:.2f} {self._unidade_sigla}")
+
+    def set_unidade(self, sigla: str, fator: float):
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator))
+        sufixo = f" {self._unidade_sigla}"
+        self.spin_dx.setSuffix(sufixo)
+        self.spin_dy.setSuffix(sufixo)
+        self.spin_comprimento.setSuffix(sufixo)
 
     def atualizar_status_operacao(self, texto: str):
         self.status_label.setText(texto)
@@ -420,6 +432,11 @@ class Ferramenta(FerramentaBase):
             self.ui_flutuante.fechado.connect(self._ui_fechado)
         elif parent is not None and self.ui_flutuante.parentWidget() is not parent:
             self.ui_flutuante.setParent(parent)
+        if self.canvas and self.ui_flutuante:
+            self.ui_flutuante.set_unidade(
+                getattr(self.canvas, "_unidade_sigla", "cm"),
+                float(getattr(self.canvas, "_unidade_fator", 1.0)),
+            )
         self.ui_flutuante.show()
         self.ui_flutuante.raise_()
         self.ui_flutuante.reposicionar_no_canto_superior_direito()
