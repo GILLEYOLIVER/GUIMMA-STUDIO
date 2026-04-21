@@ -1828,6 +1828,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self._abrir_dialogo_unidade_medida)
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self._ativar_ferramenta_global("propriedades"))
+        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self._ativar_ferramenta_global("propriedades"))
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -2261,6 +2263,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 

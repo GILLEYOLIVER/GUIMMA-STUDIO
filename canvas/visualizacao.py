@@ -767,6 +767,15 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self._ativar_ferramenta_janela_principal("propriedades")
+                event.accept()
+                return
+            if event.key() == Qt.Key_M:
+                self._ativar_ferramenta_janela_principal("informacoes_moldes")
+                event.accept()
+                return
         if self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
             if self._runtime_tool.on_key_press(self, event):
                 return
