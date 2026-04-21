@@ -5,6 +5,11 @@ from math import acos, sqrt
 
 from core.geometry.model import GeoNode, GeoSegment, GeoShape
 
+try:
+    import geometry_native as _geometry_native  # type: ignore
+except Exception:  # pragma: no cover - backend opcional
+    _geometry_native = None
+
 
 @dataclass(slots=True)
 class MoldResult:
@@ -36,6 +41,11 @@ def ensure_closed_polyline(points: list[tuple[float, float]], eps: float = 0.001
 
 
 def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
+    if _geometry_native is not None:
+        try:
+            return bool(_geometry_native.point_in_polygon(point, polygon))
+        except Exception:
+            pass
     poly = ensure_closed_polyline(polygon)
     inside = False
     j = len(poly) - 1
@@ -101,6 +111,11 @@ def build_mold_from_shape(shape: GeoShape) -> MoldResult:
 
 
 def internal_angle(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+    if _geometry_native is not None:
+        try:
+            return float(_geometry_native.internal_angle(a, b, c))
+        except Exception:
+            pass
     bax, bay = a[0] - b[0], a[1] - b[1]
     bcx, bcy = c[0] - b[0], c[1] - b[1]
     na = sqrt((bax * bax) + (bay * bay))

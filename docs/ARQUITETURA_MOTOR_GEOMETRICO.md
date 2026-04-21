@@ -37,6 +37,11 @@ Foi introduzida uma base de transição totalmente em Python para preparar a pon
 - `core/geometry/engine.py`: operações geométricas puras e construção de molde.
 - `core/geometry_bridge.py`: conversão de elementos de cena para payload neutro.
 
+Também foi adicionado backend nativo **opcional** em C++:
+
+- `core/geometry/native/geometry_native.cpp`: implementação pybind11 para `point_in_polygon` e `internal_angle`.
+- `core/geometry/engine.py`: fallback automático (usa C++ quando `geometry_native` estiver compilado/disponível, caso contrário usa Python).
+
 A ferramenta `Extrair Molde` já passou a consumir a bridge para:
 
 - teste de ponto interno

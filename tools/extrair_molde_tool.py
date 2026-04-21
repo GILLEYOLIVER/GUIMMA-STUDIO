@@ -36,6 +36,7 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais: set[int] = set()
         self._contorno_extraido: list[QPointF] | None = None
         self._contorno_auto_coords: list[tuple[float, float]] | None = None
+        self._contornos_preparados: dict[int, list[tuple[float, float]]] = {}
         self._molde_criado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto: QPointF | None = None
@@ -57,6 +58,7 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._contorno_auto_coords = None
+        self._contornos_preparados = {}
         self._molde_criado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
@@ -72,6 +74,7 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais.clear()
         self._contorno_extraido = None
         self._contorno_auto_coords = None
+        self._contornos_preparados = {}
         self._molde_criado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
@@ -110,6 +113,7 @@ class Ferramenta(FerramentaBase):
                     self._contorno_auto_coords = contorno
                     self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in contorno]
                     self._selecoes_manuais.clear()
+                    self._contornos_preparados = {}
                     self._idx_selecionado = None
                     canvas._selecionados = set()
                     self._molde_criado = False
@@ -143,6 +147,7 @@ class Ferramenta(FerramentaBase):
                 self._idx_selecionado = next(iter(self._selecoes_manuais), None)
                 self._contorno_extraido = None
                 self._contorno_auto_coords = None
+                self._contornos_preparados.pop(idx, None)
                 self._molde_criado = False
                 if self._selecoes_manuais:
                     self.set_status(f"Manual: {len(self._selecoes_manuais)} parte(s) selecionada(s). RMB para validar/extrair.")
@@ -268,7 +273,7 @@ class Ferramenta(FerramentaBase):
         if not self._selecoes_manuais:
             return False
         idxs = sorted(self._selecoes_manuais)
-        if self._cfg.get("compor_contornos") and len(idxs) > 1:
+        if len(idxs) > 1 and (self._cfg.get("compor_contornos") or self._cfg.get("modo") == "Manual"):
             return self._criar_molde_composto(canvas, idxs)
         criou = False
         novos_indices: list[int] = []
@@ -279,10 +284,12 @@ class Ferramenta(FerramentaBase):
             if el.get("tipo") != "polyline":
                 continue
             try:
-                payload = create_mold_payload(el)
+                pontos_base = self._contornos_preparados.get(idx, el.get("pontos", []))
+                payload = create_mold_payload({"tipo": "polyline", "pontos": pontos_base})
             except ValueError as exc:
                 self.set_status(f"Contorno inválido no elemento {idx + 1}: {exc}")
                 continue
+            pontos_auxiliares = payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else []
             novo = {
                 "tipo": "polyline",
                 "pontos": payload["pontos"],
@@ -293,7 +300,7 @@ class Ferramenta(FerramentaBase):
                 "segment_ids": payload["segment_ids"],
                 "controle_cantos": payload["controle_cantos"],
                 "pontos_controle_principais": payload["pontos_controle_principais"],
-                "pontos_auxiliares": payload["pontos_auxiliares"],
+                "pontos_auxiliares": pontos_auxiliares,
                 "origem_contorno": idx,
             }
             canvas.cena.elementos.append(novo)
@@ -312,7 +319,14 @@ class Ferramenta(FerramentaBase):
         if not elementos:
             return False
         try:
-            pontos = compose_closed_contour(elementos)
+            elementos_para_compor = []
+            for idx, el in zip(idxs, elementos):
+                pontos = self._contornos_preparados.get(idx)
+                if pontos:
+                    elementos_para_compor.append({"tipo": "polyline", "pontos": pontos})
+                else:
+                    elementos_para_compor.append(el)
+            pontos = compose_closed_contour(elementos_para_compor)
             novo = {"tipo": "polyline", "pontos": pontos}
             payload = create_mold_payload(novo)
         except ValueError as exc:
@@ -329,7 +343,7 @@ class Ferramenta(FerramentaBase):
                 "segment_ids": payload["segment_ids"],
                 "controle_cantos": payload["controle_cantos"],
                 "pontos_controle_principais": payload["pontos_controle_principais"],
-                "pontos_auxiliares": payload["pontos_auxiliares"],
+                "pontos_auxiliares": payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else [],
                 "origens_contorno": idxs,
             }
         )
@@ -356,7 +370,7 @@ class Ferramenta(FerramentaBase):
             "segment_ids": payload["segment_ids"],
             "controle_cantos": payload["controle_cantos"],
             "pontos_controle_principais": payload["pontos_controle_principais"],
-            "pontos_auxiliares": payload["pontos_auxiliares"],
+            "pontos_auxiliares": payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
         }
         canvas.cena.elementos.append(novo)
@@ -377,6 +391,7 @@ class Ferramenta(FerramentaBase):
             limpo = self._remover_segmentos_auxiliares([(p.x(), p.y()) for p in pontos], metadados)
             pontos = [QPointF(float(x), float(y)) for x, y in limpo]
         self._contorno_extraido = pontos
+        self._contornos_preparados[idx] = [(p.x(), p.y()) for p in pontos]
         self._molde_criado = False
 
     def _iniciar_arraste_molde(self, canvas, pos: QPointF):
