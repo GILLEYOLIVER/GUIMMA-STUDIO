@@ -15,8 +15,11 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
+    QLineEdit,
     QLabel,
     QMainWindow,
     QMenu,
@@ -29,6 +32,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QSlider,
 )
 
 from canvas.cena import CenaDocumento
@@ -40,16 +44,21 @@ from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
+from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
-    ZOOM_INICIAL_CANVAS = 9.08574
-    ORIGEM_INICIAL_CANVAS_X = 460.0
-    ORIGEM_INICIAL_CANVAS_Y = 200.0
+    ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
+    ZOOM_INICIAL_CANVAS = 8.760
+    ORIGEM_INICIAL_CANVAS_X = 110.0
+    ORIGEM_INICIAL_CANVAS_Y = 0.0
 
     def __init__(self):
         super().__init__()
         self.projeto_atual = Projeto()
+        prefs_app = self._carregar_preferencias_app()
+        if prefs_app:
+            self.projeto_atual.preferencias_usuario.update(prefs_app)
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         self._ferramenta_ativa_id = "selecionar"
@@ -57,6 +66,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
         self._passo_snap_angular_atual = 45.0
+        self._unidade_medida = str(self.projeto_atual.preferencias_usuario.get("unidade_medida", "cm"))
+        self._passo_unidade_medida = float(self.projeto_atual.preferencias_usuario.get("passo_unidade_medida", 0.5))
+        self._unidade_area = str(self.projeto_atual.preferencias_usuario.get("unidade_area", "m"))
+        self._precisao_medida = str(self.projeto_atual.preferencias_usuario.get("precisao_medida", "0.01"))
         self._snap_contextual_ativo = True
         self._janela_aux_curva: QDialog | None = None
         self._janela_aux_retangulo: QDialog | None = None
@@ -67,16 +80,59 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
-        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
+        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", False))
         self._perfis_usuarios: dict[str, list[str]] = {}
+        self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._inicializar_perfis_usuarios()
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         self._carregar_documentos_canvas()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
+
+    def _carregar_preferencias_app(self) -> dict:
+        try:
+            if self.ARQUIVO_PREFS_APP.exists():
+                return json.loads(self.ARQUIVO_PREFS_APP.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return {}
+
+    def _salvar_preferencias_app(self):
+        try:
+            self.ARQUIVO_PREFS_APP.write_text(
+                json.dumps(self.projeto_atual.preferencias_usuario, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _capturar_configuracoes_perfil(self) -> dict:
+        return {
+            "unidade_medida": self._unidade_medida,
+            "passo_unidade_medida": self._passo_unidade_medida,
+            "unidade_area": self._unidade_area,
+            "precisao_medida": self._precisao_medida,
+            "barra_usuarios_habilitada": self._barra_usuarios_habilitada,
+            "barra_usuarios_posicao": self._barra_usuarios_posicao,
+            "estilo_desenho": dict(self._estilo_desenho_atual),
+        }
+
+    def _aplicar_configuracoes_perfil(self, cfg: dict):
+        if not isinstance(cfg, dict):
+            return
+        self._unidade_medida = str(cfg.get("unidade_medida", self._unidade_medida))
+        self._passo_unidade_medida = float(cfg.get("passo_unidade_medida", self._passo_unidade_medida))
+        self._unidade_area = str(cfg.get("unidade_area", self._unidade_area))
+        self._precisao_medida = str(cfg.get("precisao_medida", self._precisao_medida))
+        self._barra_usuarios_habilitada = bool(cfg.get("barra_usuarios_habilitada", self._barra_usuarios_habilitada))
+        self._barra_usuarios_posicao = str(cfg.get("barra_usuarios_posicao", self._barra_usuarios_posicao))
+        estilo = cfg.get("estilo_desenho")
+        if isinstance(estilo, dict):
+            self._estilo_desenho_atual.update(estilo)
 
     def _configurar_interface(self):
         central = QWidget()
@@ -188,7 +244,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.action_regras = QAction("Réguas", self)
         self.action_regras.setCheckable(True)
         self.action_regras.setChecked(True)
-        self.action_regras.toggled.connect(lambda ativo: self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas"))
+        self.action_regras.toggled.connect(self._alternar_reguas)
         self.menu_visao.addAction(self.action_regras)
 
         self.action_barra_mensagem = QAction("Barra de mensagem", self)
@@ -299,6 +355,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
+        self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
         self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
@@ -541,22 +598,32 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.set_modo_curva(modo)
 
     def _restaurar_posicao_caixa_aux(self, janela: QDialog, chave: str):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
+        gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
+        min_x = gx + 8
+        min_y = gy + 8
+        max_x = gx + max(8, canvas.width() - janela.width() - 8)
+        max_y = gy + max(8, canvas.height() - janela.height() - 8)
+
         pos = self._posicoes_caixas_aux.get(chave)
         if pos:
-            janela.move(*pos)
-            return
-        area = self._area_documento_atual()
-        if area:
-            canvas = area.canvas
-            gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
-            gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
-            x = gx + max(8, canvas.width() - janela.width() - 18)
-            y = gy + 16
+            x = max(min_x, min(pos[0], max_x))
+            y = max(min_y, min(pos[1], max_y))
             janela.move(x, y)
+            return
+
+        x = gx + max(8, canvas.width() - janela.width() - 18)
+        y = gy + 16
+        janela.move(max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
         self.projeto_atual.preferencias_usuario["posicoes_caixas_aux"] = dict(self._posicoes_caixas_aux)
+        self._salvar_preferencias_app()
 
     def _abrir_menu_importar(self):
         botao = self.backstage.botoes.get("Importar ▸")
@@ -576,6 +643,217 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
+
+    def _abrir_menu_configuracoes(self):
+        botao = self.backstage.botoes.get("Configurações ▸")
+        if botao is None:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #c8d0d8; }"
+            "QMenu::item { padding: 6px 18px; }"
+            "QMenu::item:selected { background: #e6f2ff; }"
+        )
+        menu.addAction("Opções", lambda: self.lbl_status.setText("Opções (em breve)"))
+        menu.addAction("Unidade de medida\tCtrl+U", self._abrir_dialogo_unidade_medida)
+        menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
+        menu_regras = menu.addMenu("Regras de graduação")
+        menu_regras.addAction("Regras de Graduação - Nomes...", lambda: self.lbl_status.setText("Regras de Graduação - Nomes (em breve)"))
+        menu_regras.addAction("Regras de Graduação - Valores...", lambda: self.lbl_status.setText("Regras de Graduação - Valores (em breve)"))
+        menu.addAction("Cores", self._abrir_dialogo_cores)
+        menu.addAction("Grade", lambda: self.lbl_status.setText("Grade (em breve)"))
+        menu_snap = menu.addMenu("Snap")
+        menu_snap_classico = menu_snap.addMenu("Clássico")
+        menu_snap_classico.addAction("Configurações", lambda: self.lbl_status.setText("Snap clássico (em breve)"))
+        acao_snap_auto = menu_snap.addAction("Automático")
+        acao_snap_auto.setCheckable(True)
+        acao_snap_auto.setChecked(True)
+        menu_snap.addSeparator()
+        menu_snap.addAction("Configurações\tF4", lambda: self.lbl_status.setText("Configurações de snap (em breve)"))
+        menu.addAction("Paleta de usuário", lambda: self.lbl_status.setText("Paleta de usuário (em breve)"))
+        menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
+        menu.addAction("Teclas de atalho", lambda: self.lbl_status.setText("Teclas de atalho (em breve)"))
+        menu.addAction("Níveis de impressão", lambda: self.lbl_status.setText("Níveis de impressão (em breve)"))
+        pos = botao.mapToGlobal(botao.rect().bottomRight())
+        menu.exec(pos)
+
+    def _abrir_dialogo_cores(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cores")
+        dialog.setModal(False)
+        dialog.resize(520, 760)
+        dialog.setMinimumSize(500, 720)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        def botao_cor(hex_cor: str):
+            btn = QPushButton("")
+            btn.setFixedSize(22, 22)
+            btn.setStyleSheet(f"background:{hex_cor}; border:1px solid #8a8a8a;")
+            return btn
+
+        topo = QHBoxLayout()
+        gb_cores = QGroupBox("Cores")
+        gb_cores_lay = QGridLayout(gb_cores)
+        gb_cores_lay.addWidget(botao_cor("#ea00ff"), 0, 0)
+        gb_cores_lay.addWidget(QLabel("Desenho"), 0, 1)
+        gb_cores_lay.addWidget(botao_cor("#000000"), 0, 2)
+        gb_cores_lay.addWidget(QLabel("Fundo"), 0, 3)
+        gb_cores_lay.addWidget(botao_cor("#ff0000"), 1, 0)
+        gb_cores_lay.addWidget(QLabel("Seleção"), 1, 1)
+        gb_cores_lay.addWidget(botao_cor("#bfbfbf"), 1, 2)
+        gb_cores_lay.addWidget(QLabel("Grade"), 1, 3)
+        topo.addWidget(gb_cores, 1)
+
+        gb_snap = QGroupBox("Cores do snap")
+        gb_snap_lay = QVBoxLayout(gb_snap)
+        chk_auto_snap = QCheckBox("Usar cores automáticas")
+        chk_auto_snap.setChecked(True)
+        gb_snap_lay.addWidget(chk_auto_snap)
+        linha_snap_1 = QHBoxLayout()
+        linha_snap_1.addWidget(botao_cor("#6f6f6f"))
+        linha_snap_1.addWidget(QLabel("Desenho do Snap"))
+        linha_snap_1.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_1)
+        linha_snap_2 = QHBoxLayout()
+        linha_snap_2.addWidget(botao_cor("#d71313"))
+        linha_snap_2.addWidget(QLabel("Referência do Snap"))
+        linha_snap_2.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_2)
+        topo.addWidget(gb_snap, 1)
+        layout.addLayout(topo)
+
+        gb_moldes = QGroupBox("Cores dos moldes")
+        moldes = QGridLayout(gb_moldes)
+        moldes.setHorizontalSpacing(12)
+        moldes.setVerticalSpacing(6)
+        col_esq = ["Piques", "Piques internos", "Fio", "Linhas auxiliares", "Costura", "Molde dobrado", "Nome molde", "Descrição"]
+        col_dir = ["Números", "Observações", "Linha simetria", "Margem", "Tamanhos menores", "Tamanho base", "Tamanho maiores"]
+        for i, txt in enumerate(col_esq):
+            moldes.addWidget(QCheckBox(""), i, 0)
+            moldes.addWidget(botao_cor("#efefef"), i, 1)
+            moldes.addWidget(QLabel(txt), i, 2)
+        for i, txt in enumerate(col_dir):
+            moldes.addWidget(QCheckBox(""), i, 3)
+            moldes.addWidget(botao_cor("#efefef"), i, 4)
+            moldes.addWidget(QLabel(txt), i, 5)
+
+        base_row = max(len(col_esq), len(col_dir)) + 1
+        for idx, texto in enumerate(["Ponto de controle", "Ponto de pique", "Ponto não graduado"]):
+            moldes.addWidget(QCheckBox(""), base_row + idx, 0)
+            moldes.addWidget(botao_cor("#efefef"), base_row + idx, 1)
+            moldes.addWidget(QLabel(texto), base_row + idx, 2)
+            cmb = QComboBox()
+            cmb.addItems(["Círculo preenchido", "Quadrado preenchido", "Losango"])
+            cmb.setCurrentIndex(min(idx, 2))
+            moldes.addWidget(cmb, base_row + idx, 3, 1, 3)
+        layout.addWidget(gb_moldes)
+
+        chk_conforme = QCheckBox("Mostrar conforme definição das ferramentas")
+        chk_conforme.setEnabled(False)
+        layout.addWidget(chk_conforme)
+
+        linha_tecidos = QHBoxLayout()
+        chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
+        chk_cor_tecidos.setChecked(bool(getattr(canvas, "_mostrar_cor_tecidos", False)))
+        linha_tecidos.addWidget(chk_cor_tecidos)
+        btn_config = QPushButton("Configurar cor dos tecidos")
+        linha_tecidos.addWidget(btn_config)
+        linha_tecidos.addStretch(1)
+        layout.addLayout(linha_tecidos)
+
+        layout.addWidget(QCheckBox("Mostrar cor dos tecidos no menu de moldes"))
+
+        linha_opacidade = QHBoxLayout()
+        linha_opacidade.addWidget(QLabel("Opacidade das imagens"))
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        linha_opacidade.addWidget(slider, 1)
+        linha_opacidade.addWidget(QLabel("100 / 100"))
+        layout.addLayout(linha_opacidade)
+
+        linha_estilo = QHBoxLayout()
+        linha_estilo.addWidget(QLabel("Estilo linha costura"))
+        cmb_estilo = QComboBox()
+        cmb_estilo.addItems(["- - - - - -", "_______", "· · · · ·"])
+        linha_estilo.addWidget(cmb_estilo)
+        layout.addLayout(linha_estilo)
+
+        gb_esquema = QGroupBox("Esquema de cores")
+        esquema_lay = QHBoxLayout(gb_esquema)
+        cmb_esquema = QComboBox()
+        esquema_lay.addWidget(cmb_esquema, 1)
+        btn_salvar_esquema = QPushButton("Salvar esquema de cores")
+        btn_salvar_esquema.setEnabled(False)
+        esquema_lay.addWidget(btn_salvar_esquema, 1)
+        layout.addWidget(gb_esquema)
+        layout.addStretch(1)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("✓ OK")
+        btn_cancelar = QPushButton("✕ Cancelar")
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        layout.addLayout(rodape)
+
+        def abrir_config():
+            tecidos = sorted({
+                str(el.get("tecido") or "").strip()
+                for el in canvas.cena.elementos
+                if el.get("molde") and str(el.get("tecido") or "").strip()
+            })
+            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(getattr(canvas, "_cores_tecidos", {})), dialog)
+            if dialog_tecidos.exec() == QDialog.Accepted:
+                canvas._cores_tecidos = dialog_tecidos.cores_tecidos()
+                canvas.update()
+
+        def aplicar_e_fechar():
+            canvas._mostrar_cor_tecidos = chk_cor_tecidos.isChecked()
+            canvas.update()
+            dialog.accept()
+
+        btn_config.clicked.connect(abrir_config)
+        btn_ok.clicked.connect(aplicar_e_fechar)
+        btn_cancelar.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def _aplicar_estilo_claro_dialogo(self, dialog: QDialog):
+        dialog.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QGroupBox { border: 1px solid #c8c8c8; margin-top: 10px; background: #f5f5f5; }
+            QGroupBox::title { left: 6px; padding: 0 2px; }
+            QLabel, QCheckBox { color: #111111; }
+            QPushButton, QComboBox, QLineEdit {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                border-radius: 3px;
+                min-height: 22px;
+                padding: 2px 6px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                gridline-color: #d6dbe0;
+            }
+            QHeaderView::section {
+                background: #f1f1f1;
+                color: #111111;
+                border: 1px solid #c2c8cf;
+                padding: 3px;
+            }
+            """
+        )
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
@@ -613,9 +891,27 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
         pontos: list[tuple[float, float]] = []
         for el in elementos:
-            if el.get("tipo") != "polyline":
-                continue
-            pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            tipo = el.get("tipo")
+            if tipo == "polyline":
+                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            elif tipo == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    if chave in el:
+                        x, y = el[chave]
+                        pontos.append((float(x), float(y)))
+            elif tipo in {"circle", "esfera"}:
+                centro = el.get("centro")
+                raio = float(el.get("raio", 0.0))
+                if isinstance(centro, (tuple, list)) and len(centro) == 2:
+                    cx, cy = float(centro[0]), float(centro[1])
+                    pontos.extend(
+                        [
+                            (cx - raio, cy - raio),
+                            (cx + raio, cy - raio),
+                            (cx - raio, cy + raio),
+                            (cx + raio, cy + raio),
+                        ]
+                    )
         if not pontos:
             return
         xs = [p[0] for p in pontos]
@@ -638,6 +934,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         if not self._ha_alteracoes_nao_salvas():
+            self._salvar_preferencias_app()
             event.accept()
             return
         caixa = QMessageBox(self)
@@ -655,6 +952,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if resposta == QMessageBox.Yes and not self._salvar_projeto():
             event.ignore()
             return
+        self._salvar_preferencias_app()
         event.accept()
 
     def _ha_alteracoes_nao_salvas(self) -> bool:
@@ -684,7 +982,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
                 self.abas_documentos.setCurrentIndex(i)
-                QMessageBox.information(self, "Arquivo já aberto", f"O arquivo já está aberto:\n{Path(caminho).name}")
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Arquivo já aberto")
+                caixa.setIcon(QMessageBox.Information)
+                caixa.setText(f"O arquivo já está aberto:\n{Path(caminho).name}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
                 self.backstage.hide()
                 return
         self.projeto_atual = GSProjectIO.abrir(caminho)
@@ -780,7 +1085,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabWidget::pane { border: 1px solid #d7dbe1; }"
             "QTabWidget::tab-bar { alignment: left; }"
             "QTabBar { background: #f9f9f9; }"
-            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:3px 22px 3px 10px; margin-right:1px; }"
+            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
         layout.addWidget(self.abas_documentos, 1)
@@ -793,15 +1098,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         if hasattr(self, "faixa_usuarios"):
             return
         faixa = QFrame()
-        faixa.setFixedHeight(52)
+        faixa.setFixedHeight(42)
         faixa.setStyleSheet("QFrame { background:#f5f9fe; border:1px solid #c9dbef; }")
         lay = QHBoxLayout(faixa)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 2, 8, 2)
         lay.setSpacing(6)
 
         self.btn_usuario_add_all = QPushButton("Adicionar todas da aba")
         self.btn_usuario_add_all.setCursor(Qt.PointingHandCursor)
-        self.btn_usuario_add_all.setFixedHeight(34)
+        self.btn_usuario_add_all.setFixedHeight(26)
         self.btn_usuario_add_all.clicked.connect(self._adicionar_todas_ferramentas_da_aba)
         self.btn_usuario_add_all.setStyleSheet(
             """
@@ -821,7 +1126,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_usuario_limpar = QPushButton("Limpar linha")
         self.btn_usuario_limpar.setCursor(Qt.PointingHandCursor)
-        self.btn_usuario_limpar.setFixedHeight(34)
+        self.btn_usuario_limpar.setFixedHeight(26)
         self.btn_usuario_limpar.clicked.connect(self._limpar_ferramentas_usuario)
         self.btn_usuario_limpar.setStyleSheet(
             """
@@ -878,14 +1183,14 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_novo_perfil_usuario = QPushButton("Novo")
         self.btn_novo_perfil_usuario.setCursor(Qt.PointingHandCursor)
-        self.btn_novo_perfil_usuario.setFixedHeight(34)
+        self.btn_novo_perfil_usuario.setFixedHeight(26)
         self.btn_novo_perfil_usuario.clicked.connect(self._criar_novo_perfil_usuario)
         self.btn_novo_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
         controles_layout.addWidget(self.btn_novo_perfil_usuario, 0)
 
         self.btn_salvar_perfil_usuario = QPushButton("Salvar usuário")
         self.btn_salvar_perfil_usuario.setCursor(Qt.PointingHandCursor)
-        self.btn_salvar_perfil_usuario.setFixedHeight(34)
+        self.btn_salvar_perfil_usuario.setFixedHeight(26)
         self.btn_salvar_perfil_usuario.clicked.connect(self._salvar_perfil_usuario_atual)
         self.btn_salvar_perfil_usuario.setStyleSheet(self.btn_usuario_add_all.styleSheet())
         controles_layout.addWidget(self.btn_salvar_perfil_usuario, 0)
@@ -909,6 +1214,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._barra_usuarios_habilitada = habilitada
         self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._salvar_preferencias_app()
 
     def _definir_posicao_barra_usuarios(self, posicao: str):
         if posicao not in {"topo", "area"}:
@@ -917,6 +1223,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["barra_usuarios_posicao"] = posicao
         self._reposicionar_barra_usuarios()
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._salvar_preferencias_app()
 
     def _reposicionar_barra_usuarios(self):
         if not hasattr(self, "faixa_usuarios"):
@@ -930,7 +1237,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
         if hasattr(self, "faixa_usuarios"):
-            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada)
+            visivel = self._barra_usuarios_habilitada or (tab_id == "usuarios")
+            self.faixa_usuarios.setVisible(visivel)
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
@@ -983,13 +1291,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         else:
             self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
         self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(self._perfil_usuario_atual, []))
+        cfgs = self.projeto_atual.preferencias_usuario.get("perfis_usuarios_cfg")
+        if isinstance(cfgs, dict):
+            self._perfis_usuarios_cfg = {str(nome): dict(cfg or {}) for nome, cfg in cfgs.items()}
+        else:
+            self._perfis_usuarios_cfg = {}
+        self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(self._perfil_usuario_atual, {}))
 
     def _persistir_perfis_usuarios(self):
         self.projeto_atual.preferencias_usuario["perfis_usuarios"] = {
             nome: list(ids) for nome, ids in self._perfis_usuarios.items()
         }
+        self._perfis_usuarios_cfg[self._perfil_usuario_atual] = self._capturar_configuracoes_perfil()
+        self.projeto_atual.preferencias_usuario["perfis_usuarios_cfg"] = {
+            nome: dict(cfg) for nome, cfg in self._perfis_usuarios_cfg.items()
+        }
         self.projeto_atual.preferencias_usuario["perfil_usuario_atual"] = self._perfil_usuario_atual
         self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+        self._salvar_preferencias_app()
 
     def _sincronizar_perfil_usuario_atual(self):
         self._perfis_usuarios[self._perfil_usuario_atual] = list(self._ferramentas_usuario_ids)
@@ -1009,19 +1328,41 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         self._perfil_usuario_atual = nome_perfil
         self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(nome_perfil, []))
+        self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(nome_perfil, {}))
         self._persistir_perfis_usuarios()
+        self._reposicionar_barra_usuarios()
+        self._aplicar_config_unidade_global()
+        self._atualizar_estilo_desenho({})
+        self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
+        if hasattr(self, "action_barra_usuarios_habilitada"):
+            self.action_barra_usuarios_habilitada.blockSignals(True)
+            self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+            self.action_barra_usuarios_habilitada.blockSignals(False)
         self._atualizar_linha_usuarios()
         self.lbl_status.setText(f"Perfil '{nome_perfil}' carregado.")
 
     def _criar_novo_perfil_usuario(self):
-        nome, ok = QInputDialog.getText(self, "Novo usuário", "Nome do usuário/perfil:")
-        nome = (nome or "").strip()
-        if not ok or not nome:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Novo usuário")
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        lay.addWidget(QLabel("Nome do usuário/perfil:"))
+        entrada = QLineEdit()
+        lay.addWidget(entrada)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(botoes)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        nome = entrada.text().strip()
+        if not nome:
             return
         if nome in self._perfis_usuarios:
             self.lbl_status.setText(f"O perfil '{nome}' já existe.")
             return
         self._perfis_usuarios[nome] = list(self._ferramentas_usuario_ids)
+        self._perfis_usuarios_cfg[nome] = dict(self._capturar_configuracoes_perfil())
         self._perfil_usuario_atual = nome
         self._persistir_perfis_usuarios()
         self._atualizar_combo_perfis_usuarios()
@@ -1098,6 +1439,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+        area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
         area_doc.setProperty("arquivo_origem", caminho_origem)
         index = self.abas_documentos.addTab(area_doc, nome)
@@ -1141,6 +1484,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_coordenadas.blockSignals(True)
             self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
             self.action_coordenadas.blockSignals(False)
+            QTimer.singleShot(0, area.canvas.sincronizar_paineis_auxiliares)
         else:
             self.lbl_escala.setText("Escala --")
 
@@ -1174,6 +1518,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence.Copy, self, activated=self._copiar_canvas_atual)
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
+        QShortcut(QKeySequence("Ctrl+U"), self, activated=self._abrir_dialogo_unidade_medida)
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -1265,13 +1610,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if not isinstance(area, AreaDocumentoWidget):
                 continue
-            documentos_canvas.append(
-                {
-                    "nome": self.abas_documentos.tabText(i),
-                    "elementos": area.canvas.elementos_para_salvar(),
-                    "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
-                }
-            )
+            doc_payload = self._capturar_estado_documento_canvas(area)
+            doc_payload["nome"] = self.abas_documentos.tabText(i)
+            documentos_canvas.append(doc_payload)
         self.projeto_atual.preferencias_usuario["documentos_canvas"] = documentos_canvas
 
     def _carregar_documentos_canvas(self):
@@ -1293,6 +1634,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
+            area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+            area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
@@ -1302,11 +1645,49 @@ class GuimmaStudioMainWindow(QMainWindow):
                 nome = base_nome_arquivo if idx_nome == 1 else f"{base_nome_arquivo} -{idx_nome}"
             idx = self.abas_documentos.addTab(area_doc, nome)
             self._configurar_botao_fechar_aba(idx)
+            if self._restaurar_viewport_documento_canvas(area_doc, doc):
+                continue
             if doc.get("elementos"):
                 QTimer.singleShot(0, lambda a=area_doc: self._centralizar_area_documento(a))
             else:
                 QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
+
+    def _capturar_estado_documento_canvas(self, area: AreaDocumentoWidget) -> dict:
+        return {
+            "elementos": area.canvas.elementos_para_salvar(),
+            "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
+            "zoom": float(area.canvas.zoom),
+            "origem_cena": {
+                "x": float(area.canvas.origem_cena.x()),
+                "y": float(area.canvas.origem_cena.y()),
+            },
+            "snap_ativo": bool(area.canvas._snap_ativo),
+        }
+
+    def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
+        zoom = doc.get("zoom")
+        origem = doc.get("origem_cena")
+        if not isinstance(zoom, (int, float)) or not isinstance(origem, dict):
+            return False
+        ox = origem.get("x")
+        oy = origem.get("y")
+        if not isinstance(ox, (int, float)) or not isinstance(oy, (int, float)):
+            return False
+
+        snap_ativo = doc.get("snap_ativo")
+        if isinstance(snap_ativo, bool):
+            area.canvas.set_snap_ativo(snap_ativo)
+
+        def _aplicar():
+            area.canvas.set_zoom(float(zoom))
+            area.canvas.origem_cena.setX(float(ox))
+            area.canvas.origem_cena.setY(float(oy))
+            area._on_zoom_changed(area.canvas.zoom)
+            area.canvas.update()
+
+        QTimer.singleShot(0, _aplicar)
+        return True
 
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
@@ -1334,6 +1715,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | "
             f"Espessura {self._estilo_desenho_atual['espessura']:.0f} | Altura {self._estilo_desenho_atual['amplitude']:.1f}"
         )
+        self._salvar_preferencias_app()
 
     def _restaurar_estilo_desenho_memorizado(self):
         estilo_mem = self.projeto_atual.preferencias_usuario.get("estilo_desenho", {})
@@ -1347,6 +1729,134 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "amplitude": float(estilo_mem.get("amplitude", self._estilo_desenho_atual["amplitude"])),
             }
         )
+
+    def _alternar_reguas(self, ativo: bool):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.set_reguas_visiveis(ativo)
+        self.lbl_status.setText("Réguas ativas" if ativo else "Réguas ocultas")
+
+    def _aplicar_config_unidade_global(self):
+        self.projeto_atual.preferencias_usuario["unidade_medida"] = self._unidade_medida
+        self.projeto_atual.preferencias_usuario["passo_unidade_medida"] = self._passo_unidade_medida
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
+        self._salvar_preferencias_app()
+
+    def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
+            "QMenu::item { color:#111111; padding:6px 16px; }"
+            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
+        )
+        opcoes = [
+            ("Milímetros", "mm", 5.0),
+            ("Centímetros", "cm", 0.5),
+            ("Metros", "m", 0.01),
+            ("Polegadas", "pol", 0.25),
+            ("Pés", "ft", 0.25),
+            ("Jardas", "yd", 0.25),
+        ]
+        for rotulo, sigla, passo in opcoes:
+            acao = menu.addAction(rotulo)
+            acao.setCheckable(True)
+            acao.setChecked(self._unidade_medida == sigla)
+            acao.triggered.connect(lambda _=False, s=sigla, p=passo: self._definir_unidade_medida(s, p))
+        menu.addSeparator()
+        menu.addAction("Esconder régua", lambda: self.action_regras.setChecked(False))
+        menu.exec(QPoint(gx, gy))
+
+    def _definir_unidade_medida(self, sigla: str, passo: float):
+        self._unidade_medida = sigla
+        self._passo_unidade_medida = float(passo)
+        self._aplicar_config_unidade_global()
+        self.lbl_status.setText(f"Unidade ativa: {sigla} | passo {passo:g}")
+
+    def _abrir_dialogo_unidade_medida(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Unidades de medida")
+        dialog.setModal(True)
+        dialog.resize(420, 500)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        escolhas_linear = [
+            ("Milímetros", "mm", 5.0),
+            ("Centímetros", "cm", 0.5),
+            ("Metros", "m", 0.01),
+            ("Polegadas", "pol", 0.25),
+            ("Pés", "ft", 0.25),
+            ("Jardas", "yd", 0.25),
+        ]
+
+        topo = QHBoxLayout()
+        grupo_linear = QGroupBox("Linear")
+        glay_linear = QVBoxLayout(grupo_linear)
+        botoes_linear: list[QRadioButton] = []
+        for rotulo, sigla, _passo in escolhas_linear:
+            rb = QRadioButton(rotulo)
+            rb.setProperty("sigla", sigla)
+            rb.setChecked(sigla == self._unidade_medida)
+            glay_linear.addWidget(rb)
+            botoes_linear.append(rb)
+        topo.addWidget(grupo_linear, 1)
+
+        grupo_area = QGroupBox("Quadrado")
+        glay_area = QVBoxLayout(grupo_area)
+        botoes_area: list[QRadioButton] = []
+        for rotulo, sigla, _passo in escolhas_linear:
+            rb = QRadioButton(rotulo)
+            rb.setProperty("sigla", sigla)
+            rb.setChecked(sigla == self._unidade_area)
+            glay_area.addWidget(rb)
+            botoes_area.append(rb)
+        topo.addWidget(grupo_area, 1)
+        lay.addLayout(topo)
+
+        grupo_prec = QGroupBox("Precisão")
+        grid_prec = QGridLayout(grupo_prec)
+        opcoes_prec = [("0.1", "0.1"), ("1/8", "1/8"), ("0.01", "0.01"), ("1/16", "1/16"), ("0.001", "0.001"), ("1/32", "1/32"), ("0.0001", "0.0001"), ("1/64", "1/64")]
+        botoes_prec: list[QRadioButton] = []
+        for i, (rotulo, valor) in enumerate(opcoes_prec):
+            rb = QRadioButton(rotulo)
+            rb.setProperty("valor", valor)
+            rb.setChecked(valor == self._precisao_medida)
+            grid_prec.addWidget(rb, i // 2, i % 2)
+            botoes_prec.append(rb)
+        lay.addWidget(grupo_prec)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("✓ OK")
+        btn_cancelar = QPushButton("✕ Cancelar")
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancelar.clicked.connect(dialog.reject)
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        lay.addLayout(rodape)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+        for rb in botoes_linear:
+            if rb.isChecked():
+                sigla = str(rb.property("sigla"))
+                passo_padrao = next((p for _, s, p in escolhas_linear if s == sigla), 0.5)
+                self._definir_unidade_medida(sigla, passo_padrao)
+                break
+        for rb in botoes_area:
+            if rb.isChecked():
+                self._unidade_area = str(rb.property("sigla"))
+                self.projeto_atual.preferencias_usuario["unidade_area"] = self._unidade_area
+                break
+        for rb in botoes_prec:
+            if rb.isChecked():
+                self._precisao_medida = str(rb.property("valor"))
+                self.projeto_atual.preferencias_usuario["precisao_medida"] = self._precisao_medida
+                break
+        self._salvar_preferencias_app()
 
     def _carregar_posicoes_caixas_aux(self) -> dict[str, tuple[int, int]]:
         bruto = self.projeto_atual.preferencias_usuario.get("posicoes_caixas_aux", {})
@@ -1410,9 +1920,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = {
-            "elementos": area.canvas.elementos_para_salvar(),
-        }
+        payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
     def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
@@ -1514,7 +2022,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.set_zoom(area.canvas.zoom * fator)
 
     def _texto_escala(self, zoom: float) -> str:
-        return f"Escala {zoom * 100:.3f}%"
+        base = max(self.ZOOM_INICIAL_CANVAS, 1e-9)
+        percentual = (zoom / base) * 100.0
+        return f"Escala {percentual:.3f}%"
 
     def _centralizar_area_documento(self, area: AreaDocumentoWidget):
         elementos = area.canvas.cena.elementos
