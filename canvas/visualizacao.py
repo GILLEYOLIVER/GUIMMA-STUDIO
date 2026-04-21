@@ -7,7 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
@@ -55,9 +55,13 @@ class VisualizacaoCanvas(QWidget):
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ffffff"
+        self._cores_tecidos: dict[str, str] = {}
+        self._mostrar_cor_tecidos = False
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0  # 1 unidade de cena = 1 cm
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
@@ -97,10 +101,11 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.aplicar.connect(self._aplicar_coordenadas)
         self.painel_coordenadas.alternado.connect(self._set_painel_coordenadas_visivel)
         self.painel_coordenadas.posicao_alterada.connect(self._registrar_posicao_painel)
+        self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
         self.painel_coordenadas.show()
 
     def set_zoom(self, zoom: float):
-        self.zoom = max(0.025, min(zoom, 5000.0))
+        self.zoom = max(0.025, min(zoom, 10000.0))
         self.zoom_changed.emit(self.zoom)
         self.update()
 
@@ -184,6 +189,12 @@ class VisualizacaoCanvas(QWidget):
         self._painel_coordenadas_posicao = None
         self._reposicionar_painel_coordenadas()
 
+    def sincronizar_paineis_auxiliares(self):
+        """Recalcula posições dos painéis flutuantes com o tamanho atual do canvas."""
+        self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
+
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
         if self.painel_coordenadas.isVisible():
             return self.painel_coordenadas.x(), self.painel_coordenadas.y()
@@ -204,6 +215,25 @@ class VisualizacaoCanvas(QWidget):
     def set_modo_curva(self, modo: str):
         self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
         self._resetar_estado_curva()
+
+    def set_unidade_medida(self, unidade_sigla: str, fator_unidade: float):
+        self._unidade_sigla = str(unidade_sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator_unidade))
+        if hasattr(self, "painel_coordenadas"):
+            self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
+
+    def converter_de_cena(self, valor: float) -> float:
+        return float(valor) / self._unidade_fator
+
+    def converter_para_cena(self, valor: float) -> float:
+        return float(valor) * self._unidade_fator
+
+    def formatar_distancia(self, valor_cena: float, casas: int = 2) -> str:
+        valor_unidade = self.converter_de_cena(valor_cena)
+        txt = f"{valor_unidade:.{casas}f}"
+        if self._unidade_sigla == "cm":
+            txt = txt.rstrip("0").rstrip(".")
+        return f"{txt} {self._unidade_sigla}"
 
     def set_passo_snap_angular(self, passo: float):
         self._snap_angular_passo = max(1.0, float(passo))
@@ -612,10 +642,13 @@ class VisualizacaoCanvas(QWidget):
 
     def _aplicar_coordenadas(self, payload: dict):
         origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
-        dx = payload.get("dx")
-        dy = payload.get("dy")
+        dx_u = payload.get("dx")
+        dy_u = payload.get("dy")
         ang = payload.get("a")
-        dist = payload.get("d")
+        dist_u = payload.get("d")
+        dx = self.converter_para_cena(dx_u) if dx_u is not None else None
+        dy = self.converter_para_cena(dy_u) if dy_u is not None else None
+        dist = self.converter_para_cena(dist_u) if dist_u is not None else None
         destino: QPointF | None = None
         if ang is not None and dist is not None:
             rad = radians(ang)
@@ -792,9 +825,14 @@ class VisualizacaoCanvas(QWidget):
 
         for idx, elemento in enumerate(self.cena.elementos):
             cor_base = elemento.get("cor", "#d0d0d0")
+            if elemento.get("molde") and self._mostrar_cor_tecidos:
+                tecido = str(elemento.get("tecido") or "").strip()
+                if tecido and tecido in self._cores_tecidos:
+                    cor_base = self._cores_tecidos[tecido]
             selecionado = idx in self._selecionados
-            cor = self._cor_realce(cor_base) if selecionado else cor_base
-            esp = float(elemento.get("espessura", 1.0)) + (0.8 if selecionado else 0.0)
+            is_molde = bool(elemento.get("molde"))
+            cor = cor_base
+            esp = float(elemento.get("espessura", 1.0))
             if elemento.get("tipo") == "polyline":
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
@@ -807,6 +845,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"]),
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
+            if selecionado and not is_molde:
+                self._desenhar_bbox_selecao_elemento(painter, elemento)
 
         self._desenhar_overlays_moldes(painter)
 
@@ -823,6 +863,8 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
+            if idx in self._selecionados:
+                self._desenhar_selecao_molde(painter, base, el)
 
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
@@ -871,6 +913,76 @@ class VisualizacaoCanvas(QWidget):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
+                painter.setPen(QPen(QColor("#ff3b30"), 1.0))
+                painter.setBrush(QColor("#ff3b30"))
+                for pt in aux:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
+        if not base:
+            return
+        margem_cm = 0.5
+        min_x = min(pt.x() for pt in base) - margem_cm
+        max_x = max(pt.x() for pt in base) + margem_cm
+        min_y = min(pt.y() for pt in base) - margem_cm
+        max_y = max(pt.y() for pt in base) + margem_cm
+        canto_sup_esq = self._cena_para_tela(QPointF(min_x, min_y))
+        canto_inf_dir = self._cena_para_tela(QPointF(max_x, max_y))
+        x_ini = min(canto_sup_esq.x(), canto_inf_dir.x())
+        y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
+        largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
+        altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
+
+        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        ret_pen.setDashPattern([3.5, 2.5])
+        painter.setPen(ret_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
+
+        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+        if len(cantos) >= 4:
+            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
+        else:
+            pontos_controle = [self._cena_para_tela(pt) for pt in base[:4]]
+
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
+        for pt in pontos_controle:
+            d = 4
+            diamond = QPolygon([
+                QPoint(int(pt.x()), int(pt.y() - d)),
+                QPoint(int(pt.x() + d), int(pt.y())),
+                QPoint(int(pt.x()), int(pt.y() + d)),
+                QPoint(int(pt.x() - d), int(pt.y())),
+            ])
+            painter.drawPolygon(diamond)
+
+    def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
+        pontos: list[QPointF] = []
+        if elemento.get("tipo") == "polyline":
+            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
+        if not pontos:
+            return
+        margem_cm = 0.5
+        min_x = min(p.x() for p in pontos) - margem_cm
+        max_x = max(p.x() for p in pontos) + margem_cm
+        min_y = min(p.y() for p in pontos) - margem_cm
+        max_y = max(p.y() for p in pontos) + margem_cm
+        canto_sup_esq = self._cena_para_tela(QPointF(min_x, min_y))
+        canto_inf_dir = self._cena_para_tela(QPointF(max_x, max_y))
+        x_ini = min(canto_sup_esq.x(), canto_inf_dir.x())
+        y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
+        largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
+        altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
+        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1_tela = self._cena_para_tela(inicio)
