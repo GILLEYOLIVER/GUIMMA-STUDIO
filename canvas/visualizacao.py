@@ -842,17 +842,27 @@ class VisualizacaoCanvas(QWidget):
                 else:
                     xs = [p.x() for p in base]
                     ys = [p.y() for p in base]
-                    cx = sum(xs) / len(xs)
                     largura = max(xs) - min(xs)
-                    margem = largura * 0.20
-                    p1 = QPointF(min(xs) + margem, sum(ys) / len(ys))
-                    p2 = QPointF(max(xs) - margem, sum(ys) / len(ys))
-                self._desenhar_segmento(painter, p1, p2, cor="#ffffff", espessura=1.0)
+                    margem = largura * 0.12
+                    y_fio = min(ys) + ((max(ys) - min(ys)) * 0.24)
+                    p1 = QPointF(min(xs) + margem, y_fio)
+                    p2 = QPointF(max(xs) - margem, y_fio)
                 self._desenhar_seta_fio(painter, p1, p2)
-                fim_tela = self._cena_para_tela(p2)
-                ang = float(el.get("fio_angulo", 90.0))
-                painter.setPen(QPen(QColor("#ffffff"), 1.0))
-                painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
+
+                rotulo_fio = (
+                    el.get("fio_rotulo")
+                    or el.get("fio_texto")
+                    or el.get("titulo_fio")
+                    or el.get("nome_fio")
+                    or ""
+                )
+                if rotulo_fio:
+                    self._desenhar_rotulo_fio(painter, p1, p2, str(rotulo_fio))
+                else:
+                    fim_tela = self._cena_para_tela(p2)
+                    ang = float(el.get("fio_angulo", 90.0))
+                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                    painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
             if el.get("mostrar_controles", True):
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
@@ -863,21 +873,114 @@ class VisualizacaoCanvas(QWidget):
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
+        p1_tela = self._cena_para_tela(inicio)
+        p2_tela = self._cena_para_tela(fim)
+        dx = p2_tela.x() - p1_tela.x()
+        dy = p2_tela.y() - p1_tela.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-6:
+            return
+
+        ux = dx / comp
+        uy = dy / comp
+        nx = -uy
+        ny = ux
+
+        margem_px = min(18.0, max(8.0, comp * 0.02))
+        base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
+        base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
+
+        pen = QPen(QColor("#ffffff"), 1.15)
+        pen.setCapStyle(Qt.FlatCap)
+        painter.setPen(pen)
+        painter.drawLine(base_inicio, base_fim)
+
+        tamanho_seta = min(14.0, max(7.5, comp * 0.028))
+        meia_largura = tamanho_seta * 0.32
+
+        self._desenhar_ponta_seta_fechada(
+            painter,
+            ponta=p2_tela,
+            direcao=QPointF(ux, uy),
+            normal=QPointF(nx, ny),
+            comprimento=tamanho_seta,
+            meia_largura=meia_largura,
+        )
+        self._desenhar_ponta_seta_fechada(
+            painter,
+            ponta=p1_tela,
+            direcao=QPointF(-ux, -uy),
+            normal=QPointF(nx, ny),
+            comprimento=tamanho_seta,
+            meia_largura=meia_largura,
+        )
+
+    def _desenhar_ponta_seta_fechada(
+        self,
+        painter: QPainter,
+        ponta: QPointF,
+        direcao: QPointF,
+        normal: QPointF,
+        comprimento: float,
+        meia_largura: float,
+    ):
+        base = QPointF(
+            ponta.x() - (direcao.x() * comprimento),
+            ponta.y() - (direcao.y() * comprimento),
+        )
+        esquerdo = QPointF(
+            base.x() + (normal.x() * meia_largura),
+            base.y() + (normal.y() * meia_largura),
+        )
+        direito = QPointF(
+            base.x() - (normal.x() * meia_largura),
+            base.y() - (normal.y() * meia_largura),
+        )
+        path = QPainterPath()
+        path.moveTo(ponta)
+        path.lineTo(esquerdo)
+        path.lineTo(direito)
+        path.closeSubpath()
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawPath(path)
+        painter.restore()
+
+    def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str):
+        meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
+        meio_tela = self._cena_para_tela(meio)
         dx = fim.x() - inicio.x()
         dy = fim.y() - inicio.y()
         comp = sqrt((dx * dx) + (dy * dy))
         if comp <= 1e-6:
             return
-        ux = dx / comp
-        uy = dy / comp
-        nx = -uy
-        ny = ux
-        tam = max(3.0, 12.0 / max(self.zoom, 0.001))
-        p_base = QPointF(fim.x() - (ux * tam), fim.y() - (uy * tam))
-        p_l = QPointF(p_base.x() + (nx * tam * 0.45), p_base.y() + (ny * tam * 0.45))
-        p_r = QPointF(p_base.x() - (nx * tam * 0.45), p_base.y() - (ny * tam * 0.45))
-        self._desenhar_segmento(painter, p_l, fim, cor="#ffffff", espessura=1.0)
-        self._desenhar_segmento(painter, p_r, fim, cor="#ffffff", espessura=1.0)
+
+        nx = -dy / comp
+        ny = dx / comp
+        offset_px = 12.0
+        ancora = QPointF(
+            meio_tela.x() + (nx * offset_px),
+            meio_tela.y() + (ny * offset_px),
+        )
+
+        painter.save()
+        fonte = painter.font()
+        fonte.setBold(False)
+        painter.setFont(fonte)
+        metrics = QFontMetrics(painter.font())
+        largura = metrics.horizontalAdvance(texto)
+        altura = metrics.height()
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.drawText(
+            int(round(ancora.x() - (largura / 2))),
+            int(round(ancora.y() - 4)),
+            int(round(largura)),
+            int(round(altura)),
+            Qt.AlignCenter,
+            texto,
+        )
+        painter.restore()
 
     def _cor_realce(self, cor_hex: str) -> str:
         cor = QColor(cor_hex)
