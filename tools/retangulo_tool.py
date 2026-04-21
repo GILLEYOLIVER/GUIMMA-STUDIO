@@ -126,12 +126,15 @@ class Ferramenta(FerramentaBase):
         p2 = QPointF(p3.x(), p1.y())
         p4 = QPointF(p1.x(), p3.y())
         cantos = [p1, p2, p3, p4]
+        pontos_auxiliares: list[QPointF] = []
         if self._criar_molde:
             pontos_fechados: list[QPointF] = []
             for idx, inicio in enumerate(cantos):
                 fim = cantos[(idx + 1) % len(cantos)]
                 pontos_fechados.append(inicio)
-                pontos_fechados.extend(self._pontos_auxiliares_segmento(inicio, fim))
+                aux_segmento = self._pontos_auxiliares_segmento(inicio, fim)
+                pontos_auxiliares.extend(aux_segmento)
+                pontos_fechados.extend(aux_segmento)
             pontos_fechados.append(cantos[0])
             canvas.cena.elementos.append(
                 {
@@ -146,6 +149,7 @@ class Ferramenta(FerramentaBase):
                     "molde_id": str(uuid4()),
                     "fio_angulo": 0.0,
                     "controle_cantos": [(pt.x(), pt.y()) for pt in cantos],
+                    "controle_auxiliares": [(pt.x(), pt.y()) for pt in pontos_auxiliares],
                 }
             )
             canvas._selecionados = {len(canvas.cena.elementos) - 1}

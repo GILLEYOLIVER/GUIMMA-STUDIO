@@ -888,6 +888,76 @@ class VisualizacaoCanvas(QWidget):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
+                painter.setPen(QPen(QColor("#ff3b30"), 1.0))
+                painter.setBrush(QColor("#ff3b30"))
+                for pt in aux:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
+        if not base:
+            return
+        margem_cm = 5.0
+        min_x = min(pt.x() for pt in base) - margem_cm
+        max_x = max(pt.x() for pt in base) + margem_cm
+        min_y = min(pt.y() for pt in base) - margem_cm
+        max_y = max(pt.y() for pt in base) + margem_cm
+        canto_sup_esq = self._cena_para_tela(QPointF(min_x, min_y))
+        canto_inf_dir = self._cena_para_tela(QPointF(max_x, max_y))
+        x_ini = min(canto_sup_esq.x(), canto_inf_dir.x())
+        y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
+        largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
+        altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
+
+        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        ret_pen.setDashPattern([3.5, 2.5])
+        painter.setPen(ret_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
+
+        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+        if len(cantos) >= 4:
+            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
+        else:
+            pontos_controle = [self._cena_para_tela(pt) for pt in base[:4]]
+
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
+        for pt in pontos_controle:
+            d = 4
+            diamond = QPolygon([
+                QPoint(int(pt.x()), int(pt.y() - d)),
+                QPoint(int(pt.x() + d), int(pt.y())),
+                QPoint(int(pt.x()), int(pt.y() + d)),
+                QPoint(int(pt.x() - d), int(pt.y())),
+            ])
+            painter.drawPolygon(diamond)
+
+    def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
+        pontos: list[QPointF] = []
+        if elemento.get("tipo") == "polyline":
+            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
+        if not pontos:
+            return
+        margem_cm = 5.0
+        min_x = min(p.x() for p in pontos) - margem_cm
+        max_x = max(p.x() for p in pontos) + margem_cm
+        min_y = min(p.y() for p in pontos) - margem_cm
+        max_y = max(p.y() for p in pontos) + margem_cm
+        canto_sup_esq = self._cena_para_tela(QPointF(min_x, min_y))
+        canto_inf_dir = self._cena_para_tela(QPointF(max_x, max_y))
+        x_ini = min(canto_sup_esq.x(), canto_inf_dir.x())
+        y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
+        largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
+        altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
+        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         pontos_tela = [self._cena_para_tela(pt) for pt in base]
