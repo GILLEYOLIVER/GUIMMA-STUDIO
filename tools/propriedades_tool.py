@@ -223,9 +223,10 @@ class PreviewMoldeWidget(QWidget):
 class PropriedadesMoldesDialog(QDialog):
     dados_aplicados = Signal()
 
-    def __init__(self, canvas, parent: QWidget | None = None):
+    def __init__(self, canvas, parent: QWidget | None = None, mostrar_tab_ferramentas: bool = True):
         super().__init__(parent)
         self.canvas = canvas
+        self._mostrar_tab_ferramentas = bool(mostrar_tab_ferramentas)
         self._refs: list[MoldeRef] = []
         self._indice_atual: int | None = None
         self._cor_visual = "#ffffff"
@@ -366,7 +367,8 @@ class PropriedadesMoldesDialog(QDialog):
         self.tabs.addTab(self._criar_tab_visualizacao(), "Visualização")
         self.tabs.addTab(self._criar_tab_margem(), "Margem")
         self.tabs.addTab(self._criar_tab_cam(), "Pontos de CAM")
-        self.tabs.addTab(self._criar_tab_ferramentas(), "Ferramentas")
+        self._idx_tab_ferramentas = self.tabs.addTab(self._criar_tab_ferramentas(), "Ferramentas")
+        self.set_exibir_tab_ferramentas(self._mostrar_tab_ferramentas)
         lay_dir.addWidget(self.tabs, 0)
 
         self.preview = PreviewMoldeWidget()
@@ -399,6 +401,13 @@ class PropriedadesMoldesDialog(QDialog):
         raiz.addWidget(painel_dir, 1)
         self._atualizar_opcoes_tecido()
         self._ajustar_larguras_campos()
+
+    def set_exibir_tab_ferramentas(self, exibir: bool):
+        self._mostrar_tab_ferramentas = bool(exibir)
+        if hasattr(self, "tabs") and hasattr(self, "_idx_tab_ferramentas"):
+            self.tabs.setTabVisible(self._idx_tab_ferramentas, self._mostrar_tab_ferramentas)
+            if not self._mostrar_tab_ferramentas and self.tabs.currentIndex() == self._idx_tab_ferramentas:
+                self.tabs.setCurrentIndex(0)
 
     def _ajustar_larguras_campos(self):
         combos = [
@@ -1364,10 +1373,13 @@ class Ferramenta(FerramentaBase):
     def _obter_dialog(self, canvas) -> PropriedadesMoldesDialog:
         chave = id(canvas)
         dialog = self._dialog_por_canvas.get(chave)
-        if dialog is not None:
-            return dialog
         parent = canvas.window() if hasattr(canvas, "window") else None
-        dialog = PropriedadesMoldesDialog(canvas, parent)
+        opcoes = getattr(parent, "_opcoes_app", {}) if parent is not None else {}
+        exibir_tab_ferramentas = bool(opcoes.get("usar_ferramentas_moldes", False))
+        if dialog is not None:
+            dialog.set_exibir_tab_ferramentas(exibir_tab_ferramentas)
+            return dialog
+        dialog = PropriedadesMoldesDialog(canvas, parent, mostrar_tab_ferramentas=exibir_tab_ferramentas)
         dialog.dados_aplicados.connect(lambda: self.set_status("Propriedades do molde aplicadas."))
         self._dialog_por_canvas[chave] = dialog
         return dialog
