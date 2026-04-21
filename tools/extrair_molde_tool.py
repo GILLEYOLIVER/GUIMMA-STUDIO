@@ -39,6 +39,7 @@ class Ferramenta(FerramentaBase):
         self._contorno_auto_coords: list[tuple[float, float]] | None = None
         self._contornos_preparados: dict[int, list[tuple[float, float]]] = {}
         self._molde_criado = False
+        self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto: QPointF | None = None
         self._snapshot_cancelamento: dict[int, dict] = {}
@@ -61,6 +62,7 @@ class Ferramenta(FerramentaBase):
         self._contorno_auto_coords = None
         self._contornos_preparados = {}
         self._molde_criado = False
+        self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
@@ -77,6 +79,7 @@ class Ferramenta(FerramentaBase):
         self._contorno_auto_coords = None
         self._contornos_preparados = {}
         self._molde_criado = False
+        self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
@@ -87,21 +90,11 @@ class Ferramenta(FerramentaBase):
 
         if self._arrastando_molde:
             if event.button() == Qt.LeftButton:
-                self._arrastando_molde = False
-                self._ultimo_pos_arrasto = None
-                self._snapshot_cancelamento = {}
-                canvas._registrar_historico()
-                self.set_status("Molde solto com sucesso.")
-                canvas.update()
+                self._finalizar_posicionamento(canvas, "Molde solto com sucesso. RMB para limpar área e soltar ferramenta.")
                 event.accept()
                 return True
             if event.button() == Qt.RightButton:
-                self._restaurar_snapshot(canvas)
-                self._arrastando_molde = False
-                self._ultimo_pos_arrasto = None
-                self._snapshot_cancelamento = {}
-                self._molde_criado = False
-                self.set_status("Movimento cancelado.")
+                self._finalizar_posicionamento(canvas, "Molde confirmado. RMB novamente para limpar área e soltar ferramenta.")
                 canvas.update()
                 event.accept()
                 return True
@@ -118,6 +111,7 @@ class Ferramenta(FerramentaBase):
                     self._idx_selecionado = None
                     canvas._selecionados = set()
                     self._molde_criado = False
+                    self._molde_posicionado = False
                     self.set_status("Contorno da face detectado. RMB para pegar molde.")
                     canvas.update()
                     event.accept()
@@ -150,6 +144,7 @@ class Ferramenta(FerramentaBase):
                 self._contorno_auto_coords = None
                 self._contornos_preparados.pop(idx, None)
                 self._molde_criado = False
+                self._molde_posicionado = False
                 if self._selecoes_manuais:
                     self.set_status(f"Manual: {len(self._selecoes_manuais)} parte(s) selecionada(s). RMB para validar/extrair.")
                 else:
@@ -171,6 +166,7 @@ class Ferramenta(FerramentaBase):
             self._contorno_extraido = pontos
             self._contorno_auto_coords = [(p.x(), p.y()) for p in pontos]
             self._molde_criado = False
+            self._molde_posicionado = False
             self.set_status("Contorno validado e realçado. RMB para pegar molde.")
             canvas.update()
             event.accept()
@@ -178,6 +174,21 @@ class Ferramenta(FerramentaBase):
 
         if event.button() != Qt.RightButton:
             return False
+
+        if self._molde_posicionado:
+            canvas._selecionados = set()
+            self._selecoes_manuais.clear()
+            self._contorno_extraido = None
+            self._contorno_auto_coords = None
+            self._contornos_preparados = {}
+            self._idx_selecionado = None
+            self._molde_criado = False
+            self._molde_posicionado = False
+            self.set_status("Área limpa. Ferramenta solta.")
+            canvas.ferramenta_padrao_solicitada.emit("selecionar")
+            canvas.update()
+            event.accept()
+            return True
 
         if not self._selecoes_manuais and not self._contorno_auto_coords:
             self.set_status("Nenhum contorno selecionado. RMB novamente para voltar ao Selecionar.")
@@ -196,7 +207,7 @@ class Ferramenta(FerramentaBase):
                 self.set_status("Falha ao criar molde.")
             return False
         self._iniciar_arraste_molde(canvas, pos)
-        self.set_status("Molde em mãos: mova o mouse, LMB solta, RMB cancela.")
+        self.set_status("Molde em mãos: mova o mouse, LMB ou RMB confirma posicionamento.")
         canvas.update()
         event.accept()
         return True
@@ -415,12 +426,21 @@ class Ferramenta(FerramentaBase):
         min_y = min(ys)
         max_y = max(ys)
         molde.setdefault("molde_id", str(uuid4()))
-        molde.setdefault("fio_angulo", 90.0)
-        molde.setdefault("fio_origem", (cx, max_y))
-        molde.setdefault("fio_fim", (cx, min_y))
+        molde.setdefault("fio_angulo", 0.0)
+        molde.setdefault("fio_origem", (min(xs), cy))
+        molde.setdefault("fio_fim", (max(xs), cy))
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
+
+    def _finalizar_posicionamento(self, canvas, msg: str):
+        self._arrastando_molde = False
+        self._ultimo_pos_arrasto = None
+        self._snapshot_cancelamento = {}
+        self._molde_posicionado = True
+        canvas._registrar_historico()
+        self.set_status(msg)
+        canvas.update()
 
     def _iniciar_arraste_molde(self, canvas, pos: QPointF):
         self._snapshot_cancelamento = {idx: deepcopy(canvas.cena.elementos[idx]) for idx in self._selecoes_manuais if 0 <= idx < len(canvas.cena.elementos)}
