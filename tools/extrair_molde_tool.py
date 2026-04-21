@@ -432,6 +432,14 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
+        if not molde.get("controle_cantos"):
+            molde["controle_cantos"] = [(x, y) for x, y in base]
+        if not molde.get("pontos_controle_principais"):
+            molde["pontos_controle_principais"] = [
+                {"indice": i + 1, "x": x, "y": y} for i, (x, y) in enumerate(base)
+            ]
+        if "pontos_auxiliares" not in molde:
+            molde["pontos_auxiliares"] = []
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False

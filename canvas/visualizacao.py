@@ -852,13 +852,25 @@ class VisualizacaoCanvas(QWidget):
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
-            if idx in self._selecionados and el.get("mostrar_controles", True):
+            if el.get("mostrar_controles", True):
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                principais = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_controle_principais", [])]
+                painter.setPen(QPen(QColor("#6be3ff"), 1.0))
+                painter.setBrush(QColor("#6be3ff"))
+                for pt in principais:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(pt_tela, 2.2, 2.2)
+                auxiliares = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) for p in el.get("pontos_auxiliares", [])]
+                painter.setPen(QPen(QColor("#ff2a2a"), 1.0))
+                painter.setBrush(QColor("#ff2a2a"))
+                for pt in auxiliares:
+                    pt_tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(pt_tela, 1.8, 1.8)
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         dx = fim.x() - inicio.x()
