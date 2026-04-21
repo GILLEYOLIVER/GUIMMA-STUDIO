@@ -7,7 +7,7 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
@@ -55,6 +55,8 @@ class VisualizacaoCanvas(QWidget):
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ffffff"
+        self._cores_tecidos: dict[str, str] = {}
+        self._mostrar_cor_tecidos = False
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
@@ -183,6 +185,12 @@ class VisualizacaoCanvas(QWidget):
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
         self._painel_coordenadas_posicao = None
         self._reposicionar_painel_coordenadas()
+
+    def sincronizar_paineis_auxiliares(self):
+        """Recalcula posições dos painéis flutuantes com o tamanho atual do canvas."""
+        self._reposicionar_painel_coordenadas()
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_canvas_resize"):
+            self._runtime_tool.on_canvas_resize(self)
 
     def painel_auxiliar_posicao(self) -> tuple[int, int] | None:
         if self.painel_coordenadas.isVisible():
@@ -792,9 +800,14 @@ class VisualizacaoCanvas(QWidget):
 
         for idx, elemento in enumerate(self.cena.elementos):
             cor_base = elemento.get("cor", "#d0d0d0")
+            if elemento.get("molde") and self._mostrar_cor_tecidos:
+                tecido = str(elemento.get("tecido") or "").strip()
+                if tecido and tecido in self._cores_tecidos:
+                    cor_base = self._cores_tecidos[tecido]
             selecionado = idx in self._selecionados
-            cor = self._cor_realce(cor_base) if selecionado else cor_base
-            esp = float(elemento.get("espessura", 1.0)) + (0.8 if selecionado else 0.0)
+            is_molde = bool(elemento.get("molde"))
+            cor = cor_base if (selecionado and is_molde) else (self._cor_realce(cor_base) if selecionado else cor_base)
+            esp = float(elemento.get("espessura", 1.0)) + (0.0 if (selecionado and is_molde) else (0.8 if selecionado else 0.0))
             if elemento.get("tipo") == "polyline":
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
@@ -807,6 +820,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"]),
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
+            if selecionado and not is_molde:
+                self._desenhar_bbox_selecao_elemento(painter, elemento)
 
         self._desenhar_overlays_moldes(painter)
 
@@ -823,6 +838,8 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
+            if idx in self._selecionados:
+                self._desenhar_selecao_molde(painter, base, el)
 
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
@@ -864,13 +881,61 @@ class VisualizacaoCanvas(QWidget):
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
-            if el.get("mostrar_controles", True):
+            if el.get("mostrar_controles", True) and idx not in self._selecionados:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+
+    def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
+        pontos_tela = [self._cena_para_tela(pt) for pt in base]
+        xs = [p.x() for p in pontos_tela]
+        ys = [p.y() for p in pontos_tela]
+        if not xs or not ys:
+            return
+
+        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        ret_pen.setDashPattern([3.5, 2.5])
+        painter.setPen(ret_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
+
+        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+        if len(cantos) >= 4:
+            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
+        else:
+            pontos_controle = pontos_tela[:4]
+
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
+        for pt in pontos_controle:
+            d = 4
+            diamond = QPolygon([
+                QPoint(int(pt.x()), int(pt.y() - d)),
+                QPoint(int(pt.x() + d), int(pt.y())),
+                QPoint(int(pt.x()), int(pt.y() + d)),
+                QPoint(int(pt.x() - d), int(pt.y())),
+            ])
+            painter.drawPolygon(diamond)
+
+    def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
+        pontos: list[QPointF] = []
+        if elemento.get("tipo") == "polyline":
+            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
+        if not pontos:
+            return
+        tela = [self._cena_para_tela(p) for p in pontos]
+        xs = [p.x() for p in tela]
+        ys = [p.y() for p in tela]
+        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(int(min(xs)), int(min(ys)), int(max(xs) - min(xs)), int(max(ys) - min(ys)))
 
     def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
         p1_tela = self._cena_para_tela(inicio)
