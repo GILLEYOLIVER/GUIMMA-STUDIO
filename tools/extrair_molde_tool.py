@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import acos, atan2, sqrt
+from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.geometry.engine import internal_angle
+from core.geometry_bridge import create_mold_payload, element_contains_point
 from tools.tool_base import FerramentaBase
 
 
@@ -213,19 +215,8 @@ class Ferramenta(FerramentaBase):
         return candidatos
 
     def _ponto_dentro_poligono(self, pt: QPointF, pontos: list[QPointF]) -> bool:
-        poligono = pontos if pontos and self._dist(pontos[0], pontos[-1]) <= 0.001 else [*pontos, pontos[0]]
-        inside = False
-        j = len(poligono) - 1
-        x = pt.x()
-        y = pt.y()
-        for i in range(len(poligono)):
-            xi, yi = poligono[i].x(), poligono[i].y()
-            xj, yj = poligono[j].x(), poligono[j].y()
-            intercepta = ((yi > y) != (yj > y)) and (x < ((xj - xi) * (y - yi) / max((yj - yi), 1e-12)) + xi)
-            if intercepta:
-                inside = not inside
-            j = i
-        return inside
+        polygon = [(p.x(), p.y()) for p in pontos]
+        return element_contains_point({"pontos": polygon}, (pt.x(), pt.y()))
 
     def _criar_molde(self, canvas) -> bool:
         if not self._selecoes_manuais:
@@ -238,23 +229,17 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
-            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            if not self._eh_fechado(pontos):
-                pontos.append(QPointF(pontos[0]))
-                el["pontos"] = [(p.x(), p.y()) for p in pontos]
-            principais = [QPointF(p) for p in pontos[:-1]]
-            auxiliares = []
-            for i in range(len(principais)):
-                a = principais[i]
-                b = principais[(i + 1) % len(principais)]
-                aux = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
-                auxiliares.append({"x": aux.x(), "y": aux.y(), "oculto": True})
+            payload = create_mold_payload(el)
+            el["pontos"] = payload["pontos"]
 
             el["molde"] = True
             el["nome_molde"] = self._proximo_nome_molde(canvas)
-            el["controle_cantos"] = [(p.x(), p.y()) for p in principais]
-            el["pontos_controle_principais"] = [{"indice": i + 1, "x": p.x(), "y": p.y()} for i, p in enumerate(principais)]
-            el["pontos_auxiliares"] = auxiliares
+            el["shape_id"] = payload["shape_id"]
+            el["node_ids"] = payload["node_ids"]
+            el["segment_ids"] = payload["segment_ids"]
+            el["controle_cantos"] = payload["controle_cantos"]
+            el["pontos_controle_principais"] = payload["pontos_controle_principais"]
+            el["pontos_auxiliares"] = payload["pontos_auxiliares"]
             criou = True
         self._molde_criado = criou
         return criou
@@ -326,15 +311,6 @@ class Ferramenta(FerramentaBase):
 
     def _eh_fechado(self, pontos: list[QPointF]) -> bool:
         return len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) <= 0.001
-
-    def _ordenar_principais_horario(self, pontos: list[QPointF]) -> list[QPointF]:
-        area2 = 0.0
-        for a, b in zip(pontos, pontos[1:] + [pontos[0]]):
-            area2 += (b.x() - a.x()) * (b.y() + a.y())
-        if area2 > 0:
-            pontos = list(reversed(pontos))
-        centro = QPointF(sum(p.x() for p in pontos) / len(pontos), sum(p.y() for p in pontos) / len(pontos))
-        return sorted(pontos, key=lambda p: atan2(p.y() - centro.y(), p.x() - centro.x()), reverse=True)
 
     def _abrir_config(self, canvas):
         if self._dialog is None:
@@ -450,11 +426,4 @@ class Ferramenta(FerramentaBase):
         return sqrt((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2)
 
     def _angulo_interno(self, a: QPointF, b: QPointF, c: QPointF) -> float:
-        bax, bay = a.x() - b.x(), a.y() - b.y()
-        bcx, bcy = c.x() - b.x(), c.y() - b.y()
-        na = sqrt((bax * bax) + (bay * bay))
-        nb = sqrt((bcx * bcx) + (bcy * bcy))
-        if na <= 1e-9 or nb <= 1e-9:
-            return 180.0
-        cosv = max(-1.0, min(1.0, ((bax * bcx) + (bay * bcy)) / (na * nb)))
-        return acos(cosv) * (180.0 / 3.141592653589793)
+        return internal_angle((a.x(), a.y()), (b.x(), b.y()), (c.x(), c.y()))
