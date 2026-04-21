@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from math import floor, log10
+from math import ceil, floor, log10
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
+from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
 from canvas.cena import CenaDocumento
@@ -17,6 +17,9 @@ class ReguaWidget(QWidget):
         self.zoom = 1.0
         self.origem_x = 0.0
         self.origem_y = 0.0
+        self.unidade_sigla = "cm"
+        self._fator_unidade = 1.0  # 1 unidade de cena = 1 cm
+        self.passo_preferido_unidade = 0.5
         if horizontal:
             self.setFixedHeight(20)
         else:
@@ -30,6 +33,12 @@ class ReguaWidget(QWidget):
 
     def atualizar_zoom(self, zoom: float):
         self.atualizar_viewport(zoom, self.origem_x, self.origem_y)
+
+    def definir_unidade(self, sigla: str, fator_unidade: float, passo_preferido_unidade: float):
+        self.unidade_sigla = str(sigla or "cm")
+        self._fator_unidade = max(1e-9, float(fator_unidade))
+        self.passo_preferido_unidade = max(1e-6, float(passo_preferido_unidade))
+        self.update()
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -83,22 +92,22 @@ class ReguaWidget(QWidget):
     def _passo_principal(self) -> float:
         alvo_px = 85.0
         bruto = max(alvo_px / max(self.zoom, 0.001), 1e-6)
-        base = 10 ** floor(log10(bruto))
-        for mult in (1, 2, 5, 10):
-            passo = base * mult
-            if passo >= bruto:
-                return passo
-        return base * 10
+        passo_base = self.passo_preferido_unidade * self._fator_unidade
+        mult = max(1, ceil(bruto / max(passo_base, 1e-6)))
+        return passo_base * mult
 
     def _formatar_valor(self, valor: float, passo: float) -> str:
-        if passo >= 1:
-            return f"{valor:.0f}"
-        dec = max(0, min(6, int(abs(floor(log10(passo))))))
-        return f"{valor:.{dec}f}"
+        valor_unidade = valor / self._fator_unidade
+        passo_unidade = passo / self._fator_unidade
+        if passo_unidade >= 1:
+            return f"{valor_unidade:.0f}"
+        dec = max(0, min(6, int(abs(floor(log10(passo_unidade))))))
+        return f"{valor_unidade:.{dec}f}"
 
 
 class AreaDocumentoWidget(QWidget):
     zoom_changed = Signal(float)
+    unidade_menu_solicitado = Signal(int, int)
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -108,9 +117,14 @@ class AreaDocumentoWidget(QWidget):
 
         self.regua_h = ReguaWidget(horizontal=True)
         self.regua_v = ReguaWidget(horizontal=False)
-        self.canto = QLabel("cm")
-        self.canto.setAlignment(Qt.AlignCenter)
-        self.canto.setStyleSheet("background:#f8f8f8; border-right:1px solid #cdd6df; border-bottom:1px solid #cdd6df; font-size:10px;")
+        self.canto = QToolButton()
+        self.canto.setText("cm")
+        self.canto.setCursor(Qt.PointingHandCursor)
+        self.canto.setStyleSheet(
+            "QToolButton { background:#f8f8f8; border-right:1px solid #cdd6df; border-bottom:1px solid #cdd6df; font-size:10px; }"
+            "QToolButton:hover { background:#eaf5ff; }"
+        )
+        self.canto.clicked.connect(self._emitir_menu_unidade)
 
         self.canvas = VisualizacaoCanvas(cena)
         self.canvas.zoom_changed.connect(self._on_zoom_changed)
@@ -119,8 +133,37 @@ class AreaDocumentoWidget(QWidget):
         layout.addWidget(self.regua_h, 0, 1)
         layout.addWidget(self.regua_v, 1, 0)
         layout.addWidget(self.canvas, 1, 1)
+        self._reguas_visiveis = True
+        self.aplicar_config_unidade("cm", 0.5)
 
     def _on_zoom_changed(self, zoom: float):
         self.regua_h.atualizar_viewport(zoom, self.canvas.origem_cena.x(), self.canvas.origem_cena.y())
         self.regua_v.atualizar_viewport(zoom, self.canvas.origem_cena.x(), self.canvas.origem_cena.y())
         self.zoom_changed.emit(zoom)
+    
+    def _emitir_menu_unidade(self):
+        pos = self.canto.mapToGlobal(self.canto.rect().bottomLeft())
+        self.unidade_menu_solicitado.emit(pos.x(), pos.y())
+
+    def aplicar_config_unidade(self, unidade_sigla: str, passo_unidade: float):
+        mapa_fator = {
+            "mm": 0.1,
+            "cm": 1.0,
+            "m": 100.0,
+            "pol": 2.54,
+            "ft": 30.48,
+            "yd": 91.44,
+        }
+        fator = mapa_fator.get(unidade_sigla, 1.0)
+        self.regua_h.definir_unidade(unidade_sigla, fator, passo_unidade)
+        self.regua_v.definir_unidade(unidade_sigla, fator, passo_unidade)
+        self.canto.setText(unidade_sigla)
+        if hasattr(self.canvas, "set_unidade_medida"):
+            self.canvas.set_unidade_medida(unidade_sigla, fator)
+        self._on_zoom_changed(self.canvas.zoom)
+
+    def set_reguas_visiveis(self, visivel: bool):
+        self._reguas_visiveis = bool(visivel)
+        self.regua_h.setVisible(self._reguas_visiveis)
+        self.regua_v.setVisible(self._reguas_visiveis)
+        self.canto.setVisible(self._reguas_visiveis)

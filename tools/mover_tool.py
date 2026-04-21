@@ -57,6 +57,8 @@ class Ferramenta(FerramentaBase):
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
                 if "controle_cantos" in el:
                     el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                if "controle_auxiliares" in el:
+                    el["controle_auxiliares"] = [(x + dx, y + dy) for x, y in el.get("controle_auxiliares", [])]
                 if "fio_origem" in el:
                     fx, fy = el.get("fio_origem", (0.0, 0.0))
                     el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
