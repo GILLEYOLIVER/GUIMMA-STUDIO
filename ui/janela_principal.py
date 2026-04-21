@@ -88,7 +88,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
-        self._carregar_documentos_canvas()
+        self._adicionar_aba_documento(nome="novo_projeto")
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self.showMaximized()
@@ -934,6 +934,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         if not self._ha_alteracoes_nao_salvas():
+            self._salvar_estado_projeto_silenciosamente()
             self._salvar_preferencias_app()
             event.accept()
             return
@@ -959,6 +960,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and self._tem_alteracoes_area(area):
+                return True
+        return False
+
+    def _ha_alteracoes_estado_nao_salvas(self) -> bool:
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget) and self._tem_alteracoes_estado_area(area):
                 return True
         return False
 
@@ -1011,7 +1019,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
-            area.setProperty("assinatura_salva", self._assinatura_canvas(area))
+            self._marcar_area_como_salva(area)
         self.backstage.hide()
 
     def _salvar_projeto(self) -> bool:
@@ -1439,7 +1447,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_precisao_medida(self._precisao_medida)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
-        area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
+        self._marcar_area_como_salva(area_doc)
         area_doc.setProperty("arquivo_origem", caminho_origem)
         index = self.abas_documentos.addTab(area_doc, nome)
         self._configurar_botao_fechar_aba(index)
@@ -1546,6 +1554,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _confirmar_fechamento_aba(self, index: int, nome_aba: str) -> bool:
         area = self.abas_documentos.widget(index) if index >= 0 else None
         if isinstance(area, AreaDocumentoWidget) and not self._tem_alteracoes_area(area):
+            self._salvar_estado_projeto_silenciosamente()
             return True
         caixa = QMessageBox(self)
         self._estilizar_message_box(caixa)
@@ -1637,7 +1646,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
-            area_doc.setProperty("assinatura_salva", self._assinatura_canvas(area_doc))
+            self._marcar_area_como_salva(area_doc)
             nome = doc.get("nome") or "(Sem nome)"
             if str(nome).strip().startswith("(Sem nome)"):
                 idx_nome = self.abas_documentos.count() + 1
@@ -1925,15 +1934,39 @@ class GuimmaStudioMainWindow(QMainWindow):
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
     def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
-        assinatura_salva = area.property("assinatura_salva")
+        assinatura_salva = area.property("assinatura_salva_conteudo")
         return self._assinatura_canvas(area) != assinatura_salva
+
+    def _tem_alteracoes_estado_area(self, area: AreaDocumentoWidget) -> bool:
+        assinatura_estado_salva = area.property("assinatura_salva_estado")
+        return self._assinatura_estado_canvas(area) != assinatura_estado_salva
+
+    def _marcar_area_como_salva(self, area: AreaDocumentoWidget):
+        area.setProperty("assinatura_salva_conteudo", self._assinatura_canvas(area))
+        area.setProperty("assinatura_salva_estado", self._assinatura_estado_canvas(area))
 
     def _marcar_documentos_como_salvos(self):
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
-                area.setProperty("assinatura_salva", self._assinatura_canvas(area))
+                self._marcar_area_como_salva(area)
+
+    def _salvar_estado_projeto_silenciosamente(self):
+        if self._arquivo_atual is None:
+            return
+        if not self._ha_alteracoes_estado_nao_salvas():
+            return
+        try:
+            self._sincronizar_documentos_canvas_no_projeto()
+            GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
+            self._marcar_documentos_como_salvos()
+        except Exception:
+            pass
 
     def _criar_barra_inferior(self) -> QWidget:
         container = QWidget()
