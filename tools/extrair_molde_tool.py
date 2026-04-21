@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from math import sqrt
+from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -303,6 +304,7 @@ class Ferramenta(FerramentaBase):
                 "pontos_auxiliares": pontos_auxiliares,
                 "origem_contorno": idx,
             }
+            self._enriquecer_metadados_molde(novo)
             canvas.cena.elementos.append(novo)
             novos_indices.append(len(canvas.cena.elementos) - 1)
             criou = True
@@ -347,6 +349,7 @@ class Ferramenta(FerramentaBase):
                 "origens_contorno": idxs,
             }
         )
+        self._enriquecer_metadados_molde(novo)
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
@@ -373,6 +376,7 @@ class Ferramenta(FerramentaBase):
             "pontos_auxiliares": payload["pontos_auxiliares"] if self._cfg.get("detectar_auxiliares") else [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
         }
+        self._enriquecer_metadados_molde(novo)
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
@@ -393,6 +397,30 @@ class Ferramenta(FerramentaBase):
         self._contorno_extraido = pontos
         self._contornos_preparados[idx] = [(p.x(), p.y()) for p in pontos]
         self._molde_criado = False
+
+    def _enriquecer_metadados_molde(self, molde: dict):
+        pontos = [(float(x), float(y)) for x, y in molde.get("pontos", [])]
+        if len(pontos) < 2:
+            return
+        if pontos[0] == pontos[-1]:
+            base = pontos[:-1]
+        else:
+            base = pontos
+        if not base:
+            return
+        xs = [x for x, _ in base]
+        ys = [y for _, y in base]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        min_y = min(ys)
+        max_y = max(ys)
+        molde.setdefault("molde_id", str(uuid4()))
+        molde.setdefault("fio_angulo", 90.0)
+        molde.setdefault("fio_origem", (cx, max_y))
+        molde.setdefault("fio_fim", (cx, min_y))
+        molde.setdefault("mostrar_nome", True)
+        molde.setdefault("mostrar_fio", True)
+        molde.setdefault("mostrar_controles", True)
 
     def _iniciar_arraste_molde(self, canvas, pos: QPointF):
         self._snapshot_cancelamento = {idx: deepcopy(canvas.cena.elementos[idx]) for idx in self._selecoes_manuais if 0 <= idx < len(canvas.cena.elementos)}
@@ -416,6 +444,12 @@ class Ferramenta(FerramentaBase):
                     for p in el["pontos_auxiliares"]:
                         p["x"] = float(p.get("x", 0.0)) + dx
                         p["y"] = float(p.get("y", 0.0)) + dy
+                if "fio_origem" in el:
+                    fx, fy = el.get("fio_origem", (0.0, 0.0))
+                    el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
+                if "fio_fim" in el:
+                    fx, fy = el.get("fio_fim", (0.0, 0.0))
+                    el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
 
     def _restaurar_snapshot(self, canvas):
         for idx, el in self._snapshot_cancelamento.items():
@@ -479,7 +513,7 @@ class Ferramenta(FerramentaBase):
                 }
                 QCheckBox::indicator:checked {
                     border: 1px solid #145f9b;
-                    background: #ffffff;
+                    background: #2f7cf6;
                 }
                 """
             )
