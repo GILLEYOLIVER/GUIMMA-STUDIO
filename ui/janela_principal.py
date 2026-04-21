@@ -61,20 +61,21 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.projeto_atual.preferencias_usuario.update(prefs_app)
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
-        self._ferramenta_ativa_id = "selecionar"
+        self._ferramenta_ativa_id = str(self.projeto_atual.preferencias_usuario.get("ferramenta_ativa_id", "selecionar"))
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
-        self._passo_snap_angular_atual = 45.0
+        self._passo_snap_angular_atual = float(self.projeto_atual.preferencias_usuario.get("passo_snap_angular", 45.0))
         self._unidade_medida = str(self.projeto_atual.preferencias_usuario.get("unidade_medida", "cm"))
         self._passo_unidade_medida = float(self.projeto_atual.preferencias_usuario.get("passo_unidade_medida", 0.5))
         self._unidade_area = str(self.projeto_atual.preferencias_usuario.get("unidade_area", "m"))
         self._precisao_medida = str(self.projeto_atual.preferencias_usuario.get("precisao_medida", "0.01"))
-        self._snap_contextual_ativo = True
+        self._snap_contextual_ativo = bool(self.projeto_atual.preferencias_usuario.get("snap_contextual_ativo", True))
+        self._snap_ativo_global = bool(self.projeto_atual.preferencias_usuario.get("snap_ativo", True))
         self._janela_aux_curva: QDialog | None = None
         self._janela_aux_retangulo: QDialog | None = None
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
-        self._retangulo_criar_molde = True
+        self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
@@ -85,6 +86,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._inicializar_perfis_usuarios()
+        self._timer_salvar_estado = QTimer(self)
+        self._timer_salvar_estado.setSingleShot(True)
+        self._timer_salvar_estado.timeout.connect(self._salvar_estado_projeto_silenciosamente)
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
@@ -552,6 +556,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_config_retangulo(self, criar_molde: bool):
         self._retangulo_criar_molde = bool(criar_molde)
+        self.projeto_atual.preferencias_usuario["retangulo_criar_molde"] = self._retangulo_criar_molde
+        self._salvar_preferencias_app()
         area = self._area_documento_atual()
         if area:
             area.canvas.definir_config_retangulo(self._retangulo_criar_molde)
@@ -1479,6 +1485,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_atual = self._area_documento_atual()
         if area_atual and self.sender() is area_atual:
             self.lbl_escala.setText(self._texto_escala(zoom))
+            self._agendar_salvar_estado_silencioso()
 
     def _on_aba_documento_alterada(self, index: int):
         area = self.abas_documentos.widget(index) if index >= 0 else None
@@ -1699,6 +1706,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _ativar_ferramenta_global(self, tool_id: str):
         self._ferramenta_ativa_id = tool_id
+        self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = tool_id
+        self._salvar_preferencias_app()
         self.ribbon.set_active_tool(tool_id)
         if tool_id != "curva" and self._janela_aux_curva and self._janela_aux_curva.isVisible():
             self._memorizar_posicao_caixa_aux(self._janela_aux_curva, "curva")
@@ -1881,6 +1890,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _definir_passo_snap_angular(self, passo: float):
         self._passo_snap_angular_atual = float(passo)
+        self.projeto_atual.preferencias_usuario["passo_snap_angular"] = self._passo_snap_angular_atual
+        self._salvar_preferencias_app()
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
@@ -1889,6 +1900,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _alternar_snap_contextual(self, ativo: bool):
         self._snap_contextual_ativo = bool(ativo)
+        self.projeto_atual.preferencias_usuario["snap_contextual_ativo"] = self._snap_contextual_ativo
+        self._salvar_preferencias_app()
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
@@ -1902,6 +1915,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText("Barra de mensagem ativa" if ativo else "Barra de mensagem oculta")
 
     def _alternar_snap_canvas_atual(self, ativo: bool):
+        self._snap_ativo_global = bool(ativo)
+        self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
+        self._salvar_preferencias_app()
         area = self._area_documento_atual()
         if not area:
             self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
@@ -1909,6 +1925,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.set_snap_ativo(ativo)
 
     def _on_snap_changed(self, ativo: bool):
+        self._snap_ativo_global = bool(ativo)
+        self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
+        self._salvar_preferencias_app()
         self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
 
     def _alternar_coordenadas_canvas_atual(self, visivel: bool):
@@ -1931,6 +1950,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
@@ -1968,6 +1991,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _agendar_salvar_estado_silencioso(self):
+        if hasattr(self, "_timer_salvar_estado"):
+            self._timer_salvar_estado.start(450)
+
     def _criar_barra_inferior(self) -> QWidget:
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -1983,7 +2010,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_snap = QPushButton("Snap")
         self.btn_snap.setCheckable(True)
-        self.btn_snap.setChecked(True)
+        self.btn_snap.setChecked(self._snap_ativo_global)
         self.btn_snap.setCursor(Qt.PointingHandCursor)
         self.btn_snap.setToolTip("Ativar/Desativar snap (ímã)")
         icone_snap = ICONS_DIR / "snap.svg"
