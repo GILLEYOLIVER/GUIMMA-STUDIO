@@ -2306,6 +2306,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
+    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
+        payload = self._capturar_estado_documento_canvas(area)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
     def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
         assinatura_salva = area.property("assinatura_salva_conteudo")
         return self._assinatura_canvas(area) != assinatura_salva
