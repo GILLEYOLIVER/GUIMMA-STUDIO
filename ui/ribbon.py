@@ -82,7 +82,9 @@ class RibbonButton(QToolButton):
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.setIconSize(QSize(16, 16))
-            self.setFixedSize(172, 32)
+            self.setFixedHeight(28)
+            self.setMinimumWidth(118)
+            self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             self.setStyleSheet(
                 """
                 QToolButton {
@@ -92,7 +94,7 @@ class RibbonButton(QToolButton):
                     color: #1e1e1e;
                     font-size: 13px;
                     font-weight: 500;
-                    padding: 0 6px;
+                    padding: 0 4px;
                     border-radius: 4px;
                 }
                 QToolButton:hover { background: #eef5ff; border: none; }

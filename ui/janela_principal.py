@@ -75,7 +75,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
-        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
+        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", False))
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._inicializar_perfis_usuarios()
@@ -1156,7 +1156,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
         if hasattr(self, "faixa_usuarios"):
-            self.faixa_usuarios.setVisible(self._barra_usuarios_habilitada)
+            visivel = self._barra_usuarios_habilitada or (tab_id == "usuarios")
+            self.faixa_usuarios.setVisible(visivel)
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
