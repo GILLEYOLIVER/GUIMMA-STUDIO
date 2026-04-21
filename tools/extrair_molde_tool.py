@@ -462,6 +462,8 @@ class Ferramenta(FerramentaBase):
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
                 if "controle_cantos" in el:
                     el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                if "controle_auxiliares" in el:
+                    el["controle_auxiliares"] = [(x + dx, y + dy) for x, y in el.get("controle_auxiliares", [])]
                 if "pontos_controle_principais" in el:
                     for p in el["pontos_controle_principais"]:
                         p["x"] = float(p.get("x", 0.0)) + dx
