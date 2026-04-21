@@ -18,7 +18,7 @@ class ReguaWidget(QWidget):
         self.origem_x = 0.0
         self.origem_y = 0.0
         self.unidade_sigla = "cm"
-        self._fator_unidade = 10.0  # 1 unidade de cena = 1 mm
+        self._fator_unidade = 1.0  # 1 unidade de cena = 1 cm
         self.passo_preferido_unidade = 0.5
         if horizontal:
             self.setFixedHeight(20)
@@ -147,14 +147,14 @@ class AreaDocumentoWidget(QWidget):
 
     def aplicar_config_unidade(self, unidade_sigla: str, passo_unidade: float):
         mapa_fator = {
-            "mm": 1.0,
-            "cm": 10.0,
-            "m": 1000.0,
-            "pol": 25.4,
-            "ft": 304.8,
-            "yd": 914.4,
+            "mm": 0.1,
+            "cm": 1.0,
+            "m": 100.0,
+            "pol": 2.54,
+            "ft": 30.48,
+            "yd": 91.44,
         }
-        fator = mapa_fator.get(unidade_sigla, 10.0)
+        fator = mapa_fator.get(unidade_sigla, 1.0)
         self.regua_h.definir_unidade(unidade_sigla, fator, passo_unidade)
         self.regua_v.definir_unidade(unidade_sigla, fator, passo_unidade)
         self.canto.setText(unidade_sigla)

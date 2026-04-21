@@ -17,7 +17,7 @@ class PainelCoordenadas(QFrame):
         self.setObjectName("PainelCoordenadas")
         self.setFixedSize(300, 120)
         self._unidade_sigla = "cm"
-        self._unidade_fator = 10.0
+        self._unidade_fator = 1.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)

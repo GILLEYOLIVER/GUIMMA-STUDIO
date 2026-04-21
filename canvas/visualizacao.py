@@ -61,7 +61,7 @@ class VisualizacaoCanvas(QWidget):
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
         self._unidade_sigla = "cm"
-        self._unidade_fator = 10.0  # 1 unidade de cena = 1 mm
+        self._unidade_fator = 1.0  # 1 unidade de cena = 1 cm
         self._snap_angular_passo = 45.0
         self._snap_contextual_ativo = True
         self._tecla_w_trava_principal = False
