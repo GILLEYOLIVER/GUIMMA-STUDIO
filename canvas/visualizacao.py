@@ -55,6 +55,8 @@ class VisualizacaoCanvas(QWidget):
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ffffff"
+        self._cores_tecidos: dict[str, str] = {}
+        self._mostrar_cor_tecidos = False
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
@@ -798,6 +800,10 @@ class VisualizacaoCanvas(QWidget):
 
         for idx, elemento in enumerate(self.cena.elementos):
             cor_base = elemento.get("cor", "#d0d0d0")
+            if elemento.get("molde") and self._mostrar_cor_tecidos:
+                tecido = str(elemento.get("tecido") or "").strip()
+                if tecido and tecido in self._cores_tecidos:
+                    cor_base = self._cores_tecidos[tecido]
             selecionado = idx in self._selecionados
             is_molde = bool(elemento.get("molde"))
             cor = cor_base if (selecionado and is_molde) else (self._cor_realce(cor_base) if selecionado else cor_base)

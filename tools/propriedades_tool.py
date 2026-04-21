@@ -798,6 +798,12 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_aplicar_visual.setObjectName("ApplyBlueButton")
         self.btn_aplicar_visual.clicked.connect(self._aplicar)
         rodape.addWidget(self.btn_aplicar_visual, 0, Qt.AlignLeft)
+        self.chk_mostrar_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
+        self.chk_mostrar_cor_tecidos.toggled.connect(self._alternar_cor_tecidos_canvas)
+        rodape.addWidget(self.chk_mostrar_cor_tecidos, 0, Qt.AlignLeft)
+        self.btn_config_cor_tecidos = QPushButton("Configurar cor dos tecidos")
+        self.btn_config_cor_tecidos.clicked.connect(self._abrir_config_cor_tecidos)
+        rodape.addWidget(self.btn_config_cor_tecidos, 0, Qt.AlignLeft)
         rodape.addStretch(1)
 
         layout.addWidget(topo)
@@ -975,6 +981,9 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_quantidade_visual.setChecked(bool(molde.get("visual_quantidade", False)))
         self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))
         self.chk_preencher.setChecked(bool(molde.get("visual_preencher", False)))
+        self.chk_mostrar_cor_tecidos.blockSignals(True)
+        self.chk_mostrar_cor_tecidos.setChecked(bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)))
+        self.chk_mostrar_cor_tecidos.blockSignals(False)
         self._cor_visual = str(molde.get("cor") or "#ffffff")
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
         grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
@@ -1015,6 +1024,7 @@ class PropriedadesMoldesDialog(QDialog):
         molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
         self._sincronizar_gradacao_no_molde()
+        self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
 
         self.canvas.update()
         if hasattr(self.canvas, "_registrar_historico"):
@@ -1071,6 +1081,125 @@ class PropriedadesMoldesDialog(QDialog):
         if dialog.exec() == QDialog.Accepted:
             return dialog.selectedColor()
         return QColor()
+
+    def _alternar_cor_tecidos_canvas(self, ativo: bool):
+        self.canvas._mostrar_cor_tecidos = bool(ativo)
+        self.canvas.update()
+        self.preview.update()
+
+    def _abrir_config_cor_tecidos(self):
+        tecidos = sorted({
+            str(el.get("tecido") or "").strip()
+            for el in self.canvas.cena.elementos
+            if el.get("molde") and str(el.get("tecido") or "").strip()
+        })
+        mapa = dict(getattr(self.canvas, "_cores_tecidos", {}))
+        dialog = ConfigurarCoresTecidosDialog(tecidos, mapa, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.canvas._cores_tecidos = dialog.cores_tecidos()
+        self.canvas.update()
+        self.preview.update()
+
+
+class ConfigurarCoresTecidosDialog(QDialog):
+    def __init__(self, tecidos: list[str], mapa_cores: dict[str, str], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Cores dos tecidos")
+        self.resize(430, 520)
+        self.setMinimumSize(400, 460)
+        self._mapa: dict[str, str] = dict(mapa_cores)
+        self._contador_novos = 0
+        self._construir_ui()
+        self._popular_tecidos(tecidos)
+
+    def _construir_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
+
+        topo = QHBoxLayout()
+        self.btn_novo = QPushButton("Novo")
+        self.btn_excluir = QPushButton("Excluir")
+        self.btn_novo.clicked.connect(self._novo_tecido)
+        self.btn_excluir.clicked.connect(self._excluir_tecido)
+        topo.addWidget(self.btn_novo)
+        topo.addWidget(self.btn_excluir)
+        topo.addStretch(1)
+        lay.addLayout(topo)
+
+        self.tbl = QTableWidget(0, 2)
+        self.tbl.setHorizontalHeaderLabels(["Tecido", "Cor"])
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tbl.setColumnWidth(1, 70)
+        self.tbl.cellClicked.connect(self._on_cell_clicked)
+        lay.addWidget(self.tbl, 1)
+
+        botoes = QHBoxLayout()
+        botoes.addStretch(1)
+        ok = QPushButton("✓ OK")
+        cancelar = QPushButton("✕ Cancelar")
+        ok.clicked.connect(self.accept)
+        cancelar.clicked.connect(self.reject)
+        botoes.addWidget(ok)
+        botoes.addWidget(cancelar)
+        lay.addLayout(botoes)
+
+    def _popular_tecidos(self, tecidos: list[str]):
+        valores = list(dict.fromkeys([*tecidos, *self._mapa.keys()]))
+        self.tbl.setRowCount(0)
+        for tecido in valores:
+            self._adicionar_linha(tecido, self._mapa.get(tecido) or self._cor_aleatoria())
+
+    def _adicionar_linha(self, tecido: str, cor: str):
+        row = self.tbl.rowCount()
+        self.tbl.insertRow(row)
+        item_t = QTableWidgetItem(tecido)
+        item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+        self.tbl.setItem(row, 0, item_t)
+        item_c = QTableWidgetItem("")
+        item_c.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        item_c.setBackground(QColor(cor))
+        self.tbl.setItem(row, 1, item_c)
+
+    def _novo_tecido(self):
+        self._contador_novos += 1
+        self._adicionar_linha(f"TECIDO_{self._contador_novos}", self._cor_aleatoria())
+
+    def _excluir_tecido(self):
+        row = self.tbl.currentRow()
+        if row >= 0:
+            self.tbl.removeRow(row)
+
+    def _on_cell_clicked(self, row: int, col: int):
+        if col != 1 or row < 0:
+            return
+        atual = self.tbl.item(row, 1)
+        dialog = QColorDialog(atual.background().color(), self)
+        dialog.setWindowTitle("Cor do tecido")
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setStyleSheet("QColorDialog { background:#f4f4f4; color:#101010; }")
+        cor = dialog.selectedColor() if dialog.exec() == QDialog.Accepted else QColor()
+        if cor.isValid():
+            atual.setBackground(cor)
+
+    def cores_tecidos(self) -> dict[str, str]:
+        mapa: dict[str, str] = {}
+        for row in range(self.tbl.rowCount()):
+            nome_item = self.tbl.item(row, 0)
+            cor_item = self.tbl.item(row, 1)
+            if not nome_item or not cor_item:
+                continue
+            nome = nome_item.text().strip()
+            if not nome:
+                continue
+            mapa[nome] = cor_item.background().color().name()
+        return mapa
+
+    def _cor_aleatoria(self) -> str:
+        return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
 
 
 class Ferramenta(FerramentaBase):
