@@ -1008,10 +1008,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
             area.canvas._registrar_historico()
-            if doc.get("elementos"):
-                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
-            else:
-                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
+            QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             area.setProperty("assinatura_salva", self._assinatura_canvas(area))
