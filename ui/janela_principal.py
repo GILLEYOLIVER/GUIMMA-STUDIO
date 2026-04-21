@@ -47,9 +47,9 @@ from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 
 
 class GuimmaStudioMainWindow(QMainWindow):
-    ZOOM_INICIAL_CANVAS = 9.08574
-    ORIGEM_INICIAL_CANVAS_X = 460.0
-    ORIGEM_INICIAL_CANVAS_Y = 200.0
+    ZOOM_INICIAL_CANVAS = 8.760
+    ORIGEM_INICIAL_CANVAS_X = 110.0
+    ORIGEM_INICIAL_CANVAS_Y = 0.0
 
     def __init__(self):
         super().__init__()
