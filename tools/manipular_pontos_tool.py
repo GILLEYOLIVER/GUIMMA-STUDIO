@@ -17,6 +17,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando_controle_molde: tuple[int, str, int] | None = None
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._hover_controle_molde: tuple[int, str, int] | None = None
+        self._hover_elemento_idx: int | None = None
         self._hover_molde_idx: int | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._angulo_info: tuple[QPointF, QPointF, QPointF, float] | None = None
@@ -26,6 +27,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando_controle_molde = None
         self._hover_ponto_poly = None
         self._hover_controle_molde = None
+        self._hover_elemento_idx = None
         self._hover_molde_idx = None
         self._guia_ponto_poly = None
         self._angulo_info = None
@@ -63,6 +65,7 @@ class Ferramenta(FerramentaBase):
         pos = canvas._ponto_com_snap(event.position())
         self._hover_ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
         self._hover_controle_molde = self._controle_molde_em_ponto(canvas, pos)
+        self._hover_elemento_idx = self._elemento_em_hover(canvas, pos)
         self._hover_molde_idx = self._molde_em_ponto(canvas, pos)
 
         if self._arrastando_ponto_poly is not None:
@@ -105,6 +108,7 @@ class Ferramenta(FerramentaBase):
         return False
 
     def on_paint_overlay(self, canvas, painter):
+        self._desenhar_elemento_hover(canvas, painter)
         self._desenhar_controles_molde_hover(canvas, painter)
         self._desenhar_guia(canvas, painter)
         self._desenhar_hover(canvas, painter)
@@ -150,6 +154,18 @@ class Ferramenta(FerramentaBase):
             if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("molde"):
                 return idx
         return None
+
+    def _elemento_em_hover(self, canvas, pos: QPointF) -> int | None:
+        if canvas._snap_resultado is not None and canvas._snap_resultado.elemento_idx is not None:
+            idx = int(canvas._snap_resultado.elemento_idx)
+            if 0 <= idx < len(canvas.cena.elementos):
+                return idx
+        if not hasattr(canvas, "_indices_elementos_em_ponto"):
+            return None
+        candidatos = canvas._indices_elementos_em_ponto(pos)
+        if not candidatos:
+            return None
+        return candidatos[0]
 
     def _gerar_guia(self, canvas, idx: int, p_idx: int):
         el = canvas.cena.elementos[idx]
@@ -342,17 +358,44 @@ class Ferramenta(FerramentaBase):
         cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
         aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
 
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor("#000000"))
+        painter.setPen(QPen(QColor("#2da8ff"), 1.0))
+        painter.setBrush(QColor("#001522"))
         for pt in cantos:
             tela = canvas._cena_para_tela(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
 
-        painter.setPen(QPen(QColor("#ff3b30"), 1.0))
-        painter.setBrush(QColor("#ff3b30"))
+        painter.setPen(QPen(QColor("#64d2ff"), 1.0))
+        painter.setBrush(QColor("#64d2ff"))
         for pt in aux:
             tela = canvas._cena_para_tela(pt)
             painter.drawRect(int(tela.x() - 2), int(tela.y() - 2), 4, 4)
+
+    def _desenhar_elemento_hover(self, canvas, painter):
+        idx = self._hover_elemento_idx
+        if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        cor = "#2da8ff"
+        esp = max(1.6, float(el.get("espessura", 1.0)) + 0.7)
+        if el.get("tipo") == "polyline":
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if len(pontos) >= 2:
+                canvas._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp, estilo="solid", amplitude=1.0)
+        elif el.get("tipo") == "bezier_quadratica":
+            p0 = QPointF(*el["p0"])
+            p1 = QPointF(*el["p1"])
+            p2 = QPointF(*el["p2"])
+            canvas._desenhar_bezier_quadratica(
+                painter,
+                p0,
+                p1,
+                p2,
+                cor=cor,
+                espessura=esp,
+                estilo="solid",
+                amplitude=1.0,
+                destacar_controles=bool(el.get("molde")),
+            )
 
     def _desenhar_hover(self, canvas, painter):
         if self._hover_ponto_poly is not None:
@@ -363,7 +406,7 @@ class Ferramenta(FerramentaBase):
                 if 0 <= p_idx < len(pontos):
                     x, y = pontos[p_idx]
                     pt = canvas._cena_para_tela(QPointF(float(x), float(y)))
-                    painter.setPen(QPen(QColor("#ff2bd6"), 1))
+                    painter.setPen(QPen(QColor("#2da8ff"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
 
