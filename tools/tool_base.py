@@ -55,6 +55,10 @@ class FerramentaBase:
         if not self.usa_painel_auxiliar:
             return
         parent = canvas if canvas is not None else None
+        if parent is not None:
+            for painel_existente in parent.findChildren(PainelFerramentaBasico):
+                if painel_existente is not getattr(self, "_painel_auxiliar", None):
+                    painel_existente.hide()
         painel = getattr(self, "_painel_auxiliar", None)
         if painel is None:
             self._painel_auxiliar = PainelFerramentaBasico(self.nome, self.descricao_painel, parent=parent)
