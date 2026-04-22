@@ -227,7 +227,8 @@
             "conferir",
             "conferir_multiplos",
             "controle_curvas",
-            "cota_perimetro"
+            "cota_perimetro",
+            "perimetro"
           ]
         },
         {
@@ -715,6 +716,12 @@
       "module": "tools/cota_perimetro_tool.py",
       "class": "Ferramenta",
       "icon": "cota_perimetro.svg"
+    },
+    "perimetro": {
+      "title": "Perimetro",
+      "module": "tools/perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "perimetro.svg"
     },
     "cota_distancia": {
       "title": "Cota Distancia",
