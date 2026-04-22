@@ -1042,11 +1042,21 @@ class VisualizacaoCanvas(QWidget):
 
             if el.get("mostrar_controles", True) and idx not in self._selecionados:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+                if cantos:
+                    cx = sum(p.x() for p in cantos) / len(cantos)
+                    cy = sum(p.y() for p in cantos) / len(cantos)
+                else:
+                    cx, cy = 0.0, 0.0
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
-                    painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                    dx = pt.x() - cx
+                    dy = pt.y() - cy
+                    mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
+                    off_x = (dx / mod) * 11.0
+                    off_y = (dy / mod) * 11.0
+                    painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
                 aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                 painter.setPen(QPen(QColor("#ff3b30"), 1.0))
                 painter.setBrush(QColor("#ff3b30"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from math import sqrt
@@ -451,10 +452,14 @@ class PropriedadesMoldesDialog(QDialog):
         self.canvas = canvas
         self._mostrar_tab_ferramentas = bool(mostrar_tab_ferramentas)
         self._refs: list[MoldeRef] = []
-        self._indice_atual: int | None = None
+        self._indice_atual: int | None = self._indice_molde_preferencial()
         self._cor_visual = "#ffffff"
         self._graduacao_linhas: list[dict] = []
         self._contador_novos_tamanhos = 0
+        self._snapshot_moldes: dict[int, dict] = self._criar_snapshot_moldes()
+        self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._confirmado_ok = False
+        self._suspender_auto_aplicar = False
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -463,6 +468,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
+        self._conectar_auto_aplicacao()
         _log_propriedades_debug(f"PropriedadesMoldesDialog criado. canvas={type(canvas).__name__}; parent={type(parent).__name__ if parent is not None else None}; mostrar_tab_ferramentas={mostrar_tab_ferramentas}")
         try:
             self.recarregar_lista()
@@ -937,6 +943,7 @@ class PropriedadesMoldesDialog(QDialog):
         form.setSpacing(8)
         self.cmb_aplicar_grade = QComboBox()
         self.cmb_aplicar_grade.addItems(["Ao modelo", "Ao molde"])
+        self.cmb_aplicar_grade.setCurrentText("Ao molde")
         self.cmb_area_tamanho = QComboBox()
         self.cmb_area_tamanho.addItems(["Manter diferença", "Igual tamanho", "Tamanho intermediário"])
         self.cmb_grade_tamanhos = QComboBox()
@@ -1547,6 +1554,21 @@ class PropriedadesMoldesDialog(QDialog):
             refs.append(MoldeRef(indice=idx, nome=str(el.get("nome_molde") or f"K{idx + 1}"), dados=el))
         return refs
 
+    def _indice_molde_preferencial(self) -> int | None:
+        selecionados = getattr(self.canvas, "_selecionados", set())
+        if not isinstance(selecionados, (set, list, tuple)):
+            return None
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if not isinstance(elementos, list):
+            return None
+        for idx in selecionados:
+            if isinstance(idx, int) and 0 <= idx < len(elementos):
+                el = elementos[idx]
+                if isinstance(el, dict) and el.get("molde"):
+                    return idx
+        return None
+
     def _quando_troca_selecao(self):
         item = self.arvore.currentItem()
         if not item:
@@ -1595,6 +1617,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_faixa_giro.repaint()
 
     def _preencher_campos(self, molde: dict | None):
+        self._suspender_auto_aplicar = True
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
@@ -1621,6 +1644,7 @@ class PropriedadesMoldesDialog(QDialog):
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
             self._atualizar_estado_faixa_giro()
+            self._suspender_auto_aplicar = False
             return
 
         pos_combo = self.cmb_molde.findData(self._indice_atual)
@@ -1676,6 +1700,7 @@ class PropriedadesMoldesDialog(QDialog):
         else:
             self._aplicar_grade_tamanhos(self.cmb_grade_tamanhos.currentText())
         self.preview.set_molde(dict(molde))
+        self._suspender_auto_aplicar = False
 
     def _dados_encaixe_formulario(self) -> dict:
         return {
@@ -1715,11 +1740,8 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _finalizar_aplicacao_em_lote(self):
         self.canvas.update()
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
         self.preview.set_molde(dict(self._molde_atual() or {}))
         self.recarregar_lista()
-        self.dados_aplicados.emit()
 
     def _aplicar_todos_moldes(self):
         if not self._refs:
@@ -1754,31 +1776,7 @@ class PropriedadesMoldesDialog(QDialog):
             QMessageBox.information(self, "Propriedades", "Selecione um molde.")
             return False
 
-        nome_combo = self.cmb_molde.currentText().strip()
-        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
-        molde["descricao"] = self.ed_descricao.toPlainText().strip()
-        molde["tecido"] = self.ed_tecido.currentText().strip()
-        molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
-        molde["espelhar"] = self.cmb_espelhar.currentText().strip()
-        molde["giro"] = self.cmb_giro.currentText().strip()
-        molde["faixa_giro"] = self.ed_faixa_giro.text().strip() or "0"
-        molde["giro_inicial"] = self.ed_giro_inicial.text().strip() or "0"
-        molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
-        molde["molde_pronto"] = self.chk_molde_pronto.isChecked()
-        molde["permitir_alteracoes_encaixe"] = self.chk_perm_alt.isChecked()
-        molde["par"] = self.chk_par.isChecked()
-        molde["dobra_vertical"] = self.chk_dobra_v.isChecked()
-        molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
-        molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
-        molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
-        molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
-        molde["mostrar_fio"] = self.chk_mostrar_fio.isChecked()
-        molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
-        molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
-        molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
-        molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
-        molde["visual_preencher"] = self.chk_preencher.isChecked()
-        molde["cor"] = self._cor_visual
+        self._aplicar_formulario_no_molde(molde)
         self._sincronizar_gradacao_no_molde()
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
 
@@ -1787,12 +1785,18 @@ class PropriedadesMoldesDialog(QDialog):
             self.canvas._registrar_historico()
         self.preview.set_molde(dict(molde))
         self.recarregar_lista()
+        self._confirmado_ok = True
         self.dados_aplicados.emit()
         return True
 
     def _ok(self):
         if self._aplicar():
             self.close()
+
+    def closeEvent(self, event):
+        if not self._confirmado_ok:
+            self._restaurar_snapshot_moldes()
+        super().closeEvent(event)
 
     def _excluir_molde_atual(self):
         cena = getattr(self.canvas, "cena", None)
@@ -1848,6 +1852,100 @@ class PropriedadesMoldesDialog(QDialog):
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
         )
+
+    def _criar_snapshot_moldes(self) -> dict[int, dict]:
+        snapshot: dict[int, dict] = {}
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return snapshot
+        for idx, el in enumerate(elementos):
+            if isinstance(el, dict) and el.get("molde"):
+                snapshot[idx] = deepcopy(el)
+        return snapshot
+
+    def _restaurar_snapshot_moldes(self):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+        for idx, el in self._snapshot_moldes.items():
+            if 0 <= idx < len(elementos):
+                elementos[idx] = deepcopy(el)
+        self.canvas._mostrar_cor_tecidos = bool(self._snapshot_mostrar_cor_tecidos)
+        self.canvas.update()
+
+    def _aplicar_formulario_no_molde(self, molde: dict):
+        nome_combo = self.cmb_molde.currentText().strip()
+        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
+        molde["descricao"] = self.ed_descricao.toPlainText().strip()
+        molde["tecido"] = self.ed_tecido.currentText().strip()
+        molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
+        molde["espelhar"] = self.cmb_espelhar.currentText().strip()
+        molde["giro"] = self.cmb_giro.currentText().strip()
+        molde["faixa_giro"] = self.ed_faixa_giro.text().strip() or "0"
+        molde["giro_inicial"] = self.ed_giro_inicial.text().strip() or "0"
+        molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
+        molde["molde_pronto"] = self.chk_molde_pronto.isChecked()
+        molde["permitir_alteracoes_encaixe"] = self.chk_perm_alt.isChecked()
+        molde["par"] = self.chk_par.isChecked()
+        molde["dobra_vertical"] = self.chk_dobra_v.isChecked()
+        molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
+        molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
+        molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
+        molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
+        molde["mostrar_fio"] = self.chk_mostrar_fio.isChecked()
+        molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
+        molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
+        molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
+        molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
+        molde["visual_preencher"] = self.chk_preencher.isChecked()
+        molde["cor"] = self._cor_visual
+
+    def _aplicar_imediato_formulario(self):
+        if self._suspender_auto_aplicar:
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        self._aplicar_formulario_no_molde(molde)
+        self._sincronizar_gradacao_no_molde()
+        self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        self.preview.set_molde(dict(molde))
+        self.canvas.update()
+        self.recarregar_lista()
+
+    def _conectar_auto_aplicacao(self):
+        sinais = [
+            self.cmb_molde.currentTextChanged,
+            self.ed_descricao.textChanged,
+            self.ed_tecido.currentTextChanged,
+            self.cmb_tipo_corte.currentTextChanged,
+            self.cmb_espelhar.currentTextChanged,
+            self.cmb_giro.currentTextChanged,
+            self.ed_faixa_giro.textChanged,
+            self.ed_giro_inicial.textChanged,
+            self.sp_qtd_modelo.valueChanged,
+            self.chk_molde_pronto.toggled,
+            self.chk_perm_alt.toggled,
+            self.chk_par.toggled,
+            self.chk_dobra_v.toggled,
+            self.chk_dobra_h.toggled,
+            self.chk_reflete_v.toggled,
+            self.chk_reflete_h.toggled,
+            self.chk_mostrar_nome.toggled,
+            self.chk_mostrar_fio.toggled,
+            self.chk_mostrar_numeros.toggled,
+            self.chk_visual_descricao.toggled,
+            self.chk_quantidade_visual.toggled,
+            self.chk_margem_visual.toggled,
+            self.chk_preencher.toggled,
+            self.chk_mostrar_cor_tecidos.toggled,
+            self.cmb_grade_tamanhos.currentTextChanged,
+            self.cmb_aplicar_grade.currentTextChanged,
+        ]
+        for sinal in sinais:
+            sinal.connect(self._aplicar_imediato_formulario)
 
     def _abrir_config_cor_tecidos(self):
         cena = getattr(self.canvas, "cena", None)
