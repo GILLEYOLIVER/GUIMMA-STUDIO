@@ -57,6 +57,7 @@ class Ferramenta(FerramentaBase):
     _idx_por_canvas: dict[int, int] = {}
     _preview_ativo_por_canvas: dict[int, bool] = {}
     _snapshot_por_canvas: dict[int, dict] = {}
+    _segmentos_iguais_por_canvas: dict[int, list[tuple[QPointF, QPointF]]] = {}
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
@@ -72,6 +73,7 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
         self._preview_ativo_por_canvas.pop(id(canvas), None)
         self._snapshot_por_canvas.pop(id(canvas), None)
+        self._segmentos_iguais_por_canvas.pop(id(canvas), None)
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -81,6 +83,7 @@ class Ferramenta(FerramentaBase):
             canvas._registrar_historico()
             self._preview_ativo_por_canvas[chave] = False
             self._snapshot_por_canvas.pop(chave, None)
+            self._segmentos_iguais_por_canvas.pop(chave, None)
             if getattr(canvas, "lbl_status", None) is not None:
                 canvas.lbl_status.setText("Redefinição de perímetro confirmada.")
             event.accept()
@@ -178,8 +181,26 @@ class Ferramenta(FerramentaBase):
                 el["p0"] = snapshot.get("p0", el["p0"])
                 el["p2"] = snapshot.get("p2", el["p2"])
         canvas.cena.elementos[idx] = el
+        self._segmentos_iguais_por_canvas[chave] = self._segmentos_com_tamanho(el, alvo, tolerancia=0.03)
         novo_per = comprimento_total_elemento(el)
         dialog.ed_de.setText(canvas.formatar_valor_unidade(novo_per))
         canvas.update()
         if getattr(canvas, "lbl_status", None) is not None:
             canvas.lbl_status.setText(f"Prévia perímetro: {canvas.formatar_valor_unidade(novo_per)} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo confirma")
+
+    def _segmentos_com_tamanho(self, el: dict, tamanho: float, tolerancia: float) -> list[tuple[QPointF, QPointF]]:
+        segs: list[tuple[QPointF, QPointF]] = []
+        if el.get("tipo") == "polyline":
+            pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            for a, b in zip(pts, pts[1:]):
+                comp = ((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2) ** 0.5
+                if abs(comp - tamanho) <= tolerancia:
+                    segs.append((a, b))
+        return segs
+
+    def on_paint_overlay(self, canvas, painter):
+        segs = self._segmentos_iguais_por_canvas.get(id(canvas), [])
+        if not segs:
+            return
+        for a, b in segs:
+            canvas._desenhar_segmento(painter, a, b, tracejado=True, cor="#ff2a2a", espessura=2.0)
