@@ -405,7 +405,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage = BackstageArquivoPanel(self)
         self.backstage.botoes["Novo"].clicked.connect(self._novo_projeto)
         self.backstage.botoes["Abrir"].clicked.connect(self._abrir_projeto)
-        self.backstage.botoes["Salvar"].clicked.connect(self._salvar_projeto)
+        self.backstage.botoes["Salvar"].clicked.connect(self._acao_salvar_pelo_backstage)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
         self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
@@ -1543,7 +1543,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.adicionar_recente(str(self._arquivo_atual))
         self._atualizar_titulo()
         self._marcar_documentos_como_salvos()
+        self.backstage.hide()
         return True
+
+    def _acao_salvar_pelo_backstage(self):
+        self._salvar_projeto()
+        self.backstage.hide()
 
     def _salvar_projeto_como(self) -> bool:
         pasta_inicial = self._arquivo_atual.parent if self._arquivo_atual else Path.home()
