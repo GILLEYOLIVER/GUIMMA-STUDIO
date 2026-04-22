@@ -196,7 +196,8 @@
             "modificar",
             "editar",
             "manipular_pontos",
-            "mover"
+            "mover",
+            "redefinir_perimetro"
           ]
         },
         {
@@ -656,6 +657,12 @@
       "module": "tools/mover_tool.py",
       "class": "Ferramenta",
       "icon": "mover.svg"
+    },
+    "redefinir_perimetro": {
+      "title": "Redefinir Perimetro",
+      "module": "tools/redefinir_perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "redefinir_perimetro.svg"
     },
     "elemento_paralelo": {
       "title": "Elemento Paralelo",
