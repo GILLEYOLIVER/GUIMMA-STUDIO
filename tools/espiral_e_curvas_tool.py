@@ -1,8 +1,223 @@
 from __future__ import annotations
 
+from math import cos, pi, sin
+
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QSpinBox,
+    QVBoxLayout,
+)
+
 from tools.tool_base import FerramentaBase
+
+
+class InserirCurvaDialog(QDialog):
+    OPCOES = [
+        "Spiral",
+        "Curva Francesa 1",
+        "Curva Francesa 2",
+        "Curva Francesa 3",
+        "Curva Francesa 4",
+        "Manga - cava frente",
+        "Cava costas",
+        "Gancho calça",
+        "Lado saia",
+        "Decote",
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Inserir curva")
+        self.setWindowFlag(Qt.Tool, True)
+        self.setModal(False)
+        self.setFixedWidth(245)
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QComboBox, QSpinBox {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                border-radius: 3px;
+                min-height: 22px;
+                padding: 2px 6px;
+            }
+            QPushButton {
+                background: #f7f7f7;
+                color: #111111;
+                border: 1px solid #b7bec5;
+                border-radius: 4px;
+                min-height: 22px;
+                padding: 2px 8px;
+            }
+            QPushButton:hover { background: #ffffff; }
+            """
+        )
+        self._montar_ui()
+
+    def _montar_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(4)
+
+        self.cmb_curva = QComboBox()
+        self.cmb_curva.addItems(self.OPCOES)
+        self.cmb_curva.setCurrentText("Spiral")
+        self.chk_criar_molde = QCheckBox("Criar moldes")
+        self.sp_largura = QSpinBox()
+        self.sp_largura.setRange(1, 9999)
+        self.sp_largura.setValue(5)
+        self.sp_perimetro = QSpinBox()
+        self.sp_perimetro.setRange(1, 9999)
+        self.sp_perimetro.setValue(60)
+
+        form.addRow("Curva pré-definida", self.cmb_curva)
+        form.addRow("", self.chk_criar_molde)
+        form.addRow("Largura (cm)", self.sp_largura)
+        form.addRow("Perímetro (cm)", self.sp_perimetro)
+        lay.addLayout(form)
+
+    def configuracao(self) -> tuple[str, float, float, bool]:
+        return (
+            self.cmb_curva.currentText(),
+            float(self.sp_largura.value()),
+            float(self.sp_perimetro.value()),
+            bool(self.chk_criar_molde.isChecked()),
+        )
+
+    def gerar_pontos(self) -> tuple[list[QPointF], bool]:
+        largura = float(self.sp_largura.value())
+        perimetro = float(self.sp_perimetro.value())
+        nome = self.cmb_curva.currentText()
+        if nome == "Spiral":
+            pontos = _gerar_espiral(largura=largura, perimetro=perimetro)
+        else:
+            pontos = _gerar_curva_predefinida(nome=nome, largura=largura, perimetro=perimetro)
+        return pontos, self.chk_criar_molde.isChecked()
+
+
+def _gerar_espiral(largura: float, perimetro: float) -> list[QPointF]:
+    raio_max = max(0.4, largura / 2.0)
+    voltas = max(1.4, min(4.2, perimetro / max(largura * 3.2, 0.01)))
+    segmentos = int(max(48, min(280, voltas * 70)))
+    pts: list[QPointF] = []
+    for i in range(segmentos + 1):
+        t = i / max(segmentos, 1)
+        ang = (2.0 * pi * voltas * t) - (pi / 2.0)
+        raio = raio_max * t
+        pts.append(QPointF(cos(ang) * raio, sin(ang) * raio))
+    return pts
+
+
+def _gerar_curva_predefinida(nome: str, largura: float, perimetro: float) -> list[QPointF]:
+    w = max(1.0, largura)
+    h = max(1.0, perimetro / 10.0)
+    perfis = {
+        "Curva Francesa 1": [(0.0, 0.0), (0.25, -0.05), (0.45, -0.2), (0.7, -0.62), (1.0, -1.0)],
+        "Curva Francesa 2": [(0.0, 0.0), (0.2, -0.15), (0.4, -0.45), (0.7, -0.85), (1.0, -1.0)],
+        "Curva Francesa 3": [(0.0, 0.0), (0.2, 0.05), (0.4, -0.2), (0.75, -0.8), (1.0, -1.0)],
+        "Curva Francesa 4": [(0.0, 0.0), (0.18, -0.28), (0.35, -0.52), (0.66, -0.9), (1.0, -1.0)],
+        "Manga - cava frente": [(0.0, 0.0), (0.18, -0.1), (0.4, -0.55), (0.72, -0.84), (1.0, -1.0)],
+        "Cava costas": [(0.0, 0.0), (0.15, -0.08), (0.36, -0.42), (0.68, -0.8), (1.0, -1.0)],
+        "Gancho calça": [(0.0, 0.0), (0.12, -0.12), (0.32, -0.5), (0.58, -0.9), (1.0, -1.0)],
+        "Lado saia": [(0.0, 0.0), (0.18, -0.04), (0.45, -0.3), (0.78, -0.75), (1.0, -1.0)],
+        "Decote": [(0.0, 0.0), (0.2, -0.22), (0.42, -0.58), (0.72, -0.86), (1.0, -1.0)],
+    }
+    base = perfis.get(nome, perfis["Curva Francesa 1"])
+    pts: list[QPointF] = []
+    for nx, ny in base:
+        x = (nx - 0.5) * w
+        y = (ny + 0.5) * h
+        pts.append(QPointF(x, y))
+    # Suaviza com interpolação linear para evitar poucos pontos.
+    suavizada: list[QPointF] = []
+    for a, b in zip(pts, pts[1:]):
+        if not suavizada:
+            suavizada.append(a)
+        subdiv = 10
+        for i in range(1, subdiv + 1):
+            t = i / subdiv
+            suavizada.append(QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t)))
+    return suavizada
 
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "espiral_e_curvas"
     nome = "Espiral e Curvas"
+    descricao_painel = "Insere curvas pré-definidas (espiral, curvas francesas, cava, gancho, decote)."
+
+    _dialog_por_canvas: dict[int, InserirCurvaDialog] = {}
+
+    def __init__(self):
+        super().__init__()
+        self._canvas_ativo = None
+
+    def on_activate(self, canvas):
+        super().on_activate(canvas)
+        self._canvas_ativo = canvas
+        dialog = self._obter_dialog(canvas)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self.set_status("Inserir curva: escolha o tipo e clique no canvas para inserir (sem OK).")
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText("Inserir curva: escolha no painel e clique no desenho.")
+
+    def on_deactivate(self, canvas):
+        super().on_deactivate(canvas)
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.hide()
+        self._canvas_ativo = None
+
+    def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() != Qt.LeftButton:
+            return False
+        dialog = self._obter_dialog(canvas)
+        nome, largura, perimetro, criar_molde = dialog.configuracao()
+        if nome == "Spiral":
+            pontos = _gerar_espiral(largura=largura, perimetro=perimetro)
+        else:
+            pontos = _gerar_curva_predefinida(nome=nome, largura=largura, perimetro=perimetro)
+        if len(pontos) < 2:
+            return True
+        origem = canvas._ponto_com_snap(event.position())
+        pontos_cena = [(origem.x() + p.x(), origem.y() + p.y()) for p in pontos]
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": pontos_cena,
+                "cor": getattr(canvas, "_linha_cor", "#ffffff"),
+                "espessura": float(getattr(canvas, "_linha_espessura", 1.0)),
+                "estilo": str(getattr(canvas, "_linha_estilo", "solid")),
+                "amplitude": float(getattr(canvas, "_linha_amplitude", 1.0)),
+                "fase_inicio": 0.0,
+                "molde": bool(criar_molde),
+            }
+        )
+        canvas._registrar_historico()
+        canvas.update()
+        msg = f"Curva \"{nome}\" inserida."
+        self.set_status(msg)
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText(msg)
+        event.accept()
+        return True
+
+    def _obter_dialog(self, canvas) -> InserirCurvaDialog:
+        chave = id(canvas)
+        dialog = self._dialog_por_canvas.get(chave)
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        if dialog is None or dialog.parentWidget() is not parent:
+            dialog = InserirCurvaDialog(parent)
+            self._dialog_por_canvas[chave] = dialog
+        return dialog
