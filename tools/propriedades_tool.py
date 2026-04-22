@@ -1348,23 +1348,29 @@ class PropriedadesMoldesDialog(QDialog):
         grid.addWidget(self.btn_config_ferramentas, 0, 4, 1, 2)
         grid.addWidget(self.btn_config_defaults, 1, 4, 1, 2)
 
-        cmb_extra1 = QComboBox()
-        cmb_extra1.addItem("-")
-        cmb_extra2 = QComboBox()
-        cmb_extra2.addItem("-")
-        btn_cor_extra = QPushButton("")
-        btn_cor_extra.setFixedSize(30, 22)
-        btn_cor_extra.setStyleSheet("background:#d6d6d6; border:1px solid #343434;")
-        chk_extra = QCheckBox("Usar")
+        self.cmb_extra1 = QComboBox()
+        self.cmb_extra1.addItems(["Piques sobre o contorno", "Piques internos", "Linhas auxiliares"])
+        self.cmb_extra2 = QComboBox()
+        self.cmb_extra2.addItems(["-", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+        self.cmb_extra2.setCurrentText("6")
+        self.btn_cor_extra = QPushButton("")
+        self.btn_cor_extra.setFixedSize(30, 22)
+        self.btn_cor_extra.setStyleSheet("background:#19bdb7; border:1px solid #343434;")
+        self.btn_cor_extra.clicked.connect(lambda: self._escolher_cor_ferramenta(self.btn_cor_extra))
+        self.chk_extra = QCheckBox("Usar")
+        self.chk_extra.setChecked(True)
         btn_aplicar = QPushButton("Aplicar todos")
         btn_aplicar.setObjectName("ApplyBlueButton")
         btn_aplicar.clicked.connect(self._aplicar)
-        grid.addWidget(cmb_extra1, 6, 0, 1, 2)
-        grid.addWidget(cmb_extra2, 6, 2)
-        grid.addWidget(btn_cor_extra, 6, 3)
-        grid.addWidget(chk_extra, 6, 4)
+        grid.addWidget(self.cmb_extra1, 6, 0, 1, 2)
+        grid.addWidget(self.cmb_extra2, 6, 2)
+        grid.addWidget(self.btn_cor_extra, 6, 3)
+        grid.addWidget(self.chk_extra, 6, 4)
         grid.addWidget(btn_aplicar, 6, 5)
-        grid.addWidget(QLabel("Aplique a todos os moldes as configurações de ferramentas"), 7, 0, 1, 6)
+        self.lbl_aplicar_extra = QLabel("")
+        grid.addWidget(self.lbl_aplicar_extra, 7, 0, 1, 6)
+        self.cmb_extra1.currentIndexChanged.connect(self._atualizar_config_extra_ferramenta)
+        self._atualizar_config_extra_ferramenta()
 
         layout.addWidget(box)
         layout.addStretch(1)
@@ -1407,6 +1413,31 @@ class PropriedadesMoldesDialog(QDialog):
             if "background" in trecho and ":" in trecho:
                 return trecho.split(":", 1)[1].strip()
         return botao.palette().button().color().name()
+
+    def _escolher_cor_ferramenta(self, botao: QPushButton):
+        cor_atual = QColor(self._cor_botao(botao))
+        dialog = QColorDialog(cor_atual, self)
+        dialog.setWindowTitle("Cor da ferramenta")
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if cor.isValid():
+            botao.setStyleSheet(f"background:{cor.name()}; border:1px solid #343434;")
+
+    def _atualizar_config_extra_ferramenta(self):
+        mapa = {
+            0: {"indice": "6", "cor": "#19bdb7", "texto": "Selecione os \"piques sobre o contorno\" para aplicar a todos."},
+            1: {"indice": "7", "cor": "#d0d0d0", "texto": "Selecione os \"piques internos\" para aplicar a todos."},
+            2: {"indice": "8", "cor": "#93ed2b", "texto": "Selecione as \"linhas auxiliares\" para aplicar a todos."},
+        }
+        dados = mapa.get(self.cmb_extra1.currentIndex(), mapa[0])
+        if hasattr(self, "cmb_extra2"):
+            self.cmb_extra2.setCurrentText(dados["indice"])
+        if hasattr(self, "btn_cor_extra"):
+            self.btn_cor_extra.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+        if hasattr(self, "lbl_aplicar_extra"):
+            self.lbl_aplicar_extra.setText(dados["texto"])
 
     def recarregar_lista(self):
         _log_propriedades_debug("recarregar_lista() iniciado")
