@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import cos, pi, sin
+from math import atan2, cos, pi, sin, sqrt
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -174,20 +174,35 @@ class InserirCurvaDialog(QDialog):
         return base[i1 : i2 + 1]
 
 
-def _interp(perfil: list[tuple[float, float]], segmentos: int = 72, sx: float = 6.0, sy: float = 4.0) -> list[QPointF]:
-    pts: list[QPointF] = []
-    for i in range(len(perfil) - 1):
-        a = perfil[i]
-        b = perfil[i + 1]
-        sub = max(4, segmentos // max(1, len(perfil) - 1))
-        for j in range(sub):
-            t = j / sub
-            x = (a[0] + ((b[0] - a[0]) * t) - 0.5) * sx
-            y = (a[1] + ((b[1] - a[1]) * t) - 0.5) * sy
-            pts.append(QPointF(x, y))
-    x, y = perfil[-1]
-    pts.append(QPointF((x - 0.5) * sx, (y - 0.5) * sy))
-    return pts
+def _interp(perfil: list[tuple[float, float]], sx: float = 6.0, sy: float = 4.0, amostras: int = 24) -> list[QPointF]:
+    base = [QPointF((x - 0.5) * sx, (y - 0.5) * sy) for x, y in perfil]
+    if len(base) < 3:
+        return base
+    saida: list[QPointF] = []
+    for i in range(len(base) - 1):
+        p0 = base[max(0, i - 1)]
+        p1 = base[i]
+        p2 = base[i + 1]
+        p3 = base[min(len(base) - 1, i + 2)]
+        for j in range(amostras):
+            t = j / amostras
+            t2 = t * t
+            t3 = t2 * t
+            x = 0.5 * (
+                (2.0 * p1.x())
+                + (-p0.x() + p2.x()) * t
+                + ((2.0 * p0.x()) - (5.0 * p1.x()) + (4.0 * p2.x()) - p3.x()) * t2
+                + (-p0.x() + (3.0 * p1.x()) - (3.0 * p2.x()) + p3.x()) * t3
+            )
+            y = 0.5 * (
+                (2.0 * p1.y())
+                + (-p0.y() + p2.y()) * t
+                + ((2.0 * p0.y()) - (5.0 * p1.y()) + (4.0 * p2.y()) - p3.y()) * t2
+                + (-p0.y() + (3.0 * p1.y()) - (3.0 * p2.y()) + p3.y()) * t3
+            )
+            saida.append(QPointF(x, y))
+    saida.append(base[-1])
+    return saida
 
 
 def _gerar_curva_base(nome: str) -> list[QPointF]:
@@ -211,7 +226,7 @@ def _gerar_curva_base(nome: str) -> list[QPointF]:
             r = 3.0 * t
             pts.append(QPointF(cos(ang) * r, sin(ang) * r))
         return pts
-    return _interp(perfis.get(nome, perfis["Curva Francesa 1"]), segmentos=84)
+    return _interp(perfis.get(nome, perfis["Curva Francesa 1"]), amostras=28)
 
 
 class Ferramenta(FerramentaBase):
@@ -219,13 +234,22 @@ class Ferramenta(FerramentaBase):
     nome = "Espiral e Curvas"
     descricao_painel = "Insere curvas pré-definidas (sem modal)."
     _dialog_por_canvas: dict[int, InserirCurvaDialog] = {}
+    _canvas_por_id: dict[int, object] = {}
+    _ultimo_idx_por_canvas: dict[int, int] = {}
+    _ultima_origem_por_canvas: dict[int, QPointF] = {}
+    _desenhando_por_canvas: dict[int, bool] = {}
+    _origem_por_canvas: dict[int, QPointF] = {}
+    _cursor_por_canvas: dict[int, QPointF] = {}
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._canvas_por_id[id(canvas)] = canvas
+        self._desenhando_por_canvas[id(canvas)] = False
         dialog = self._obter_dialog(canvas)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        self._atualizar_status_perimetro(canvas, dialog)
         msg = "Inserir curva: selecione o modelo e clique no canvas."
         self.set_status(msg)
         if getattr(canvas, "lbl_status", None) is not None:
@@ -236,16 +260,40 @@ class Ferramenta(FerramentaBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog:
             dialog.hide()
+        self._canvas_por_id.pop(id(canvas), None)
+        self._desenhando_por_canvas.pop(id(canvas), None)
+        self._origem_por_canvas.pop(id(canvas), None)
+        self._cursor_por_canvas.pop(id(canvas), None)
 
     def on_mouse_press(self, canvas, event) -> bool:
+        chave = id(canvas)
+        if event.button() == Qt.RightButton:
+            if self._desenhando_por_canvas.get(chave):
+                self._desenhando_por_canvas[chave] = False
+                self._origem_por_canvas.pop(chave, None)
+                self._cursor_por_canvas.pop(chave, None)
+                if getattr(canvas, "lbl_status", None) is not None:
+                    canvas.lbl_status.setText("Inserção de curva cancelada.")
+                canvas.update()
+                event.accept()
+                return True
+            return False
         if event.button() != Qt.LeftButton:
             return False
         dialog = self._obter_dialog(canvas)
-        pontos = dialog.pontos_processados()
-        if len(pontos) < 2:
+        pos = canvas._ponto_com_snap(event.position())
+        if not self._desenhando_por_canvas.get(chave):
+            self._desenhando_por_canvas[chave] = True
+            self._origem_por_canvas[chave] = QPointF(pos)
+            self._cursor_por_canvas[chave] = QPointF(pos)
+            self._atualizar_status_perimetro(canvas, dialog)
+            canvas.update()
+            event.accept()
             return True
-        origem = canvas._ponto_com_snap(event.position())
-        pontos_cena = [(origem.x() + p.x(), origem.y() + p.y()) for p in pontos]
+        pontos_cena_qt = self._pontos_transformados(canvas, dialog)
+        if len(pontos_cena_qt) < 2:
+            return True
+        pontos_cena = [(p.x(), p.y()) for p in pontos_cena_qt]
         canvas.cena.elementos.append(
             {
                 "tipo": "polyline",
@@ -257,9 +305,15 @@ class Ferramenta(FerramentaBase):
                 "fase_inicio": 0.0,
             }
         )
+        idx = len(canvas.cena.elementos) - 1
+        self._ultimo_idx_por_canvas[chave] = idx
+        self._ultima_origem_por_canvas[chave] = QPointF(pontos_cena_qt[0])
+        self._desenhando_por_canvas[chave] = False
+        self._origem_por_canvas.pop(chave, None)
+        self._cursor_por_canvas.pop(chave, None)
         canvas._registrar_historico()
         canvas.update()
-        msg = f"Curva \"{dialog.cmb_curva.currentText()}\" inserida."
+        msg = f"Curva \"{dialog.cmb_curva.currentText()}\" inserida. {self._texto_perimetro(pontos_cena_qt, canvas)}"
         self.set_status(msg)
         if getattr(canvas, "lbl_status", None) is not None:
             canvas.lbl_status.setText(msg)
@@ -273,4 +327,102 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = InserirCurvaDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+        if not hasattr(dialog, "_callbacks_canvas"):
+            dialog._callbacks_canvas = set()  # type: ignore[attr-defined]
+        if chave not in dialog._callbacks_canvas:  # type: ignore[attr-defined]
+            dialog.configuracao_alterada.connect(lambda chave_canvas=chave: self._quando_config_alterada(chave_canvas))
+            dialog._callbacks_canvas.add(chave)  # type: ignore[attr-defined]
         return dialog
+
+    def _quando_config_alterada(self, chave_canvas: int):
+        dialog = self._dialog_por_canvas.get(chave_canvas)
+        if dialog is None:
+            return
+        canvas = self._canvas_por_id.get(chave_canvas)
+        if canvas is None:
+            return
+        self._atualizar_status_perimetro(canvas, dialog)
+        self._atualizar_ultimo_elemento(canvas, dialog)
+        if self._desenhando_por_canvas.get(chave_canvas):
+            canvas.update()
+
+    def _atualizar_ultimo_elemento(self, canvas, dialog: InserirCurvaDialog):
+        chave = id(canvas)
+        idx = self._ultimo_idx_por_canvas.get(chave)
+        origem = self._ultima_origem_por_canvas.get(chave)
+        if idx is None or origem is None:
+            return
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        pontos = dialog.pontos_processados()
+        if len(pontos) < 2:
+            return
+        el = canvas.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return
+        el["pontos"] = [(origem.x() + p.x(), origem.y() + p.y()) for p in pontos]
+        canvas.update()
+
+    def _atualizar_status_perimetro(self, canvas, dialog: InserirCurvaDialog):
+        pontos = self._pontos_transformados(canvas, dialog) if self._desenhando_por_canvas.get(id(canvas)) else dialog.pontos_processados()
+        msg = self._texto_perimetro(pontos, canvas)
+        self.set_status(msg)
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText(msg)
+
+    def _texto_perimetro(self, pontos: list[QPointF], canvas) -> str:
+        if len(pontos) < 2:
+            return "Perímetro: 0.00"
+        total = 0.0
+        for a, b in zip(pontos, pontos[1:]):
+            total += ((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2) ** 0.5
+        return f"Perímetro: {canvas.formatar_valor_unidade(total)} ({getattr(canvas, '_unidade_sigla', 'cm')})"
+
+    def on_mouse_move(self, canvas, event) -> bool:
+        chave = id(canvas)
+        if not self._desenhando_por_canvas.get(chave):
+            return False
+        self._cursor_por_canvas[chave] = canvas._ponto_com_snap(event.position())
+        self._atualizar_status_perimetro(canvas, self._obter_dialog(canvas))
+        canvas.update()
+        event.accept()
+        return True
+
+    def on_paint_overlay(self, canvas, painter):
+        if not self._desenhando_por_canvas.get(id(canvas)):
+            return
+        pontos = self._pontos_transformados(canvas, self._obter_dialog(canvas))
+        if len(pontos) < 2:
+            return
+        for a, b in zip(pontos, pontos[1:]):
+            canvas._desenhar_segmento(painter, a, b, cor="#ff1245", espessura=1.8)
+
+    def _pontos_transformados(self, canvas, dialog: InserirCurvaDialog) -> list[QPointF]:
+        chave = id(canvas)
+        origem = self._origem_por_canvas.get(chave)
+        cursor = self._cursor_por_canvas.get(chave)
+        base = dialog.pontos_processados()
+        if origem is None or cursor is None or len(base) < 2:
+            return base
+        p0 = base[0]
+        p1 = base[-1]
+        bvx = p1.x() - p0.x()
+        bvy = p1.y() - p0.y()
+        comp_base = max(1e-6, sqrt((bvx * bvx) + (bvy * bvy)))
+        tvx = cursor.x() - origem.x()
+        tvy = cursor.y() - origem.y()
+        comp_target = max(1e-6, sqrt((tvx * tvx) + (tvy * tvy)))
+        escala = comp_target / comp_base
+        ang_base = atan2(bvy, bvx)
+        ang_target = atan2(tvy, tvx)
+        delta = ang_target - ang_base
+        cd = cos(delta)
+        sd = sin(delta)
+        out: list[QPointF] = []
+        for pt in base:
+            rx = (pt.x() - p0.x()) * escala
+            ry = (pt.y() - p0.y()) * escala
+            x = (rx * cd) - (ry * sd)
+            y = (rx * sd) + (ry * cd)
+            out.append(QPointF(origem.x() + x, origem.y() + y))
+        return out
