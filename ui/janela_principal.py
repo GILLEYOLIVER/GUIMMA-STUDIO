@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from importlib import import_module
 from pathlib import Path
 from time import time
@@ -460,26 +461,91 @@ class GuimmaStudioMainWindow(QMainWindow):
         if acao == acao_add_todas:
             self._adicionar_todas_ferramentas_da_aba_id(tab_id)
 
+    def _log_debug_propriedades(self, mensagem: str):
+        try:
+            caminho = Path.home() / "guimma_propriedades_debug.log"
+            linha = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [janela_principal] {mensagem}"
+            print(linha)
+            with caminho.open("a", encoding="utf-8") as arq:
+                arq.write(linha + "\n")
+        except Exception as exc:
+            print(f"[janela_principal][log-falhou] {type(exc).__name__}: {exc}")
+
+    def _abrir_propriedades_diretamente(self):
+        self._log_debug_propriedades("Atalho/abertura direta de propriedades acionado.")
+        try:
+            self._abrir_pagina_ferramenta("propriedades")
+        except Exception as exc:
+            self._log_debug_propriedades(f"Falha na abertura direta de propriedades: {type(exc).__name__}: {exc}")
+            raise
+
     def _abrir_pagina_ferramenta(self, tool_id: str):
+        self._log_debug_propriedades(f"_abrir_pagina_ferramenta iniciado com tool_id={tool_id!r}")
         if self._executar_acao_edicao_ribbon(tool_id):
+            self._log_debug_propriedades(f"tool_id={tool_id!r} tratado como ação de edição ribbon.")
             return
         tool_def = self.ribbon.tool_def(tool_id)
+        self._log_debug_propriedades(f"tool_def encontrado={tool_def is not None}")
         if not tool_def:
             self.lbl_status.setText(f"Ferramenta não encontrada: {tool_id}")
+            self._log_debug_propriedades(f"Ferramenta não encontrada para tool_id={tool_id!r}")
             return
         if self._abrir_janela_auxiliar_ferramenta(tool_id, tool_def.title):
+            self._log_debug_propriedades(f"tool_id={tool_id!r} abriu janela auxiliar e retornou.")
             return
 
         module_name = tool_def.module.replace("/", ".").replace(".py", "")
+        self._log_debug_propriedades(
+            f"Carregando módulo={module_name!r}, classe={tool_def.class_name!r}, título={tool_def.title!r}"
+        )
         try:
             module = import_module(module_name)
+            self._log_debug_propriedades(f"Módulo importado com sucesso: {module_name!r}")
             tool_cls = getattr(module, tool_def.class_name)
+            self._log_debug_propriedades(f"Classe localizada: {tool_cls}")
             tool = tool_cls()
-            msg = tool.ativar()
+            self._log_debug_propriedades(f"Instância criada: {tool}")
+
+            area = self._area_documento_atual()
+            self._log_debug_propriedades(
+                f"Área atual existe={area is not None}; abas={self.abas_documentos.count() if hasattr(self, 'abas_documentos') else '??'}; currentIndex={self.abas_documentos.currentIndex() if hasattr(self, 'abas_documentos') else '??'}"
+            )
+            canvas = getattr(area, 'canvas', None) if area is not None else None
+            self._log_debug_propriedades(f"Canvas atual existe={canvas is not None}")
+
+            abriu = False
+            if canvas is not None and hasattr(tool, 'on_activate'):
+                self._log_debug_propriedades(f"Chamando on_activate(canvas) para tool_id={tool_id!r}")
+                try:
+                    resultado = tool.on_activate(canvas)
+                    abriu = True
+                    self._log_debug_propriedades(f"on_activate executado com sucesso. retorno={resultado!r}")
+                except Exception as exc:
+                    self._log_debug_propriedades(f"Erro em on_activate: {type(exc).__name__}: {exc}")
+                    raise
+            else:
+                self._log_debug_propriedades(
+                    f"on_activate não será usado. canvas_existe={canvas is not None}, tem_on_activate={hasattr(tool, 'on_activate')}"
+                )
+
             self._ativar_ferramenta_global(tool_id)
-            self.lbl_status.setText(msg)
+            self._log_debug_propriedades(f"Ferramenta global ativada: {tool_id!r}")
+
+            if not abriu:
+                self._log_debug_propriedades(f"Chamando ativar() para tool_id={tool_id!r}")
+                msg = tool.ativar()
+                self.lbl_status.setText(msg)
+                self._log_debug_propriedades(f"ativar() retornou: {msg!r}")
+            else:
+                self.lbl_status.setText(f"{tool_def.title} aberta.")
+                self._log_debug_propriedades(f"Janela/ferramenta {tool_def.title!r} aberta via on_activate.")
         except Exception as exc:  # pragma: no cover - fallback de carregamento
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
+            self._log_debug_propriedades(f"Falha ao abrir {tool_def.title!r}: {type(exc).__name__}: {exc}")
+            try:
+                QMessageBox.critical(self, "Erro ao abrir ferramenta", f"{type(exc).__name__}: {exc}")
+            except Exception as exc2:
+                self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
 
     def _executar_acao_edicao_ribbon(self, tool_id: str) -> bool:
         area = self._area_documento_atual()
@@ -1801,6 +1867,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self.abas_documentos.currentWidget()
         if isinstance(area, AreaDocumentoWidget):
             return area
+        try:
+            self._log_debug_propriedades(f"_area_documento_atual retornou None. currentWidget={type(area).__name__ if area is not None else None}")
+        except Exception:
+            pass
         return None
 
     def _configurar_botao_fechar_aba(self, index: int):
@@ -1828,8 +1898,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence.Paste, self, activated=self._colar_canvas_atual)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self._apagar_canvas_atual)
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self._abrir_dialogo_unidade_medida)
-        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self._ativar_ferramenta_global("propriedades"))
-        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self._ativar_ferramenta_global("propriedades"))
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._abrir_propriedades_diretamente)
+        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=self._abrir_propriedades_diretamente)
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()

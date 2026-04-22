@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -65,11 +66,6 @@ class PreviewMoldeWidget(QWidget):
         self._molde = molde
         self._zoom = 1.0
         self._offset = QPointF(0.0, 0.0)
-        self.update()
-
-    def set_config_cores_tecidos(self, cores: dict[str, str], mostrar: bool):
-        self._cores_tecidos = dict(cores)
-        self._mostrar_cor_tecidos = bool(mostrar)
         self.update()
 
     def set_config_cores_tecidos(self, cores: dict[str, str], mostrar: bool):
@@ -466,7 +462,12 @@ class PropriedadesMoldesDialog(QDialog):
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
-        self.recarregar_lista()
+        _log_propriedades_debug(f"PropriedadesMoldesDialog criado. canvas={type(canvas).__name__}; parent={type(parent).__name__ if parent is not None else None}; mostrar_tab_ferramentas={mostrar_tab_ferramentas}")
+        try:
+            self.recarregar_lista()
+        except Exception as exc:
+            _log_propriedades_debug(f"Falha ao carregar lista de moldes no __init__: {type(exc).__name__}: {exc}")
+            print(f"Falha ao carregar lista de moldes: {type(exc).__name__}: {exc}")
 
     def _stylesheet(self) -> str:
         return """
@@ -552,6 +553,18 @@ class PropriedadesMoldesDialog(QDialog):
         QPushButton#ApplyBlueButton {
             background: #d7e9f9;
             border-color: #b8d0ea;
+            min-width: 150px;
+        }
+        QToolButton {
+            background: #f7f7f7;
+            border: 1px solid #b7bec5;
+            border-radius: 4px;
+            padding: 2px 6px;
+            color: #111111;
+        }
+        QToolButton:disabled {
+            color: #777777;
+            background: #ebebeb;
         }
         QHeaderView::section {
             background: #f1f1f1;
@@ -650,13 +663,23 @@ class PropriedadesMoldesDialog(QDialog):
         raiz.addWidget(painel_dir, 1)
         self._atualizar_opcoes_tecido()
         self._ajustar_larguras_campos()
+        self._atualizar_estado_faixa_giro()
 
     def set_exibir_tab_ferramentas(self, exibir: bool):
         self._mostrar_tab_ferramentas = bool(exibir)
-        if hasattr(self, "tabs") and hasattr(self, "_idx_tab_ferramentas"):
-            self.tabs.setTabVisible(self._idx_tab_ferramentas, self._mostrar_tab_ferramentas)
+        if not hasattr(self, "tabs") or not hasattr(self, "_idx_tab_ferramentas"):
+            return
+        try:
+            if hasattr(self.tabs, "setTabVisible"):
+                self.tabs.setTabVisible(self._idx_tab_ferramentas, self._mostrar_tab_ferramentas)
+            else:
+                pagina = self.tabs.widget(self._idx_tab_ferramentas)
+                if pagina is not None:
+                    pagina.setVisible(self._mostrar_tab_ferramentas)
             if not self._mostrar_tab_ferramentas and self.tabs.currentIndex() == self._idx_tab_ferramentas:
                 self.tabs.setCurrentIndex(0)
+        except Exception:
+            pass
 
     def _ajustar_larguras_campos(self):
         combos = [
@@ -665,6 +688,7 @@ class PropriedadesMoldesDialog(QDialog):
             self.cmb_grade_tamanhos,
             self.cmb_elementos_molde,
             self.cmb_tipo_corte,
+            self.cmb_molde,
             self.cmb_espelhar,
             self.cmb_giro,
             self.cmb_tipo_corte_cam,
@@ -683,79 +707,163 @@ class PropriedadesMoldesDialog(QDialog):
 
         topo = QFrame()
         grid = QGridLayout(topo)
-        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setContentsMargins(8, 4, 8, 2)
         grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(5)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(1, 1)
 
-        self.ed_nome = QLineEdit()
-        self.ed_descricao = QTextEdit()
-        self.ed_descricao.setFixedHeight(56)
+        self.cmb_molde = QComboBox()
+        self.cmb_molde.setEditable(False)
+        self.cmb_molde.currentIndexChanged.connect(self._trocar_molde_pelo_combo)
+
         self.cmb_tipo_corte = QComboBox()
         self.cmb_tipo_corte.addItems(["Completo", "Par", "Espelhado", "Único"])
-        self.ed_tecido = QComboBox()
-        self.ed_tecido.setEditable(True)
-        self.ed_tecido.setInsertPolicy(QComboBox.NoInsert)
-        self.cmb_espelhar = QComboBox()
-        self.cmb_espelhar.addItems(["Horizontal", "Vertical", "Nenhum"])
-        self.sp_qtd_modelo = QSpinBox()
-        self.sp_qtd_modelo.setRange(1, 999)
-        self.cmb_giro = QComboBox()
-        self.cmb_giro.addItems(["180 graus", "90 graus", "270 graus", "Livre"])
-        self.ed_faixa_giro = QLineEdit("0")
-        self.ed_giro_inicial = QLineEdit("0")
-        self.chk_par = QCheckBox("Par")
-        self.chk_dobra_v = QCheckBox("Dobra vertical")
-        self.chk_dobra_h = QCheckBox("Dobra horizontal")
-        self.chk_perm_alt = QCheckBox("Permitir alterações das propriedades no GUIMMA Encaixe")
-        self.chk_reflete_v = QCheckBox("Refletido vertical")
-        self.chk_reflete_h = QCheckBox("Refletido horizontal")
+        self.cmb_tipo_corte.hide()
 
-        grid.addWidget(QLabel("Molde"), 0, 0)
-        grid.addWidget(self.ed_nome, 0, 1, 1, 4)
-        grid.addWidget(QLabel("Descrição"), 1, 0)
-        grid.addWidget(self.ed_descricao, 1, 1, 1, 4)
+        self.ed_descricao = QTextEdit()
+        self.ed_descricao.setFixedHeight(72)
+
+        grid.addWidget(QLabel("Molde"), 0, 0, alignment=Qt.AlignLeft | Qt.AlignVCenter)
+        grid.addWidget(self.cmb_molde, 0, 1)
+        grid.addWidget(QLabel("Descrição"), 1, 0, alignment=Qt.AlignLeft | Qt.AlignTop)
+        grid.addWidget(self.ed_descricao, 1, 1)
 
         box = QGroupBox("Propriedades de encaixe")
         box_layout = QGridLayout(box)
-        box_layout.setContentsMargins(8, 14, 8, 8)
-        box_layout.setHorizontalSpacing(8)
-        box_layout.setVerticalSpacing(6)
+        box_layout.setContentsMargins(10, 16, 10, 10)
+        box_layout.setHorizontalSpacing(10)
+        box_layout.setVerticalSpacing(7)
+        box_layout.setColumnStretch(1, 1)
+        box_layout.setColumnStretch(3, 1)
 
         self.chk_molde_pronto = QCheckBox("Molde pronto")
-        box_layout.addWidget(self.chk_molde_pronto, 0, 0)
-        box_layout.addWidget(self.chk_perm_alt, 0, 3, 1, 3)
+        self.chk_perm_alt = QCheckBox("Permitir alterações das propriedades no Audaces Encaixe")
+
+        self.ed_tecido = QComboBox()
+        self.ed_tecido.setEditable(True)
+        self.ed_tecido.setInsertPolicy(QComboBox.NoInsert)
+        self.ed_tecido.setMinimumWidth(120)
+        self.ed_tecido.setMaximumWidth(120)
+        self.btn_config_tecido = QPushButton("⚙")
+        self.btn_config_tecido.setFixedSize(24, 24)
+        self.btn_config_tecido.setToolTip("Configurar cor do tecido")
+        self.btn_config_tecido.clicked.connect(self._abrir_config_cor_tecidos)
+
+        self.cmb_espelhar = QComboBox()
+        self.cmb_espelhar.addItems(["Nenhum", "Horizontal", "Vertical"])
+        self.sp_qtd_modelo = QSpinBox()
+        self.sp_qtd_modelo.setRange(1, 999)
+        self.cmb_giro = QComboBox()
+        self.cmb_giro.addItems(["Sem giro", "Livre", "90 graus", "180 graus", "180 graus + faixa", "Faixa"])
+        self.cmb_giro.currentTextChanged.connect(self._atualizar_estado_faixa_giro)
+        self.ed_faixa_giro = QLineEdit("0")
+        self.ed_faixa_giro.setMaximumWidth(96)
+        self.ed_giro_inicial = QLineEdit("0")
+        self.ed_giro_inicial.setMaximumWidth(78)
+
+        self.chk_par = QCheckBox("Par")
+        self.chk_dobra_v = QCheckBox("Dobra vertical")
+        self.chk_dobra_h = QCheckBox("Dobra horizontal")
+        self.chk_reflete_v = QCheckBox("Refletido vertical")
+        self.chk_reflete_h = QCheckBox("Refletido horizontal")
+
+        box_layout.addWidget(self.chk_molde_pronto, 0, 0, 1, 2)
+        box_layout.addWidget(self.chk_perm_alt, 0, 3, 1, 4, alignment=Qt.AlignLeft)
 
         box_layout.addWidget(QLabel("Tecido"), 1, 0)
-        box_layout.addWidget(self.ed_tecido, 1, 3, 1, 2)
-        box_layout.addWidget(QLabel("Espelhar"), 2, 0)
-        box_layout.addWidget(self.cmb_espelhar, 2, 3, 1, 2)
-        box_layout.addWidget(QLabel("Quantidade por modelo"), 3, 0)
-        box_layout.addWidget(self.sp_qtd_modelo, 3, 3, 1, 2)
-        box_layout.addWidget(self.chk_par, 3, 5)
-        box_layout.addWidget(QLabel("Giro"), 4, 0)
-        box_layout.addWidget(self.cmb_giro, 4, 3, 1, 2)
-        box_layout.addWidget(self.chk_dobra_v, 4, 5)
-        box_layout.addWidget(QLabel("Faixa de giro"), 5, 0)
-        box_layout.addWidget(self.ed_faixa_giro, 5, 3, 1, 2)
-        box_layout.addWidget(QLabel("°"), 5, 5)
-        box_layout.addWidget(self.chk_dobra_h, 5, 6)
+        box_layout.addWidget(self.ed_tecido, 1, 1, 1, 1)
+        box_layout.addWidget(self.btn_config_tecido, 1, 2, alignment=Qt.AlignLeft)
 
-        box_layout.addWidget(QLabel("Configuração inicial do molde"), 6, 0, 1, 3)
+        box_layout.addWidget(QLabel("Espelhar"), 2, 0)
+        box_layout.addWidget(self.cmb_espelhar, 2, 1, 1, 2)
+
+        box_layout.addWidget(QLabel("Quantidade por modelo"), 3, 0)
+        box_layout.addWidget(self.sp_qtd_modelo, 3, 1, 1, 2)
+        box_layout.addWidget(self.chk_par, 3, 3, 1, 3, alignment=Qt.AlignLeft)
+
+        box_layout.addWidget(QLabel("Giro"), 4, 0)
+        box_layout.addWidget(self.cmb_giro, 4, 1, 1, 2)
+        box_layout.addWidget(self.chk_dobra_v, 4, 3, 1, 3, alignment=Qt.AlignLeft)
+
+        box_layout.addWidget(QLabel("Faixa de giro"), 5, 0)
+        faixa_layout = QHBoxLayout()
+        faixa_layout.setContentsMargins(0, 0, 0, 0)
+        faixa_layout.setSpacing(4)
+        faixa_layout.addWidget(self.ed_faixa_giro)
+        faixa_layout.addWidget(QLabel("°"))
+        faixa_layout.addStretch(1)
+        box_layout.addLayout(faixa_layout, 5, 1, 1, 2)
+        box_layout.addWidget(self.chk_dobra_h, 5, 3, 1, 3, alignment=Qt.AlignLeft)
+
+        lbl_conf_inicial = QLabel("Configuração inicial do molde")
+        box_layout.addWidget(lbl_conf_inicial, 6, 0, 1, 4)
+
         box_layout.addWidget(QLabel("Giro inicial"), 7, 0)
-        box_layout.addWidget(self.ed_giro_inicial, 7, 1)
-        box_layout.addWidget(QLabel("°"), 7, 2)
-        box_layout.addWidget(self.chk_reflete_v, 7, 4)
-        box_layout.addWidget(self.chk_reflete_h, 7, 5)
+        giro_layout = QHBoxLayout()
+        giro_layout.setContentsMargins(0, 0, 0, 0)
+        giro_layout.setSpacing(4)
+        giro_layout.addWidget(self.ed_giro_inicial)
+        giro_layout.addWidget(QLabel("°"))
+        giro_layout.addStretch(1)
+        box_layout.addLayout(giro_layout, 7, 1, 1, 2)
+
+        reflexo_layout = QHBoxLayout()
+        reflexo_layout.setContentsMargins(0, 0, 0, 0)
+        reflexo_layout.setSpacing(10)
+        reflexo_layout.addWidget(self.chk_reflete_v)
+        reflexo_layout.addWidget(self.chk_reflete_h)
+        reflexo_layout.addStretch(1)
+        box_layout.addLayout(reflexo_layout, 7, 3, 1, 3)
 
         self.btn_aplicar_todos_prop = QPushButton("Aplicar todos")
         self.btn_aplicar_todos_prop.setObjectName("ApplyBlueButton")
         self.btn_aplicar_todos_prop.clicked.connect(self._aplicar)
-        box_layout.addWidget(self.btn_aplicar_todos_prop, 8, 0, 1, 2)
+        self.btn_menu_aplicar_prop = QToolButton()
+        self.btn_menu_aplicar_prop.setText("▾")
+        self.btn_menu_aplicar_prop.setFixedWidth(18)
+        self.btn_menu_aplicar_prop.setEnabled(False)
+        aplicar_layout = QHBoxLayout()
+        aplicar_layout.setContentsMargins(0, 0, 0, 0)
+        aplicar_layout.setSpacing(0)
+        aplicar_layout.addWidget(self.btn_aplicar_todos_prop)
+        aplicar_layout.addWidget(self.btn_menu_aplicar_prop)
+        aplicar_layout.addStretch(1)
+        box_layout.addLayout(aplicar_layout, 8, 0, 1, 3)
 
         layout.addWidget(topo)
         layout.addWidget(box)
+        layout.addStretch(1)
         return aba
 
+    def _trocar_molde_pelo_combo(self, index: int):
+        if index < 0 or not hasattr(self, "cmb_molde"):
+            return
+        idx_molde = self.cmb_molde.itemData(index)
+        if idx_molde is None:
+            return
+        raiz = self.arvore.topLevelItem(0)
+        if raiz is None:
+            return
+        for item in self._iter_items(raiz):
+            if item.data(0, Qt.UserRole) == idx_molde:
+                with QSignalBlocker(self.arvore):
+                    self.arvore.setCurrentItem(item)
+                self._indice_atual = int(idx_molde)
+                self._preencher_campos(self._molde_atual())
+                break
+
+    def _atualizar_combo_moldes(self):
+        if not hasattr(self, "cmb_molde"):
+            return
+        atual = self._indice_atual
+        with QSignalBlocker(self.cmb_molde):
+            self.cmb_molde.clear()
+            for ref in self._refs:
+                self.cmb_molde.addItem(ref.nome or f"Molde {ref.indice + 1}", ref.indice)
+            if atual is not None:
+                pos = self.cmb_molde.findData(atual)
+                if pos >= 0:
+                    self.cmb_molde.setCurrentIndex(pos)
     def _criar_tab_graduacao(self) -> QWidget:
         aba = QWidget()
         layout = QHBoxLayout(aba)
@@ -973,9 +1081,13 @@ class PropriedadesMoldesDialog(QDialog):
         molde["graduacao_tamanhos_ativos"] = ativos
 
     def _atualizar_opcoes_tecido(self):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            elementos = []
         tecidos = {
             str(el.get("tecido") or "").strip()
-            for el in self.canvas.cena.elementos
+            for el in elementos
             if isinstance(el, dict) and el.get("molde")
         }
         tecidos.update({
@@ -1231,8 +1343,10 @@ class PropriedadesMoldesDialog(QDialog):
         return aba
 
     def recarregar_lista(self):
+        _log_propriedades_debug("recarregar_lista() iniciado")
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
+        _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
         self.arvore.clear()
         raiz = QTreeWidgetItem(["1"])
         raiz.setExpanded(True)
@@ -1279,9 +1393,13 @@ class PropriedadesMoldesDialog(QDialog):
         if escolhido:
             self.arvore.setCurrentItem(escolhido)
             self._indice_atual = int(escolhido.data(0, Qt.UserRole))
+            self._atualizar_combo_moldes()
+            _log_propriedades_debug(f"recarregar_lista(): item escolhido indice={self._indice_atual}")
             self._preencher_campos(self._molde_atual())
         else:
             self._indice_atual = None
+            self._atualizar_combo_moldes()
+            _log_propriedades_debug("recarregar_lista(): nenhum item escolhido; preenchendo campos vazios")
             self._preencher_campos(None)
 
     def _iter_items(self, pai: QTreeWidgetItem):
@@ -1292,7 +1410,11 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _coletar_moldes(self) -> list[MoldeRef]:
         refs: list[MoldeRef] = []
-        for idx, el in enumerate(self.canvas.cena.elementos):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if not isinstance(elementos, list):
+            return refs
+        for idx, el in enumerate(elementos):
             if not isinstance(el, dict):
                 continue
             if not el.get("molde"):
@@ -1314,11 +1436,21 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _molde_atual(self) -> dict | None:
         if self._indice_atual is None:
+            _log_propriedades_debug("_molde_atual(): indice_atual é None")
             return None
-        if 0 <= self._indice_atual < len(self.canvas.cena.elementos):
-            el = self.canvas.cena.elementos[self._indice_atual]
-            if el.get("molde"):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if not isinstance(elementos, list):
+            _log_propriedades_debug(f"_molde_atual(): elementos inválido: {type(elementos).__name__}")
+            return None
+        if 0 <= self._indice_atual < len(elementos):
+            el = elementos[self._indice_atual]
+            if isinstance(el, dict) and el.get("molde"):
+                _log_propriedades_debug(f"_molde_atual(): molde válido encontrado no índice {self._indice_atual}")
                 return el
+            _log_propriedades_debug(f"_molde_atual(): elemento no índice {self._indice_atual} não é molde válido")
+        else:
+            _log_propriedades_debug(f"_molde_atual(): índice fora da faixa. indice={self._indice_atual}; total={len(elementos)}")
         return None
 
     def _int_seguro(self, valor, padrao: int) -> int:
@@ -1327,6 +1459,16 @@ class PropriedadesMoldesDialog(QDialog):
         except (TypeError, ValueError):
             return int(padrao)
 
+    def _atualizar_estado_faixa_giro(self, texto: str | None = None):
+        valor = str(texto if texto is not None else self.cmb_giro.currentText()).strip().lower()
+        ativo = valor in {"faixa", "180 graus + faixa"}
+        self.ed_faixa_giro.setEnabled(ativo)
+        if ativo:
+            self.ed_faixa_giro.setStyleSheet("")
+        else:
+            self.ed_faixa_giro.setStyleSheet("background:#efefef; color:#7a7a7a;")
+        self.ed_faixa_giro.repaint()
+
     def _preencher_campos(self, molde: dict | None):
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
@@ -1334,19 +1476,55 @@ class PropriedadesMoldesDialog(QDialog):
         )
         self.preview.set_molde(molde)
         if molde is None:
-            self.ed_nome.clear()
+            with QSignalBlocker(self.cmb_molde):
+                self.cmb_molde.setCurrentIndex(-1)
             self.ed_descricao.clear()
             self.ed_tecido.setCurrentText("1")
+            self.sp_qtd_modelo.setValue(1)
+            self.cmb_tipo_corte.setCurrentText("Completo")
+            self.cmb_espelhar.setCurrentText("Nenhum")
+            self.cmb_giro.setCurrentText("180 graus")
+            self.ed_faixa_giro.setText("0")
+            self.ed_giro_inicial.setText("0")
+            self.chk_molde_pronto.setChecked(False)
+            self.chk_perm_alt.setChecked(False)
+            self.chk_par.setChecked(False)
+            self.chk_dobra_v.setChecked(False)
+            self.chk_dobra_h.setChecked(False)
+            self.chk_reflete_v.setChecked(False)
+            self.chk_reflete_h.setChecked(False)
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
+            self._atualizar_estado_faixa_giro()
             return
 
-        self.ed_nome.setText(str(molde.get("nome_molde") or ""))
+        pos_combo = self.cmb_molde.findData(self._indice_atual)
+        if pos_combo >= 0:
+            with QSignalBlocker(self.cmb_molde):
+                self.cmb_molde.setCurrentIndex(pos_combo)
         self.ed_descricao.setPlainText(str(molde.get("descricao") or ""))
+        tipo_corte = str(molde.get("tipo_corte") or "Completo")
+        idx_tipo_corte = self.cmb_tipo_corte.findText(tipo_corte)
+        self.cmb_tipo_corte.setCurrentIndex(idx_tipo_corte if idx_tipo_corte >= 0 else 0)
         self._atualizar_opcoes_tecido()
         self.ed_tecido.setCurrentText(str(molde.get("tecido") or "1"))
         self.sp_qtd_modelo.setValue(self._int_seguro(molde.get("qtd_modelo", 1) or 1, 1))
+        self.chk_molde_pronto.setChecked(bool(molde.get("molde_pronto", False)))
+        self.chk_perm_alt.setChecked(bool(molde.get("permitir_alteracoes_encaixe", False)))
         self.chk_par.setChecked(bool(molde.get("par", False)))
+        self.chk_dobra_v.setChecked(bool(molde.get("dobra_vertical", False)))
+        self.chk_dobra_h.setChecked(bool(molde.get("dobra_horizontal", False)))
+        self.chk_reflete_v.setChecked(bool(molde.get("refletido_vertical", False)))
+        self.chk_reflete_h.setChecked(bool(molde.get("refletido_horizontal", False)))
+        self.ed_faixa_giro.setText(str(molde.get("faixa_giro", 0) or 0))
+        self._atualizar_estado_faixa_giro()
+        self.ed_giro_inicial.setText(str(molde.get("giro_inicial", 0) or 0))
+        tipo_espelho = str(molde.get("espelhar") or "Nenhum")
+        idx_espelho = self.cmb_espelhar.findText(tipo_espelho)
+        self.cmb_espelhar.setCurrentIndex(idx_espelho if idx_espelho >= 0 else self.cmb_espelhar.findText("Nenhum"))
+        tipo_giro = str(molde.get("giro") or "180 graus")
+        idx_giro = self.cmb_giro.findText(tipo_giro)
+        self.cmb_giro.setCurrentIndex(idx_giro if idx_giro >= 0 else 0)
         self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
         self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
         self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", False)))
@@ -1380,12 +1558,21 @@ class PropriedadesMoldesDialog(QDialog):
             QMessageBox.information(self, "Propriedades", "Selecione um molde.")
             return False
 
-        molde["nome_molde"] = self.ed_nome.text().strip() or molde.get("nome_molde") or "N22"
+        nome_combo = self.cmb_molde.currentText().strip()
+        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
         molde["descricao"] = self.ed_descricao.toPlainText().strip()
         molde["tecido"] = self.ed_tecido.currentText().strip()
         molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
+        molde["espelhar"] = self.cmb_espelhar.currentText().strip()
+        molde["giro"] = self.cmb_giro.currentText().strip()
+        molde["faixa_giro"] = self.ed_faixa_giro.text().strip() or "0"
+        molde["giro_inicial"] = self.ed_giro_inicial.text().strip() or "0"
         molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
+        molde["molde_pronto"] = self.chk_molde_pronto.isChecked()
+        molde["permitir_alteracoes_encaixe"] = self.chk_perm_alt.isChecked()
         molde["par"] = self.chk_par.isChecked()
+        molde["dobra_vertical"] = self.chk_dobra_v.isChecked()
+        molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
         molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
         molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
         molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
@@ -1412,14 +1599,17 @@ class PropriedadesMoldesDialog(QDialog):
             self.close()
 
     def _excluir_molde_atual(self):
-        if self._indice_atual is None:
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if self._indice_atual is None or not isinstance(elementos, list):
             return
-        if not (0 <= self._indice_atual < len(self.canvas.cena.elementos)):
+        if not (0 <= self._indice_atual < len(elementos)):
             return
-        del self.canvas.cena.elementos[self._indice_atual]
+        del elementos[self._indice_atual]
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
-        self.canvas.update()
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
         self._indice_atual = None
         self.recarregar_lista()
 
@@ -1464,10 +1654,14 @@ class PropriedadesMoldesDialog(QDialog):
         )
 
     def _abrir_config_cor_tecidos(self):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            elementos = []
         tecidos = sorted({
             str(el.get("tecido") or "").strip()
-            for el in self.canvas.cena.elementos
-            if el.get("molde") and str(el.get("tecido") or "").strip()
+            for el in elementos
+            if isinstance(el, dict) and el.get("molde") and str(el.get("tecido") or "").strip()
         })
         mapa = dict(getattr(self.canvas, "_cores_tecidos", {}))
         dialog = ConfigurarCoresTecidosDialog(tecidos, mapa, self)
@@ -1475,12 +1669,12 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self.canvas._cores_tecidos = dialog.cores_tecidos()
         self._atualizar_opcoes_tecido()
-        self.canvas.update()
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
         )
-
 
 class ConfigurarCoresTecidosDialog(QDialog):
     def __init__(self, tecidos: list[str], mapa_cores: dict[str, str], parent: QWidget | None = None):
@@ -1608,6 +1802,17 @@ class ConfigurarCoresTecidosDialog(QDialog):
         return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
 
 
+def _log_propriedades_debug(mensagem: str):
+    try:
+        caminho = Path.home() / "guimma_propriedades_debug.log"
+        linha = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [propriedades_tool] {mensagem}"
+        print(linha)
+        with caminho.open("a", encoding="utf-8") as arq:
+            arq.write(linha + "\n")
+    except Exception as exc:
+        print(f"[propriedades_tool][log-falhou] {type(exc).__name__}: {exc}")
+
+
 class Ferramenta(FerramentaBase):
     id_ferramenta = "propriedades"
     nome = "Propriedades"
@@ -1617,15 +1822,34 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        dialog = self._obter_dialog(canvas)
-        dialog.recarregar_lista()
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
-        if dialog._indice_atual is None:
-            self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
-        else:
-            self.set_status("Janela de propriedades do molde aberta.")
+        _log_propriedades_debug(f"on_activate() chamado. canvas={type(canvas).__name__}; window={type(canvas.window()).__name__ if hasattr(canvas, 'window') and canvas.window() is not None else None}")
+        try:
+            dialog = self._obter_dialog(canvas)
+            _log_propriedades_debug(f"Dialog obtido: {dialog}; visível_antes={dialog.isVisible() if dialog is not None else None}")
+            dialog.recarregar_lista()
+            _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            _log_propriedades_debug(f"Dialog visível_depois={dialog.isVisible()}; geometria={dialog.geometry().getRect()}")
+            if dialog._indice_atual is None:
+                self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
+            else:
+                self.set_status("Janela de propriedades do molde aberta.")
+        except Exception as exc:
+            _log_propriedades_debug(f"Falha ao abrir Propriedades: {type(exc).__name__}: {exc}")
+            print(f"Falha ao abrir Propriedades: {type(exc).__name__}: {exc}")
+            try:
+                QMessageBox.critical(
+                    canvas.window() if hasattr(canvas, "window") else None,
+                    "Erro ao abrir propriedades",
+                    f"{type(exc).__name__}: {exc}",
+                )
+            except Exception as exc2:
+                _log_propriedades_debug(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
+
+    def ativar(self):
+        return "Use on_activate(canvas) para abrir a janela de propriedades."
 
     def _obter_dialog(self, canvas) -> PropriedadesMoldesDialog:
         chave = id(canvas)
@@ -1633,10 +1857,63 @@ class Ferramenta(FerramentaBase):
         parent = canvas.window() if hasattr(canvas, "window") else None
         opcoes = getattr(parent, "_opcoes_app", {}) if parent is not None else {}
         exibir_tab_ferramentas = bool(opcoes.get("usar_ferramentas_moldes", False))
-        if dialog is not None:
+        parent_nome = type(parent).__name__ if parent is not None else None
+        dialog_parent_nome = None
+        try:
+            dialog_parent = dialog.parentWidget() if dialog is not None else None
+            dialog_parent_nome = type(dialog_parent).__name__ if dialog_parent is not None else None
+        except Exception:
+            dialog_parent = None
+        _log_propriedades_debug(
+            f"_obter_dialog(): chave_canvas={chave}; dialog_existente={dialog is not None}; parent={parent_nome}; dialog_parent={dialog_parent_nome}; exibir_tab_ferramentas={exibir_tab_ferramentas}"
+        )
+
+        precisa_recriar = False
+        if dialog is None:
+            precisa_recriar = True
+        else:
+            try:
+                if dialog.parentWidget() is not parent:
+                    _log_propriedades_debug(
+                        "_obter_dialog(): parent do dialog mudou; recriando janela para evitar ficar presa ao widget antigo."
+                    )
+                    try:
+                        dialog.hide()
+                    except Exception:
+                        pass
+                    try:
+                        dialog.close()
+                    except Exception:
+                        pass
+                    try:
+                        dialog.deleteLater()
+                    except Exception:
+                        pass
+                    self._dialog_por_canvas.pop(chave, None)
+                    dialog = None
+                    precisa_recriar = True
+            except Exception as exc:
+                _log_propriedades_debug(
+                    f"_obter_dialog(): falha ao validar dialog existente; recriando. erro={type(exc).__name__}: {exc}"
+                )
+                self._dialog_por_canvas.pop(chave, None)
+                dialog = None
+                precisa_recriar = True
+
+        if not precisa_recriar and dialog is not None:
             dialog.set_exibir_tab_ferramentas(exibir_tab_ferramentas)
+            try:
+                if dialog.parentWidget() is None and parent is not None:
+                    dialog.setParent(parent)
+            except Exception:
+                pass
             return dialog
+
         dialog = PropriedadesMoldesDialog(canvas, parent, mostrar_tab_ferramentas=exibir_tab_ferramentas)
         dialog.dados_aplicados.connect(lambda: self.set_status("Propriedades do molde aplicadas."))
+        dialog.destroyed.connect(lambda *_: self._dialog_por_canvas.pop(chave, None))
         self._dialog_por_canvas[chave] = dialog
+        _log_propriedades_debug(
+            f"_obter_dialog(): novo dialog criado e armazenado para chave={chave}; parent={parent_nome}"
+        )
         return dialog
