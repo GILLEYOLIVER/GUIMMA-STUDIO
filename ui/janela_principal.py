@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from importlib import import_module
+from math import ceil, cos, pi, sin, sqrt
 from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -88,6 +89,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
+        self._indice_layout_organizacao_moldes = 0
         self._inicializar_perfis_usuarios()
         self._opcoes_app = self._carregar_opcoes_app()
         self._timer_salvar_estado = QTimer(self)
@@ -1244,6 +1246,134 @@ class GuimmaStudioMainWindow(QMainWindow):
         canvas.origem_cena.setY(cy - (canvas.height() / (2 * canvas.zoom)))
         canvas.update()
 
+    def _bbox_elemento(self, el: dict) -> tuple[float, float, float, float] | None:
+        pontos: list[tuple[float, float]] = []
+        tipo = el.get("tipo")
+        if tipo == "polyline":
+            pontos.extend((float(x), float(y)) for x, y in el.get("pontos", []))
+        elif tipo == "bezier_quadratica":
+            for chave in ("p0", "p1", "p2"):
+                pt = el.get(chave)
+                if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                    pontos.append((float(pt[0]), float(pt[1])))
+        elif tipo in {"circle", "esfera"}:
+            centro = el.get("centro")
+            raio = float(el.get("raio", 0.0))
+            if isinstance(centro, (tuple, list)) and len(centro) == 2:
+                cx, cy = float(centro[0]), float(centro[1])
+                pontos.extend([(cx - raio, cy - raio), (cx + raio, cy + raio)])
+        if not pontos:
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _transladar_elemento(self, el: dict, dx: float, dy: float):
+        tipo = el.get("tipo")
+        if tipo == "polyline":
+            el["pontos"] = [(float(x) + dx, float(y) + dy) for x, y in el.get("pontos", [])]
+            return
+        if tipo == "bezier_quadratica":
+            for chave in ("p0", "p1", "p2"):
+                pt = el.get(chave)
+                if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                    el[chave] = (float(pt[0]) + dx, float(pt[1]) + dy)
+            return
+        if tipo in {"circle", "esfera"}:
+            centro = el.get("centro")
+            if isinstance(centro, (tuple, list)) and len(centro) == 2:
+                el["centro"] = (float(centro[0]) + dx, float(centro[1]) + dy)
+
+    def _organizar_moldes_no_canvas(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
+        moldes: list[dict] = []
+        for idx, el in enumerate(canvas.cena.elementos):
+            if not el.get("molde"):
+                continue
+            bbox = self._bbox_elemento(el)
+            if bbox is None:
+                continue
+            min_x, min_y, max_x, max_y = bbox
+            largura = max(max_x - min_x, 1.0)
+            altura = max(max_y - min_y, 1.0)
+            moldes.append(
+                {
+                    "idx": idx,
+                    "bbox": bbox,
+                    "w": largura,
+                    "h": altura,
+                    "cx": (min_x + max_x) / 2.0,
+                    "cy": (min_y + max_y) / 2.0,
+                    "area": largura * altura,
+                }
+            )
+        if not moldes:
+            return 0
+        moldes.sort(key=lambda info: info["area"], reverse=True)
+        n = len(moldes)
+        variacao_idx = int(self._indice_layout_organizacao_moldes if variacao is None else variacao) % 3
+        media_w = sum(info["w"] for info in moldes) / n
+        media_h = sum(info["h"] for info in moldes) / n
+        base_gap = max(media_w, media_h) * 0.45 + 8.0
+        centros: list[tuple[float, float]] = []
+        origem_x, origem_y = 0.0, 0.0
+
+        if variacao_idx == 0:
+            colunas = max(1, ceil(sqrt(n)))
+            for pos in range(n):
+                linha = pos // colunas
+                coluna = pos % colunas
+                x = origem_x + coluna * (media_w + base_gap)
+                y = origem_y + linha * (media_h + base_gap)
+                centros.append((x, y))
+        elif variacao_idx == 1:
+            if n == 1:
+                centros = [(origem_x, origem_y)]
+            else:
+                raio = max(media_w, media_h) * (1.2 + (n / 7.0))
+                for pos in range(n):
+                    ang = (2.0 * pi * pos / n) - (pi / 2.0)
+                    centros.append((origem_x + (raio * cos(ang)), origem_y + (raio * sin(ang))))
+        else:
+            colunas = 3 if n > 4 else 2
+            passo_x = media_w + base_gap
+            passo_y = media_h + (base_gap * 0.85)
+            for pos in range(n):
+                linha = pos // colunas
+                coluna = pos % colunas
+                deslocamento = passo_x * 0.5 if linha % 2 else 0.0
+                x = origem_x + deslocamento + coluna * passo_x
+                y = origem_y + linha * passo_y
+                centros.append((x, y))
+
+        if centros:
+            media_x = sum(x for x, _ in centros) / len(centros)
+            media_y = sum(y for _, y in centros) / len(centros)
+            centros = [(x - media_x, y - media_y) for x, y in centros]
+
+        for info, (target_x, target_y) in zip(moldes, centros):
+            dx = target_x - info["cx"]
+            dy = target_y - info["cy"]
+            self._transladar_elemento(canvas.cena.elementos[info["idx"]], dx, dy)
+        if registrar_historico:
+            canvas._registrar_historico()
+        canvas.update()
+        return n
+
+    def _organizar_moldes_canvas_atual(self):
+        area = self._area_documento_atual()
+        if not area:
+            self.lbl_status.setText("Nenhum documento ativo para organizar moldes.")
+            return
+        layout_aplicado = (self._indice_layout_organizacao_moldes % 3) + 1
+        qtd = self._organizar_moldes_no_canvas(area.canvas)
+        if not qtd:
+            self.lbl_status.setText("Nenhum molde encontrado para organizar.")
+            return
+        self._indice_layout_organizacao_moldes = (self._indice_layout_organizacao_moldes + 1) % 3
+        self._centralizar_canvas_em_elementos(area.canvas, [el for el in area.canvas.cena.elementos if el.get("molde")])
+        area._on_zoom_changed(area.canvas.zoom)
+        self.lbl_status.setText(f"{qtd} molde(s) reorganizado(s). Layout #{layout_aplicado} pronto.")
+
     def closeEvent(self, event):  # noqa: N802
         if not self._ha_alteracoes_nao_salvas():
             self._salvar_estado_projeto_silenciosamente()
@@ -1392,8 +1522,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             if "painel_coordenadas_visivel" in doc:
                 area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            qtd_moldes_organizados = self._organizar_moldes_no_canvas(area.canvas, variacao=0, registrar_historico=False)
             area.canvas._registrar_historico()
-            QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
+            if qtd_moldes_organizados:
+                QTimer.singleShot(0, lambda a=area: self._centralizar_area_documento(a))
+            else:
+                QTimer.singleShot(0, lambda a=area: self._aplicar_viewport_inicial(a))
             area.canvas.update()
         if area:
             self._marcar_area_como_salva(area)
@@ -2481,6 +2615,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_zoom_mais.setToolTip("Zoom +")
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
         row.addWidget(self.btn_zoom_mais)
+
+        self.btn_organizar_moldes = QPushButton("Organizar moldes")
+        self.btn_organizar_moldes.setFixedHeight(24)
+        self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
+        self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
+        row.addWidget(self.btn_organizar_moldes)
 
         row.addStretch(1)
         layout.addWidget(atalhos)
