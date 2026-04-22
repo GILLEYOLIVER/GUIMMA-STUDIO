@@ -84,8 +84,7 @@ class PreviewMoldeWidget(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter, "Nenhum molde selecionado")
             return
 
-        pontos_raw = self._molde.get("pontos", [])
-        pontos = [QPointF(float(x), float(y)) for x, y in pontos_raw]
+        pontos = self._coletar_pontos(self._molde.get("pontos"))
         if len(pontos) < 2:
             return
 
@@ -152,9 +151,11 @@ class PreviewMoldeWidget(QWidget):
         fio_fim = self._molde.get("fio_fim")
         xs = [p.x() for p in base]
         ys = [p.y() for p in base]
-        if fio_origem and fio_fim:
-            p1 = mapear(QPointF(float(fio_origem[0]), float(fio_origem[1])))
-            p2 = mapear(QPointF(float(fio_fim[0]), float(fio_fim[1])))
+        p_fio_origem = self._ponto_xy(fio_origem)
+        p_fio_fim = self._ponto_xy(fio_fim)
+        if p_fio_origem and p_fio_fim:
+            p1 = mapear(p_fio_origem)
+            p2 = mapear(p_fio_fim)
         else:
             margem = (max(xs) - min(xs)) * 0.18
             y_fio = min(ys) + ((max(ys) - min(ys)) * 0.58)
@@ -222,13 +223,31 @@ class PreviewMoldeWidget(QWidget):
     def _desenhar_controles(self, painter: QPainter, mapear):
         if not self._molde.get("mostrar_controles", True):
             return
-        pontos = [QPointF(float(x), float(y)) for x, y in self._molde.get("controle_cantos", [])]
+        pontos = self._coletar_pontos(self._molde.get("controle_cantos"))
         painter.setPen(QPen(QColor("#ffffff"), 1.0))
         for i, pt in enumerate(pontos, start=1):
             tela = mapear(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
             if self._molde.get("mostrar_numeros", False):
                 painter.drawText(int(tela.x() + 4), int(tela.y() - 6), str(i))
+
+    def _coletar_pontos(self, dados) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(dados, (list, tuple)):
+            return pontos
+        for item in dados:
+            ponto = self._ponto_xy(item)
+            if ponto is not None:
+                pontos.append(ponto)
+        return pontos
+
+    def _ponto_xy(self, valor) -> QPointF | None:
+        if not isinstance(valor, (list, tuple)) or len(valor) < 2:
+            return None
+        try:
+            return QPointF(float(valor[0]), float(valor[1]))
+        except (TypeError, ValueError):
+            return None
 
     def zoom_in(self):
         self._zoom = min(20.0, self._zoom * 1.15)
@@ -548,7 +567,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box = QGroupBox("Propriedades de encaixe")
         box_layout = QGridLayout(box)
-        box_layout.setContentsMargins(8, 8, 8, 8)
+        box_layout.setContentsMargins(8, 14, 8, 8)
         box_layout.setHorizontalSpacing(8)
         box_layout.setVerticalSpacing(6)
 
@@ -807,7 +826,7 @@ class PropriedadesMoldesDialog(QDialog):
         tecidos = {
             str(el.get("tecido") or "").strip()
             for el in self.canvas.cena.elementos
-            if el.get("molde")
+            if isinstance(el, dict) and el.get("molde")
         }
         tecidos.update({
             str(chave).strip()
@@ -833,7 +852,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         topo = QGroupBox("Manipular")
         grid = QGridLayout(topo)
-        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
 
@@ -863,7 +882,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box_vis = QGroupBox("Visualização")
         gvis = QGridLayout(box_vis)
-        gvis.setContentsMargins(10, 8, 10, 8)
+        gvis.setContentsMargins(10, 14, 10, 8)
         gvis.setHorizontalSpacing(24)
         gvis.setVerticalSpacing(10)
 
@@ -984,7 +1003,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         topo = QGroupBox()
         grid = QGridLayout(topo)
-        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.addWidget(QLabel("Tipo corte"), 0, 0)
         self.cmb_tipo_corte_cam = QComboBox()
         self.cmb_tipo_corte_cam.addItems(["Completo", "Par", "Espelhado", "Único"])
@@ -1007,7 +1026,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box = QGroupBox("Elementos")
         grid = QGridLayout(box)
-        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
 
@@ -1124,6 +1143,8 @@ class PropriedadesMoldesDialog(QDialog):
     def _coletar_moldes(self) -> list[MoldeRef]:
         refs: list[MoldeRef] = []
         for idx, el in enumerate(self.canvas.cena.elementos):
+            if not isinstance(el, dict):
+                continue
             if not el.get("molde"):
                 continue
             refs.append(MoldeRef(indice=idx, nome=str(el.get("nome_molde") or f"K{idx + 1}"), dados=el))
@@ -1150,6 +1171,12 @@ class PropriedadesMoldesDialog(QDialog):
                 return el
         return None
 
+    def _int_seguro(self, valor, padrao: int) -> int:
+        try:
+            return int(valor)
+        except (TypeError, ValueError):
+            return int(padrao)
+
     def _preencher_campos(self, molde: dict | None):
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
@@ -1168,7 +1195,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_descricao.setPlainText(str(molde.get("descricao") or ""))
         self._atualizar_opcoes_tecido()
         self.ed_tecido.setCurrentText(str(molde.get("tecido") or "1"))
-        self.sp_qtd_modelo.setValue(int(molde.get("qtd_modelo", 1) or 1))
+        self.sp_qtd_modelo.setValue(self._int_seguro(molde.get("qtd_modelo", 1) or 1, 1))
         self.chk_par.setChecked(bool(molde.get("par", False)))
         self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
         self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
