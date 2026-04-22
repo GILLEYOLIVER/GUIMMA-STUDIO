@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QHeaderView,
     QToolButton,
+    QMenu,
 )
 
 from tools.tool_base import FerramentaBase
@@ -573,6 +574,27 @@ class PropriedadesMoldesDialog(QDialog):
             padding: 3px;
             font-weight: 500;
         }
+        QMenu {
+            background: #ffffff;
+            color: #111111;
+            border: 1px solid #bfc6cc;
+            padding: 4px;
+        }
+        QMenu::item {
+            background: transparent;
+            color: #111111;
+            padding: 6px 22px 6px 12px;
+            border-radius: 2px;
+        }
+        QMenu::item:selected {
+            background: #d9ecff;
+            color: #111111;
+        }
+        QMenu::separator {
+            height: 1px;
+            background: #d7d7d7;
+            margin: 4px 8px;
+        }
         """
 
     def _construir_ui(self):
@@ -817,11 +839,15 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.btn_aplicar_todos_prop = QPushButton("Aplicar todos")
         self.btn_aplicar_todos_prop.setObjectName("ApplyBlueButton")
-        self.btn_aplicar_todos_prop.clicked.connect(self._aplicar)
+        self.btn_aplicar_todos_prop.clicked.connect(self._aplicar_todos_moldes)
         self.btn_menu_aplicar_prop = QToolButton()
         self.btn_menu_aplicar_prop.setText("▾")
         self.btn_menu_aplicar_prop.setFixedWidth(18)
-        self.btn_menu_aplicar_prop.setEnabled(False)
+        self.btn_menu_aplicar_prop.setPopupMode(QToolButton.InstantPopup)
+        self.menu_aplicar_prop = QMenu(self)
+        self.menu_aplicar_prop.addAction("Aplicar todos", self._aplicar_todos_moldes)
+        self.menu_aplicar_prop.addAction("Aplicar a todos com o mesmo tecido", self._aplicar_todos_com_mesmo_tecido)
+        self.btn_menu_aplicar_prop.setMenu(self.menu_aplicar_prop)
         aplicar_layout = QHBoxLayout()
         aplicar_layout.setContentsMargins(0, 0, 0, 0)
         aplicar_layout.setSpacing(0)
@@ -1551,6 +1577,77 @@ class PropriedadesMoldesDialog(QDialog):
         else:
             self._aplicar_grade_tamanhos(self.cmb_grade_tamanhos.currentText())
         self.preview.set_molde(dict(molde))
+
+    def _dados_encaixe_formulario(self) -> dict:
+        return {
+            "tecido": self.ed_tecido.currentText().strip(),
+            "tipo_corte": self.cmb_tipo_corte.currentText().strip(),
+            "espelhar": self.cmb_espelhar.currentText().strip(),
+            "giro": self.cmb_giro.currentText().strip(),
+            "faixa_giro": self.ed_faixa_giro.text().strip() or "0",
+            "giro_inicial": self.ed_giro_inicial.text().strip() or "0",
+            "qtd_modelo": int(self.sp_qtd_modelo.value()),
+            "molde_pronto": self.chk_molde_pronto.isChecked(),
+            "permitir_alteracoes_encaixe": self.chk_perm_alt.isChecked(),
+            "par": self.chk_par.isChecked(),
+            "dobra_vertical": self.chk_dobra_v.isChecked(),
+            "dobra_horizontal": self.chk_dobra_h.isChecked(),
+            "refletido_vertical": self.chk_reflete_v.isChecked(),
+            "refletido_horizontal": self.chk_reflete_h.isChecked(),
+        }
+
+    def _aplicar_encaixe_em_molde(self, molde: dict, valores: dict):
+        if not molde:
+            return
+        molde["tecido"] = valores["tecido"]
+        molde["tipo_corte"] = valores["tipo_corte"]
+        molde["espelhar"] = valores["espelhar"]
+        molde["giro"] = valores["giro"]
+        molde["faixa_giro"] = valores["faixa_giro"]
+        molde["giro_inicial"] = valores["giro_inicial"]
+        molde["qtd_modelo"] = valores["qtd_modelo"]
+        molde["molde_pronto"] = valores["molde_pronto"]
+        molde["permitir_alteracoes_encaixe"] = valores["permitir_alteracoes_encaixe"]
+        molde["par"] = valores["par"]
+        molde["dobra_vertical"] = valores["dobra_vertical"]
+        molde["dobra_horizontal"] = valores["dobra_horizontal"]
+        molde["refletido_vertical"] = valores["refletido_vertical"]
+        molde["refletido_horizontal"] = valores["refletido_horizontal"]
+
+    def _finalizar_aplicacao_em_lote(self):
+        self.canvas.update()
+        if hasattr(self.canvas, "_registrar_historico"):
+            self.canvas._registrar_historico()
+        self.preview.set_molde(dict(self._molde_atual() or {}))
+        self.recarregar_lista()
+        self.dados_aplicados.emit()
+
+    def _aplicar_todos_moldes(self):
+        if not self._refs:
+            QMessageBox.information(self, "Propriedades", "Nenhum molde disponível.")
+            return
+        valores = self._dados_encaixe_formulario()
+        for ref in self._refs:
+            self._aplicar_encaixe_em_molde(ref.dados, valores)
+        self._finalizar_aplicacao_em_lote()
+
+    def _aplicar_todos_com_mesmo_tecido(self):
+        molde_atual = self._molde_atual()
+        if not molde_atual:
+            QMessageBox.information(self, "Propriedades", "Selecione um molde.")
+            return
+        tecido_base = str(molde_atual.get("tecido") or "").strip()
+        valores = self._dados_encaixe_formulario()
+        aplicados = 0
+        for ref in self._refs:
+            tecido_ref = str(ref.dados.get("tecido") or "").strip()
+            if tecido_ref == tecido_base:
+                self._aplicar_encaixe_em_molde(ref.dados, valores)
+                aplicados += 1
+        if aplicados <= 0:
+            QMessageBox.information(self, "Propriedades", "Nenhum molde com o mesmo tecido foi encontrado.")
+            return
+        self._finalizar_aplicacao_em_lote()
 
     def _aplicar(self) -> bool:
         molde = self._molde_atual()
