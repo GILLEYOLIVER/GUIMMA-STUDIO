@@ -1343,6 +1343,8 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.btn_config_ferramentas = QPushButton("Configurar Ferramentas")
         self.btn_config_defaults = QPushButton("Configurar Defaults")
+        self.btn_config_ferramentas.clicked.connect(self._abrir_config_ferramentas)
+        self.btn_config_defaults.clicked.connect(self._abrir_config_defaults)
         grid.addWidget(self.btn_config_ferramentas, 0, 4, 1, 2)
         grid.addWidget(self.btn_config_defaults, 1, 4, 1, 2)
 
@@ -1367,6 +1369,44 @@ class PropriedadesMoldesDialog(QDialog):
         layout.addWidget(box)
         layout.addStretch(1)
         return aba
+
+    def _abrir_config_ferramentas(self):
+        dialog = ConfigurarFerramentasDialog(self)
+        dialog.exec()
+
+    def _abrir_config_defaults(self):
+        valores = []
+        for cmb, btn_cor, chk in getattr(self, "_ferramentas_linhas", []):
+            cor = self._cor_botao(btn_cor)
+            valores.append(
+                {
+                    "indice": cmb.currentText(),
+                    "cor": cor,
+                    "usar": chk.isChecked(),
+                }
+            )
+        dialog = ConfigurarDefaultsDialog(valores, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        novos = dialog.valores()
+        for i, (cmb, btn_cor, chk) in enumerate(getattr(self, "_ferramentas_linhas", [])):
+            if i >= len(novos):
+                break
+            dados = novos[i]
+            if cmb.isEnabled() and dados.get("indice"):
+                cmb.setCurrentText(str(dados["indice"]))
+            if btn_cor.isEnabled() and dados.get("cor"):
+                btn_cor.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+            if chk.isEnabled():
+                chk.setChecked(bool(dados.get("usar", False)))
+
+    @staticmethod
+    def _cor_botao(botao: QPushButton) -> str:
+        estilo = botao.styleSheet() or ""
+        for trecho in estilo.split(";"):
+            if "background" in trecho and ":" in trecho:
+                return trecho.split(":", 1)[1].strip()
+        return botao.palette().button().color().name()
 
     def recarregar_lista(self):
         _log_propriedades_debug("recarregar_lista() iniciado")
@@ -1772,6 +1812,224 @@ class PropriedadesMoldesDialog(QDialog):
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
         )
+
+class ConfigurarFerramentasDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Configurar Ferramentas")
+        self.resize(640, 520)
+        self.setMinimumSize(580, 460)
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QTableWidget { color: #111111; }
+            QComboBox, QLineEdit {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                min-height: 20px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #b5bcc3;
+                gridline-color: #d6dbe0;
+            }
+            QHeaderView::section {
+                background: #f1f1f1;
+                color: #111111;
+                border: 1px solid #c2c8cf;
+                padding: 3px;
+            }
+            """
+        )
+        self._construir_ui()
+
+    def _construir_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel("Configure abaixo a cor e a descrição das ferramentas:"))
+
+        self.tbl = QTableWidget(16, 4)
+        self.tbl.setHorizontalHeaderLabels(["Ferramentas", "Descrição", "Tipo", "Cor"])
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tbl.setColumnWidth(0, 90)
+        self.tbl.setColumnWidth(2, 90)
+        self.tbl.setColumnWidth(3, 58)
+        self.tbl.cellClicked.connect(self._on_celula_clicada)
+        lay.addWidget(self.tbl, 1)
+
+        paleta = [
+            "#f0d100", "#8d00c7", "#17bcc3", "#ffffff", "#93ed2b", "#768899", "#8a4d17", "#4f96c5",
+            "#2ccb3b", "#0c12d6", "#f52ca6", "#f6b11c", "#d4d4d4", "#b8d99b", "#73e3cf", "#f1dfc4",
+        ]
+        for i in range(16):
+            idx_ferramenta = 4 + i
+            item_id = QTableWidgetItem(str(idx_ferramenta))
+            item_id.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl.setItem(i, 0, item_id)
+            self.tbl.setItem(i, 1, QTableWidgetItem(""))
+            cmb = QComboBox()
+            cmb.addItems(["Desenho"])
+            self.tbl.setCellWidget(i, 2, cmb)
+            item_cor = QTableWidgetItem("")
+            item_cor.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item_cor.setBackground(QColor(paleta[i]))
+            self.tbl.setItem(i, 3, item_cor)
+
+        botoes = QHBoxLayout()
+        botoes.addStretch(1)
+        ok = QPushButton("✓ OK")
+        cancelar = QPushButton("✕ Cancelar")
+        ok.clicked.connect(self.accept)
+        cancelar.clicked.connect(self.reject)
+        botoes.addWidget(ok)
+        botoes.addWidget(cancelar)
+        lay.addLayout(botoes)
+
+    def _on_celula_clicada(self, row: int, col: int):
+        if col != 3 or row < 0:
+            return
+        item = self.tbl.item(row, col)
+        atual = item.background().color() if item is not None else QColor("#ffffff")
+        dialog = QColorDialog(atual, self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Cor da ferramenta")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if item is not None and cor.isValid():
+            item.setBackground(cor)
+
+
+class ConfigurarDefaultsDialog(QDialog):
+    def __init__(self, valores_iniciais: list[dict] | None = None, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Ferramentas Padrão")
+        self.resize(310, 430)
+        self.setMinimumSize(290, 390)
+        self._valores = valores_iniciais or []
+        self._linhas: list[tuple[QComboBox, QPushButton, QCheckBox]] = []
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QComboBox {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                min-height: 20px;
+            }
+            QPushButton {
+                background: #f7f7f7;
+                border: 1px solid #b7bec5;
+                border-radius: 4px;
+                min-height: 20px;
+                color: #111111;
+            }
+            """
+        )
+        self._construir_ui()
+
+    def _construir_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(QLabel(""), 0, 0)
+        grid.addWidget(QLabel(""), 0, 1)
+        grid.addWidget(QLabel(""), 0, 2)
+        grid.addWidget(QLabel("Usar"), 0, 3)
+
+        nomes = [
+            "Contorno",
+            "Nome",
+            "Descrição",
+            "Observações",
+            "Fio",
+            "Piques sobre o contorno",
+            "Piques internos",
+            "Linhas auxiliares",
+            "Costura",
+        ]
+        cores = ["#8f4514", "#557d1f", "#3f63d8", "#f0d100", "#0c12d6", "#19bdb7", "#d0d0d0", "#93ed2b", "#768899"]
+        for i, nome in enumerate(nomes):
+            lbl = QLabel(nome)
+            cmb = QComboBox()
+            cmb.addItems(["-", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+            cmb.setCurrentText(str(i + 1))
+            btn_cor = QPushButton("")
+            btn_cor.setFixedSize(24, 20)
+            btn_cor.setStyleSheet(f"background:{cores[i]}; border:1px solid #343434;")
+            btn_cor.clicked.connect(lambda _=False, b=btn_cor: self._escolher_cor_botao(b))
+            chk = QCheckBox("")
+            chk.setChecked(True)
+            grid.addWidget(lbl, i + 1, 0)
+            grid.addWidget(cmb, i + 1, 1)
+            grid.addWidget(btn_cor, i + 1, 2)
+            grid.addWidget(chk, i + 1, 3, alignment=Qt.AlignCenter)
+            self._linhas.append((cmb, btn_cor, chk))
+
+        if self._valores:
+            for i, dados in enumerate(self._valores):
+                if i >= len(self._linhas):
+                    break
+                cmb, btn_cor, chk = self._linhas[i]
+                if dados.get("indice"):
+                    cmb.setCurrentText(str(dados["indice"]))
+                if dados.get("cor"):
+                    btn_cor.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+                chk.setChecked(bool(dados.get("usar", True)))
+
+        lay.addLayout(grid)
+
+        botoes = QHBoxLayout()
+        botoes.addStretch(1)
+        ok = QPushButton("✓ OK")
+        cancelar = QPushButton("✕ Cancelar")
+        ok.clicked.connect(self.accept)
+        cancelar.clicked.connect(self.reject)
+        botoes.addWidget(ok)
+        botoes.addWidget(cancelar)
+        lay.addLayout(botoes)
+
+    def _escolher_cor_botao(self, botao: QPushButton):
+        dialog = QColorDialog(QColor(self._cor_botao(botao)), self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Cor padrão")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if cor.isValid():
+            botao.setStyleSheet(f"background:{cor.name()}; border:1px solid #343434;")
+
+    def valores(self) -> list[dict]:
+        saida = []
+        for cmb, btn_cor, chk in self._linhas:
+            saida.append(
+                {
+                    "indice": cmb.currentText(),
+                    "cor": self._cor_botao(btn_cor),
+                    "usar": chk.isChecked(),
+                }
+            )
+        return saida
+
+    @staticmethod
+    def _cor_botao(botao: QPushButton) -> str:
+        estilo = botao.styleSheet() or ""
+        for trecho in estilo.split(";"):
+            if "background" in trecho and ":" in trecho:
+                return trecho.split(":", 1)[1].strip()
+        return botao.palette().button().color().name()
+
 
 class ConfigurarCoresTecidosDialog(QDialog):
     def __init__(self, tecidos: list[str], mapa_cores: dict[str, str], parent: QWidget | None = None):
