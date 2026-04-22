@@ -217,7 +217,13 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def set_modo_curva(self, modo: str):
-        self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
+        modo_txt = str(modo).lower().strip()
+        if modo_txt in {"np", "n", "indefinido", "indefinidos"}:
+            self._modo_curva = "np"
+        elif modo_txt.startswith("3"):
+            self._modo_curva = "3p"
+        else:
+            self._modo_curva = "2p"
         self._resetar_estado_curva()
 
     def set_unidade_medida(self, unidade_sigla: str, fator_unidade: float):

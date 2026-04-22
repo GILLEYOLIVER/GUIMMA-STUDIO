@@ -692,11 +692,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             layout.addWidget(QLabel("<b>(cm) Curva</b>"))
             rb_2p = QRadioButton("Curva por 2 pontos")
             rb_3p = QRadioButton("Curva por 3 pontos")
+            rb_np = QRadioButton("Pontos indefinidos")
             rb_2p.setChecked(True)
             layout.addWidget(rb_2p)
             layout.addWidget(rb_3p)
+            layout.addWidget(rb_np)
             rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
             rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
+            rb_np.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("np") if marcado else None)
             self._janela_aux_curva = janela
         else:
             janela = self._janela_aux_curva
@@ -714,6 +717,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.set_modo_curva(modo)
+        if hasattr(self, "lbl_status") and self.lbl_status is not None:
+            if modo == "np":
+                self.lbl_status.setText("Curva ativa (pontos indefinidos).")
+            elif modo == "3p":
+                self.lbl_status.setText("Curva ativa (3 pontos).")
+            else:
+                self.lbl_status.setText("Curva ativa (2 pontos).")
 
     def _restaurar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         area = self._area_documento_atual()

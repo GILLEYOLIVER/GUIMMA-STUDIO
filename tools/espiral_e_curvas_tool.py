@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QSpinBox,
     QVBoxLayout,
@@ -34,7 +33,7 @@ class InserirCurvaDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Inserir curva")
         self.setWindowFlag(Qt.Tool, True)
-        self.setModal(True)
+        self.setModal(False)
         self.setFixedWidth(245)
         self.setStyleSheet(
             """
@@ -87,10 +86,13 @@ class InserirCurvaDialog(QDialog):
         form.addRow("Perímetro (cm)", self.sp_perimetro)
         lay.addLayout(form)
 
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        lay.addWidget(botoes)
+    def configuracao(self) -> tuple[str, float, float, bool]:
+        return (
+            self.cmb_curva.currentText(),
+            float(self.sp_largura.value()),
+            float(self.sp_perimetro.value()),
+            bool(self.chk_criar_molde.isChecked()),
+        )
 
     def gerar_pontos(self) -> tuple[list[QPointF], bool]:
         largura = float(self.sp_largura.value())
@@ -153,22 +155,43 @@ class Ferramenta(FerramentaBase):
     nome = "Espiral e Curvas"
     descricao_painel = "Insere curvas pré-definidas (espiral, curvas francesas, cava, gancho, decote)."
 
+    _dialog_por_canvas: dict[int, InserirCurvaDialog] = {}
+
+    def __init__(self):
+        super().__init__()
+        self._canvas_ativo = None
+
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        dialog = InserirCurvaDialog(canvas.window() if hasattr(canvas, "window") else canvas)
-        if dialog.exec() != QDialog.Accepted:
-            self.set_status("Inserção de curva cancelada.")
-            return
-        pontos, criar_molde = dialog.gerar_pontos()
-        if len(pontos) < 2:
-            self.set_status("Não foi possível gerar a curva selecionada.")
-            return
+        self._canvas_ativo = canvas
+        dialog = self._obter_dialog(canvas)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self.set_status("Inserir curva: escolha o tipo e clique no canvas para inserir (sem OK).")
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText("Inserir curva: escolha no painel e clique no desenho.")
 
-        centro = QPointF(
-            canvas.origem_cena.x() + (canvas.width() / max(canvas.zoom, 0.001) / 2.0),
-            canvas.origem_cena.y() + (canvas.height() / max(canvas.zoom, 0.001) / 2.0),
-        )
-        pontos_cena = [(centro.x() + p.x(), centro.y() + p.y()) for p in pontos]
+    def on_deactivate(self, canvas):
+        super().on_deactivate(canvas)
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.hide()
+        self._canvas_ativo = None
+
+    def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() != Qt.LeftButton:
+            return False
+        dialog = self._obter_dialog(canvas)
+        nome, largura, perimetro, criar_molde = dialog.configuracao()
+        if nome == "Spiral":
+            pontos = _gerar_espiral(largura=largura, perimetro=perimetro)
+        else:
+            pontos = _gerar_curva_predefinida(nome=nome, largura=largura, perimetro=perimetro)
+        if len(pontos) < 2:
+            return True
+        origem = canvas._ponto_com_snap(event.position())
+        pontos_cena = [(origem.x() + p.x(), origem.y() + p.y()) for p in pontos]
         canvas.cena.elementos.append(
             {
                 "tipo": "polyline",
@@ -183,4 +206,18 @@ class Ferramenta(FerramentaBase):
         )
         canvas._registrar_historico()
         canvas.update()
-        self.set_status(f"Curva \"{dialog.cmb_curva.currentText()}\" inserida.")
+        msg = f"Curva \"{nome}\" inserida."
+        self.set_status(msg)
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText(msg)
+        event.accept()
+        return True
+
+    def _obter_dialog(self, canvas) -> InserirCurvaDialog:
+        chave = id(canvas)
+        dialog = self._dialog_por_canvas.get(chave)
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        if dialog is None or dialog.parentWidget() is not parent:
+            dialog = InserirCurvaDialog(parent)
+            self._dialog_por_canvas[chave] = dialog
+        return dialog

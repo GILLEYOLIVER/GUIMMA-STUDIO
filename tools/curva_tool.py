@@ -48,7 +48,7 @@ class Ferramenta(FerramentaBase):
                 event.accept()
                 return True
         canvas._cliques_direito_curva = 0
-        if canvas._modo_curva == "3p":
+        if canvas._modo_curva in {"3p", "np"}:
             if canvas._curva_estado in {"parada", "aguardando_inicial"}:
                 canvas._curva_p0 = pos
                 canvas._curva_pmedio = None
@@ -62,7 +62,14 @@ class Ferramenta(FerramentaBase):
             elif canvas._curva_estado == "aguardando_ponto3":
                 canvas._curva_p2 = pos
                 canvas._curva_p1 = canvas._controle_para_tres_pontos(canvas._curva_p0, canvas._curva_pmedio, canvas._curva_p2)
-                canvas._finalizar_curva()
+                if canvas._modo_curva == "np":
+                    novo_inicio = QPointF(canvas._curva_p2)
+                    canvas._finalizar_curva()
+                    canvas._curva_p0 = novo_inicio
+                    canvas._curva_estado = "aguardando_ponto2"
+                    canvas._curva_preview_fim = None
+                else:
+                    canvas._finalizar_curva()
             canvas.update()
             event.accept()
             return True
