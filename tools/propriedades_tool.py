@@ -1349,9 +1349,9 @@ class PropriedadesMoldesDialog(QDialog):
         grid.addWidget(self.btn_config_defaults, 1, 4, 1, 2)
 
         self.cmb_extra1 = QComboBox()
-        self.cmb_extra1.addItems(["Piques sobre o contorno", "Piques internos", "Linhas auxiliares"])
+        self.cmb_extra1.addItems(["-", "Piques sobre o contorno", "Piques internos", "Linhas auxiliares"])
         self.cmb_extra2 = QComboBox()
-        self.cmb_extra2.addItems(["-", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+        self.cmb_extra2.addItems(["1", "2", "3", "4", "5", "6", "7", "8", "9"])
         self.cmb_extra2.setCurrentText("6")
         self.btn_cor_extra = QPushButton("")
         self.btn_cor_extra.setFixedSize(30, 22)
@@ -1427,15 +1427,22 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _atualizar_config_extra_ferramenta(self):
         mapa = {
-            0: {"indice": "6", "cor": "#19bdb7", "texto": "Selecione os \"piques sobre o contorno\" para aplicar a todos."},
-            1: {"indice": "7", "cor": "#d0d0d0", "texto": "Selecione os \"piques internos\" para aplicar a todos."},
-            2: {"indice": "8", "cor": "#93ed2b", "texto": "Selecione as \"linhas auxiliares\" para aplicar a todos."},
+            0: {"indice": "6", "cor": "#d6d6d6", "texto": "Aplique a todos os moldes as configurações de ferramentas", "usar": False},
+            1: {"indice": "6", "cor": "#19bdb7", "texto": "Selecione os \"piques sobre o contorno\" para aplicar a todos.", "usar": True},
+            2: {"indice": "7", "cor": "#d0d0d0", "texto": "Selecione os \"piques internos\" para aplicar a todos.", "usar": True},
+            3: {"indice": "8", "cor": "#93ed2b", "texto": "Selecione as \"linhas auxiliares\" para aplicar a todos.", "usar": True},
         }
         dados = mapa.get(self.cmb_extra1.currentIndex(), mapa[0])
         if hasattr(self, "cmb_extra2"):
             self.cmb_extra2.setCurrentText(dados["indice"])
         if hasattr(self, "btn_cor_extra"):
             self.btn_cor_extra.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+            self.btn_cor_extra.setEnabled(bool(dados.get("usar", True)))
+        if hasattr(self, "chk_extra"):
+            self.chk_extra.setChecked(bool(dados.get("usar", True)))
+            self.chk_extra.setEnabled(self.cmb_extra1.currentIndex() != 0)
+        if hasattr(self, "cmb_extra2"):
+            self.cmb_extra2.setEnabled(self.cmb_extra1.currentIndex() != 0)
         if hasattr(self, "lbl_aplicar_extra"):
             self.lbl_aplicar_extra.setText(dados["texto"])
 
