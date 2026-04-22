@@ -84,6 +84,15 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
+        if canvas._arrastando_alca_curva is not None:
+            idx, chave = canvas._arrastando_alca_curva
+            if 0 <= idx < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[idx]
+                if el.get("tipo") == "bezier_quadratica":
+                    el[chave] = (pos.x(), pos.y())
+                    canvas.update()
+                    event.accept()
+                    return True
         if canvas._curva_estado == "aguardando_final":
             canvas._curva_preview_fim = pos
         elif canvas._curva_estado == "aguardando_controle":
@@ -92,6 +101,15 @@ class Ferramenta(FerramentaBase):
             canvas._curva_preview_fim = pos
             canvas._curva_p2 = pos
             canvas._curva_p1 = canvas._controle_para_tres_pontos(canvas._curva_p0, canvas._curva_pmedio, canvas._curva_p2)
+        canvas.update()
+        event.accept()
+        return True
+
+    def on_mouse_release(self, canvas, event) -> bool:
+        if event.button() != Qt.LeftButton or canvas._arrastando_alca_curva is None:
+            return False
+        canvas._arrastando_alca_curva = None
+        canvas._registrar_historico()
         canvas.update()
         event.accept()
         return True
