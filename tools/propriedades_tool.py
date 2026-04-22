@@ -717,7 +717,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box = QGroupBox("Propriedades de encaixe")
         box_layout = QGridLayout(box)
-        box_layout.setContentsMargins(8, 18, 8, 8)
+        box_layout.setContentsMargins(8, 14, 8, 8)
         box_layout.setHorizontalSpacing(8)
         box_layout.setVerticalSpacing(6)
 
@@ -1002,7 +1002,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         topo = QGroupBox("Manipular")
         grid = QGridLayout(topo)
-        grid.setContentsMargins(10, 18, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
 
@@ -1032,7 +1032,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box_vis = QGroupBox("Visualização")
         gvis = QGridLayout(box_vis)
-        gvis.setContentsMargins(10, 18, 10, 8)
+        gvis.setContentsMargins(10, 14, 10, 8)
         gvis.setHorizontalSpacing(24)
         gvis.setVerticalSpacing(10)
 
@@ -1153,7 +1153,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         topo = QGroupBox()
         grid = QGridLayout(topo)
-        grid.setContentsMargins(10, 18, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.addWidget(QLabel("Tipo corte"), 0, 0)
         self.cmb_tipo_corte_cam = QComboBox()
         self.cmb_tipo_corte_cam.addItems(["Completo", "Par", "Espelhado", "Único"])
@@ -1176,7 +1176,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         box = QGroupBox("Elementos")
         grid = QGridLayout(box)
-        grid.setContentsMargins(10, 18, 10, 8)
+        grid.setContentsMargins(10, 14, 10, 8)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
 
