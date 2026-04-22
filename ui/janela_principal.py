@@ -1169,6 +1169,38 @@ class GuimmaStudioMainWindow(QMainWindow):
             """
         )
 
+    def _centralizar_dialogo_na_janela(self, dialog: QDialog):
+        dialog.adjustSize()
+        geo_janela = self.frameGeometry()
+        centro_janela = geo_janela.center()
+        geo_dialogo = dialog.frameGeometry()
+        geo_dialogo.moveCenter(centro_janela)
+        dialog.move(geo_dialogo.topLeft())
+
+    def _abrir_dialogo_arquivo_claro(
+        self,
+        titulo: str,
+        filtro: str,
+        *,
+        modo_salvar: bool = False,
+    ) -> tuple[str, str]:
+        dialog = QFileDialog(self, titulo, "", filtro)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        if modo_salvar:
+            dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+            dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        else:
+            dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        self._centralizar_dialogo_na_janela(dialog)
+        if dialog.exec() != QDialog.Accepted:
+            return "", ""
+        arquivos = dialog.selectedFiles()
+        caminho = arquivos[0] if arquivos else ""
+        return caminho, dialog.selectedNameFilter()
+
     def _importar_por_tipo(self, tipo: str):
         filtros = {
             "dxf": "DXF (*.dxf)",
@@ -1179,7 +1211,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "gerber": "Gerber (*.ger *.gbr *.zip)",
             "assyst": "Assyst (*.assyst *.ast *.zip)",
         }
-        caminho, _ = QFileDialog.getOpenFileName(self, f"Importar {tipo.upper()}", "", filtros.get(tipo, "Todos (*.*)"))
+        caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
         if not caminho:
             return
         area = self._area_documento_atual()
@@ -1482,10 +1514,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText("Recuperação concluída.")
 
     def _abrir_projeto(self):
-        caminho, _ = QFileDialog.getOpenFileName(
-            self,
+        caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir projeto",
-            "",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
         )
         if caminho:

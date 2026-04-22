@@ -567,6 +567,11 @@ class VisualizacaoCanvas(QWidget):
 
     def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
         pos_cena = self._tela_para_cena(pos_tela)
+        if not self._snap_ativo:
+            self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
+            return pos_cena
         self._snap_candidatos = self._snap_manager.calcular_candidatos(
             self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
         )
@@ -587,6 +592,14 @@ class VisualizacaoCanvas(QWidget):
                 dist = self._dist(pos_cena, ponto)
                 if dist <= tol_cena:
                     self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+            for chave in ("controle_cantos", "controle_auxiliares"):
+                for p in el.get(chave, []) or []:
+                    if not isinstance(p, (list, tuple)) or len(p) != 2:
+                        continue
+                    ponto = QPointF(float(p[0]), float(p[1]))
+                    dist = self._dist(pos_cena, ponto)
+                    if dist <= tol_cena:
+                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo="controle", distancia=dist, elemento_idx=idx))
         if self._ponto_coordenada_aplicada is not None:
             dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
             if dist <= tol_cena:
@@ -897,9 +910,12 @@ class VisualizacaoCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        self._ponto_com_snap(event.position())
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_move"):
             if self._runtime_tool.on_mouse_move(self, event):
+                self.update()
                 return
+        self.update()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -951,6 +967,25 @@ class VisualizacaoCanvas(QWidget):
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
+        self._desenhar_overlay_snap_ativo(painter)
+
+    def _desenhar_overlay_snap_ativo(self, painter: QPainter):
+        if not self._snap_ativo or not self._snap_resultado:
+            return
+        snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
+        cor = QColor("#ffd400")
+        if self._snap_resultado.tipo == "controle":
+            cor = QColor("#2da8ff")
+        elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
+            cor = QColor("#7df9ff")
+        elif self._snap_resultado.tipo == "interseção":
+            cor = QColor("#ff62b0")
+        pen = QPen(cor, 1.6)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(snap_tela, 6, 6)
+        painter.drawLine(QPointF(snap_tela.x() - 8, snap_tela.y()), QPointF(snap_tela.x() + 8, snap_tela.y()))
+        painter.drawLine(QPointF(snap_tela.x(), snap_tela.y() - 8), QPointF(snap_tela.x(), snap_tela.y() + 8))
 
     def _desenhar_overlays_moldes(self, painter: QPainter):
         for idx, el in enumerate(self.cena.elementos):
