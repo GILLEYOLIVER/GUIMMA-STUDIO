@@ -82,40 +82,18 @@ class PreviewMoldeWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor("#000000"))
-
-        if not self._molde or self._molde.get("tipo") != "polyline":
+        info = self._dados_transformacao()
+        if not info:
             painter.setPen(QPen(QColor("#8a8a8a"), 1))
             painter.drawText(self.rect(), Qt.AlignCenter, "Nenhum molde selecionado")
             return
 
-        pontos_raw = self._molde.get("pontos", [])
-        pontos = [QPointF(float(x), float(y)) for x, y in pontos_raw]
-        if len(pontos) < 2:
-            return
-
-        base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
-        if not base:
-            return
-
-        xs = [p.x() for p in base]
-        ys = [p.y() for p in base]
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        largura = max(1.0, max_x - min_x)
-        altura = max(1.0, max_y - min_y)
-
-        margem = 26.0
-        area_w = max(1.0, self.width() - (margem * 2.0))
-        area_h = max(1.0, self.height() - (margem * 2.0))
-        escala = min(area_w / largura, area_h / altura)
-
-        offset_x = (self.width() - (largura * escala)) / 2.0
-        offset_y = (self.height() - (altura * escala)) / 2.0
+        base = info["base"]
 
         def mapear(pt: QPointF) -> QPointF:
             return QPointF(
-                self._offset.x() + offset_x + ((pt.x() - min_x) * escala * self._zoom),
-                self._offset.y() + offset_y + ((pt.y() - min_y) * escala * self._zoom),
+                self._offset.x() + info["offset_x"] + ((pt.x() - info["min_x"]) * info["escala"] * self._zoom),
+                self._offset.y() + info["offset_y"] + ((pt.y() - info["min_y"]) * info["escala"] * self._zoom),
             )
 
         cor_desenho = QColor("#ffffff")
@@ -146,8 +124,65 @@ class PreviewMoldeWidget(QWidget):
         painter.drawPath(path)
 
         self._desenhar_fio(painter, base, mapear)
-        self._desenhar_textos(painter, base, mapear, min_y, max_y)
+        self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
         self._desenhar_controles(painter, mapear)
+
+    def _dados_transformacao(self) -> dict | None:
+        if not self._molde or self._molde.get("tipo") != "polyline":
+            return None
+        pontos_raw = self._molde.get("pontos", [])
+        pontos = [QPointF(float(x), float(y)) for x, y in pontos_raw]
+        if len(pontos) < 2:
+            return None
+        base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
+        if not base:
+            return None
+
+        xs = [p.x() for p in base]
+        ys = [p.y() for p in base]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        largura = max(1.0, max_x - min_x)
+        altura = max(1.0, max_y - min_y)
+
+        margem = 26.0
+        area_w = max(1.0, self.width() - (margem * 2.0))
+        area_h = max(1.0, self.height() - (margem * 2.0))
+        escala = min(area_w / largura, area_h / altura)
+        offset_x = (self.width() - (largura * escala)) / 2.0
+        offset_y = (self.height() - (altura * escala)) / 2.0
+        return {
+            "base": base,
+            "min_x": min_x,
+            "min_y": min_y,
+            "max_y": max_y,
+            "escala": escala,
+            "offset_x": offset_x,
+            "offset_y": offset_y,
+        }
+
+    def _aplicar_zoom(self, fator: float, anchor: QPointF | None = None):
+        old_zoom = self._zoom
+        new_zoom = max(0.2, min(20.0, self._zoom * fator))
+        if abs(new_zoom - old_zoom) <= 1e-9:
+            return
+
+        info = self._dados_transformacao()
+        if info is None:
+            self._zoom = new_zoom
+            self.update()
+            return
+
+        ponto_ancora = anchor or QPointF(self.width() / 2.0, self.height() / 2.0)
+        rel_x = ponto_ancora.x() - self._offset.x() - info["offset_x"]
+        rel_y = ponto_ancora.y() - self._offset.y() - info["offset_y"]
+        escala = new_zoom / max(old_zoom, 1e-9)
+        self._offset = QPointF(
+            ponto_ancora.x() - info["offset_x"] - (rel_x * escala),
+            ponto_ancora.y() - info["offset_y"] - (rel_y * escala),
+        )
+        self._zoom = new_zoom
+        self.update()
 
     def _desenhar_fio(self, painter: QPainter, base: list[QPointF], mapear):
         if not self._molde.get("mostrar_fio", True):
@@ -235,12 +270,10 @@ class PreviewMoldeWidget(QWidget):
                 painter.drawText(int(tela.x() + 4), int(tela.y() - 6), str(i))
 
     def zoom_in(self):
-        self._zoom = min(20.0, self._zoom * 1.15)
-        self.update()
+        self._aplicar_zoom(1.15)
 
     def zoom_out(self):
-        self._zoom = max(0.2, self._zoom / 1.15)
-        self.update()
+        self._aplicar_zoom(1.0 / 1.15)
 
     def reset_view(self):
         self._zoom = 1.0
@@ -254,9 +287,9 @@ class PreviewMoldeWidget(QWidget):
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
         delta = event.angleDelta().y()
         if delta > 0:
-            self.zoom_in()
+            self._aplicar_zoom(1.15, event.position())
         elif delta < 0:
-            self.zoom_out()
+            self._aplicar_zoom(1.0 / 1.15, event.position())
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
@@ -416,22 +449,27 @@ class PropriedadesMoldesDialog(QDialog):
         QTreeWidget::item { height: 21px; }
         QTreeWidget::item:selected { background: #b9cfe1; color: #111111; }
         QTabWidget::pane {
-            border: none;
-            background: transparent;
+            border: 1px solid #cfd4da;
+            background: #ececec;
+            top: -1px;
+        }
+        QTabWidget::tab-bar {
+            left: 6px;
         }
         QTabBar::tab {
-            background: #f3f3f3;
-            border: 1px solid #d8d8d8;
-            padding: 4px 14px;
-            min-width: 72px;
-            margin-right: 1px;
+            background: #f0f0f0;
+            border: 1px solid #cfd4da;
+            border-bottom: none;
+            padding: 3px 10px;
+            min-width: 64px;
+            margin-right: 2px;
             color: #000000;
         }
         QTabBar::tab:selected {
-            background: #ffffff;
-            border-bottom-color: #ffffff;
+            background: #ececec;
+            border-color: #cfd4da;
         }
-        QTabBar::tab:hover { background: #ffffff; }
+        QTabBar::tab:hover { background: #f6f6f6; }
         QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget {
             background: #ffffff;
             border: 1px solid #b5bcc3;
@@ -512,7 +550,7 @@ class PropriedadesMoldesDialog(QDialog):
         lay_dir.setSpacing(10)
 
         self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
+        self.tabs.setDocumentMode(False)
         self.tabs.addTab(self._criar_tab_propriedades(), "Propriedades")
         self.tabs.addTab(self._criar_tab_graduacao(), "Graduação")
         self.tabs.addTab(self._criar_tab_visualizacao(), "Visualização")
