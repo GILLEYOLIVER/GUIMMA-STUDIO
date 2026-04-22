@@ -36,6 +36,29 @@ class InserirCurvaDialog(QDialog):
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(True)
         self.setFixedWidth(245)
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QComboBox, QSpinBox {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                border-radius: 3px;
+                min-height: 22px;
+                padding: 2px 6px;
+            }
+            QPushButton {
+                background: #f7f7f7;
+                color: #111111;
+                border: 1px solid #b7bec5;
+                border-radius: 4px;
+                min-height: 22px;
+                padding: 2px 8px;
+            }
+            QPushButton:hover { background: #ffffff; }
+            """
+        )
         self._montar_ui()
 
     def _montar_ui(self):

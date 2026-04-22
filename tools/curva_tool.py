@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPen
 
 from tools.tool_base import FerramentaBase
 
@@ -95,6 +96,8 @@ class Ferramenta(FerramentaBase):
                     return True
         if canvas._curva_estado == "aguardando_final":
             canvas._curva_preview_fim = pos
+        elif canvas._curva_estado == "aguardando_ponto2":
+            canvas._curva_preview_fim = pos
         elif canvas._curva_estado == "aguardando_controle":
             canvas._curva_p1 = pos
         elif canvas._curva_estado == "aguardando_ponto3" and canvas._curva_p0 and canvas._curva_pmedio:
@@ -113,3 +116,61 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         event.accept()
         return True
+
+    def on_paint_overlay(self, canvas, painter):
+        estado = canvas._curva_estado
+        p0 = canvas._curva_p0
+        p1 = canvas._curva_p1
+        p2 = canvas._curva_p2
+        pm = canvas._curva_pmedio
+        preview = canvas._curva_preview_fim
+
+        pen_guia = QPen(QColor("#f36cff"), 1.0, Qt.DashLine)
+        painter.setPen(pen_guia)
+
+        if estado == "aguardando_ponto2" and p0 is not None:
+            canvas._desenhar_marca_x(painter, p0, cor="#ff4fd8")
+            if preview is not None:
+                canvas._desenhar_segmento(painter, p0, preview, tracejado=True, cor="#f36cff", espessura=1.0)
+            return
+
+        if estado == "aguardando_final" and p0 is not None:
+            canvas._desenhar_marca_x(painter, p0, cor="#ff4fd8")
+            if preview is not None:
+                canvas._desenhar_segmento(painter, p0, preview, tracejado=True, cor="#f36cff", espessura=1.0)
+            return
+
+        if estado == "aguardando_ponto3" and p0 is not None and pm is not None:
+            canvas._desenhar_marca_x(painter, p0, cor="#ff4fd8")
+            canvas._desenhar_marca_x(painter, pm, cor="#5dc8ff")
+            canvas._desenhar_segmento(painter, p0, pm, tracejado=True, cor="#f36cff", espessura=1.0)
+            if preview is not None:
+                canvas._desenhar_segmento(painter, pm, preview, tracejado=True, cor="#f36cff", espessura=1.0)
+            if p1 is not None and p2 is not None:
+                canvas._desenhar_bezier_quadratica(
+                    painter,
+                    p0,
+                    p1,
+                    p2,
+                    cor="#ff4fd8",
+                    espessura=max(1.0, float(getattr(canvas, "_linha_espessura", 1.0))),
+                    estilo="solid",
+                    amplitude=1.0,
+                    destacar_controles=True,
+                )
+            return
+
+        if estado == "aguardando_controle" and p0 is not None and p2 is not None and p1 is not None:
+            canvas._desenhar_segmento(painter, p0, p1, tracejado=True, cor="#5dc8ff", espessura=1.0)
+            canvas._desenhar_segmento(painter, p1, p2, tracejado=True, cor="#5dc8ff", espessura=1.0)
+            canvas._desenhar_bezier_quadratica(
+                painter,
+                p0,
+                p1,
+                p2,
+                cor="#ff4fd8",
+                espessura=max(1.0, float(getattr(canvas, "_linha_espessura", 1.0))),
+                estilo="solid",
+                amplitude=1.0,
+                destacar_controles=True,
+            )
