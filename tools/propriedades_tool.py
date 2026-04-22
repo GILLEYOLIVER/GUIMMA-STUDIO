@@ -88,7 +88,28 @@ class PreviewMoldeWidget(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter, "Nenhum molde selecionado")
             return
 
-        base = info["base"]
+        pontos = self._coletar_pontos(self._molde.get("pontos"))
+        if len(pontos) < 2:
+            return
+
+        base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
+        if not base:
+            return
+
+        xs = [p.x() for p in base]
+        ys = [p.y() for p in base]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        largura = max(1.0, max_x - min_x)
+        altura = max(1.0, max_y - min_y)
+
+        margem = 26.0
+        area_w = max(1.0, self.width() - (margem * 2.0))
+        area_h = max(1.0, self.height() - (margem * 2.0))
+        escala = min(area_w / largura, area_h / altura)
+
+        offset_x = (self.width() - (largura * escala)) / 2.0
+        offset_y = (self.height() - (altura * escala)) / 2.0
 
         def mapear(pt: QPointF) -> QPointF:
             return QPointF(
@@ -191,9 +212,11 @@ class PreviewMoldeWidget(QWidget):
         fio_fim = self._molde.get("fio_fim")
         xs = [p.x() for p in base]
         ys = [p.y() for p in base]
-        if fio_origem and fio_fim:
-            p1 = mapear(QPointF(float(fio_origem[0]), float(fio_origem[1])))
-            p2 = mapear(QPointF(float(fio_fim[0]), float(fio_fim[1])))
+        p_fio_origem = self._ponto_xy(fio_origem)
+        p_fio_fim = self._ponto_xy(fio_fim)
+        if p_fio_origem and p_fio_fim:
+            p1 = mapear(p_fio_origem)
+            p2 = mapear(p_fio_fim)
         else:
             margem = (max(xs) - min(xs)) * 0.18
             y_fio = min(ys) + ((max(ys) - min(ys)) * 0.58)
@@ -261,13 +284,31 @@ class PreviewMoldeWidget(QWidget):
     def _desenhar_controles(self, painter: QPainter, mapear):
         if not self._molde.get("mostrar_controles", True):
             return
-        pontos = [QPointF(float(x), float(y)) for x, y in self._molde.get("controle_cantos", [])]
+        pontos = self._coletar_pontos(self._molde.get("controle_cantos"))
         painter.setPen(QPen(QColor("#ffffff"), 1.0))
         for i, pt in enumerate(pontos, start=1):
             tela = mapear(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
             if self._molde.get("mostrar_numeros", False):
                 painter.drawText(int(tela.x() + 4), int(tela.y() - 6), str(i))
+
+    def _coletar_pontos(self, dados) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(dados, (list, tuple)):
+            return pontos
+        for item in dados:
+            ponto = self._ponto_xy(item)
+            if ponto is not None:
+                pontos.append(ponto)
+        return pontos
+
+    def _ponto_xy(self, valor) -> QPointF | None:
+        if not isinstance(valor, (list, tuple)) or len(valor) < 2:
+            return None
+        try:
+            return QPointF(float(valor[0]), float(valor[1]))
+        except (TypeError, ValueError):
+            return None
 
     def zoom_in(self):
         self._aplicar_zoom(1.15)
@@ -932,7 +973,7 @@ class PropriedadesMoldesDialog(QDialog):
         tecidos = {
             str(el.get("tecido") or "").strip()
             for el in self.canvas.cena.elementos
-            if el.get("molde")
+            if isinstance(el, dict) and el.get("molde")
         }
         tecidos.update({
             str(chave).strip()
@@ -1249,6 +1290,8 @@ class PropriedadesMoldesDialog(QDialog):
     def _coletar_moldes(self) -> list[MoldeRef]:
         refs: list[MoldeRef] = []
         for idx, el in enumerate(self.canvas.cena.elementos):
+            if not isinstance(el, dict):
+                continue
             if not el.get("molde"):
                 continue
             refs.append(MoldeRef(indice=idx, nome=str(el.get("nome_molde") or f"K{idx + 1}"), dados=el))
@@ -1275,6 +1318,12 @@ class PropriedadesMoldesDialog(QDialog):
                 return el
         return None
 
+    def _int_seguro(self, valor, padrao: int) -> int:
+        try:
+            return int(valor)
+        except (TypeError, ValueError):
+            return int(padrao)
+
     def _preencher_campos(self, molde: dict | None):
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
@@ -1293,7 +1342,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_descricao.setPlainText(str(molde.get("descricao") or ""))
         self._atualizar_opcoes_tecido()
         self.ed_tecido.setCurrentText(str(molde.get("tecido") or "1"))
-        self.sp_qtd_modelo.setValue(int(molde.get("qtd_modelo", 1) or 1))
+        self.sp_qtd_modelo.setValue(self._int_seguro(molde.get("qtd_modelo", 1) or 1, 1))
         self.chk_par.setChecked(bool(molde.get("par", False)))
         self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
         self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
