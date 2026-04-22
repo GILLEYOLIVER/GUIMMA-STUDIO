@@ -84,6 +84,7 @@ class PainelFerramentaBasico(QFrame):
         self.status_lbl.setObjectName("status")
         self.status_lbl.setWordWrap(True)
         self.status_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.status_lbl.setMinimumHeight(68)
         layout.addWidget(self.status_lbl)
 
     def atualizar_status(self, texto: str):
