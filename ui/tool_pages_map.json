@@ -196,7 +196,8 @@
             "modificar",
             "editar",
             "manipular_pontos",
-            "mover"
+            "mover",
+            "redefinir_perimetro"
           ]
         },
         {
@@ -227,7 +228,8 @@
             "conferir",
             "conferir_multiplos",
             "controle_curvas",
-            "cota_perimetro"
+            "cota_perimetro",
+            "perimetro"
           ]
         },
         {
@@ -656,6 +658,12 @@
       "class": "Ferramenta",
       "icon": "mover.svg"
     },
+    "redefinir_perimetro": {
+      "title": "Redefinir Perimetro",
+      "module": "tools/redefinir_perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "redefinir_perimetro.svg"
+    },
     "elemento_paralelo": {
       "title": "Elemento Paralelo",
       "module": "tools/elemento_paralelo_tool.py",
@@ -715,6 +723,12 @@
       "module": "tools/cota_perimetro_tool.py",
       "class": "Ferramenta",
       "icon": "cota_perimetro.svg"
+    },
+    "perimetro": {
+      "title": "Perimetro",
+      "module": "tools/perimetro_tool.py",
+      "class": "Ferramenta",
+      "icon": "perimetro.svg"
     },
     "cota_distancia": {
       "title": "Cota Distancia",
