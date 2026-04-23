@@ -218,12 +218,16 @@ class VisualizacaoCanvas(QWidget):
 
     def set_modo_curva(self, modo: str):
         modo_txt = str(modo).lower().strip()
+
         if modo_txt in {"np", "n", "indefinido", "indefinidos"}:
             self._modo_curva = "np"
+        elif modo_txt in {"suave", "spline", "livre"}:
+            self._modo_curva = "suave"
         elif modo_txt.startswith("3"):
             self._modo_curva = "3p"
         else:
             self._modo_curva = "2p"
+
         self._resetar_estado_curva()
 
     def set_unidade_medida(self, unidade_sigla: str, fator_unidade: float):
@@ -565,6 +569,75 @@ class VisualizacaoCanvas(QWidget):
         return QPointF((ponto.x() - self.origem_cena.x()) * self.zoom,
                        (ponto.y() - self.origem_cena.y()) * self.zoom)
 
+    def _adicionar_candidato_snap(
+        self,
+        candidatos: list[SnapResult],
+        pos_cena: QPointF,
+        ponto: QPointF | None,
+        tipo: str,
+        elemento_idx: int | None = None,
+        tol_cena: float | None = None,
+    ):
+        if ponto is None:
+            return
+        dist = self._dist(pos_cena, ponto)
+        if tol_cena is not None and dist > tol_cena:
+            return
+        candidatos.append(SnapResult(ponto=QPointF(ponto), tipo=tipo, distancia=dist, elemento_idx=elemento_idx))
+
+    def _prioridade_tipo_snap(self, tipo: str) -> int:
+        ordem = {
+            "nó": 0,
+            "interseção": 1,
+            "centro": 2,
+            "ponto médio": 3,
+            "borda": 4,
+            "controle": 5,
+            "coord": 6,
+            "fio": 7,
+            "nome": 8,
+            "grade": 9,
+        }
+        return ordem.get(tipo, 99)
+
+    def _segmentos_snap_de_pontos(self, pontos: list[QPointF]) -> list[tuple[QPointF, QPointF]]:
+        if len(pontos) < 2:
+            return []
+        return [(QPointF(a), QPointF(b)) for a, b in zip(pontos, pontos[1:])]
+
+    def _candidatos_snap_temporarios(self, pos_cena: QPointF, tol_cena: float) -> list[SnapResult]:
+        candidatos: list[SnapResult] = []
+
+        # Segmentos/nós temporários da reta em construção.
+        if self._pontos_reta:
+            pontos_reta = [QPointF(p) for p in self._pontos_reta]
+            for ponto in pontos_reta:
+                self._adicionar_candidato_snap(candidatos, pos_cena, ponto, "nó", None, tol_cena)
+            for inicio, fim in self._segmentos_snap_de_pontos(pontos_reta):
+                meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
+                proj = self._snap_manager._projetar_em_segmento(pos_cena, inicio, fim)
+                self._adicionar_candidato_snap(candidatos, pos_cena, meio, "ponto médio", None, tol_cena)
+                self._adicionar_candidato_snap(candidatos, pos_cena, proj, "borda", None, tol_cena)
+            if self._preview_reta is not None:
+                inicio = QPointF(pontos_reta[-1])
+                fim = QPointF(self._preview_reta)
+                proj = self._snap_manager._projetar_em_segmento(pos_cena, inicio, fim)
+                self._adicionar_candidato_snap(candidatos, pos_cena, fim, "nó", None, tol_cena)
+                self._adicionar_candidato_snap(candidatos, pos_cena, proj, "borda", None, tol_cena)
+
+        # Permite que a ferramenta ativa ofereça os snaps temporários dela.
+        if self._runtime_tool and hasattr(self._runtime_tool, "obter_candidatos_snap"):
+            try:
+                extras = self._runtime_tool.obter_candidatos_snap(self, QPointF(pos_cena))
+                for item in extras or []:
+                    if isinstance(item, SnapResult):
+                        if item.distancia <= tol_cena:
+                            candidatos.append(item)
+            except Exception:
+                pass
+
+        return candidatos
+
     def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
         pos_cena = self._tela_para_cena(pos_tela)
         if not self._snap_ativo:
@@ -572,33 +645,32 @@ class VisualizacaoCanvas(QWidget):
             self._snap_candidatos = []
             self._snap_indice = 0
             return pos_cena
-        self._snap_candidatos = self._snap_manager.calcular_candidatos(
-            self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
+
+        tol_px = self._tolerancia_snap_px()
+        tol_cena = tol_px / max(self.zoom, 0.001)
+        candidatos = self._snap_manager.calcular_candidatos(
+            self.cena, pos_cena, self.zoom, tolerancia_px=tol_px
         )
-        tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
+
         for idx, el in enumerate(self.cena.elementos):
             if el.get("tipo") == "bezier_quadratica":
                 p0 = QPointF(*el["p0"])
                 p1 = QPointF(*el["p1"])
                 p2 = QPointF(*el["p2"])
-                candidatos = [
+                candidatos_bezier = [
                     ("nó", p0),
                     ("controle", p1),
                     ("nó", p2),
                     ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
                 ]
-                for tipo, ponto in candidatos:
-                    dist = self._dist(pos_cena, ponto)
-                    if dist <= tol_cena:
-                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+                for tipo, ponto in candidatos_bezier:
+                    self._adicionar_candidato_snap(candidatos, pos_cena, ponto, tipo, idx, tol_cena)
             for chave in ("controle_cantos", "controle_auxiliares"):
                 for p in el.get(chave, []) or []:
                     if not isinstance(p, (list, tuple)) or len(p) != 2:
                         continue
                     ponto = QPointF(float(p[0]), float(p[1]))
-                    dist = self._dist(pos_cena, ponto)
-                    if dist <= tol_cena:
-                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo="controle", distancia=dist, elemento_idx=idx))
+                    self._adicionar_candidato_snap(candidatos, pos_cena, ponto, "controle", idx, tol_cena)
             if el.get("molde"):
                 fio_origem = el.get("fio_origem")
                 fio_fim = el.get("fio_fim")
@@ -607,9 +679,7 @@ class VisualizacaoCanvas(QWidget):
                     p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
                     pm = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
                     for tipo, ponto in (("fio", p1), ("fio", p2), ("fio", pm)):
-                        dist = self._dist(pos_cena, ponto)
-                        if dist <= tol_cena:
-                            self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+                        self._adicionar_candidato_snap(candidatos, pos_cena, ponto, tipo, idx, tol_cena)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
                     pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                     base = pts[:-1] if len(pts) >= 2 and pts[0] == pts[-1] else pts
@@ -617,22 +687,28 @@ class VisualizacaoCanvas(QWidget):
                         cx = sum(p.x() for p in base) / len(base)
                         cy = sum(p.y() for p in base) / len(base)
                         p_nome = QPointF(cx, cy)
-                        dist_nome = self._dist(pos_cena, p_nome)
-                        if dist_nome <= tol_cena * 1.5:
-                            self._snap_candidatos.append(SnapResult(ponto=p_nome, tipo="nome", distancia=dist_nome, elemento_idx=idx))
+                        self._adicionar_candidato_snap(candidatos, pos_cena, p_nome, "nome", idx, tol_cena * 1.5)
+
+        candidatos.extend(self._candidatos_snap_temporarios(pos_cena, tol_cena))
+
         if self._ponto_coordenada_aplicada is not None:
             dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
             if dist <= tol_cena:
-                self._snap_candidatos.insert(0, SnapResult(
+                candidatos.insert(0, SnapResult(
                     ponto=QPointF(self._ponto_coordenada_aplicada),
                     tipo="coord",
                     distancia=dist,
                     elemento_idx=None,
                 ))
-        if self._snap_candidatos:
-            candidatos_sem_grade = [c for c in self._snap_candidatos if c.tipo != "grade"]
+
+        if candidatos:
+            candidatos_sem_grade = [c for c in candidatos if c.tipo != "grade"]
             if candidatos_sem_grade:
-                self._snap_candidatos = candidatos_sem_grade
+                candidatos = candidatos_sem_grade
+
+        candidatos.sort(key=lambda c: (self._prioridade_tipo_snap(c.tipo), c.distancia))
+        self._snap_candidatos = candidatos
+
         if self._snap_candidatos:
             self._snap_indice = min(self._snap_indice, len(self._snap_candidatos) - 1)
             self._snap_resultado = self._snap_candidatos[self._snap_indice]

@@ -36,6 +36,13 @@
             "restaurar",
             "restaurar_copia"
           ]
+        },
+        {
+          "title": "Saída",
+          "tools": [
+            "imprimir",
+            "plotar"
+          ]
         }
       ]
     },
@@ -831,6 +838,18 @@
       "module": "tools/restaurar_copia_tool.py",
       "class": "Ferramenta",
       "icon": "restaurar_copia.svg"
+    },
+    "imprimir": {
+      "title": "Imprimir",
+      "module": "tools/imprimir_tool.py",
+      "class": "Ferramenta",
+      "icon": "imprimir.svg"
+    },
+    "plotar": {
+      "title": "Plotar",
+      "module": "tools/plotar_tool.py",
+      "class": "Ferramenta",
+      "icon": "plotar.svg"
     }
   }
 }

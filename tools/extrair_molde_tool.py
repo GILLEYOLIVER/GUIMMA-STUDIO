@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import sqrt
+from math import atan2, cos, pi, sin, sqrt
 from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
@@ -11,8 +11,10 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QLabel,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.geometry.engine import internal_angle
@@ -30,6 +32,26 @@ class Ferramenta(FerramentaBase):
     nome = "Extrair Molde"
     descricao_painel = "LMB seleciona/valida contorno. RMB pega molde. LMB solta, RMB cancela/volta Selecionar."
 
+    _dialog_global: QDialog | None = None
+    _cmb_modo_global: QComboBox | None = None
+    _chk_grad_global: QCheckBox | None = None
+    _chk_piques_global: QCheckBox | None = None
+    _chk_aux_global: QCheckBox | None = None
+    _chk_compor_global: QCheckBox | None = None
+    _chk_usar_global: QCheckBox | None = None
+    _chk_quebrar_global: QCheckBox | None = None
+    _chk_converter_global: QCheckBox | None = None
+    _cfg_global = {
+        "modo": "Automático",
+        "detectar_graduacoes": True,
+        "detectar_piques": True,
+        "detectar_auxiliares": False,
+        "compor_contornos": True,
+        "usar_auxiliares": True,
+        "quebrar_auxiliares": True,
+        "converter_auxiliares": True,
+    }
+
     def __init__(self):
         super().__init__()
         self._dialog: QDialog | None = None
@@ -43,16 +65,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando_molde = False
         self._ultimo_pos_arrasto: QPointF | None = None
         self._snapshot_cancelamento: dict[int, dict] = {}
-        self._cfg = {
-            "modo": "Automático",
-            "detectar_graduacoes": True,
-            "detectar_piques": True,
-            "detectar_auxiliares": False,
-            "compor_contornos": True,
-            "usar_auxiliares": True,
-            "quebrar_auxiliares": True,
-            "converter_auxiliares": True,
-        }
+        self._cfg = dict(type(self)._cfg_global)
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -66,13 +79,13 @@ class Ferramenta(FerramentaBase):
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
+        self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
         self.set_status("Defina modo. LMB seleciona contorno(s), RMB pega molde, LMB solta, RMB cancela.")
 
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
-        if self._dialog:
-            self._dialog.hide()
+        self._sincronizar_cfg_da_ui()
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
         self._contorno_extraido = None
@@ -86,6 +99,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
+        self._sincronizar_cfg_da_ui()
         modo_manual = self._cfg.get("modo") == "Manual"
 
         if self._arrastando_molde:
@@ -297,6 +311,7 @@ class Ferramenta(FerramentaBase):
                 continue
             try:
                 pontos_base = self._contornos_preparados.get(idx, el.get("pontos", []))
+                pontos_base = self._normalizar_pontos_contorno(pontos_base)
                 payload = create_mold_payload({"tipo": "polyline", "pontos": pontos_base})
             except ValueError as exc:
                 self.set_status(f"Contorno inválido no elemento {idx + 1}: {exc}")
@@ -340,6 +355,7 @@ class Ferramenta(FerramentaBase):
                 else:
                     elementos_para_compor.append(el)
             pontos = compose_closed_contour(elementos_para_compor)
+            pontos = self._normalizar_pontos_contorno(pontos)
             novo = {"tipo": "polyline", "pontos": pontos}
             payload = create_mold_payload(novo)
         except ValueError as exc:
@@ -370,6 +386,7 @@ class Ferramenta(FerramentaBase):
 
     def _criar_molde_de_contorno_extraido(self, canvas, pontos: list[tuple[float, float]]) -> bool:
         try:
+            pontos = self._normalizar_pontos_contorno(pontos)
             payload = create_mold_payload({"tipo": "polyline", "pontos": pontos})
         except ValueError as exc:
             self.set_status(f"Contorno detectado inválido: {exc}")
@@ -405,28 +422,27 @@ class Ferramenta(FerramentaBase):
         if self._cfg["quebrar_auxiliares"]:
             limpo = self._remover_segmentos_auxiliares([(p.x(), p.y()) for p in pontos], metadados)
             pontos = [QPointF(float(x), float(y)) for x, y in limpo]
+        # Manter o contorno fiel: a opção de conversão não deve destruir o perímetro extraído.
+        pontos = [QPointF(float(x), float(y)) for x, y in self._normalizar_pontos_contorno([(p.x(), p.y()) for p in pontos])]
         self._contorno_extraido = pontos
         self._contornos_preparados[idx] = [(p.x(), p.y()) for p in pontos]
         self._molde_criado = False
 
     def _enriquecer_metadados_molde(self, molde: dict):
-        pontos = [(float(x), float(y)) for x, y in molde.get("pontos", [])]
-        if len(pontos) < 2:
+        pontos = self._normalizar_pontos_contorno(molde.get("pontos", []))
+        if len(pontos) < 4:
             return
-        if pontos[0] == pontos[-1]:
-            base = pontos[:-1]
-        else:
-            base = pontos
-        if not base:
-            return
+
+        base = pontos[:-1]
         xs = [x for x, _ in base]
         ys = [y for _, y in base]
         cx = sum(xs) / len(xs)
         cy = sum(ys) / len(ys)
-        min_y = min(ys)
-        max_y = max(ys)
+
+        molde["pontos"] = pontos
         molde.setdefault("molde_id", str(uuid4()))
         molde.setdefault("fio_angulo", 0.0)
+
         largura = max(xs) - min(xs)
         margem = largura * 0.20
         molde.setdefault("fio_origem", (min(xs) + margem, cy))
@@ -434,23 +450,20 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
-        if not molde.get("controle_cantos"):
-            molde["controle_cantos"] = [(x, y) for x, y in base]
-        cantos = [(float(x), float(y)) for x, y in molde.get("controle_cantos", [])]
-        if len(cantos) >= 2 and not molde.get("controle_auxiliares"):
-            auxiliares: list[tuple[float, float]] = []
-            for i in range(len(cantos)):
-                j = (i + 1) % len(cantos)
-                ax, ay = cantos[i]
-                bx, by = cantos[j]
-                auxiliares.append(((ax + bx) / 2.0, (ay + by) / 2.0))
-            molde["controle_auxiliares"] = auxiliares
-        if not molde.get("pontos_controle_principais"):
-            molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
-        if not molde.get("pontos_auxiliares"):
-            molde["pontos_auxiliares"] = [
-                {"x": float(x), "y": float(y)} for x, y in molde.get("controle_auxiliares", [])
-            ]
+
+        indices_cantos = self._indices_controles_principais(base)
+        cantos = [base[i] for i in indices_cantos]
+        molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
+
+        usar_auxiliares = bool(self._cfg.get("usar_auxiliares", True))
+        if usar_auxiliares and len(indices_cantos) >= 2:
+            auxiliares = self._calcular_auxiliares_no_contorno(base, indices_cantos)
+        else:
+            auxiliares = []
+
+        molde["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
+        molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
+        molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False
@@ -539,82 +552,299 @@ class Ferramenta(FerramentaBase):
         return len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) <= 0.001
 
     def _abrir_config(self, canvas):
-        if self._dialog is None:
-            self._dialog = QDialog(canvas)
-            self._dialog.setWindowTitle("Definir contorno")
-            self._dialog.setWindowFlags(Qt.Tool)
-            self._dialog.setModal(False)
-            self._dialog.setStyleSheet(
+        cls = type(self)
+        if cls._dialog_global is None:
+            dialog = QDialog(canvas)
+            dialog.setObjectName("guimma_extrair_molde_config")
+            dialog.setWindowTitle("Definir contorno")
+            dialog.setWindowFlags(Qt.Tool)
+            dialog.setModal(False)
+            dialog.setFixedWidth(262)
+            dialog.setStyleSheet(
                 """
                 QDialog {
-                    background: #f1f4f8;
+                    background: #ffffff;
                     color: #111111;
                 }
-                QLabel, QCheckBox, QComboBox {
+                QLabel {
                     color: #111111;
+                    font-size: 12px;
+                }
+                QWidget#painelDefinirContorno {
+                    background: #ffffff;
                 }
                 QComboBox {
                     background: #ffffff;
-                    border: 1px solid #b9c4cf;
-                    border-radius: 4px;
-                    min-height: 24px;
+                    color: #111111;
+                    border: 1px solid #7db5dd;
+                    border-radius: 0px;
+                    min-height: 22px;
+                    padding: 0 22px 0 6px;
                 }
-                QCheckBox::indicator {
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid #4f5d6c;
-                    background: #ffffff;
+                QComboBox:hover { border: 1px solid #5ca0d1; }
+                QComboBox:focus { border: 1px solid #4b90c3; }
+                QComboBox::drop-down {
+                    width: 20px;
+                    border-left: 1px solid #7db5dd;
+                    background: #d8edf9;
                 }
-                QCheckBox::indicator:checked {
-                    border: 1px solid #145f9b;
-                    background: #2f7cf6;
+                QCheckBox {
+                    color: #111111;
+                    font-size: 12px;
+                    spacing: 6px;
+                    padding: 1px 0;
+                }
+                QCheckBox::indicator { width: 12px; height: 12px; }
+                QFrame#linhaSeparadora {
+                    background: #b7b7b7;
+                    min-height: 1px;
+                    max-height: 1px;
+                    border: none;
                 }
                 """
             )
-            lay = QVBoxLayout(self._dialog)
-            form = QFormLayout()
-            self.cmb_modo = QComboBox()
-            self.cmb_modo.addItems(["Automático", "Manual"])
-            self.cmb_modo.setCurrentText(str(self._cfg["modo"]))
-            form.addRow("Modo", self.cmb_modo)
-            lay.addLayout(form)
 
-            self.chk_grad = QCheckBox("Detectar graduações")
-            self.chk_grad.setChecked(bool(self._cfg["detectar_graduacoes"]))
-            self.chk_piques = QCheckBox("Detectar piques")
-            self.chk_piques.setChecked(bool(self._cfg["detectar_piques"]))
-            self.chk_aux = QCheckBox("Detectar linhas auxiliares")
-            self.chk_aux.setChecked(bool(self._cfg["detectar_auxiliares"]))
-            self.chk_compor = QCheckBox("Compor contornos")
-            self.chk_compor.setChecked(bool(self._cfg["compor_contornos"]))
-            self.chk_usar = QCheckBox("Usar linhas auxiliares")
-            self.chk_usar.setChecked(bool(self._cfg["usar_auxiliares"]))
-            self.chk_quebrar = QCheckBox("Quebrar linhas auxiliares")
-            self.chk_quebrar.setChecked(bool(self._cfg["quebrar_auxiliares"]))
-            self.chk_converter = QCheckBox("Converter primitivas em linhas auxiliares")
-            self.chk_converter.setChecked(bool(self._cfg["converter_auxiliares"]))
-            for chk in (self.chk_grad, self.chk_piques, self.chk_aux, self.chk_compor, self.chk_usar, self.chk_quebrar, self.chk_converter):
-                lay.addWidget(chk)
-            lay.addWidget(QLabel(""))
-            self.cmb_modo.currentTextChanged.connect(self._salvar_cfg)
-            for chk in (self.chk_grad, self.chk_piques, self.chk_aux, self.chk_compor, self.chk_usar, self.chk_quebrar, self.chk_converter):
-                chk.toggled.connect(self._salvar_cfg)
-        self._dialog.show()
-        self._dialog.raise_()
+            lay = QVBoxLayout(dialog)
+            lay.setContentsMargins(8, 8, 8, 8)
+            lay.setSpacing(4)
+
+            painel = QWidget(dialog)
+            painel.setObjectName("painelDefinirContorno")
+            painel_lay = QVBoxLayout(painel)
+            painel_lay.setContentsMargins(0, 0, 0, 0)
+            painel_lay.setSpacing(4)
+            lay.addWidget(painel)
+
+            painel_lay.addWidget(QLabel("Modo"))
+
+            cls._cmb_modo_global = QComboBox()
+            cls._cmb_modo_global.addItems(["Automático", "Manual"])
+            cls._cmb_modo_global.setFixedWidth(140)
+            painel_lay.addWidget(cls._cmb_modo_global, 0, Qt.AlignRight)
+
+            cls._chk_grad_global = QCheckBox("Detectar graduações")
+            cls._chk_piques_global = QCheckBox("Detectar piques")
+            cls._chk_aux_global = QCheckBox("Detectar linhas auxiliares")
+            cls._chk_compor_global = QCheckBox("Compor contornos")
+            cls._chk_usar_global = QCheckBox("Usar linhas auxiliares")
+            cls._chk_quebrar_global = QCheckBox("Quebrar linhas auxiliares")
+            cls._chk_converter_global = QCheckBox("Converter primitivas em linhas auxiliares")
+
+            painel_lay.addWidget(cls._chk_grad_global)
+            painel_lay.addWidget(cls._chk_piques_global)
+            painel_lay.addWidget(cls._chk_aux_global)
+
+            separador = QFrame()
+            separador.setObjectName("linhaSeparadora")
+            painel_lay.addWidget(separador)
+
+            for chk in (cls._chk_compor_global, cls._chk_usar_global, cls._chk_quebrar_global, cls._chk_converter_global):
+                painel_lay.addWidget(chk)
+
+            cls._cmb_modo_global.currentTextChanged.connect(self._salvar_cfg_global)
+            for chk in (
+                cls._chk_grad_global, cls._chk_piques_global, cls._chk_aux_global,
+                cls._chk_compor_global, cls._chk_usar_global, cls._chk_quebrar_global, cls._chk_converter_global,
+            ):
+                chk.toggled.connect(self._salvar_cfg_global)
+
+            cls._dialog_global = dialog
+            self._aplicar_cfg_na_ui()
+        else:
+            self._aplicar_cfg_na_ui()
+
+        self._dialog = cls._dialog_global
+        self.cmb_modo = cls._cmb_modo_global
+        self.chk_grad = cls._chk_grad_global
+        self.chk_piques = cls._chk_piques_global
+        self.chk_aux = cls._chk_aux_global
+        self.chk_compor = cls._chk_compor_global
+        self.chk_usar = cls._chk_usar_global
+        self.chk_quebrar = cls._chk_quebrar_global
+        self.chk_converter = cls._chk_converter_global
+
+        if self._dialog and not self._dialog.isVisible():
+            self._dialog.adjustSize()
+            self._dialog.show()
+        elif self._dialog:
+            self._dialog.raise_()
+            self._dialog.activateWindow()
 
     def _salvar_cfg(self, *_):
-        self._cfg.update(
+        self._salvar_cfg_global()
+        self._sincronizar_cfg_da_ui()
+
+    @classmethod
+    def _salvar_cfg_global(cls, *_):
+        if cls._cmb_modo_global is None:
+            return
+        cls._cfg_global.update(
             {
-                "modo": self.cmb_modo.currentText(),
-                "detectar_graduacoes": self.chk_grad.isChecked(),
-                "detectar_piques": self.chk_piques.isChecked(),
-                "detectar_auxiliares": self.chk_aux.isChecked(),
-                "compor_contornos": self.chk_compor.isChecked(),
-                "usar_auxiliares": self.chk_usar.isChecked(),
-                "quebrar_auxiliares": self.chk_quebrar.isChecked(),
-                "converter_auxiliares": self.chk_converter.isChecked(),
+                "modo": cls._cmb_modo_global.currentText(),
+                "detectar_graduacoes": cls._chk_grad_global.isChecked() if cls._chk_grad_global else True,
+                "detectar_piques": cls._chk_piques_global.isChecked() if cls._chk_piques_global else True,
+                "detectar_auxiliares": cls._chk_aux_global.isChecked() if cls._chk_aux_global else False,
+                "compor_contornos": cls._chk_compor_global.isChecked() if cls._chk_compor_global else True,
+                "usar_auxiliares": cls._chk_usar_global.isChecked() if cls._chk_usar_global else True,
+                "quebrar_auxiliares": cls._chk_quebrar_global.isChecked() if cls._chk_quebrar_global else True,
+                "converter_auxiliares": cls._chk_converter_global.isChecked() if cls._chk_converter_global else True,
             }
         )
+
+    def _aplicar_cfg_na_ui(self):
+        cls = type(self)
+        if cls._cmb_modo_global is None:
+            return
+        cls._cmb_modo_global.setCurrentText(str(self._cfg.get("modo", cls._cfg_global["modo"])))
+        cls._chk_grad_global.setChecked(bool(self._cfg.get("detectar_graduacoes", cls._cfg_global["detectar_graduacoes"])))
+        cls._chk_piques_global.setChecked(bool(self._cfg.get("detectar_piques", cls._cfg_global["detectar_piques"])))
+        cls._chk_aux_global.setChecked(bool(self._cfg.get("detectar_auxiliares", cls._cfg_global["detectar_auxiliares"])))
+        cls._chk_compor_global.setChecked(bool(self._cfg.get("compor_contornos", cls._cfg_global["compor_contornos"])))
+        cls._chk_usar_global.setChecked(bool(self._cfg.get("usar_auxiliares", cls._cfg_global["usar_auxiliares"])))
+        cls._chk_quebrar_global.setChecked(bool(self._cfg.get("quebrar_auxiliares", cls._cfg_global["quebrar_auxiliares"])))
+        cls._chk_converter_global.setChecked(bool(self._cfg.get("converter_auxiliares", cls._cfg_global["converter_auxiliares"])))
+        cls._salvar_cfg_global()
+
+    def _sincronizar_cfg_da_ui(self):
+        type(self)._salvar_cfg_global()
+        self._cfg = dict(type(self)._cfg_global)
+
+    def _normalizar_pontos_contorno(self, pontos: list[tuple[float, float]] | list) -> list[tuple[float, float]]:
+        coords: list[tuple[float, float]] = []
+        for x, y in pontos:
+            pt = (float(x), float(y))
+            if not coords or self._dist_tuple(coords[-1], pt) > 1e-6:
+                coords.append(pt)
+        if len(coords) < 2:
+            return coords
+        if self._dist_tuple(coords[0], coords[-1]) > 1e-6:
+            coords.append(coords[0])
+        if len(coords) >= 3 and self._dist_tuple(coords[-2], coords[-1]) <= 1e-6:
+            coords.pop(-1)
+            if self._dist_tuple(coords[0], coords[-1]) > 1e-6:
+                coords.append(coords[0])
+        return coords
+
+    def _indices_controles_principais(self, base: list[tuple[float, float]]) -> list[int]:
+        if len(base) <= 4:
+            return list(range(len(base)))
+        if self._eh_quase_circulo(base):
+            return self._indices_para_circulo(base)
+
+        candidatos = self._indices_por_angulo(base)
+        if len(candidatos) < 4:
+            candidatos = self._indices_por_amostragem(base, 6)
+        elif len(candidatos) > 8:
+            candidatos = self._indices_por_amostragem([base[i] for i in candidatos], 8, indices_originais=candidatos)
+        return candidatos
+
+    def _indices_por_angulo(self, base: list[tuple[float, float]]) -> list[int]:
+        n = len(base)
+        if n < 3:
+            return list(range(n))
+        saida: list[int] = []
+        limite = 150.0 if self._cfg.get("detectar_piques", True) else 135.0
+        perimetro = 0.0
+        for i in range(n):
+            perimetro += self._dist_tuple(base[i], base[(i + 1) % n])
+        dist_min = max(1.5, perimetro * 0.06)
+
+        for i in range(n):
+            a = QPointF(*base[i - 1])
+            b = QPointF(*base[i])
+            c = QPointF(*base[(i + 1) % n])
+            ang = self._angulo_interno(a, b, c)
+            if ang <= limite or not saida:
+                if not saida or self._dist_tuple(base[saida[-1]], base[i]) >= dist_min:
+                    saida.append(i)
+
+        if len(saida) >= 2 and self._dist_tuple(base[saida[0]], base[saida[-1]]) < dist_min:
+            saida.pop()
+        return saida
+
+    def _indices_por_amostragem(self, base: list[tuple[float, float]], quantidade: int, indices_originais: list[int] | None = None) -> list[int]:
+        if not base:
+            return []
+        qtd = max(4, min(int(quantidade), len(base)))
+        passo = len(base) / float(qtd)
+        saida: list[int] = []
+        usados = set()
+        for i in range(qtd):
+            idx_local = int(round(i * passo)) % len(base)
+            while idx_local in usados and len(usados) < len(base):
+                idx_local = (idx_local + 1) % len(base)
+            usados.add(idx_local)
+            idx_real = indices_originais[idx_local] if indices_originais is not None else idx_local
+            saida.append(idx_real)
+        return saida
+
+    def _eh_quase_circulo(self, base: list[tuple[float, float]]) -> bool:
+        if len(base) < 8:
+            return False
+        xs = [x for x, _ in base]
+        ys = [y for _, y in base]
+        largura = max(xs) - min(xs)
+        altura = max(ys) - min(ys)
+        if largura <= 1e-6 or altura <= 1e-6:
+            return False
+        proporcao = largura / max(altura, 1e-6)
+        if not 0.8 <= proporcao <= 1.25:
+            return False
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        raios = [sqrt((x - cx) ** 2 + (y - cy) ** 2) for x, y in base]
+        media = sum(raios) / len(raios)
+        if media <= 1e-6:
+            return False
+        variacao = max(raios) - min(raios)
+        cantos_agudos = 0
+        for i in range(len(base)):
+            a = QPointF(*base[i - 1])
+            b = QPointF(*base[i])
+            c = QPointF(*base[(i + 1) % len(base)])
+            if self._angulo_interno(a, b, c) < 120.0:
+                cantos_agudos += 1
+        return (variacao / media) <= 0.20 and cantos_agudos <= 2
+
+    def _indices_para_circulo(self, base: list[tuple[float, float]]) -> list[int]:
+        xs = [x for x, _ in base]
+        ys = [y for _, y in base]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        alvos = [
+            (cx, min(ys)),
+            (max(xs), cy),
+            (cx, max(ys)),
+            (min(xs), cy),
+        ]
+        indices: list[int] = []
+        usados = set()
+        for ax, ay in alvos:
+            melhor_idx = min(range(len(base)), key=lambda i: ((base[i][0] - ax) ** 2 + (base[i][1] - ay) ** 2) + (1e6 if i in usados else 0.0))
+            usados.add(melhor_idx)
+            indices.append(melhor_idx)
+        return indices
+
+    def _calcular_auxiliares_no_contorno(self, base: list[tuple[float, float]], indices_cantos: list[int]) -> list[tuple[float, float]]:
+        if len(indices_cantos) < 2:
+            return []
+        n = len(base)
+        aux: list[tuple[float, float]] = []
+        for pos, idx_a in enumerate(indices_cantos):
+            idx_b = indices_cantos[(pos + 1) % len(indices_cantos)]
+            caminho = [idx_a]
+            i = idx_a
+            while i != idx_b:
+                i = (i + 1) % n
+                caminho.append(i)
+                if len(caminho) > n + 1:
+                    break
+            meio_idx = caminho[len(caminho) // 2]
+            aux.append((float(base[meio_idx][0]), float(base[meio_idx][1])))
+        return aux
+
+    def _dist_tuple(self, a: tuple[float, float], b: tuple[float, float]) -> float:
+        return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
     def _extrair_metadados(self, pontos: list[QPointF]) -> dict:
         segmentos = [self._dist(a, b) for a, b in zip(pontos, pontos[1:])]

@@ -8,8 +8,8 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -48,6 +49,7 @@ from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
+from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -409,6 +411,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
         self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
+        if "Plotar" in self.backstage.botoes:
+            self.backstage.botoes["Plotar"].clicked.connect(self._abrir_dialogo_plotagem)
+        if "Imprimir" in self.backstage.botoes:
+            self.backstage.botoes["Imprimir"].clicked.connect(self._abrir_dialogo_impressao)
         self.backstage.arquivo_recente_clicado.connect(self._abrir_projeto_em_caminho)
 
         return topo
@@ -550,6 +556,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
 
     def _executar_acao_edicao_ribbon(self, tool_id: str) -> bool:
+        if tool_id in {"imprimir", "impressao", "print"}:
+            self._abrir_dialogo_impressao()
+            return True
+        if tool_id in {"plotar", "plotagem", "plot"}:
+            self._abrir_dialogo_plotagem()
+            return True
+
         area = self._area_documento_atual()
         if not area:
             return False
@@ -560,12 +573,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             "excluir": (area.canvas.apagar_selecionados, "Excluído"),
         }
         acao = acoes.get(tool_id)
-        if not acao:
-            return False
-        func, mensagem = acao
-        func()
-        self.lbl_status.setText(mensagem)
-        return True
+        if acao:
+            func, mensagem = acao
+            func()
+            self.lbl_status.setText(mensagem)
+            return True
+        return False
 
     def _abrir_janela_auxiliar_ferramenta(self, tool_id: str, titulo: str) -> bool:
         if tool_id == "curva":
@@ -680,6 +693,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if not area:
             return False
+
         if self._janela_aux_curva is None:
             janela = QDialog(self)
             janela.setWindowTitle(titulo)
@@ -690,27 +704,37 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
                 "QRadioButton { color:#2b2b2b; padding:2px; }"
             )
+
             layout = QVBoxLayout(janela)
             layout.addWidget(QLabel("<b>(cm) Curva</b>"))
-            rb_2p = QRadioButton("Curva por 2 pontos")
+
+            rb_np = QRadioButton("NP - Pontos indefinidos")
+            rb_suave = QRadioButton("Curva suave")
             rb_3p = QRadioButton("Curva por 3 pontos")
-            rb_np = QRadioButton("Pontos indefinidos")
+            rb_2p = QRadioButton("Curva por 2 pontos")
+
             layout.addWidget(rb_np)
-            layout.addWidget(rb_2p)
+            layout.addWidget(rb_suave)
             layout.addWidget(rb_3p)
-            layout.addWidget(rb_np)
-            rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
-            rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
+            layout.addWidget(rb_2p)
+
             rb_np.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("np") if marcado else None)
+            rb_suave.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("suave") if marcado else None)
+            rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
+            rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
+
             self._rb_curva_np = rb_np
-            self._rb_curva_2p = rb_2p
+            self._rb_curva_suave = rb_suave
             self._rb_curva_3p = rb_3p
+            self._rb_curva_2p = rb_2p
             self._janela_aux_curva = janela
         else:
             janela = self._janela_aux_curva
             janela.setWindowTitle(titulo)
+
         if hasattr(self, "_rb_curva_np"):
             self._rb_curva_np.setChecked(True)
+
         self._restaurar_posicao_caixa_aux(janela, "curva")
         area.canvas.set_modo_curva("np")
         self._ativar_ferramenta_global("curva")
@@ -724,9 +748,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.set_modo_curva(modo)
+
         if hasattr(self, "lbl_status") and self.lbl_status is not None:
             if modo == "np":
                 self.lbl_status.setText("Curva ativa (pontos indefinidos).")
+            elif modo == "suave":
+                self.lbl_status.setText("Curva ativa (curva suave).")
             elif modo == "3p":
                 self.lbl_status.setText("Curva ativa (3 pontos).")
             else:
@@ -808,7 +835,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Paleta de usuário", lambda: self.lbl_status.setText("Paleta de usuário (em breve)"))
         menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
         menu.addAction("Teclas de atalho", lambda: self.lbl_status.setText("Teclas de atalho (em breve)"))
-        menu.addAction("Níveis de impressão", lambda: self.lbl_status.setText("Níveis de impressão (em breve)"))
+        menu.addAction("Impressão...	Ctrl+P", self._abrir_dialogo_impressao)
+        menu.addAction("Plotagem...	Ctrl+Shift+P", self._abrir_dialogo_plotagem)
+        menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
 
@@ -1182,6 +1211,67 @@ class GuimmaStudioMainWindow(QMainWindow):
         geo_dialogo.moveCenter(centro_janela)
         dialog.move(geo_dialogo.topLeft())
 
+    def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
+        dialog.setStyleSheet(
+            '''
+            QFileDialog {
+                background: #f3f3f3;
+                color: #111111;
+            }
+            QFileDialog QWidget,
+            QFileDialog QFrame,
+            QFileDialog QLabel,
+            QFileDialog QToolButton,
+            QFileDialog QPushButton,
+            QFileDialog QComboBox,
+            QFileDialog QLineEdit,
+            QFileDialog QListView,
+            QFileDialog QTreeView,
+            QFileDialog QHeaderView::section,
+            QFileDialog QScrollBar,
+            QFileDialog QSplitter,
+            QFileDialog QAbstractItemView {
+                background: #ffffff;
+                color: #111111;
+            }
+            QFileDialog QTreeView,
+            QFileDialog QListView,
+            QFileDialog QAbstractItemView {
+                alternate-background-color: #f7f7f7;
+                selection-background-color: #cfe8ff;
+                selection-color: #111111;
+                border: 1px solid #c6ccd3;
+            }
+            QFileDialog QLineEdit,
+            QFileDialog QComboBox {
+                border: 1px solid #b8c0c8;
+                padding: 4px 6px;
+                min-height: 24px;
+            }
+            QFileDialog QPushButton,
+            QFileDialog QToolButton {
+                border: 1px solid #b8c0c8;
+                padding: 4px 8px;
+                min-height: 24px;
+            }
+            QFileDialog QPushButton:hover,
+            QFileDialog QToolButton:hover {
+                background: #eaf4ff;
+            }
+            QFileDialog QHeaderView::section {
+                background: #f0f2f4;
+                border: 1px solid #d2d7dd;
+                padding: 4px;
+            }
+            '''
+        )
+        self._aplicar_estilo_claro_dialogo(dialog)
+        for view in dialog.findChildren((QListView, QTreeView)):
+            view.setStyleSheet(
+                "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
+                "selection-color:#111111;border:1px solid #c6ccd3;"
+            )
+
     def _abrir_dialogo_arquivo_claro(
         self,
         titulo: str,
@@ -1198,13 +1288,790 @@ class GuimmaStudioMainWindow(QMainWindow):
         else:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-        self._aplicar_estilo_claro_dialogo(dialog)
+        self._forcar_dialogo_arquivo_claro(dialog)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
             return "", ""
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         return caminho, dialog.selectedNameFilter()
+
+
+    def _nome_documento_ativo_saida(self) -> str:
+        area = self._area_documento_atual()
+        if not area:
+            return "Sem nome"
+        indice = self.abas_documentos.currentIndex()
+        nome = self.abas_documentos.tabText(indice) if indice >= 0 else "Sem nome"
+        nome = (nome or "Sem nome").strip()
+        proibidos = '<>:"/\\|?*'
+        for ch in proibidos:
+            nome = nome.replace(ch, "_")
+        return nome or "Sem nome"
+
+    def _obter_elementos_saida(self, apenas_selecionados: bool = False) -> list[dict]:
+        area = self._area_documento_atual()
+        if not area:
+            return []
+        elementos = list(getattr(area.canvas.cena, 'elementos', []) or [])
+        if not apenas_selecionados:
+            return [dict(el) for el in elementos]
+        selecionados = [
+            dict(el)
+            for el in elementos
+            if bool(el.get('selecionado') or el.get('selected') or el.get('is_selected'))
+        ]
+        return selecionados
+
+    def _polilinhas_elemento_saida(self, el: dict, segmentos_curva: int = 32, segmentos_circulo: int = 48) -> list[list[tuple[float, float]]]:
+        tipo = str(el.get('tipo') or '').lower()
+        if tipo == 'polyline':
+            pontos = [(float(x), float(y)) for x, y in el.get('pontos', []) if isinstance((x, y), tuple)]
+            if len(pontos) >= 2:
+                return [pontos]
+            return []
+        if tipo == 'bezier_quadratica':
+            p0 = el.get('p0')
+            p1 = el.get('p1')
+            p2 = el.get('p2')
+            if not all(isinstance(p, (tuple, list)) and len(p) == 2 for p in (p0, p1, p2)):
+                return []
+            x0, y0 = float(p0[0]), float(p0[1])
+            x1, y1 = float(p1[0]), float(p1[1])
+            x2, y2 = float(p2[0]), float(p2[1])
+            pts: list[tuple[float, float]] = []
+            for i in range(segmentos_curva + 1):
+                t = i / segmentos_curva
+                mt = 1.0 - t
+                x = (mt * mt * x0) + (2.0 * mt * t * x1) + (t * t * x2)
+                y = (mt * mt * y0) + (2.0 * mt * t * y1) + (t * t * y2)
+                pts.append((x, y))
+            return [pts]
+        if tipo in {'circle', 'esfera'}:
+            centro = el.get('centro')
+            raio = float(el.get('raio', 0.0))
+            if not (isinstance(centro, (tuple, list)) and len(centro) == 2 and raio > 0):
+                return []
+            cx, cy = float(centro[0]), float(centro[1])
+            pts = []
+            for i in range(segmentos_circulo + 1):
+                ang = (2.0 * pi * i) / segmentos_circulo
+                pts.append((cx + cos(ang) * raio, cy + sin(ang) * raio))
+            return [pts]
+        return []
+
+    def _bbox_elementos_saida(self, elementos: list[dict]) -> tuple[float, float, float, float] | None:
+        pontos: list[tuple[float, float]] = []
+        for el in elementos:
+            for linha in self._polilinhas_elemento_saida(el):
+                pontos.extend(linha)
+        if not pontos:
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _ajustar_retangulo_margens_cm(self, rect: QRectF, margem_esq: float, margem_sup: float, margem_dir: float, margem_inf: float, dpi_x: float, dpi_y: float) -> QRectF:
+        px_esq = (margem_esq / 2.54) * dpi_x
+        px_dir = (margem_dir / 2.54) * dpi_x
+        px_sup = (margem_sup / 2.54) * dpi_y
+        px_inf = (margem_inf / 2.54) * dpi_y
+        ajustado = QRectF(rect)
+        ajustado.adjust(px_esq, px_sup, -px_dir, -px_inf)
+        return ajustado
+
+    def _desenhar_elementos_em_painter(self, painter: QPainter, rect: QRectF, elementos: list[dict], config: dict):
+        bbox = self._bbox_elementos_saida(elementos)
+        if bbox is None:
+            return
+        min_x, min_y, max_x, max_y = bbox
+        largura = max(max_x - min_x, 1.0)
+        altura = max(max_y - min_y, 1.0)
+        area = QRectF(rect)
+        margem_esq = float(config.get('margem_esq', 0.0))
+        margem_sup = float(config.get('margem_sup', 0.0))
+        margem_dir = float(config.get('margem_dir', 0.0))
+        margem_inf = float(config.get('margem_inf', 0.0))
+        dpi_x = float(getattr(painter.device(), 'logicalDpiX', lambda: 96)())
+        dpi_y = float(getattr(painter.device(), 'logicalDpiY', lambda: 96)())
+        area = self._ajustar_retangulo_margens_cm(area, margem_esq, margem_sup, margem_dir, margem_inf, dpi_x, dpi_y)
+        if area.width() <= 1 or area.height() <= 1:
+            area = QRectF(rect)
+
+        girar_90 = bool(config.get('girar_90', False))
+        fator_x = max(0.01, float(config.get('escala_x', 1.0)))
+        fator_y = max(0.01, float(config.get('escala_y', 1.0)))
+        usar_percent = bool(config.get('usar_percentual', False))
+        percentual = max(0.01, float(config.get('percentual', 100.0))) / 100.0
+        escala_base = min(area.width() / (altura if girar_90 else largura), area.height() / (largura if girar_90 else altura))
+        escala = escala_base * (percentual if usar_percent else 1.0)
+        centro_x = (min_x + max_x) / 2.0
+        centro_y = (min_y + max_y) / 2.0
+        cor_unica = not bool(config.get('em_cores', False))
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.translate(area.center())
+        if girar_90:
+            painter.rotate(90)
+        painter.scale(escala * fator_x, -(escala * fator_y))
+        painter.translate(-centro_x, -centro_y)
+
+        for el in elementos:
+            cor = '#000000'
+            if not cor_unica:
+                cor = str(el.get('cor') or el.get('stroke') or el.get('line_color') or '#000000')
+            pen = QPen(QColor(cor))
+            pen.setWidthF(0.0)
+            painter.setPen(pen)
+            for linha in self._polilinhas_elemento_saida(el):
+                if len(linha) < 2:
+                    continue
+                path = QPainterPath()
+                path.moveTo(linha[0][0], linha[0][1])
+                for x, y in linha[1:]:
+                    path.lineTo(x, y)
+                painter.drawPath(path)
+        painter.restore()
+
+        estilo_borda = str(config.get('estilo_borda') or 'nenhum')
+        if estilo_borda != 'nenhum':
+            painter.save()
+            pen = QPen(QColor('#5a5a5a'))
+            if estilo_borda == 'tracejada':
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(area)
+            elif estilo_borda == 'cantos':
+                pen.setWidth(1)
+                painter.setPen(pen)
+                canto = min(area.width(), area.height()) * 0.10
+                x1, y1, x2, y2 = area.left(), area.top(), area.right(), area.bottom()
+                painter.drawLine(x1, y1, x1 + canto, y1)
+                painter.drawLine(x1, y1, x1, y1 + canto)
+                painter.drawLine(x2 - canto, y1, x2, y1)
+                painter.drawLine(x2, y1, x2, y1 + canto)
+                painter.drawLine(x1, y2 - canto, x1, y2)
+                painter.drawLine(x1, y2, x1 + canto, y2)
+                painter.drawLine(x2 - canto, y2, x2, y2)
+                painter.drawLine(x2, y2 - canto, x2, y2)
+            painter.restore()
+
+    def _desenhar_documento_impressao(self, printer: QPrinter, config: dict):
+        elementos = self._obter_elementos_saida(bool(config.get('apenas_selecionados', False)))
+        if not elementos:
+            return
+        painter = QPainter(printer)
+        try:
+            rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
+            self._desenhar_elementos_em_painter(painter, rect, elementos, config)
+        finally:
+            painter.end()
+
+    def _executar_impressao(self, config: dict, visualizar: bool):
+        elementos = self._obter_elementos_saida(bool(config.get('apenas_selecionados', False)))
+        if not elementos:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle('Impressão')
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText('Não há elementos disponíveis para impressão.')
+            caixa.exec()
+            return
+        printer = QPrinter(QPrinter.HighResolution)
+        if visualizar:
+            preview = QPrintPreviewDialog(printer, self)
+            preview.setWindowTitle('Visualizar impressão')
+            preview.paintRequested.connect(lambda pr: self._desenhar_documento_impressao(pr, config))
+            preview.exec()
+            return
+        dialog = QPrintDialog(printer, self)
+        dialog.setWindowTitle('Imprimir')
+        if dialog.exec() == QDialog.Accepted:
+            self._desenhar_documento_impressao(printer, config)
+            self.lbl_status.setText('Impressão enviada.')
+
+    def _abrir_dialogo_impressao(self):
+        area = self._area_documento_atual()
+        if not area or not getattr(area.canvas.cena, 'elementos', None):
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle('Impressão')
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText('Abra um documento com elementos antes de imprimir.')
+            caixa.exec()
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Impressão')
+        dialog.setModal(True)
+        dialog.resize(420, 560)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        topo = QHBoxLayout()
+        gb_impressao = QGroupBox('Impressão')
+        g_imp = QVBoxLayout(gb_impressao)
+        rb_tudo = QRadioButton('Tudo')
+        rb_tudo.setChecked(True)
+        rb_sel = QRadioButton('Selecionados')
+        tem_sel = bool(self._obter_elementos_saida(True))
+        rb_sel.setEnabled(tem_sel)
+        g_imp.addWidget(rb_tudo)
+        g_imp.addWidget(rb_sel)
+        topo.addWidget(gb_impressao)
+
+        gb_prop = QGroupBox('Proporção')
+        g_prop = QVBoxLayout(gb_prop)
+        rb_tamanho_folha = QRadioButton('Tamanho da folha')
+        rb_tamanho_folha.setChecked(True)
+        linha_pct = QHBoxLayout()
+        rb_percent = QRadioButton('Porcentagem')
+        edt_percent = QDoubleSpinBox()
+        edt_percent.setDecimals(2)
+        edt_percent.setRange(1.0, 1000.0)
+        edt_percent.setValue(100.0)
+        edt_percent.setSuffix(' %')
+        edt_percent.setEnabled(False)
+        rb_percent.toggled.connect(edt_percent.setEnabled)
+        linha_pct.addWidget(rb_percent)
+        linha_pct.addWidget(edt_percent, 1)
+        g_prop.addWidget(rb_tamanho_folha)
+        g_prop.addLayout(linha_pct)
+        topo.addWidget(gb_prop, 1)
+        lay.addLayout(topo)
+
+        gb_fatores = QGroupBox('Fatores de escala')
+        g_fat = QGridLayout(gb_fatores)
+        edt_x = QDoubleSpinBox()
+        edt_x.setDecimals(3)
+        edt_x.setRange(0.001, 1000.0)
+        edt_x.setValue(1.0)
+        edt_y = QDoubleSpinBox()
+        edt_y.setDecimals(3)
+        edt_y.setRange(0.001, 1000.0)
+        edt_y.setValue(1.0)
+        chk_cores = QCheckBox('Em cores')
+        g_fat.addWidget(QLabel('X'), 0, 0)
+        g_fat.addWidget(edt_x, 0, 1)
+        g_fat.addWidget(QLabel('Y'), 0, 2)
+        g_fat.addWidget(edt_y, 0, 3)
+        g_fat.addWidget(chk_cores, 0, 4)
+        lay.addWidget(gb_fatores)
+
+        gb_moldes = QGroupBox('Opções dos Moldes')
+        g_moldes = QGridLayout(gb_moldes)
+        g_moldes.addWidget(QLabel('Selecionar tamanhos'), 0, 0)
+        cmb_tamanhos = QComboBox()
+        cmb_tamanhos.addItems(['Todos'])
+        g_moldes.addWidget(cmb_tamanhos, 0, 1)
+        chk_reorg = QCheckBox('Reorganizar moldes')
+        g_moldes.addWidget(chk_reorg, 1, 0, 1, 2)
+        lay.addWidget(gb_moldes)
+
+        meio = QHBoxLayout()
+        gb_margens = QGroupBox('Margens (cm)')
+        gb_margens.setMinimumHeight(240)
+        g_marg = QGridLayout(gb_margens)
+        edt_sup = QDoubleSpinBox()
+        edt_sup.setRange(0.0, 99.0)
+        edt_sup.setDecimals(2)
+        edt_sup.setValue(0.0)
+        edt_esq = QDoubleSpinBox()
+        edt_esq.setRange(0.0, 99.0)
+        edt_esq.setDecimals(2)
+        edt_esq.setValue(0.0)
+        edt_dir = QDoubleSpinBox()
+        edt_dir.setRange(0.0, 99.0)
+        edt_dir.setDecimals(2)
+        edt_dir.setValue(0.0)
+        edt_inf = QDoubleSpinBox()
+        edt_inf.setRange(0.0, 99.0)
+        edt_inf.setDecimals(2)
+        edt_inf.setValue(0.0)
+        area_pagina = QFrame()
+        area_pagina.setFixedSize(86, 110)
+        area_pagina.setStyleSheet('background:#ececec;border:1px solid #cfcfcf;')
+        g_marg.addWidget(edt_sup, 0, 1)
+        g_marg.addWidget(edt_esq, 1, 0)
+        g_marg.addWidget(area_pagina, 1, 1)
+        g_marg.addWidget(edt_dir, 1, 2)
+        g_marg.addWidget(edt_inf, 2, 1)
+        meio.addWidget(gb_margens, 1)
+
+        gb_borda = QGroupBox('Estilo de Borda')
+        g_borda = QVBoxLayout(gb_borda)
+        rb_sem_borda = QRadioButton('nenhum')
+        rb_sem_borda.setChecked(True)
+        rb_cantos = QRadioButton('cantos')
+        rb_tracejada = QRadioButton('tracejada')
+        g_borda.addWidget(rb_sem_borda)
+        g_borda.addWidget(rb_cantos)
+        g_borda.addWidget(rb_tracejada)
+        g_borda.addStretch(1)
+        meio.addWidget(gb_borda)
+        lay.addLayout(meio)
+        lay.addStretch(1)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_imprimir = QPushButton('Imprimir')
+        btn_visualizar = QPushButton('Visualizar')
+        btn_fechar = QPushButton('Fechar')
+        rodape.addWidget(btn_imprimir)
+        rodape.addWidget(btn_visualizar)
+        rodape.addWidget(btn_fechar)
+        lay.addLayout(rodape)
+
+        def _config() -> dict:
+            estilo_borda = 'nenhum'
+            if rb_cantos.isChecked():
+                estilo_borda = 'cantos'
+            elif rb_tracejada.isChecked():
+                estilo_borda = 'tracejada'
+            return {
+                'apenas_selecionados': rb_sel.isChecked(),
+                'usar_percentual': rb_percent.isChecked(),
+                'percentual': float(edt_percent.value()),
+                'escala_x': float(edt_x.value()),
+                'escala_y': float(edt_y.value()),
+                'em_cores': chk_cores.isChecked(),
+                'reorganizar': chk_reorg.isChecked(),
+                'margem_sup': float(edt_sup.value()),
+                'margem_esq': float(edt_esq.value()),
+                'margem_dir': float(edt_dir.value()),
+                'margem_inf': float(edt_inf.value()),
+                'estilo_borda': estilo_borda,
+                'girar_90': False,
+            }
+
+        btn_visualizar.clicked.connect(lambda: self._executar_impressao(_config(), True))
+        btn_imprimir.clicked.connect(lambda: self._executar_impressao(_config(), False))
+        btn_fechar.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def _plotagem_cfg(self) -> dict:
+        bruto = self.projeto_atual.preferencias_usuario.get("plotagem_cfg", {})
+        if not isinstance(bruto, dict):
+            bruto = {}
+        plotter = bruto.get("plotter_props", {}) if isinstance(bruto.get("plotter_props", {}), dict) else {}
+        porta = bruto.get("porta_cfg", {}) if isinstance(bruto.get("porta_cfg", {}), dict) else {}
+        return {
+            "plotter_props": {
+                "largura_papel_cm": float(plotter.get("largura_papel_cm", 185.0)),
+                "tamanho_pagina_cm": float(plotter.get("tamanho_pagina_cm", 115.0)),
+                "margem_inferior_cm": float(plotter.get("margem_inferior_cm", 0.0)),
+                "qualidade": str(plotter.get("qualidade", "Rascunho")),
+                "cor": str(plotter.get("cor", "Preto")),
+                "resolucao_dmpl": str(plotter.get("resolucao_dmpl", "Padrão")),
+                "corte_papel": str(plotter.get("corte_papel", "nao_cortar")),
+                "fator_x": float(plotter.get("fator_x", 1.0)),
+                "fator_y": float(plotter.get("fator_y", 1.0)),
+                "usar_niveis_impressao": bool(plotter.get("usar_niveis_impressao", False)),
+                "usar_texto_como_linha": bool(plotter.get("usar_texto_como_linha", False)),
+            },
+            "porta_cfg": {
+                "bits_por_segundo": str(porta.get("bits_por_segundo", "57600")),
+                "bits_de_dados": str(porta.get("bits_de_dados", "8")),
+                "paridade": str(porta.get("paridade", "Nenhum")),
+                "bits_de_parada": str(porta.get("bits_de_parada", "1")),
+                "porta_saida": str(porta.get("porta_saida", "COM1")),
+            },
+        }
+
+    def _salvar_plotagem_cfg(self, cfg: dict):
+        self.projeto_atual.preferencias_usuario["plotagem_cfg"] = cfg
+        self._salvar_preferencias_app()
+
+    def _abrir_dialogo_propriedades_plotter(self, props_atuais: dict) -> dict | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Propriedades plotter")
+        dialog.setModal(True)
+        dialog.resize(350, 500)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel("Plotter: HPGL/2"))
+
+        gb = QGroupBox("")
+        g = QGridLayout(gb)
+        edt_largura = QDoubleSpinBox(); edt_largura.setRange(1.0, 9999.0); edt_largura.setDecimals(2); edt_largura.setValue(float(props_atuais.get("largura_papel_cm", 185.0)))
+        edt_pagina = QDoubleSpinBox(); edt_pagina.setRange(1.0, 9999.0); edt_pagina.setDecimals(2); edt_pagina.setValue(float(props_atuais.get("tamanho_pagina_cm", 115.0)))
+        edt_margem = QDoubleSpinBox(); edt_margem.setRange(0.0, 9999.0); edt_margem.setDecimals(2); edt_margem.setValue(float(props_atuais.get("margem_inferior_cm", 0.0)))
+        cmb_qualidade = QComboBox(); cmb_qualidade.addItems(["Rascunho", "Normal", "Alta"]); cmb_qualidade.setCurrentText(str(props_atuais.get("qualidade", "Rascunho")))
+        cmb_cor = QComboBox(); cmb_cor.addItems(["Preto", "Colorido"]); cmb_cor.setCurrentText(str(props_atuais.get("cor", "Preto")))
+        cmb_res = QComboBox(); cmb_res.addItems(["Padrão", "300", "600"]); cmb_res.setCurrentText(str(props_atuais.get("resolucao_dmpl", "Padrão")))
+        g.addWidget(QLabel("Largura do papel (cm)"), 0, 0); g.addWidget(edt_largura, 0, 1)
+        g.addWidget(QLabel("Tamanho da página (cm)"), 1, 0); g.addWidget(edt_pagina, 1, 1)
+        g.addWidget(QLabel("Margem inferior (cm)"), 2, 0); g.addWidget(edt_margem, 2, 1)
+        g.addWidget(QLabel("Qualidade"), 3, 0); g.addWidget(cmb_qualidade, 3, 1)
+        g.addWidget(QLabel("Cor"), 4, 0); g.addWidget(cmb_cor, 4, 1)
+        g.addWidget(QLabel("Resolução DMPL"), 5, 0); g.addWidget(cmb_res, 5, 1)
+        lay.addWidget(gb)
+
+        gb_corte = QGroupBox("Corte do papel")
+        corte_lay = QVBoxLayout(gb_corte)
+        rb_nao = QRadioButton("Não cortar")
+        rb_final = QRadioButton("Cortar no final")
+        rb_faixa = QRadioButton("Cortar entre cada faixa")
+        corte = str(props_atuais.get("corte_papel", "nao_cortar"))
+        rb_nao.setChecked(corte == "nao_cortar")
+        rb_final.setChecked(corte == "cortar_final")
+        rb_faixa.setChecked(corte == "cortar_faixa")
+        for w in (rb_nao, rb_final, rb_faixa):
+            corte_lay.addWidget(w)
+        lay.addWidget(gb_corte)
+
+        gb_fat = QGroupBox("Fatores de escala")
+        fat = QGridLayout(gb_fat)
+        edt_fx = QDoubleSpinBox(); edt_fx.setRange(0.01, 1000.0); edt_fx.setDecimals(4); edt_fx.setValue(float(props_atuais.get("fator_x", 1.0)))
+        edt_fy = QDoubleSpinBox(); edt_fy.setRange(0.01, 1000.0); edt_fy.setDecimals(4); edt_fy.setValue(float(props_atuais.get("fator_y", 1.0)))
+        fat.addWidget(QLabel("X"), 0, 0); fat.addWidget(edt_fx, 0, 1)
+        fat.addWidget(QLabel("Y"), 0, 2); fat.addWidget(edt_fy, 0, 3)
+        lay.addWidget(gb_fat)
+
+        chk_niveis = QCheckBox("Usar níveis de impressão"); chk_niveis.setChecked(bool(props_atuais.get("usar_niveis_impressao", False)))
+        chk_texto = QCheckBox("Utilizar texto como linha"); chk_texto.setChecked(bool(props_atuais.get("usar_texto_como_linha", False)))
+        lay.addWidget(chk_niveis)
+        lay.addWidget(chk_texto)
+        lay.addStretch(1)
+        rod = QHBoxLayout(); rod.addStretch(1)
+        btn_ok = QPushButton("✓ OK"); btn_cancel = QPushButton("✕ Cancelar")
+        rod.addWidget(btn_ok); rod.addWidget(btn_cancel); lay.addLayout(rod)
+        btn_ok.clicked.connect(dialog.accept); btn_cancel.clicked.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        corte_val = "nao_cortar"
+        if rb_final.isChecked():
+            corte_val = "cortar_final"
+        elif rb_faixa.isChecked():
+            corte_val = "cortar_faixa"
+        return {
+            "largura_papel_cm": float(edt_largura.value()),
+            "tamanho_pagina_cm": float(edt_pagina.value()),
+            "margem_inferior_cm": float(edt_margem.value()),
+            "qualidade": cmb_qualidade.currentText(),
+            "cor": cmb_cor.currentText(),
+            "resolucao_dmpl": cmb_res.currentText(),
+            "corte_papel": corte_val,
+            "fator_x": float(edt_fx.value()),
+            "fator_y": float(edt_fy.value()),
+            "usar_niveis_impressao": chk_niveis.isChecked(),
+            "usar_texto_como_linha": chk_texto.isChecked(),
+        }
+
+    def _abrir_dialogo_setup_porta(self, porta_atual: dict) -> dict | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configuração da porta")
+        dialog.setModal(True)
+        dialog.resize(280, 210)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QVBoxLayout(dialog)
+        form = QGridLayout()
+        cmb_bps = QComboBox(); cmb_bps.addItems(["9600", "19200", "38400", "57600", "115200"]); cmb_bps.setCurrentText(str(porta_atual.get("bits_por_segundo", "57600")))
+        cmb_dados = QComboBox(); cmb_dados.addItems(["7", "8"]); cmb_dados.setCurrentText(str(porta_atual.get("bits_de_dados", "8")))
+        cmb_paridade = QComboBox(); cmb_paridade.addItems(["Nenhum", "Par", "Ímpar"]); cmb_paridade.setCurrentText(str(porta_atual.get("paridade", "Nenhum")))
+        cmb_stop = QComboBox(); cmb_stop.addItems(["1", "2"]); cmb_stop.setCurrentText(str(porta_atual.get("bits_de_parada", "1")))
+        form.addWidget(QLabel("Bits por segundo"), 0, 0); form.addWidget(cmb_bps, 0, 1)
+        form.addWidget(QLabel("Bits de dados"), 1, 0); form.addWidget(cmb_dados, 1, 1)
+        form.addWidget(QLabel("Paridade"), 2, 0); form.addWidget(cmb_paridade, 2, 1)
+        form.addWidget(QLabel("Bits de parada"), 3, 0); form.addWidget(cmb_stop, 3, 1)
+        lay.addLayout(form)
+        lay.addStretch(1)
+        rod = QHBoxLayout(); rod.addStretch(1)
+        btn_ok = QPushButton("✓ OK"); btn_cancel = QPushButton("✕ Cancelar")
+        rod.addWidget(btn_ok); rod.addWidget(btn_cancel); lay.addLayout(rod)
+        btn_ok.clicked.connect(dialog.accept); btn_cancel.clicked.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return {
+            "bits_por_segundo": cmb_bps.currentText(),
+            "bits_de_dados": cmb_dados.currentText(),
+            "paridade": cmb_paridade.currentText(),
+            "bits_de_parada": cmb_stop.currentText(),
+            "porta_saida": str(porta_atual.get("porta_saida", "COM1")),
+        }
+
+    def _gerar_hpgl2_do_molde(self, elementos: list[dict], config: dict) -> tuple[str, int, int]:
+        polilinhas: list[list[tuple[float, float]]] = []
+        for el in elementos:
+            polilinhas.extend(self._polilinhas_elemento_saida(el))
+        if not polilinhas:
+            return "", 0, 0
+        pontos = [pt for linha in polilinhas for pt in linha]
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        largura = max(max_x - min_x, 1.0)
+        altura = max(max_y - min_y, 1.0)
+        girar_90 = bool(config.get("girar_90", False))
+        percentual = max(0.01, float(config.get("percentual", 100.0))) / 100.0
+        props = config.get("plotter_props", {}) if isinstance(config.get("plotter_props", {}), dict) else {}
+        fator_x = max(0.001, float(props.get("fator_x", 1.0)))
+        fator_y = max(0.001, float(props.get("fator_y", 1.0)))
+        largura_papel = max(1.0, float(props.get("largura_papel_cm", 185.0)))
+        altura_papel = max(1.0, float(props.get("tamanho_pagina_cm", 115.0)))
+        margem_inf = max(0.0, float(props.get("margem_inferior_cm", 0.0)))
+        margem_u = int(round(margem_inf * 40.0))
+        largura_u_disp = max(400, int(round(largura_papel * 20.0)) - 2 * margem_u)
+        altura_u_disp = max(400, int(round(altura_papel * 20.0)) - 2 * margem_u)
+        largura_base = altura if girar_90 else largura
+        altura_base = largura if girar_90 else altura
+        escala_fit = min(largura_u_disp / max(largura_base, 1.0), altura_u_disp / max(altura_base, 1.0))
+        escala = max(0.1, escala_fit * percentual)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        largura_plot = int(round(largura_base * escala * fator_x))
+        altura_plot = int(round(altura_base * escala * fator_y))
+        offset_x = margem_u
+        offset_y = margem_u
+
+        def _mapear(pt: tuple[float, float]) -> tuple[int, int]:
+            x = float(pt[0]) - cx
+            y = float(pt[1]) - cy
+            if girar_90:
+                x, y = -y, x
+            hx = int(round(offset_x + (largura_plot / 2.0) + (x * escala * fator_x)))
+            hy = int(round(offset_y + (altura_plot / 2.0) + (y * escala * fator_y)))
+            return hx, hy
+
+        linhas = []
+        for linha in polilinhas:
+            if len(linha) < 2:
+                continue
+            x0, y0 = _mapear(linha[0])
+            coords = []
+            for pt in linha[1:]:
+                x, y = _mapear(pt)
+                coords.append(f"{x},{y}")
+            linhas.append(f"PU{x0},{y0}PD " + " ".join(coords) + "PU")
+        return "".join(linhas), largura_plot + 2 * margem_u, altura_plot + 2 * margem_u
+
+    def _gerar_hpgl2(self, elementos: list[dict], config: dict) -> str:
+        corpo, largura_ps, altura_ps = self._gerar_hpgl2_do_molde(elementos, config)
+        if not corpo:
+            return ''
+        props = config.get('plotter_props', {}) if isinstance(config.get('plotter_props', {}), dict) else {}
+        qualidade = str(props.get('qualidade', 'Rascunho')).lower()
+        ql = '0' if qualidade == 'rascunho' else ('1' if qualidade == 'normal' else '2')
+        cabecalho = f"\x1b%-1BBPINPS{int(max(1, largura_ps))},{int(max(1, altura_ps))}SP1QL{ql}"
+        return cabecalho + '\r\n' + corpo + 'SP0PG;\r\n'
+
+    def _exportar_plotagem_para_arquivo(self, config: dict):
+        elementos = self._obter_elementos_saida(bool(config.get('apenas_selecionados', False)))
+        if not elementos:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle('Plotagem')
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText('Não há elementos disponíveis para plotagem.')
+            caixa.exec()
+            return
+        caminho, _ = self._abrir_dialogo_arquivo_claro('HPGL/2', 'Arquivos de plotagem (*.plt);;Todos (*.*)', modo_salvar=True)
+        if not caminho:
+            return
+        destino = Path(caminho)
+        if not destino.suffix:
+            destino = destino.with_suffix('.plt')
+        conteudo = self._gerar_hpgl2(elementos, config)
+        if not conteudo.strip():
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle('Plotagem')
+            caixa.setIcon(QMessageBox.Warning)
+            caixa.setText('Não foi possível gerar o arquivo de plotagem com os elementos atuais.')
+            caixa.exec()
+            return
+        destino.write_text(conteudo, encoding='latin-1', newline='')
+        self.lbl_status.setText(f'Arquivo de plotagem salvo em: {destino}')
+        caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
+        caixa.setWindowTitle('Plotagem')
+        caixa.setIcon(QMessageBox.Information)
+        caixa.setText(f'Arquivo HPGL/2 gerado com sucesso.\n\n{destino}')
+        caixa.exec()
+
+    def _abrir_dialogo_plotagem(self):
+        area = self._area_documento_atual()
+        if not area or not getattr(area.canvas.cena, 'elementos', None):
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle('Plotagem')
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText('Abra um documento com elementos antes de plotar.')
+            caixa.exec()
+            return
+
+        cfg_salva = self._plotagem_cfg()
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Plotagem')
+        dialog.setModal(True)
+        dialog.resize(640, 440)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        lay = QHBoxLayout(dialog)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(12)
+
+        col_esq = QVBoxLayout()
+        gb_area = QGroupBox('Área de plotagem')
+        g_area = QGridLayout(gb_area)
+        rb_area_tudo = QRadioButton('Tudo')
+        rb_area_tudo.setChecked(True)
+        rb_faixas = QRadioButton('Faixas de plotagem')
+        edt_faixas = QLineEdit('1-2')
+        edt_x_inicial = QDoubleSpinBox()
+        edt_x_inicial.setRange(0.0, 99999.0)
+        edt_x_inicial.setDecimals(2)
+        edt_x_inicial.setValue(0.0)
+        g_area.addWidget(rb_area_tudo, 0, 0, 1, 2)
+        g_area.addWidget(rb_faixas, 1, 0)
+        g_area.addWidget(edt_faixas, 1, 1)
+        g_area.addWidget(QLabel('X inicial de plotagem (cm)'), 2, 0)
+        g_area.addWidget(edt_x_inicial, 2, 1)
+        col_esq.addWidget(gb_area)
+
+        gb_sep = QGroupBox('')
+        g_sep = QVBoxLayout(gb_sep)
+        chk_tamanhos_sep = QCheckBox('Plotar tamanhos separados')
+        cmb_tamanhos = QComboBox()
+        cmb_tamanhos.addItems(['Todos'])
+        cmb_tamanhos.setEnabled(False)
+        chk_tamanhos_sep.toggled.connect(cmb_tamanhos.setEnabled)
+        chk_reorg = QCheckBox('Reorganizar moldes')
+        g_sep.addWidget(chk_tamanhos_sep)
+        g_sep.addWidget(cmb_tamanhos)
+        g_sep.addWidget(chk_reorg)
+        col_esq.addWidget(gb_sep)
+
+        gb_opts = QGroupBox('Opções de plotagem')
+        g_opts = QVBoxLayout(gb_opts)
+        chk_para_arquivo = QCheckBox('Plotar para arquivo')
+        chk_para_arquivo.setChecked(True)
+        chk_girar = QCheckBox('Plotar girando 90°')
+        chk_desdobrar = QCheckBox('Desdobrar moldes')
+        chk_elem_sel = QCheckBox('Plotar elementos selecionados')
+        chk_elem_sel.setEnabled(bool(self._obter_elementos_saida(True)))
+        chk_contorno = QCheckBox('Somente contorno de corte')
+        chk_gerenciador = QCheckBox('Usar gerenciador de plotagem')
+        chk_ferr_hpgl = QCheckBox('Usar ferramentas definidas (HPGL)')
+        chk_estilos = QCheckBox('Usar estilos de linha definidos')
+        for w in (chk_para_arquivo, chk_girar, chk_desdobrar, chk_elem_sel, chk_contorno, chk_gerenciador, chk_ferr_hpgl, chk_estilos):
+            g_opts.addWidget(w)
+        col_esq.addWidget(gb_opts, 1)
+        lay.addLayout(col_esq, 1)
+
+        col_dir = QVBoxLayout()
+        gb_prop = QGroupBox('Proporção')
+        g_prop = QHBoxLayout(gb_prop)
+        g_prop.addWidget(QLabel('Porcentagem'))
+        edt_pct = QDoubleSpinBox()
+        edt_pct.setRange(1.0, 1000.0)
+        edt_pct.setDecimals(2)
+        edt_pct.setValue(100.0)
+        edt_pct.setSuffix(' %')
+        g_prop.addWidget(edt_pct, 1)
+        col_dir.addWidget(gb_prop)
+
+        gb_plotter = QGroupBox('Configurações do plotter')
+        g_plotter = QGridLayout(gb_plotter)
+        g_plotter.addWidget(QLabel('Plotter'), 0, 0)
+        cmb_plotter = QComboBox()
+        cmb_plotter.addItems(['HPGL/2'])
+        btn_props = QPushButton('Propriedades...')
+        g_plotter.addWidget(cmb_plotter, 1, 0)
+        g_plotter.addWidget(btn_props, 1, 1)
+        g_plotter.addWidget(QLabel('Porta de saída'), 2, 0, 1, 2)
+        linha_saida = QHBoxLayout()
+        chk_printer = QCheckBox('')
+        cmb_printer = QComboBox()
+        cmb_printer.addItems(['EPSON7FEDEB (L3150 Series)'])
+        cmb_printer.setEnabled(False)
+        chk_printer.toggled.connect(cmb_printer.setEnabled)
+        linha_saida.addWidget(chk_printer)
+        linha_saida.addWidget(cmb_printer, 1)
+        g_plotter.addLayout(linha_saida, 3, 0, 1, 2)
+        cmb_porta = QComboBox()
+        cmb_porta.addItems(['COM1', 'COM2', 'COM3', 'LPT1'])
+        btn_setup = QPushButton('Setup...')
+        g_plotter.addWidget(cmb_porta, 4, 0)
+        g_plotter.addWidget(btn_setup, 4, 1)
+        col_dir.addWidget(gb_plotter)
+
+        gb_perf = QGroupBox('Perfis de configuração')
+        g_perf = QGridLayout(gb_perf)
+        g_perf.addWidget(QLabel('Perfil'), 0, 0)
+        cmb_perfil = QComboBox()
+        cmb_perfil.addItems([''])
+        g_perf.addWidget(cmb_perfil, 0, 1, 1, 2)
+        btn_criar = QPushButton('Criar')
+        btn_atualizar = QPushButton('Atualizar')
+        btn_remover = QPushButton('Remover')
+        btn_criar.clicked.connect(lambda: self.lbl_status.setText('Criação de perfil de plotagem em evolução.'))
+        btn_atualizar.clicked.connect(lambda: self.lbl_status.setText('Atualização de perfil de plotagem em evolução.'))
+        btn_remover.clicked.connect(lambda: self.lbl_status.setText('Remoção de perfil de plotagem em evolução.'))
+        g_perf.addWidget(btn_criar, 1, 0)
+        g_perf.addWidget(btn_atualizar, 1, 1)
+        g_perf.addWidget(btn_remover, 1, 2)
+        col_dir.addWidget(gb_perf)
+        col_dir.addStretch(1)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton('✓ OK')
+        btn_cancelar = QPushButton('✕ Cancelar')
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        col_dir.addLayout(rodape)
+        lay.addLayout(col_dir, 1)
+
+        cfg_edicao = {'plotter_props': dict(cfg_salva['plotter_props']), 'porta_cfg': dict(cfg_salva['porta_cfg'])}
+        porta_inicial = str(cfg_edicao['porta_cfg'].get('porta_saida', 'COM1'))
+        if porta_inicial in ['COM1', 'COM2', 'COM3', 'LPT1']:
+            cmb_porta.setCurrentText(porta_inicial)
+
+        def _abrir_props():
+            novo = self._abrir_dialogo_propriedades_plotter(cfg_edicao['plotter_props'])
+            if novo is not None:
+                cfg_edicao['plotter_props'] = novo
+                self.lbl_status.setText('Propriedades do plotter atualizadas.')
+
+        def _abrir_setup():
+            novo = self._abrir_dialogo_setup_porta(cfg_edicao['porta_cfg'])
+            if novo is not None:
+                cfg_edicao['porta_cfg'] = novo
+                self.lbl_status.setText('Configuração da porta atualizada.')
+
+        btn_props.clicked.connect(_abrir_props)
+        btn_setup.clicked.connect(_abrir_setup)
+
+        def _plotar():
+            cfg_edicao['porta_cfg']['porta_saida'] = cmb_porta.currentText()
+            self._salvar_plotagem_cfg(cfg_edicao)
+            config = {
+                'percentual': float(edt_pct.value()),
+                'girar_90': chk_girar.isChecked(),
+                'desdobrar': chk_desdobrar.isChecked(),
+                'apenas_selecionados': chk_elem_sel.isChecked(),
+                'somente_contorno': chk_contorno.isChecked(),
+                'plotter': cmb_plotter.currentText(),
+                'porta_saida': cmb_porta.currentText(),
+                'area_modo': 'faixas' if rb_faixas.isChecked() else 'tudo',
+                'faixas': edt_faixas.text().strip(),
+                'x_inicial': float(edt_x_inicial.value()),
+                'plotar_para_arquivo': chk_para_arquivo.isChecked(),
+                'plotter_props': dict(cfg_edicao['plotter_props']),
+                'porta_cfg': dict(cfg_edicao['porta_cfg']),
+            }
+            self._exportar_plotagem_para_arquivo(config)
+            dialog.accept()
+
+        btn_ok.clicked.connect(_plotar)
+        btn_cancelar.clicked.connect(dialog.reject)
+        dialog.exec()
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
@@ -2084,6 +2951,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+U"), self, activated=self._abrir_dialogo_unidade_medida)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._abrir_propriedades_diretamente)
         QShortcut(QKeySequence("Ctrl+Enter"), self, activated=self._abrir_propriedades_diretamente)
+        QShortcut(QKeySequence.Print, self, activated=self._abrir_dialogo_impressao)
+        QShortcut(QKeySequence("Ctrl+Shift+P"), self, activated=self._abrir_dialogo_plotagem)
 
     def _desfazer_canvas_atual(self):
         area = self._area_documento_atual()
