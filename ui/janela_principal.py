@@ -695,17 +695,22 @@ class GuimmaStudioMainWindow(QMainWindow):
             rb_2p = QRadioButton("Curva por 2 pontos")
             rb_3p = QRadioButton("Curva por 3 pontos")
             rb_np = QRadioButton("Pontos indefinidos")
-            rb_np.setChecked(True)
+            layout.addWidget(rb_np)
             layout.addWidget(rb_2p)
             layout.addWidget(rb_3p)
             layout.addWidget(rb_np)
             rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
             rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
             rb_np.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("np") if marcado else None)
+            self._rb_curva_np = rb_np
+            self._rb_curva_2p = rb_2p
+            self._rb_curva_3p = rb_3p
             self._janela_aux_curva = janela
         else:
             janela = self._janela_aux_curva
             janela.setWindowTitle(titulo)
+        if hasattr(self, "_rb_curva_np"):
+            self._rb_curva_np.setChecked(True)
         self._restaurar_posicao_caixa_aux(janela, "curva")
         area.canvas.set_modo_curva("np")
         self._ativar_ferramenta_global("curva")
