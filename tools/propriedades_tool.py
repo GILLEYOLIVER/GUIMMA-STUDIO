@@ -79,7 +79,7 @@ class PreviewMoldeWidget(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#000000"))
+        painter.fillRect(self.rect(), QColor("#f1f1f1"))
         info = self._dados_transformacao()
         if not info:
             painter.setPen(QPen(QColor("#8a8a8a"), 1))
@@ -115,7 +115,9 @@ class PreviewMoldeWidget(QWidget):
                 self._offset.y() + info["offset_y"] + ((pt.y() - info["min_y"]) * info["escala"] * self._zoom),
             )
 
-        cor_desenho = QColor("#ffffff")
+        cor_desenho = QColor(str(self._molde.get("cor") or "#ffffff"))
+        if not cor_desenho.isValid():
+            cor_desenho = QColor("#ffffff")
         if self._mostrar_cor_tecidos:
             tecido = str(self._molde.get("tecido") or "").strip()
             cor_tecido = self._cores_tecidos.get(tecido)
@@ -460,6 +462,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
         self._confirmado_ok = False
         self._suspender_auto_aplicar = False
+        self._suspender_item_changed = False
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -525,6 +528,15 @@ class PropriedadesMoldesDialog(QDialog):
             border-radius: 0px;
             selection-background-color: #2b7cd3;
             selection-color: #ffffff;
+        }
+        QComboBox { combobox-popup: 0; }
+        QComboBox QAbstractItemView {
+            background: #ffffff;
+            color: #111111;
+            border: 1px solid #b5bcc3;
+            selection-background-color: #2b7cd3;
+            selection-color: #ffffff;
+            outline: 0;
         }
         QTextEdit { padding: 4px; }
         QGroupBox {
@@ -618,6 +630,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore = QTreeWidget()
         self.arvore.setHeaderHidden(True)
         self.arvore.itemSelectionChanged.connect(self._quando_troca_selecao)
+        self.arvore.itemChanged.connect(self._quando_item_editado)
         lay_esq.addWidget(self.arvore, 1)
 
         self.btn_excluir_molde = QPushButton("🗑 Excluir molde")
@@ -741,7 +754,7 @@ class PropriedadesMoldesDialog(QDialog):
         grid.setColumnStretch(1, 1)
 
         self.cmb_molde = QComboBox()
-        self.cmb_molde.setEditable(False)
+        self.cmb_molde.setEditable(True)
         self.cmb_molde.currentIndexChanged.connect(self._trocar_molde_pelo_combo)
 
         self.cmb_tipo_corte = QComboBox()
@@ -1458,8 +1471,10 @@ class PropriedadesMoldesDialog(QDialog):
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
+        self._suspender_item_changed = True
         self.arvore.clear()
         raiz = QTreeWidgetItem(["1"])
+        raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
 
@@ -1476,16 +1491,19 @@ class PropriedadesMoldesDialog(QDialog):
         for ref in diretos:
             item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
             item.setData(0, Qt.UserRole, ref.indice)
+            item.setFlags(item.flags() | Qt.ItemIsEditable)
             item.setIcon(0, self._icone_status_molde(ref, referencia_grade=self._assinatura_grade(diretos[0].dados if diretos else {})))
             raiz.addChild(item)
 
         for grupo_nome, itens in grupos.items():
             pai = QTreeWidgetItem([grupo_nome])
+            pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
             referencia = self._assinatura_grade(itens[0].dados if itens else {})
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
                 item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia))
                 pai.addChild(item)
 
@@ -1515,6 +1533,25 @@ class PropriedadesMoldesDialog(QDialog):
             self._atualizar_combo_moldes()
             _log_propriedades_debug("recarregar_lista(): nenhum item escolhido; preenchendo campos vazios")
             self._preencher_campos(None)
+        self._suspender_item_changed = False
+
+    def _assinatura_grade(self, molde: dict) -> str:
+        nome = str(molde.get("graduacao_grade_nome") or "").strip()
+        linhas = molde.get("graduacao_tamanhos")
+        if not isinstance(linhas, list):
+            return nome
+        tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
+        return f"{nome}|{'/'.join(tags)}"
+
+    def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
+        dados = ref.dados if isinstance(ref.dados, dict) else {}
+        pronto = bool(dados.get("molde_pronto", False))
+        assinatura = self._assinatura_grade(dados)
+        if not pronto:
+            return QIcon(str(ICONS_DIR / "molde-nao-pronto.svg"))
+        if referencia_grade and assinatura and assinatura != referencia_grade:
+            return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
+        return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
 
     def _assinatura_grade(self, molde: dict) -> str:
         nome = str(molde.get("graduacao_grade_nome") or "").strip()
@@ -1580,6 +1617,43 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._indice_atual = int(idx)
         self._preencher_campos(self._molde_atual())
+
+    def _quando_item_editado(self, item: QTreeWidgetItem, coluna: int):
+        if self._suspender_item_changed or coluna != 0:
+            return
+        novo_nome = item.text(0).strip()
+        if not novo_nome:
+            return
+        idx = item.data(0, Qt.UserRole)
+        if idx is not None:
+            cena = getattr(self.canvas, "cena", None)
+            elementos = getattr(cena, "elementos", [])
+            if isinstance(elementos, list) and 0 <= int(idx) < len(elementos):
+                el = elementos[int(idx)]
+                if isinstance(el, dict) and el.get("molde"):
+                    el["nome_molde"] = novo_nome
+                    self._atualizar_combo_moldes()
+                    self.preview.set_molde(dict(el))
+                    self.canvas.update()
+            return
+        parent = item.parent()
+        if parent is None:
+            return
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+        for i in range(item.childCount()):
+            filho = item.child(i)
+            idx_filho = filho.data(0, Qt.UserRole)
+            if idx_filho is None:
+                continue
+            if 0 <= int(idx_filho) < len(elementos):
+                el = elementos[int(idx_filho)]
+                if isinstance(el, dict) and el.get("molde"):
+                    el["tecido"] = novo_nome
+                    el["grupo_molde"] = novo_nome
+        self.canvas.update()
 
     def _molde_atual(self) -> dict | None:
         if self._indice_atual is None:
@@ -1819,11 +1893,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._cor_visual = cor.name()
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
-        molde = self._molde_atual()
-        if molde:
-            clone = dict(molde)
-            clone["cor"] = self._cor_visual
-            self.preview.set_molde(clone)
+        self._aplicar_imediato_formulario()
 
     def _selecionar_cor_clara(self, cor_inicial: QColor, titulo: str) -> QColor:
         dialog = QColorDialog(cor_inicial, self)
@@ -1913,7 +1983,6 @@ class PropriedadesMoldesDialog(QDialog):
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
         self.preview.set_molde(dict(molde))
         self.canvas.update()
-        self.recarregar_lista()
 
     def _conectar_auto_aplicacao(self):
         sinais = [
@@ -2080,6 +2149,14 @@ class ConfigurarDefaultsDialog(QDialog):
                 color: #111111;
                 border: 1px solid #b5bcc3;
                 min-height: 20px;
+                combobox-popup: 0;
+            }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                selection-background-color: #2b7cd3;
+                selection-color: #ffffff;
             }
             QPushButton {
                 background: #f7f7f7;
@@ -2205,6 +2282,14 @@ class ConfigurarCoresTecidosDialog(QDialog):
                 border-radius: 3px;
                 min-height: 22px;
                 padding: 2px 6px;
+            }
+            QComboBox { combobox-popup: 0; }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                selection-background-color: #2b7cd3;
+                selection-color: #ffffff;
             }
             QTableWidget {
                 background: #ffffff;
