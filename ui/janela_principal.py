@@ -698,6 +698,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             layout.addWidget(rb_np)
             layout.addWidget(rb_2p)
             layout.addWidget(rb_3p)
+            layout.addWidget(rb_np)
             rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
             rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
             rb_np.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("np") if marcado else None)
