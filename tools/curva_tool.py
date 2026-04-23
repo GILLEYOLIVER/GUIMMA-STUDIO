@@ -82,10 +82,19 @@ class Ferramenta(FerramentaBase):
                 canvas._curva_p2 = pos
                 canvas._curva_p1 = canvas._controle_para_tres_pontos(canvas._curva_p0, canvas._curva_pmedio, canvas._curva_p2)
                 if canvas._modo_curva == "np":
+                    pm_anterior = QPointF(canvas._curva_pmedio) if canvas._curva_pmedio is not None else None
                     novo_inicio = QPointF(canvas._curva_p2)
                     canvas._finalizar_curva()
                     canvas._curva_p0 = novo_inicio
-                    canvas._curva_estado = "aguardando_ponto2"
+                    if pm_anterior is not None:
+                        pm_espelhado = QPointF(
+                            (2.0 * novo_inicio.x()) - pm_anterior.x(),
+                            (2.0 * novo_inicio.y()) - pm_anterior.y(),
+                        )
+                        canvas._curva_pmedio = pm_espelhado
+                        canvas._curva_estado = "aguardando_ponto3"
+                    else:
+                        canvas._curva_estado = "aguardando_ponto2"
                     canvas._curva_preview_fim = None
                 else:
                     canvas._finalizar_curva()
