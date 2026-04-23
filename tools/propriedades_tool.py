@@ -1553,24 +1553,6 @@ class PropriedadesMoldesDialog(QDialog):
             return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
         return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
 
-    def _assinatura_grade(self, molde: dict) -> str:
-        nome = str(molde.get("graduacao_grade_nome") or "").strip()
-        linhas = molde.get("graduacao_tamanhos")
-        if not isinstance(linhas, list):
-            return nome
-        tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
-        return f"{nome}|{'/'.join(tags)}"
-
-    def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
-        dados = ref.dados if isinstance(ref.dados, dict) else {}
-        pronto = bool(dados.get("molde_pronto", False))
-        assinatura = self._assinatura_grade(dados)
-        if not pronto:
-            return QIcon(str(ICONS_DIR / "molde-nao-pronto.svg"))
-        if referencia_grade and assinatura and assinatura != referencia_grade:
-            return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
-        return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
-
     def _iter_items(self, pai: QTreeWidgetItem):
         for i in range(pai.childCount()):
             child = pai.child(i)

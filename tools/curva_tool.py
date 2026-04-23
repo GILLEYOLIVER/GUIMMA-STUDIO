@@ -18,6 +18,25 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
         if event.button() == Qt.RightButton:
+            if canvas._modo_curva == "np":
+                if canvas._cliques_direito_curva >= 1:
+                    canvas._resetar_estado_curva()
+                    canvas._cliques_direito_curva = 0
+                    canvas.ferramenta_padrao_solicitada.emit("selecionar")
+                    canvas.update()
+                    event.accept()
+                    return True
+                # 1º RMB no modo indefinido: apenas encerra o desenho contínuo atual.
+                canvas._curva_p0 = None
+                canvas._curva_pmedio = None
+                canvas._curva_p1 = None
+                canvas._curva_p2 = None
+                canvas._curva_preview_fim = None
+                canvas._curva_estado = "parada"
+                canvas._cliques_direito_curva = 1
+                canvas.update()
+                event.accept()
+                return True
             if canvas._cliques_direito_curva >= 2:
                 canvas._resetar_estado_curva()
                 canvas._cliques_direito_curva = 0

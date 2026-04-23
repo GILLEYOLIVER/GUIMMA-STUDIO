@@ -39,11 +39,23 @@ class Ferramenta(FerramentaBase):
                 self.set_status("Elemento alternado com botão direito.")
                 event.accept()
                 return True
+            if canvas._snap_resultado and canvas._snap_resultado.elemento_idx is not None:
+                idx_snap = int(canvas._snap_resultado.elemento_idx)
+                if 0 <= idx_snap < len(canvas.cena.elementos):
+                    canvas._selecionados = {idx_snap}
+                    self.set_status("Elemento alternado via snap.")
+                    canvas.update()
+                    event.accept()
+                    return True
             return False
         if event.button() != Qt.LeftButton:
             return False
 
         indices = canvas._indices_elementos_em_ponto(pos)
+        if not indices and canvas._snap_resultado and canvas._snap_resultado.elemento_idx is not None:
+            idx_snap = int(canvas._snap_resultado.elemento_idx)
+            if 0 <= idx_snap < len(canvas.cena.elementos):
+                indices = [idx_snap]
         if indices:
             selecionado = indices[0]
             if selecionado in canvas._selecionados and not (event.modifiers() & Qt.ShiftModifier):

@@ -577,21 +577,20 @@ class VisualizacaoCanvas(QWidget):
         )
         tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
         for idx, el in enumerate(self.cena.elementos):
-            if el.get("tipo") != "bezier_quadratica":
-                continue
-            p0 = QPointF(*el["p0"])
-            p1 = QPointF(*el["p1"])
-            p2 = QPointF(*el["p2"])
-            candidatos = [
-                ("nó", p0),
-                ("controle", p1),
-                ("nó", p2),
-                ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
-            ]
-            for tipo, ponto in candidatos:
-                dist = self._dist(pos_cena, ponto)
-                if dist <= tol_cena:
-                    self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+            if el.get("tipo") == "bezier_quadratica":
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                candidatos = [
+                    ("nó", p0),
+                    ("controle", p1),
+                    ("nó", p2),
+                    ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
+                ]
+                for tipo, ponto in candidatos:
+                    dist = self._dist(pos_cena, ponto)
+                    if dist <= tol_cena:
+                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
             for chave in ("controle_cantos", "controle_auxiliares"):
                 for p in el.get(chave, []) or []:
                     if not isinstance(p, (list, tuple)) or len(p) != 2:
@@ -600,6 +599,27 @@ class VisualizacaoCanvas(QWidget):
                     dist = self._dist(pos_cena, ponto)
                     if dist <= tol_cena:
                         self._snap_candidatos.append(SnapResult(ponto=ponto, tipo="controle", distancia=dist, elemento_idx=idx))
+            if el.get("molde"):
+                fio_origem = el.get("fio_origem")
+                fio_fim = el.get("fio_fim")
+                if isinstance(fio_origem, (list, tuple)) and len(fio_origem) == 2 and isinstance(fio_fim, (list, tuple)) and len(fio_fim) == 2:
+                    p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
+                    p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
+                    pm = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
+                    for tipo, ponto in (("fio", p1), ("fio", p2), ("fio", pm)):
+                        dist = self._dist(pos_cena, ponto)
+                        if dist <= tol_cena:
+                            self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+                if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
+                    pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                    base = pts[:-1] if len(pts) >= 2 and pts[0] == pts[-1] else pts
+                    if base:
+                        cx = sum(p.x() for p in base) / len(base)
+                        cy = sum(p.y() for p in base) / len(base)
+                        p_nome = QPointF(cx, cy)
+                        dist_nome = self._dist(pos_cena, p_nome)
+                        if dist_nome <= tol_cena * 1.5:
+                            self._snap_candidatos.append(SnapResult(ponto=p_nome, tipo="nome", distancia=dist_nome, elemento_idx=idx))
         if self._ponto_coordenada_aplicada is not None:
             dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
             if dist <= tol_cena:
