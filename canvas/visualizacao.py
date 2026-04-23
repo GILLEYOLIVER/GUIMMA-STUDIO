@@ -77,7 +77,7 @@ class VisualizacaoCanvas(QWidget):
         self._curva_p1: QPointF | None = None
         self._curva_preview_fim: QPointF | None = None
         self._curva_pmedio: QPointF | None = None
-        self._modo_curva = "2p"
+        self._modo_curva = "np"
         self._cliques_direito_curva = 0
         self._arrastando_alca_curva: tuple[int, str] | None = None
         self._ciclo_selecao_indices: list[int] = []
@@ -217,7 +217,13 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def set_modo_curva(self, modo: str):
-        self._modo_curva = "3p" if str(modo).lower().startswith("3") else "2p"
+        modo_txt = str(modo).lower().strip()
+        if modo_txt in {"np", "n", "indefinido", "indefinidos"}:
+            self._modo_curva = "np"
+        elif modo_txt.startswith("3"):
+            self._modo_curva = "3p"
+        else:
+            self._modo_curva = "2p"
         self._resetar_estado_curva()
 
     def set_unidade_medida(self, unidade_sigla: str, fator_unidade: float):
@@ -478,6 +484,60 @@ class VisualizacaoCanvas(QWidget):
         self._curva_p1 = None
         self._curva_preview_fim = None
         self._curva_pmedio = None
+        self._arrastando_alca_curva = None
+
+    def _controle_para_tres_pontos(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> QPointF:
+        # B(0.5) = 0.25*p0 + 0.5*p1 + 0.25*p2  =>  p1 = 2*pmedio - 0.5*(p0+p2)
+        return QPointF(
+            (2.0 * pmedio.x()) - (0.5 * (p0.x() + p2.x())),
+            (2.0 * pmedio.y()) - (0.5 * (p0.y() + p2.y())),
+        )
+
+    def _curva_pronta_para_finalizar(self) -> bool:
+        if self._modo_curva == "3p":
+            return all(p is not None for p in (self._curva_p0, self._curva_pmedio, self._curva_p2))
+        return all(p is not None for p in (self._curva_p0, self._curva_p1, self._curva_p2))
+
+    def _finalizar_curva(self):
+        if not self._curva_pronta_para_finalizar():
+            return
+        if self._modo_curva == "3p" and self._curva_p1 is None and self._curva_p0 and self._curva_pmedio and self._curva_p2:
+            self._curva_p1 = self._controle_para_tres_pontos(self._curva_p0, self._curva_pmedio, self._curva_p2)
+        if self._curva_p0 is None or self._curva_p1 is None or self._curva_p2 is None:
+            return
+        self.cena.elementos.append(
+            {
+                "tipo": "bezier_quadratica",
+                "p0": (self._curva_p0.x(), self._curva_p0.y()),
+                "p1": (self._curva_p1.x(), self._curva_p1.y()),
+                "p2": (self._curva_p2.x(), self._curva_p2.y()),
+                "cor": self._linha_cor,
+                "espessura": self._linha_espessura,
+                "estilo": self._linha_estilo,
+                "amplitude": self._linha_amplitude,
+                "fase_inicio": 0.0,
+            }
+        )
+        self._registrar_historico()
+        self._resetar_estado_curva()
+        self.update()
+
+    def _alca_curva_em_ponto(self, pos: QPointF) -> tuple[int, str] | None:
+        tolerancia = 10.0 / max(self.zoom, 0.001)
+        candidatos = sorted(self._selecionados) if self._selecionados else range(len(self.cena.elementos))
+        for idx in candidatos:
+            if idx < 0 or idx >= len(self.cena.elementos):
+                continue
+            el = self.cena.elementos[idx]
+            if el.get("tipo") != "bezier_quadratica":
+                continue
+            for chave in ("p0", "p1", "p2"):
+                px, py = el.get(chave, (None, None))
+                if px is None or py is None:
+                    continue
+                if self._dist(QPointF(float(px), float(py)), pos) <= tolerancia:
+                    return idx, chave
+        return None
 
     def _reposicionar_painel_coordenadas(self):
         if not self.painel_coordenadas.isVisible():
@@ -507,26 +567,59 @@ class VisualizacaoCanvas(QWidget):
 
     def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
         pos_cena = self._tela_para_cena(pos_tela)
+        if not self._snap_ativo:
+            self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
+            return pos_cena
         self._snap_candidatos = self._snap_manager.calcular_candidatos(
             self.cena, pos_cena, self.zoom, tolerancia_px=self._tolerancia_snap_px()
         )
         tol_cena = self._tolerancia_snap_px() / max(self.zoom, 0.001)
         for idx, el in enumerate(self.cena.elementos):
-            if el.get("tipo") != "bezier_quadratica":
-                continue
-            p0 = QPointF(*el["p0"])
-            p1 = QPointF(*el["p1"])
-            p2 = QPointF(*el["p2"])
-            candidatos = [
-                ("nó", p0),
-                ("controle", p1),
-                ("nó", p2),
-                ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
-            ]
-            for tipo, ponto in candidatos:
-                dist = self._dist(pos_cena, ponto)
-                if dist <= tol_cena:
-                    self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+            if el.get("tipo") == "bezier_quadratica":
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                candidatos = [
+                    ("nó", p0),
+                    ("controle", p1),
+                    ("nó", p2),
+                    ("ponto médio", QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)),
+                ]
+                for tipo, ponto in candidatos:
+                    dist = self._dist(pos_cena, ponto)
+                    if dist <= tol_cena:
+                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+            for chave in ("controle_cantos", "controle_auxiliares"):
+                for p in el.get(chave, []) or []:
+                    if not isinstance(p, (list, tuple)) or len(p) != 2:
+                        continue
+                    ponto = QPointF(float(p[0]), float(p[1]))
+                    dist = self._dist(pos_cena, ponto)
+                    if dist <= tol_cena:
+                        self._snap_candidatos.append(SnapResult(ponto=ponto, tipo="controle", distancia=dist, elemento_idx=idx))
+            if el.get("molde"):
+                fio_origem = el.get("fio_origem")
+                fio_fim = el.get("fio_fim")
+                if isinstance(fio_origem, (list, tuple)) and len(fio_origem) == 2 and isinstance(fio_fim, (list, tuple)) and len(fio_fim) == 2:
+                    p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
+                    p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
+                    pm = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
+                    for tipo, ponto in (("fio", p1), ("fio", p2), ("fio", pm)):
+                        dist = self._dist(pos_cena, ponto)
+                        if dist <= tol_cena:
+                            self._snap_candidatos.append(SnapResult(ponto=ponto, tipo=tipo, distancia=dist, elemento_idx=idx))
+                if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
+                    pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                    base = pts[:-1] if len(pts) >= 2 and pts[0] == pts[-1] else pts
+                    if base:
+                        cx = sum(p.x() for p in base) / len(base)
+                        cy = sum(p.y() for p in base) / len(base)
+                        p_nome = QPointF(cx, cy)
+                        dist_nome = self._dist(pos_cena, p_nome)
+                        if dist_nome <= tol_cena * 1.5:
+                            self._snap_candidatos.append(SnapResult(ponto=p_nome, tipo="nome", distancia=dist_nome, elemento_idx=idx))
         if self._ponto_coordenada_aplicada is not None:
             dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
             if dist <= tol_cena:
@@ -837,9 +930,12 @@ class VisualizacaoCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        self._ponto_com_snap(event.position())
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_move"):
             if self._runtime_tool.on_mouse_move(self, event):
+                self.update()
                 return
+        self.update()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -891,6 +987,25 @@ class VisualizacaoCanvas(QWidget):
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
+        self._desenhar_overlay_snap_ativo(painter)
+
+    def _desenhar_overlay_snap_ativo(self, painter: QPainter):
+        if not self._snap_ativo or not self._snap_resultado:
+            return
+        snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
+        cor = QColor("#ffd400")
+        if self._snap_resultado.tipo == "controle":
+            cor = QColor("#2da8ff")
+        elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
+            cor = QColor("#7df9ff")
+        elif self._snap_resultado.tipo == "interseção":
+            cor = QColor("#ff62b0")
+        pen = QPen(cor, 1.6)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(snap_tela, 6, 6)
+        painter.drawLine(QPointF(snap_tela.x() - 8, snap_tela.y()), QPointF(snap_tela.x() + 8, snap_tela.y()))
+        painter.drawLine(QPointF(snap_tela.x(), snap_tela.y() - 8), QPointF(snap_tela.x(), snap_tela.y() + 8))
 
     def _desenhar_overlays_moldes(self, painter: QPainter):
         for idx, el in enumerate(self.cena.elementos):
@@ -947,11 +1062,21 @@ class VisualizacaoCanvas(QWidget):
 
             if el.get("mostrar_controles", True) and idx not in self._selecionados:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+                if cantos:
+                    cx = sum(p.x() for p in cantos) / len(cantos)
+                    cy = sum(p.y() for p in cantos) / len(cantos)
+                else:
+                    cx, cy = 0.0, 0.0
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
-                    painter.drawText(int(pt_tela.x() + 4), int(pt_tela.y() - 6), str(i))
+                    dx = pt.x() - cx
+                    dy = pt.y() - cy
+                    mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
+                    off_x = (dx / mod) * 11.0
+                    off_y = (dy / mod) * 11.0
+                    painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
                 aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                 painter.setPen(QPen(QColor("#ff3b30"), 1.0))
                 painter.setBrush(QColor("#ff3b30"))
