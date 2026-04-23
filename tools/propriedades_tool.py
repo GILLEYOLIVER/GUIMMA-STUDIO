@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from math import sqrt
@@ -78,7 +79,7 @@ class PreviewMoldeWidget(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#000000"))
+        painter.fillRect(self.rect(), QColor("#f1f1f1"))
         info = self._dados_transformacao()
         if not info:
             painter.setPen(QPen(QColor("#8a8a8a"), 1))
@@ -114,7 +115,9 @@ class PreviewMoldeWidget(QWidget):
                 self._offset.y() + info["offset_y"] + ((pt.y() - info["min_y"]) * info["escala"] * self._zoom),
             )
 
-        cor_desenho = QColor("#ffffff")
+        cor_desenho = QColor(str(self._molde.get("cor") or "#ffffff"))
+        if not cor_desenho.isValid():
+            cor_desenho = QColor("#ffffff")
         if self._mostrar_cor_tecidos:
             tecido = str(self._molde.get("tecido") or "").strip()
             cor_tecido = self._cores_tecidos.get(tecido)
@@ -451,10 +454,15 @@ class PropriedadesMoldesDialog(QDialog):
         self.canvas = canvas
         self._mostrar_tab_ferramentas = bool(mostrar_tab_ferramentas)
         self._refs: list[MoldeRef] = []
-        self._indice_atual: int | None = None
+        self._indice_atual: int | None = self._indice_molde_preferencial()
         self._cor_visual = "#ffffff"
         self._graduacao_linhas: list[dict] = []
         self._contador_novos_tamanhos = 0
+        self._snapshot_moldes: dict[int, dict] = self._criar_snapshot_moldes()
+        self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._confirmado_ok = False
+        self._suspender_auto_aplicar = False
+        self._suspender_item_changed = False
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -463,6 +471,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
+        self._conectar_auto_aplicacao()
         _log_propriedades_debug(f"PropriedadesMoldesDialog criado. canvas={type(canvas).__name__}; parent={type(parent).__name__ if parent is not None else None}; mostrar_tab_ferramentas={mostrar_tab_ferramentas}")
         try:
             self.recarregar_lista()
@@ -519,6 +528,15 @@ class PropriedadesMoldesDialog(QDialog):
             border-radius: 0px;
             selection-background-color: #2b7cd3;
             selection-color: #ffffff;
+        }
+        QComboBox { combobox-popup: 0; }
+        QComboBox QAbstractItemView {
+            background: #ffffff;
+            color: #111111;
+            border: 1px solid #b5bcc3;
+            selection-background-color: #2b7cd3;
+            selection-color: #ffffff;
+            outline: 0;
         }
         QTextEdit { padding: 4px; }
         QGroupBox {
@@ -612,6 +630,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore = QTreeWidget()
         self.arvore.setHeaderHidden(True)
         self.arvore.itemSelectionChanged.connect(self._quando_troca_selecao)
+        self.arvore.itemChanged.connect(self._quando_item_editado)
         lay_esq.addWidget(self.arvore, 1)
 
         self.btn_excluir_molde = QPushButton("🗑 Excluir molde")
@@ -735,7 +754,7 @@ class PropriedadesMoldesDialog(QDialog):
         grid.setColumnStretch(1, 1)
 
         self.cmb_molde = QComboBox()
-        self.cmb_molde.setEditable(False)
+        self.cmb_molde.setEditable(True)
         self.cmb_molde.currentIndexChanged.connect(self._trocar_molde_pelo_combo)
 
         self.cmb_tipo_corte = QComboBox()
@@ -937,6 +956,7 @@ class PropriedadesMoldesDialog(QDialog):
         form.setSpacing(8)
         self.cmb_aplicar_grade = QComboBox()
         self.cmb_aplicar_grade.addItems(["Ao modelo", "Ao molde"])
+        self.cmb_aplicar_grade.setCurrentText("Ao molde")
         self.cmb_area_tamanho = QComboBox()
         self.cmb_area_tamanho.addItems(["Manter diferença", "Igual tamanho", "Tamanho intermediário"])
         self.cmb_grade_tamanhos = QComboBox()
@@ -1343,38 +1363,118 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.btn_config_ferramentas = QPushButton("Configurar Ferramentas")
         self.btn_config_defaults = QPushButton("Configurar Defaults")
+        self.btn_config_ferramentas.clicked.connect(self._abrir_config_ferramentas)
+        self.btn_config_defaults.clicked.connect(self._abrir_config_defaults)
         grid.addWidget(self.btn_config_ferramentas, 0, 4, 1, 2)
         grid.addWidget(self.btn_config_defaults, 1, 4, 1, 2)
 
-        cmb_extra1 = QComboBox()
-        cmb_extra1.addItem("-")
-        cmb_extra2 = QComboBox()
-        cmb_extra2.addItem("-")
-        btn_cor_extra = QPushButton("")
-        btn_cor_extra.setFixedSize(30, 22)
-        btn_cor_extra.setStyleSheet("background:#d6d6d6; border:1px solid #343434;")
-        chk_extra = QCheckBox("Usar")
+        self.cmb_extra1 = QComboBox()
+        self.cmb_extra1.addItems(["-", "Piques sobre o contorno", "Piques internos", "Linhas auxiliares"])
+        self.cmb_extra2 = QComboBox()
+        self.cmb_extra2.addItems(["1", "2", "3", "4", "5", "6", "7", "8", "9"])
+        self.cmb_extra2.setCurrentText("6")
+        self.btn_cor_extra = QPushButton("")
+        self.btn_cor_extra.setFixedSize(30, 22)
+        self.btn_cor_extra.setStyleSheet("background:#19bdb7; border:1px solid #343434;")
+        self.btn_cor_extra.clicked.connect(lambda: self._escolher_cor_ferramenta(self.btn_cor_extra))
+        self.chk_extra = QCheckBox("Usar")
+        self.chk_extra.setChecked(True)
         btn_aplicar = QPushButton("Aplicar todos")
         btn_aplicar.setObjectName("ApplyBlueButton")
         btn_aplicar.clicked.connect(self._aplicar)
-        grid.addWidget(cmb_extra1, 6, 0, 1, 2)
-        grid.addWidget(cmb_extra2, 6, 2)
-        grid.addWidget(btn_cor_extra, 6, 3)
-        grid.addWidget(chk_extra, 6, 4)
+        grid.addWidget(self.cmb_extra1, 6, 0, 1, 2)
+        grid.addWidget(self.cmb_extra2, 6, 2)
+        grid.addWidget(self.btn_cor_extra, 6, 3)
+        grid.addWidget(self.chk_extra, 6, 4)
         grid.addWidget(btn_aplicar, 6, 5)
-        grid.addWidget(QLabel("Aplique a todos os moldes as configurações de ferramentas"), 7, 0, 1, 6)
+        self.lbl_aplicar_extra = QLabel("")
+        grid.addWidget(self.lbl_aplicar_extra, 7, 0, 1, 6)
+        self.cmb_extra1.currentIndexChanged.connect(self._atualizar_config_extra_ferramenta)
+        self._atualizar_config_extra_ferramenta()
 
         layout.addWidget(box)
         layout.addStretch(1)
         return aba
+
+    def _abrir_config_ferramentas(self):
+        dialog = ConfigurarFerramentasDialog(self)
+        dialog.exec()
+
+    def _abrir_config_defaults(self):
+        valores = []
+        for cmb, btn_cor, chk in getattr(self, "_ferramentas_linhas", []):
+            cor = self._cor_botao(btn_cor)
+            valores.append(
+                {
+                    "indice": cmb.currentText(),
+                    "cor": cor,
+                    "usar": chk.isChecked(),
+                }
+            )
+        dialog = ConfigurarDefaultsDialog(valores, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        novos = dialog.valores()
+        for i, (cmb, btn_cor, chk) in enumerate(getattr(self, "_ferramentas_linhas", [])):
+            if i >= len(novos):
+                break
+            dados = novos[i]
+            if cmb.isEnabled() and dados.get("indice"):
+                cmb.setCurrentText(str(dados["indice"]))
+            if btn_cor.isEnabled() and dados.get("cor"):
+                btn_cor.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+            if chk.isEnabled():
+                chk.setChecked(bool(dados.get("usar", False)))
+
+    @staticmethod
+    def _cor_botao(botao: QPushButton) -> str:
+        estilo = botao.styleSheet() or ""
+        for trecho in estilo.split(";"):
+            if "background" in trecho and ":" in trecho:
+                return trecho.split(":", 1)[1].strip()
+        return botao.palette().button().color().name()
+
+    def _escolher_cor_ferramenta(self, botao: QPushButton):
+        cor_atual = QColor(self._cor_botao(botao))
+        dialog = QColorDialog(cor_atual, self)
+        dialog.setWindowTitle("Cor da ferramenta")
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if cor.isValid():
+            botao.setStyleSheet(f"background:{cor.name()}; border:1px solid #343434;")
+
+    def _atualizar_config_extra_ferramenta(self):
+        mapa = {
+            0: {"indice": "6", "cor": "#d6d6d6", "texto": "Aplique a todos os moldes as configurações de ferramentas", "usar": False},
+            1: {"indice": "6", "cor": "#19bdb7", "texto": "Selecione os \"piques sobre o contorno\" para aplicar a todos.", "usar": True},
+            2: {"indice": "7", "cor": "#d0d0d0", "texto": "Selecione os \"piques internos\" para aplicar a todos.", "usar": True},
+            3: {"indice": "8", "cor": "#93ed2b", "texto": "Selecione as \"linhas auxiliares\" para aplicar a todos.", "usar": True},
+        }
+        dados = mapa.get(self.cmb_extra1.currentIndex(), mapa[0])
+        if hasattr(self, "cmb_extra2"):
+            self.cmb_extra2.setCurrentText(dados["indice"])
+        if hasattr(self, "btn_cor_extra"):
+            self.btn_cor_extra.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+            self.btn_cor_extra.setEnabled(bool(dados.get("usar", True)))
+        if hasattr(self, "chk_extra"):
+            self.chk_extra.setChecked(bool(dados.get("usar", True)))
+            self.chk_extra.setEnabled(self.cmb_extra1.currentIndex() != 0)
+        if hasattr(self, "cmb_extra2"):
+            self.cmb_extra2.setEnabled(self.cmb_extra1.currentIndex() != 0)
+        if hasattr(self, "lbl_aplicar_extra"):
+            self.lbl_aplicar_extra.setText(dados["texto"])
 
     def recarregar_lista(self):
         _log_propriedades_debug("recarregar_lista() iniciado")
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
+        self._suspender_item_changed = True
         self.arvore.clear()
         raiz = QTreeWidgetItem(["1"])
+        raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
 
@@ -1391,14 +1491,20 @@ class PropriedadesMoldesDialog(QDialog):
         for ref in diretos:
             item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
             item.setData(0, Qt.UserRole, ref.indice)
+            item.setFlags(item.flags() | Qt.ItemIsEditable)
+            item.setIcon(0, self._icone_status_molde(ref, referencia_grade=self._assinatura_grade(diretos[0].dados if diretos else {})))
             raiz.addChild(item)
 
         for grupo_nome, itens in grupos.items():
             pai = QTreeWidgetItem([grupo_nome])
+            pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
+            referencia = self._assinatura_grade(itens[0].dados if itens else {})
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
+                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia))
                 pai.addChild(item)
 
         raiz.setExpanded(True)
@@ -1427,6 +1533,25 @@ class PropriedadesMoldesDialog(QDialog):
             self._atualizar_combo_moldes()
             _log_propriedades_debug("recarregar_lista(): nenhum item escolhido; preenchendo campos vazios")
             self._preencher_campos(None)
+        self._suspender_item_changed = False
+
+    def _assinatura_grade(self, molde: dict) -> str:
+        nome = str(molde.get("graduacao_grade_nome") or "").strip()
+        linhas = molde.get("graduacao_tamanhos")
+        if not isinstance(linhas, list):
+            return nome
+        tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
+        return f"{nome}|{'/'.join(tags)}"
+
+    def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
+        dados = ref.dados if isinstance(ref.dados, dict) else {}
+        pronto = bool(dados.get("molde_pronto", False))
+        assinatura = self._assinatura_grade(dados)
+        if not pronto:
+            return QIcon(str(ICONS_DIR / "molde-nao-pronto.svg"))
+        if referencia_grade and assinatura and assinatura != referencia_grade:
+            return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
+        return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
 
     def _iter_items(self, pai: QTreeWidgetItem):
         for i in range(pai.childCount()):
@@ -1448,6 +1573,21 @@ class PropriedadesMoldesDialog(QDialog):
             refs.append(MoldeRef(indice=idx, nome=str(el.get("nome_molde") or f"K{idx + 1}"), dados=el))
         return refs
 
+    def _indice_molde_preferencial(self) -> int | None:
+        selecionados = getattr(self.canvas, "_selecionados", set())
+        if not isinstance(selecionados, (set, list, tuple)):
+            return None
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if not isinstance(elementos, list):
+            return None
+        for idx in selecionados:
+            if isinstance(idx, int) and 0 <= idx < len(elementos):
+                el = elementos[idx]
+                if isinstance(el, dict) and el.get("molde"):
+                    return idx
+        return None
+
     def _quando_troca_selecao(self):
         item = self.arvore.currentItem()
         if not item:
@@ -1459,6 +1599,43 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._indice_atual = int(idx)
         self._preencher_campos(self._molde_atual())
+
+    def _quando_item_editado(self, item: QTreeWidgetItem, coluna: int):
+        if self._suspender_item_changed or coluna != 0:
+            return
+        novo_nome = item.text(0).strip()
+        if not novo_nome:
+            return
+        idx = item.data(0, Qt.UserRole)
+        if idx is not None:
+            cena = getattr(self.canvas, "cena", None)
+            elementos = getattr(cena, "elementos", [])
+            if isinstance(elementos, list) and 0 <= int(idx) < len(elementos):
+                el = elementos[int(idx)]
+                if isinstance(el, dict) and el.get("molde"):
+                    el["nome_molde"] = novo_nome
+                    self._atualizar_combo_moldes()
+                    self.preview.set_molde(dict(el))
+                    self.canvas.update()
+            return
+        parent = item.parent()
+        if parent is None:
+            return
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+        for i in range(item.childCount()):
+            filho = item.child(i)
+            idx_filho = filho.data(0, Qt.UserRole)
+            if idx_filho is None:
+                continue
+            if 0 <= int(idx_filho) < len(elementos):
+                el = elementos[int(idx_filho)]
+                if isinstance(el, dict) and el.get("molde"):
+                    el["tecido"] = novo_nome
+                    el["grupo_molde"] = novo_nome
+        self.canvas.update()
 
     def _molde_atual(self) -> dict | None:
         if self._indice_atual is None:
@@ -1496,6 +1673,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_faixa_giro.repaint()
 
     def _preencher_campos(self, molde: dict | None):
+        self._suspender_auto_aplicar = True
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
@@ -1522,6 +1700,7 @@ class PropriedadesMoldesDialog(QDialog):
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
             self._atualizar_estado_faixa_giro()
+            self._suspender_auto_aplicar = False
             return
 
         pos_combo = self.cmb_molde.findData(self._indice_atual)
@@ -1577,6 +1756,7 @@ class PropriedadesMoldesDialog(QDialog):
         else:
             self._aplicar_grade_tamanhos(self.cmb_grade_tamanhos.currentText())
         self.preview.set_molde(dict(molde))
+        self._suspender_auto_aplicar = False
 
     def _dados_encaixe_formulario(self) -> dict:
         return {
@@ -1616,11 +1796,8 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _finalizar_aplicacao_em_lote(self):
         self.canvas.update()
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
         self.preview.set_molde(dict(self._molde_atual() or {}))
         self.recarregar_lista()
-        self.dados_aplicados.emit()
 
     def _aplicar_todos_moldes(self):
         if not self._refs:
@@ -1655,31 +1832,7 @@ class PropriedadesMoldesDialog(QDialog):
             QMessageBox.information(self, "Propriedades", "Selecione um molde.")
             return False
 
-        nome_combo = self.cmb_molde.currentText().strip()
-        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
-        molde["descricao"] = self.ed_descricao.toPlainText().strip()
-        molde["tecido"] = self.ed_tecido.currentText().strip()
-        molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
-        molde["espelhar"] = self.cmb_espelhar.currentText().strip()
-        molde["giro"] = self.cmb_giro.currentText().strip()
-        molde["faixa_giro"] = self.ed_faixa_giro.text().strip() or "0"
-        molde["giro_inicial"] = self.ed_giro_inicial.text().strip() or "0"
-        molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
-        molde["molde_pronto"] = self.chk_molde_pronto.isChecked()
-        molde["permitir_alteracoes_encaixe"] = self.chk_perm_alt.isChecked()
-        molde["par"] = self.chk_par.isChecked()
-        molde["dobra_vertical"] = self.chk_dobra_v.isChecked()
-        molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
-        molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
-        molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
-        molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
-        molde["mostrar_fio"] = self.chk_mostrar_fio.isChecked()
-        molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
-        molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
-        molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
-        molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
-        molde["visual_preencher"] = self.chk_preencher.isChecked()
-        molde["cor"] = self._cor_visual
+        self._aplicar_formulario_no_molde(molde)
         self._sincronizar_gradacao_no_molde()
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
 
@@ -1688,12 +1841,18 @@ class PropriedadesMoldesDialog(QDialog):
             self.canvas._registrar_historico()
         self.preview.set_molde(dict(molde))
         self.recarregar_lista()
+        self._confirmado_ok = True
         self.dados_aplicados.emit()
         return True
 
     def _ok(self):
         if self._aplicar():
             self.close()
+
+    def closeEvent(self, event):
+        if not self._confirmado_ok:
+            self._restaurar_snapshot_moldes()
+        super().closeEvent(event)
 
     def _excluir_molde_atual(self):
         cena = getattr(self.canvas, "cena", None)
@@ -1716,11 +1875,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._cor_visual = cor.name()
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
-        molde = self._molde_atual()
-        if molde:
-            clone = dict(molde)
-            clone["cor"] = self._cor_visual
-            self.preview.set_molde(clone)
+        self._aplicar_imediato_formulario()
 
     def _selecionar_cor_clara(self, cor_inicial: QColor, titulo: str) -> QColor:
         dialog = QColorDialog(cor_inicial, self)
@@ -1750,6 +1905,99 @@ class PropriedadesMoldesDialog(QDialog):
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
         )
 
+    def _criar_snapshot_moldes(self) -> dict[int, dict]:
+        snapshot: dict[int, dict] = {}
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return snapshot
+        for idx, el in enumerate(elementos):
+            if isinstance(el, dict) and el.get("molde"):
+                snapshot[idx] = deepcopy(el)
+        return snapshot
+
+    def _restaurar_snapshot_moldes(self):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+        for idx, el in self._snapshot_moldes.items():
+            if 0 <= idx < len(elementos):
+                elementos[idx] = deepcopy(el)
+        self.canvas._mostrar_cor_tecidos = bool(self._snapshot_mostrar_cor_tecidos)
+        self.canvas.update()
+
+    def _aplicar_formulario_no_molde(self, molde: dict):
+        nome_combo = self.cmb_molde.currentText().strip()
+        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
+        molde["descricao"] = self.ed_descricao.toPlainText().strip()
+        molde["tecido"] = self.ed_tecido.currentText().strip()
+        molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
+        molde["espelhar"] = self.cmb_espelhar.currentText().strip()
+        molde["giro"] = self.cmb_giro.currentText().strip()
+        molde["faixa_giro"] = self.ed_faixa_giro.text().strip() or "0"
+        molde["giro_inicial"] = self.ed_giro_inicial.text().strip() or "0"
+        molde["qtd_modelo"] = int(self.sp_qtd_modelo.value())
+        molde["molde_pronto"] = self.chk_molde_pronto.isChecked()
+        molde["permitir_alteracoes_encaixe"] = self.chk_perm_alt.isChecked()
+        molde["par"] = self.chk_par.isChecked()
+        molde["dobra_vertical"] = self.chk_dobra_v.isChecked()
+        molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
+        molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
+        molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
+        molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
+        molde["mostrar_fio"] = self.chk_mostrar_fio.isChecked()
+        molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
+        molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
+        molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
+        molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
+        molde["visual_preencher"] = self.chk_preencher.isChecked()
+        molde["cor"] = self._cor_visual
+
+    def _aplicar_imediato_formulario(self):
+        if self._suspender_auto_aplicar:
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        self._aplicar_formulario_no_molde(molde)
+        self._sincronizar_gradacao_no_molde()
+        self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        self.preview.set_molde(dict(molde))
+        self.canvas.update()
+
+    def _conectar_auto_aplicacao(self):
+        sinais = [
+            self.cmb_molde.currentTextChanged,
+            self.ed_descricao.textChanged,
+            self.ed_tecido.currentTextChanged,
+            self.cmb_tipo_corte.currentTextChanged,
+            self.cmb_espelhar.currentTextChanged,
+            self.cmb_giro.currentTextChanged,
+            self.ed_faixa_giro.textChanged,
+            self.ed_giro_inicial.textChanged,
+            self.sp_qtd_modelo.valueChanged,
+            self.chk_molde_pronto.toggled,
+            self.chk_perm_alt.toggled,
+            self.chk_par.toggled,
+            self.chk_dobra_v.toggled,
+            self.chk_dobra_h.toggled,
+            self.chk_reflete_v.toggled,
+            self.chk_reflete_h.toggled,
+            self.chk_mostrar_nome.toggled,
+            self.chk_mostrar_fio.toggled,
+            self.chk_mostrar_numeros.toggled,
+            self.chk_visual_descricao.toggled,
+            self.chk_quantidade_visual.toggled,
+            self.chk_margem_visual.toggled,
+            self.chk_preencher.toggled,
+            self.chk_mostrar_cor_tecidos.toggled,
+            self.cmb_grade_tamanhos.currentTextChanged,
+            self.cmb_aplicar_grade.currentTextChanged,
+        ]
+        for sinal in sinais:
+            sinal.connect(self._aplicar_imediato_formulario)
+
     def _abrir_config_cor_tecidos(self):
         cena = getattr(self.canvas, "cena", None)
         elementos = getattr(cena, "elementos", [])
@@ -1773,6 +2021,232 @@ class PropriedadesMoldesDialog(QDialog):
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
         )
 
+class ConfigurarFerramentasDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Configurar Ferramentas")
+        self.resize(640, 520)
+        self.setMinimumSize(580, 460)
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QTableWidget { color: #111111; }
+            QComboBox, QLineEdit {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                min-height: 20px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #b5bcc3;
+                gridline-color: #d6dbe0;
+            }
+            QHeaderView::section {
+                background: #f1f1f1;
+                color: #111111;
+                border: 1px solid #c2c8cf;
+                padding: 3px;
+            }
+            """
+        )
+        self._construir_ui()
+
+    def _construir_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel("Configure abaixo a cor e a descrição das ferramentas:"))
+
+        self.tbl = QTableWidget(16, 4)
+        self.tbl.setHorizontalHeaderLabels(["Ferramentas", "Descrição", "Tipo", "Cor"])
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tbl.setColumnWidth(0, 90)
+        self.tbl.setColumnWidth(2, 90)
+        self.tbl.setColumnWidth(3, 58)
+        self.tbl.cellClicked.connect(self._on_celula_clicada)
+        lay.addWidget(self.tbl, 1)
+
+        paleta = [
+            "#f0d100", "#8d00c7", "#17bcc3", "#ffffff", "#93ed2b", "#768899", "#8a4d17", "#4f96c5",
+            "#2ccb3b", "#0c12d6", "#f52ca6", "#f6b11c", "#d4d4d4", "#b8d99b", "#73e3cf", "#f1dfc4",
+        ]
+        for i in range(16):
+            idx_ferramenta = 4 + i
+            item_id = QTableWidgetItem(str(idx_ferramenta))
+            item_id.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl.setItem(i, 0, item_id)
+            self.tbl.setItem(i, 1, QTableWidgetItem(""))
+            cmb = QComboBox()
+            cmb.addItems(["Desenho"])
+            self.tbl.setCellWidget(i, 2, cmb)
+            item_cor = QTableWidgetItem("")
+            item_cor.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item_cor.setBackground(QColor(paleta[i]))
+            self.tbl.setItem(i, 3, item_cor)
+
+        botoes = QHBoxLayout()
+        botoes.addStretch(1)
+        ok = QPushButton("✓ OK")
+        cancelar = QPushButton("✕ Cancelar")
+        ok.clicked.connect(self.accept)
+        cancelar.clicked.connect(self.reject)
+        botoes.addWidget(ok)
+        botoes.addWidget(cancelar)
+        lay.addLayout(botoes)
+
+    def _on_celula_clicada(self, row: int, col: int):
+        if col != 3 or row < 0:
+            return
+        item = self.tbl.item(row, col)
+        atual = item.background().color() if item is not None else QColor("#ffffff")
+        dialog = QColorDialog(atual, self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Cor da ferramenta")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if item is not None and cor.isValid():
+            item.setBackground(cor)
+
+
+class ConfigurarDefaultsDialog(QDialog):
+    def __init__(self, valores_iniciais: list[dict] | None = None, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Ferramentas Padrão")
+        self.resize(310, 430)
+        self.setMinimumSize(290, 390)
+        self._valores = valores_iniciais or []
+        self._linhas: list[tuple[QComboBox, QPushButton, QCheckBox]] = []
+        self.setStyleSheet(
+            """
+            QDialog { background: #efefef; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QComboBox {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                min-height: 20px;
+                combobox-popup: 0;
+            }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                selection-background-color: #2b7cd3;
+                selection-color: #ffffff;
+            }
+            QPushButton {
+                background: #f7f7f7;
+                border: 1px solid #b7bec5;
+                border-radius: 4px;
+                min-height: 20px;
+                color: #111111;
+            }
+            """
+        )
+        self._construir_ui()
+
+    def _construir_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(QLabel(""), 0, 0)
+        grid.addWidget(QLabel(""), 0, 1)
+        grid.addWidget(QLabel(""), 0, 2)
+        grid.addWidget(QLabel("Usar"), 0, 3)
+
+        nomes = [
+            "Contorno",
+            "Nome",
+            "Descrição",
+            "Observações",
+            "Fio",
+            "Piques sobre o contorno",
+            "Piques internos",
+            "Linhas auxiliares",
+            "Costura",
+        ]
+        cores = ["#8f4514", "#557d1f", "#3f63d8", "#f0d100", "#0c12d6", "#19bdb7", "#d0d0d0", "#93ed2b", "#768899"]
+        for i, nome in enumerate(nomes):
+            lbl = QLabel(nome)
+            cmb = QComboBox()
+            cmb.addItems(["-", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
+            cmb.setCurrentText(str(i + 1))
+            btn_cor = QPushButton("")
+            btn_cor.setFixedSize(24, 20)
+            btn_cor.setStyleSheet(f"background:{cores[i]}; border:1px solid #343434;")
+            btn_cor.clicked.connect(lambda _=False, b=btn_cor: self._escolher_cor_botao(b))
+            chk = QCheckBox("")
+            chk.setChecked(True)
+            grid.addWidget(lbl, i + 1, 0)
+            grid.addWidget(cmb, i + 1, 1)
+            grid.addWidget(btn_cor, i + 1, 2)
+            grid.addWidget(chk, i + 1, 3, alignment=Qt.AlignCenter)
+            self._linhas.append((cmb, btn_cor, chk))
+
+        if self._valores:
+            for i, dados in enumerate(self._valores):
+                if i >= len(self._linhas):
+                    break
+                cmb, btn_cor, chk = self._linhas[i]
+                if dados.get("indice"):
+                    cmb.setCurrentText(str(dados["indice"]))
+                if dados.get("cor"):
+                    btn_cor.setStyleSheet(f"background:{dados['cor']}; border:1px solid #343434;")
+                chk.setChecked(bool(dados.get("usar", True)))
+
+        lay.addLayout(grid)
+
+        botoes = QHBoxLayout()
+        botoes.addStretch(1)
+        ok = QPushButton("✓ OK")
+        cancelar = QPushButton("✕ Cancelar")
+        ok.clicked.connect(self.accept)
+        cancelar.clicked.connect(self.reject)
+        botoes.addWidget(ok)
+        botoes.addWidget(cancelar)
+        lay.addLayout(botoes)
+
+    def _escolher_cor_botao(self, botao: QPushButton):
+        dialog = QColorDialog(QColor(self._cor_botao(botao)), self)
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Cor padrão")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        cor = dialog.selectedColor()
+        if cor.isValid():
+            botao.setStyleSheet(f"background:{cor.name()}; border:1px solid #343434;")
+
+    def valores(self) -> list[dict]:
+        saida = []
+        for cmb, btn_cor, chk in self._linhas:
+            saida.append(
+                {
+                    "indice": cmb.currentText(),
+                    "cor": self._cor_botao(btn_cor),
+                    "usar": chk.isChecked(),
+                }
+            )
+        return saida
+
+    @staticmethod
+    def _cor_botao(botao: QPushButton) -> str:
+        estilo = botao.styleSheet() or ""
+        for trecho in estilo.split(";"):
+            if "background" in trecho and ":" in trecho:
+                return trecho.split(":", 1)[1].strip()
+        return botao.palette().button().color().name()
+
+
 class ConfigurarCoresTecidosDialog(QDialog):
     def __init__(self, tecidos: list[str], mapa_cores: dict[str, str], parent: QWidget | None = None):
         super().__init__(parent)
@@ -1790,6 +2264,14 @@ class ConfigurarCoresTecidosDialog(QDialog):
                 border-radius: 3px;
                 min-height: 22px;
                 padding: 2px 6px;
+            }
+            QComboBox { combobox-popup: 0; }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #b5bcc3;
+                selection-background-color: #2b7cd3;
+                selection-color: #ffffff;
             }
             QTableWidget {
                 background: #ffffff;
