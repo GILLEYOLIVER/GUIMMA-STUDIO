@@ -436,8 +436,21 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_controles", True)
         if not molde.get("controle_cantos"):
             molde["controle_cantos"] = [(x, y) for x, y in base]
-        molde.setdefault("pontos_controle_principais", [])
-        molde.setdefault("pontos_auxiliares", [])
+        cantos = [(float(x), float(y)) for x, y in molde.get("controle_cantos", [])]
+        if len(cantos) >= 2 and not molde.get("controle_auxiliares"):
+            auxiliares: list[tuple[float, float]] = []
+            for i in range(len(cantos)):
+                j = (i + 1) % len(cantos)
+                ax, ay = cantos[i]
+                bx, by = cantos[j]
+                auxiliares.append(((ax + bx) / 2.0, (ay + by) / 2.0))
+            molde["controle_auxiliares"] = auxiliares
+        if not molde.get("pontos_controle_principais"):
+            molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
+        if not molde.get("pontos_auxiliares"):
+            molde["pontos_auxiliares"] = [
+                {"x": float(x), "y": float(y)} for x, y in molde.get("controle_auxiliares", [])
+            ]
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False
@@ -495,6 +508,14 @@ class Ferramenta(FerramentaBase):
     def _desenhar_controles_molde(self, canvas, painter, el: dict):
         principais = [QPointF(float(p["x"]), float(p["y"])) for p in el.get("pontos_controle_principais", [])]
         auxiliares = [QPointF(float(p["x"]), float(p["y"])) for p in el.get("pontos_auxiliares", [])]
+        if not principais:
+            principais = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
+        if not auxiliares:
+            auxiliares = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
+        if not principais:
+            return
+        cx = sum(p.x() for p in principais) / len(principais)
+        cy = sum(p.y() for p in principais) / len(principais)
         painter.setFont(QFont("Arial", 10, QFont.Bold))
         for i, pt in enumerate(principais, start=1):
             tela = canvas._cena_para_tela(pt)
@@ -502,7 +523,12 @@ class Ferramenta(FerramentaBase):
             painter.setBrush(QColor("#101010"))
             painter.drawRect(int(tela.x() - 4), int(tela.y() - 4), 8, 8)
             painter.setPen(QColor("#ffffff"))
-            painter.drawText(int(tela.x() - 6), int(tela.y() - 8), str(i))
+            dx = pt.x() - cx
+            dy = pt.y() - cy
+            mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
+            off_x = (dx / mod) * 10.0
+            off_y = (dy / mod) * 10.0
+            painter.drawText(int(tela.x() + off_x), int(tela.y() + off_y), str(i))
         painter.setPen(QPen(QColor("#ff2a2a"), 1))
         painter.setBrush(QColor("#ff2a2a"))
         for pt in auxiliares:
