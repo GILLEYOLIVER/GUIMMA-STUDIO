@@ -77,7 +77,7 @@ class VisualizacaoCanvas(QWidget):
         self._curva_p1: QPointF | None = None
         self._curva_preview_fim: QPointF | None = None
         self._curva_pmedio: QPointF | None = None
-        self._modo_curva = "2p"
+        self._modo_curva = "np"
         self._cliques_direito_curva = 0
         self._arrastando_alca_curva: tuple[int, str] | None = None
         self._ciclo_selecao_indices: list[int] = []
