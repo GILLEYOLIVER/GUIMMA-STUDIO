@@ -12,6 +12,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "retangulo"
     nome = "Retangulo"
+    usa_painel_auxiliar = False
     descricao_painel = "Clique em dois cantos para criar retângulo. RMB cancela a prévia."
 
     def __init__(self):

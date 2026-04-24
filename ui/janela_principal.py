@@ -80,6 +80,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._snap_ativo_global = bool(self.projeto_atual.preferencias_usuario.get("snap_ativo", True))
         self._janela_aux_curva: QDialog | None = None
         self._janela_aux_retangulo: QDialog | None = None
+        self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
@@ -611,38 +612,41 @@ class GuimmaStudioMainWindow(QMainWindow):
         }
         if tool_id not in instrucoes:
             return False
-        janela = QDialog(self)
-        janela.setWindowTitle(f"{titulo} - Auxiliar")
-        janela.setModal(True)
-        janela.setMinimumWidth(380)
-        janela.setStyleSheet(
-            "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
-            "QPushButton { background:#d7d7d7; border:1px solid #9da3aa; padding:4px 10px; color:#1f1f1f; }"
-            "QPushButton:disabled { color:#5f5f5f; background:#d8d8d8; border:1px solid #b3b3b3; }"
-        )
-        layout = QVBoxLayout(janela)
+        janela = self._janelas_aux_instrucao.get(tool_id)
         texto_titulo, texto_instrucao = instrucoes[tool_id]
-        lbl_titulo = QLabel(f"<b>{texto_titulo}</b>")
-        lbl_titulo.setStyleSheet("font-size: 13px;")
-        layout.addWidget(lbl_titulo)
-        lbl_instrucao = QLabel(texto_instrucao)
-        lbl_instrucao.setWordWrap(True)
-        lbl_instrucao.setStyleSheet("font-size: 12px; color:#2b2b2b;")
-        layout.addWidget(lbl_instrucao)
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.button(QDialogButtonBox.Ok).setText("Ativar ferramenta")
-        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
-        layout.addWidget(botoes)
-        botoes.accepted.connect(janela.accept)
-        botoes.rejected.connect(janela.reject)
+        if janela is None:
+            janela = QDialog(self)
+            janela.setWindowTitle(f"{titulo} - Auxiliar")
+            janela.setModal(False)
+            janela.setWindowFlag(Qt.Tool, True)
+            janela.setMinimumWidth(380)
+            janela.setStyleSheet(
+                "QDialog { background:#e6e6e6; border:1px solid #9da3aa; } QLabel { color:#2b2b2b; }"
+            )
+            layout = QVBoxLayout(janela)
+            lbl_titulo = QLabel(f"<b>{texto_titulo}</b>")
+            lbl_titulo.setStyleSheet("font-size: 13px;")
+            layout.addWidget(lbl_titulo)
+            lbl_instrucao = QLabel(texto_instrucao)
+            lbl_instrucao.setWordWrap(True)
+            lbl_instrucao.setStyleSheet("font-size: 12px; color:#2b2b2b;")
+            layout.addWidget(lbl_instrucao)
+            janela._lbl_titulo = lbl_titulo  # type: ignore[attr-defined]
+            janela._lbl_instrucao = lbl_instrucao  # type: ignore[attr-defined]
+            self._janelas_aux_instrucao[tool_id] = janela
+        else:
+            janela.setWindowTitle(f"{titulo} - Auxiliar")
+            if hasattr(janela, "_lbl_titulo"):
+                janela._lbl_titulo.setText(f"<b>{texto_titulo}</b>")  # type: ignore[attr-defined]
+            if hasattr(janela, "_lbl_instrucao"):
+                janela._lbl_instrucao.setText(texto_instrucao)  # type: ignore[attr-defined]
+
         self._restaurar_posicao_caixa_aux(janela, tool_id)
-        if janela.exec() != QDialog.Accepted:
-            self._memorizar_posicao_caixa_aux(janela, tool_id)
-            self.lbl_status.setText(f"{titulo} cancelado.")
-            return True
-        self._memorizar_posicao_caixa_aux(janela, tool_id)
+        janela.show()
+        janela.raise_()
+        janela.activateWindow()
         self._ativar_ferramenta_global(tool_id)
-        self.lbl_status.setText(f"{titulo} ativo. Siga os passos da janela auxiliar.")
+        self.lbl_status.setText(f"{titulo} ativo.")
         return True
 
     def _abrir_janela_auxiliar_retangulo(self, titulo: str) -> bool:
@@ -764,6 +768,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         canvas = area.canvas
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(janela.width(), janela.height(), abaixo_coordenadas=True)
+            pos_global = canvas.mapToGlobal(pos_local)
+            janela.move(pos_global)
+            return
         gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
         gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
         min_x = gx + 8
@@ -3131,18 +3140,27 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = tool_id
         self._salvar_preferencias_app()
         self.ribbon.set_active_tool(tool_id)
-        if tool_id != "curva" and self._janela_aux_curva and self._janela_aux_curva.isVisible():
-            self._memorizar_posicao_caixa_aux(self._janela_aux_curva, "curva")
-            self._janela_aux_curva.hide()
-        if tool_id != "retangulo" and self._janela_aux_retangulo and self._janela_aux_retangulo.isVisible():
-            self._memorizar_posicao_caixa_aux(self._janela_aux_retangulo, "retangulo")
-            self._janela_aux_retangulo.hide()
+        self._ocultar_janelas_auxiliares(exceto=tool_id)
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_ferramenta_ativa(tool_id)
             area_atual.canvas.definir_config_retangulo(self._retangulo_criar_molde)
         if tool_id == "selecionar":
             self.lbl_status.setText("Selecionar ativada")
+
+    def _ocultar_janelas_auxiliares(self, exceto: str | None = None):
+        if exceto != "curva" and self._janela_aux_curva and self._janela_aux_curva.isVisible():
+            self._memorizar_posicao_caixa_aux(self._janela_aux_curva, "curva")
+            self._janela_aux_curva.hide()
+        if exceto != "retangulo" and self._janela_aux_retangulo and self._janela_aux_retangulo.isVisible():
+            self._memorizar_posicao_caixa_aux(self._janela_aux_retangulo, "retangulo")
+            self._janela_aux_retangulo.hide()
+        for chave, janela in self._janelas_aux_instrucao.items():
+            if chave == exceto:
+                continue
+            if janela.isVisible():
+                self._memorizar_posicao_caixa_aux(janela, chave)
+                janela.hide()
 
     def _atualizar_estilo_desenho(self, estilo: dict):
         self._estilo_desenho_atual.update(estilo)
