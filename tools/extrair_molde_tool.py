@@ -745,7 +745,7 @@ class Ferramenta(FerramentaBase):
 
         candidatos = self._indices_por_angulo(base)
         if len(candidatos) < 4:
-            candidatos = self._indices_por_amostragem(base, 6)
+            candidatos = self._indices_por_amostragem(base, 4)
         elif len(candidatos) > 8:
             candidatos = self._indices_por_amostragem([base[i] for i in candidatos], 8, indices_originais=candidatos)
         return candidatos
@@ -755,7 +755,7 @@ class Ferramenta(FerramentaBase):
         if n < 3:
             return list(range(n))
         saida: list[int] = []
-        limite = 150.0 if self._cfg.get("detectar_piques", True) else 135.0
+        limite = 132.0 if self._cfg.get("detectar_piques", True) else 125.0
         perimetro = 0.0
         for i in range(n):
             perimetro += self._dist_tuple(base[i], base[(i + 1) % n])
@@ -766,7 +766,7 @@ class Ferramenta(FerramentaBase):
             b = QPointF(*base[i])
             c = QPointF(*base[(i + 1) % n])
             ang = self._angulo_interno(a, b, c)
-            if ang <= limite or not saida:
+            if ang <= limite:
                 if not saida or self._dist_tuple(base[saida[-1]], base[i]) >= dist_min:
                     saida.append(i)
 
@@ -841,18 +841,26 @@ class Ferramenta(FerramentaBase):
         if len(indices_cantos) < 2:
             return []
         n = len(base)
+        cantos_set = set(indices_cantos)
         aux: list[tuple[float, float]] = []
-        for pos, idx_a in enumerate(indices_cantos):
-            idx_b = indices_cantos[(pos + 1) % len(indices_cantos)]
-            caminho = [idx_a]
-            i = idx_a
-            while i != idx_b:
-                i = (i + 1) % n
-                caminho.append(i)
-                if len(caminho) > n + 1:
-                    break
-            meio_idx = caminho[len(caminho) // 2]
-            aux.append((float(base[meio_idx][0]), float(base[meio_idx][1])))
+        perimetro = 0.0
+        for i in range(n):
+            perimetro += self._dist_tuple(base[i], base[(i + 1) % n])
+        dist_min = max(0.8, perimetro * 0.03)
+        ultimo_idx: int | None = None
+        for i in range(n):
+            if i in cantos_set:
+                continue
+            a = QPointF(*base[i - 1])
+            b = QPointF(*base[i])
+            c = QPointF(*base[(i + 1) % n])
+            ang = self._angulo_interno(a, b, c)
+            if ang < 132.0:
+                continue
+            if ultimo_idx is not None and self._dist_tuple(base[ultimo_idx], base[i]) < dist_min:
+                continue
+            aux.append((float(base[i][0]), float(base[i][1])))
+            ultimo_idx = i
         return aux
 
     def _dist_tuple(self, a: tuple[float, float], b: tuple[float, float]) -> float:

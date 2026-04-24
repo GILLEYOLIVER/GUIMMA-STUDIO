@@ -995,8 +995,12 @@ class VisualizacaoCanvas(QWidget):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
+            pos = self._ponto_com_snap(event.position())
+            if self._clique_em_molde_selecionado(pos):
+                self._ativar_ferramenta_janela_principal("propriedades")
+                event.accept()
+                return
             if event.modifiers() & Qt.ControlModifier:
-                pos = self._ponto_com_snap(event.position())
                 if self._selecionar_proximo_em_ponto(pos):
                     event.accept()
                     return
@@ -1102,6 +1106,9 @@ class VisualizacaoCanvas(QWidget):
                     cx = sum(p.x() for p in base) / len(base)
                     cy = sum(p.y() for p in base) / len(base)
                     tela = self._cena_para_tela(QPointF(cx, cy))
+                    fonte_nome = painter.font()
+                    fonte_nome.setPointSizeF(self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 10.0))
+                    painter.setFont(fonte_nome)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(tela.x() - 20), int(tela.y()), nome)
 
@@ -1129,10 +1136,19 @@ class VisualizacaoCanvas(QWidget):
                     or ""
                 )
                 if rotulo_fio:
-                    self._desenhar_rotulo_fio(painter, p1, p2, str(rotulo_fio))
+                    self._desenhar_rotulo_fio(
+                        painter,
+                        p1,
+                        p2,
+                        str(rotulo_fio),
+                        tamanho=self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0),
+                    )
                 else:
                     fim_tela = self._cena_para_tela(p2)
                     ang = float(el.get("fio_angulo", 90.0))
+                    fonte_fio = painter.font()
+                    fonte_fio.setPointSizeF(self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0))
+                    painter.setFont(fonte_fio)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
 
@@ -1144,6 +1160,9 @@ class VisualizacaoCanvas(QWidget):
                 else:
                     cx, cy = 0.0, 0.0
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                fonte_num = painter.font()
+                fonte_num.setPointSizeF(self._tamanho_visual_molde(el, ("tam_numero", "tamanho_numero", "fonte_numeracao"), 9.0))
+                painter.setFont(fonte_num)
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
@@ -1153,12 +1172,13 @@ class VisualizacaoCanvas(QWidget):
                     off_x = (dx / mod) * 11.0
                     off_y = (dy / mod) * 11.0
                     painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
-                aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-                painter.setPen(QPen(QColor("#ff3b30"), 1.0))
-                painter.setBrush(QColor("#ff3b30"))
-                for pt in aux:
-                    pt_tela = self._cena_para_tela(pt)
-                    painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+                if self._ferramenta_manipulacao_ativa():
+                    aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
+                    painter.setPen(QPen(QColor("#ff3b30"), 1.0))
+                    painter.setBrush(QColor("#ff3b30"))
+                    for pt in aux:
+                        pt_tela = self._cena_para_tela(pt)
+                        painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
@@ -1299,7 +1319,7 @@ class VisualizacaoCanvas(QWidget):
         painter.drawPath(path)
         painter.restore()
 
-    def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str):
+    def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str, tamanho: float | None = None):
         meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
         meio_tela = self._cena_para_tela(meio)
         dx = fim.x() - inicio.x()
@@ -1319,6 +1339,8 @@ class VisualizacaoCanvas(QWidget):
         painter.save()
         fonte = painter.font()
         fonte.setBold(False)
+        if tamanho is not None:
+            fonte.setPointSizeF(float(max(6.0, tamanho)))
         painter.setFont(fonte)
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
@@ -1333,6 +1355,26 @@ class VisualizacaoCanvas(QWidget):
             texto,
         )
         painter.restore()
+
+    def _ferramenta_manipulacao_ativa(self) -> bool:
+        return str(self.ferramenta_ativa or "") in {
+            "manipular_pontos",
+            "mover",
+            "mover_pontos",
+            "editar_pontos_de_curva",
+            "no_perimetro",
+        }
+
+    def _tamanho_visual_molde(self, el: dict, chaves: tuple[str, ...], padrao: float) -> float:
+        for chave in chaves:
+            valor = el.get(chave)
+            if valor is None:
+                continue
+            try:
+                return float(max(6.0, float(valor)))
+            except Exception:
+                continue
+        return float(padrao)
 
     def _cor_realce(self, cor_hex: str) -> str:
         cor = QColor(cor_hex)
@@ -1527,7 +1569,25 @@ class VisualizacaoCanvas(QWidget):
                 amostra = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=40)
                 if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(amostra, amostra[1:])):
                     candidatos.append(idx)
+            if el.get("molde"):
+                fio_origem = el.get("fio_origem")
+                fio_fim = el.get("fio_fim")
+                if isinstance(fio_origem, (list, tuple)) and isinstance(fio_fim, (list, tuple)) and len(fio_origem) == 2 and len(fio_fim) == 2:
+                    p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
+                    p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
+                    if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
+                        candidatos.append(idx)
         return candidatos
+
+    def _clique_em_molde_selecionado(self, pos: QPointF) -> bool:
+        if not self._selecionados:
+            return False
+        candidatos = set(self._indices_elementos_em_ponto(pos))
+        for idx in self._selecionados:
+            if idx in candidatos and 0 <= idx < len(self.cena.elementos):
+                if self.cena.elementos[idx].get("molde"):
+                    return True
+        return False
 
     def _selecionar_proximo_em_ponto(self, pos: QPointF) -> bool:
         candidatos = self._indices_elementos_em_ponto(pos)
