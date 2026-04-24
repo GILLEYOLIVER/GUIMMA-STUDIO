@@ -119,11 +119,7 @@ class Ferramenta(FerramentaBase):
             return False
 
         if event.button() == Qt.LeftButton:
-            contorno = extract_smallest_enclosing_contour(
-                canvas.cena.elementos,
-                (pos.x(), pos.y()),
-                tol=self.TOLERANCIA_FECHAMENTO_CM,
-            )
+            contorno = self._detectar_contorno_fechado(canvas, pos)
             if not contorno:
                 self._mostrar_aviso_sem_molde(canvas)
                 return True
@@ -468,6 +464,32 @@ class Ferramenta(FerramentaBase):
             dy = by - ay
             total += sqrt((dx * dx) + (dy * dy))
         return total
+
+    def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
+        ponto = (pos.x(), pos.y())
+        melhor: list[tuple[float, float]] | None = None
+        melhor_area = float("inf")
+        # Primeiro tenta tolerâncias geométricas menores para preservar interseções reais.
+        # Depois amplia para cobrir pequenos vazamentos (até 0,10 cm).
+        for tol in (0.001, 0.01, self.TOLERANCIA_FECHAMENTO_CM):
+            contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, ponto, tol=tol)
+            if not contorno:
+                continue
+            area = abs(self._area_contorno(contorno))
+            if area <= 1e-8:
+                continue
+            if area < melhor_area:
+                melhor = contorno
+                melhor_area = area
+        return melhor
+
+    def _area_contorno(self, contorno: list[tuple[float, float]]) -> float:
+        if len(contorno) < 3:
+            return 0.0
+        acc = 0.0
+        for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
+            acc += (ax * by) - (bx * ay)
+        return 0.5 * acc
 
     def _aplicar_delta_selecionados(self, canvas, dx: float, dy: float):
         for idx in sorted(self._selecoes_manuais):
