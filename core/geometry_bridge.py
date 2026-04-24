@@ -11,6 +11,25 @@ from core.geometry.engine import (
 
 
 def polyline_from_element(element: dict) -> list[tuple[float, float]]:
+    tipo = str(element.get("tipo", ""))
+    if tipo == "bezier_quadratica":
+        p0 = element.get("p0")
+        p1 = element.get("p1")
+        p2 = element.get("p2")
+        if not (isinstance(p0, (list, tuple)) and isinstance(p1, (list, tuple)) and isinstance(p2, (list, tuple))):
+            return []
+        x0, y0 = float(p0[0]), float(p0[1])
+        x1, y1 = float(p1[0]), float(p1[1])
+        x2, y2 = float(p2[0]), float(p2[1])
+        amostras = max(8, int(element.get("amostras_contorno", 24)))
+        pontos: list[tuple[float, float]] = []
+        for i in range(amostras + 1):
+            t = i / amostras
+            u = 1.0 - t
+            x = (u * u * x0) + (2.0 * u * t * x1) + (t * t * x2)
+            y = (u * u * y0) + (2.0 * u * t * y1) + (t * t * y2)
+            pontos.append((x, y))
+        return pontos
     return [(float(x), float(y)) for x, y in element.get("pontos", [])]
 
 
@@ -169,7 +188,9 @@ def _find_cycles(
         adjacency.setdefault(kb, set()).add(ka)
 
     cycles: dict[tuple[tuple[int, int], ...], list[tuple[float, float]]] = {}
-    max_depth = 32
+    # Curvas amostradas podem gerar muitos segmentos no mesmo ciclo.
+    # Profundidade fixa baixa (ex.: 32) perde faces válidas.
+    max_depth = max(64, min(1024, len(adjacency) + 8))
     for start in adjacency:
         stack: list[tuple[tuple[int, int], list[tuple[int, int]]]] = [(start, [start])]
         while stack:
