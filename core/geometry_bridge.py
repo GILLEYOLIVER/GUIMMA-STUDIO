@@ -188,7 +188,9 @@ def _find_cycles(
         adjacency.setdefault(kb, set()).add(ka)
 
     cycles: dict[tuple[tuple[int, int], ...], list[tuple[float, float]]] = {}
-    max_depth = 32
+    # Curvas amostradas podem gerar muitos segmentos no mesmo ciclo.
+    # Profundidade fixa baixa (ex.: 32) perde faces válidas.
+    max_depth = max(64, min(1024, len(adjacency) + 8))
     for start in adjacency:
         stack: list[tuple[tuple[int, int], list[tuple[int, int]]]] = [(start, [start])]
         while stack:
