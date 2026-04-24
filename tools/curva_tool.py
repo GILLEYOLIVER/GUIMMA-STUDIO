@@ -11,6 +11,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "curva"
     nome = "Curva"
+    usa_painel_auxiliar = False
     descricao_painel = (
         "Curva por nós com spline suave. "
         "Clique esquerdo cria nós. Botão direito finaliza. ESC cancela."
