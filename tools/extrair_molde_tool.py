@@ -471,19 +471,40 @@ class Ferramenta(FerramentaBase):
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
         melhor: list[tuple[float, float]] | None = None
+        melhor_dist = float("inf")
         melhor_area = float("inf")
+        raio_busca = max(0.02, self.TOLERANCIA_FECHAMENTO_CM * 2.0)
+        sementes = [ponto]
+        for dx, dy in (
+            (raio_busca, 0.0),
+            (-raio_busca, 0.0),
+            (0.0, raio_busca),
+            (0.0, -raio_busca),
+            (raio_busca, raio_busca),
+            (raio_busca, -raio_busca),
+            (-raio_busca, raio_busca),
+            (-raio_busca, -raio_busca),
+        ):
+            sementes.append((ponto[0] + dx, ponto[1] + dy))
         # Primeiro tenta tolerâncias geométricas menores para preservar interseções reais.
         # Depois amplia para cobrir pequenos vazamentos (até 0,10 cm).
         for tol in (0.001, 0.01, self.TOLERANCIA_FECHAMENTO_CM):
-            contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, ponto, tol=tol)
-            if not contorno:
-                continue
-            area = abs(self._area_contorno(contorno))
-            if area <= 1e-8:
-                continue
-            if area < melhor_area:
-                melhor = contorno
-                melhor_area = area
+            for semente in sementes:
+                contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, semente, tol=tol)
+                if not contorno:
+                    continue
+                area = abs(self._area_contorno(contorno))
+                if area <= 1e-8:
+                    continue
+                dist_contorno = self._distancia_ponto_contorno(ponto, contorno)
+                if dist_contorno > (raio_busca * 2.2):
+                    continue
+                if (dist_contorno < melhor_dist - 1e-6) or (
+                    abs(dist_contorno - melhor_dist) <= 1e-6 and area < melhor_area
+                ):
+                    melhor = contorno
+                    melhor_dist = dist_contorno
+                    melhor_area = area
         return melhor
 
     def _area_contorno(self, contorno: list[tuple[float, float]]) -> float:
@@ -493,6 +514,24 @@ class Ferramenta(FerramentaBase):
         for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
             acc += (ax * by) - (bx * ay)
         return 0.5 * acc
+
+    def _distancia_ponto_contorno(self, ponto: tuple[float, float], contorno: list[tuple[float, float]]) -> float:
+        px, py = ponto
+        menor = float("inf")
+        for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
+            abx = bx - ax
+            aby = by - ay
+            denom = (abx * abx) + (aby * aby)
+            if denom <= 1e-12:
+                dist = sqrt(((px - ax) ** 2) + ((py - ay) ** 2))
+            else:
+                t = max(0.0, min(1.0, (((px - ax) * abx) + ((py - ay) * aby)) / denom))
+                qx = ax + (abx * t)
+                qy = ay + (aby * t)
+                dist = sqrt(((px - qx) ** 2) + ((py - qy) ** 2))
+            if dist < menor:
+                menor = dist
+        return menor
 
     def _aplicar_delta_selecionados(self, canvas, dx: float, dy: float):
         for idx in sorted(self._selecoes_manuais):
