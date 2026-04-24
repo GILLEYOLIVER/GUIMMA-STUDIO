@@ -119,7 +119,10 @@ class Ferramenta(FerramentaBase):
             return False
 
         if event.button() == Qt.LeftButton:
-            contorno = self._detectar_contorno_fechado(canvas, pos)
+            # Para extrair molde por área, usar o ponto real do clique (sem snap),
+            # evitando capturar regiões distantes por aproximação de snap.
+            pos_clique = canvas._tela_para_cena(event.position())
+            contorno = self._detectar_contorno_fechado(canvas, pos_clique)
             if not contorno:
                 self._mostrar_aviso_sem_molde(canvas)
                 return True
