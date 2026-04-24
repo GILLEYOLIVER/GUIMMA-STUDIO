@@ -232,6 +232,7 @@ def _gerar_curva_base(nome: str) -> list[QPointF]:
 class Ferramenta(FerramentaBase):
     id_ferramenta = "espiral_e_curvas"
     nome = "Espiral e Curvas"
+    usa_painel_auxiliar = False
     descricao_painel = "Insere curvas pré-definidas (sem modal)."
     _dialog_por_canvas: dict[int, InserirCurvaDialog] = {}
     _canvas_por_id: dict[int, object] = {}
