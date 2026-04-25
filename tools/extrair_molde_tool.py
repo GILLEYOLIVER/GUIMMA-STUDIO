@@ -22,7 +22,6 @@ from core.geometry.engine import internal_angle
 from core.geometry_bridge import (
     compose_closed_contour,
     create_mold_payload,
-    element_contains_point,
     extract_smallest_enclosing_contour,
 )
 from tools.tool_base import FerramentaBase
@@ -231,7 +230,7 @@ class Ferramenta(FerramentaBase):
 
     def _ponto_dentro_poligono(self, pt: QPointF, pontos: list[QPointF]) -> bool:
         polygon = [(p.x(), p.y()) for p in pontos]
-        return element_contains_point({"pontos": polygon}, (pt.x(), pt.y()))
+        return self._ponto_dentro_poligono_coords((pt.x(), pt.y()), polygon)
 
     def _criar_molde(self, canvas) -> bool:
         if self._contorno_auto_coords:
@@ -470,6 +469,17 @@ class Ferramenta(FerramentaBase):
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
+        # Caminho rápido: quando já existe polyline fechada contendo o clique,
+        # prioriza esse contorno direto (mais estável entre plataformas, ex.: macOS).
+        candidatos = self._indices_polylines_contem_ponto(canvas, pos)
+        if candidatos:
+            melhor_idx = self._escolher_melhor_candidato(canvas, candidatos)
+            if 0 <= melhor_idx < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[melhor_idx]
+                pontos_el = self._normalizar_pontos_contorno(el.get("pontos", []))
+                if len(pontos_el) >= 4:
+                    return pontos_el
+
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
         melhor_area = float("inf")
@@ -493,6 +503,8 @@ class Ferramenta(FerramentaBase):
                 contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, semente, tol=tol)
                 if not contorno:
                     continue
+                if not self._ponto_dentro_poligono_coords(ponto, contorno):
+                    continue
                 area = abs(self._area_contorno(contorno))
                 if area <= 1e-8:
                     continue
@@ -506,6 +518,54 @@ class Ferramenta(FerramentaBase):
                     melhor_dist = dist_contorno
                     melhor_area = area
         return melhor
+
+    def _ponto_dentro_poligono_coords(self, pt: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
+        if len(polygon) < 3:
+            return False
+        poly = list(polygon)
+        if self._dist_tuple(poly[0], poly[-1]) > 1e-6:
+            poly.append(poly[0])
+        x, y = pt
+        inside = False
+        for (x1, y1), (x2, y2) in zip(poly, poly[1:]):
+            # Conta ponto no contorno como "dentro" para melhorar UX do clique.
+            if self._ponto_no_segmento((x, y), (x1, y1), (x2, y2), tol=1e-6):
+                return True
+            cruza = (y1 > y) != (y2 > y)
+            if not cruza:
+                continue
+            y_delta = y2 - y1
+            if abs(y_delta) <= 1e-12:
+                continue
+            x_intersec = ((x2 - x1) * (y - y1) / y_delta) + x1
+            if x <= x_intersec:
+                inside = not inside
+        return inside
+
+    def _ponto_no_segmento(
+        self,
+        p: tuple[float, float],
+        a: tuple[float, float],
+        b: tuple[float, float],
+        tol: float,
+    ) -> bool:
+        px, py = p
+        ax, ay = a
+        bx, by = b
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
+        cruz = abs((abx * apy) - (aby * apx))
+        if cruz > tol:
+            return False
+        dot = (apx * abx) + (apy * aby)
+        if dot < -tol:
+            return False
+        ab2 = (abx * abx) + (aby * aby)
+        if dot - ab2 > tol:
+            return False
+        return True
 
     def _area_contorno(self, contorno: list[tuple[float, float]]) -> float:
         if len(contorno) < 3:
