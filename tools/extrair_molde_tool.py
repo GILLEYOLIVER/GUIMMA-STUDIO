@@ -470,6 +470,17 @@ class Ferramenta(FerramentaBase):
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
+        # Caminho rápido: quando já existe polyline fechada contendo o clique,
+        # prioriza esse contorno direto (mais estável entre plataformas, ex.: macOS).
+        candidatos = self._indices_polylines_contem_ponto(canvas, pos)
+        if candidatos:
+            melhor_idx = self._escolher_melhor_candidato(canvas, candidatos)
+            if 0 <= melhor_idx < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[melhor_idx]
+                pontos_el = self._normalizar_pontos_contorno(el.get("pontos", []))
+                if len(pontos_el) >= 4:
+                    return pontos_el
+
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
         melhor_area = float("inf")
