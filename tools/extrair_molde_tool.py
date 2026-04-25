@@ -30,6 +30,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
+    usa_painel_auxiliar = False
     descricao_painel = "LMB seleciona/valida contorno. RMB pega molde. LMB solta, RMB cancela/volta Selecionar."
     TOLERANCIA_FECHAMENTO_CM = 0.10
 
@@ -100,6 +101,9 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+
+    def on_canvas_resize(self, canvas) -> None:
+        self._reposicionar_dialog_config(canvas)
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos_tela_exata = self._posicao_tela_exata_no_canvas(canvas, event.position())
@@ -500,22 +504,24 @@ class Ferramenta(FerramentaBase):
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
         melhor_area = float("inf")
-        raio_busca = max(0.02, self.TOLERANCIA_FECHAMENTO_CM * 2.0)
+        raio_busca = max(0.02, self.TOLERANCIA_FECHAMENTO_CM * 3.0)
         sementes = [ponto]
-        for dx, dy in (
-            (raio_busca, 0.0),
-            (-raio_busca, 0.0),
-            (0.0, raio_busca),
-            (0.0, -raio_busca),
-            (raio_busca, raio_busca),
-            (raio_busca, -raio_busca),
-            (-raio_busca, raio_busca),
-            (-raio_busca, -raio_busca),
-        ):
-            sementes.append((ponto[0] + dx, ponto[1] + dy))
+        for fator in (1.0, 1.8, 2.6):
+            r = raio_busca * fator
+            for dx, dy in (
+                (r, 0.0),
+                (-r, 0.0),
+                (0.0, r),
+                (0.0, -r),
+                (r, r),
+                (r, -r),
+                (-r, r),
+                (-r, -r),
+            ):
+                sementes.append((ponto[0] + dx, ponto[1] + dy))
         # Primeiro tenta tolerâncias geométricas menores para preservar interseções reais.
-        # Depois amplia para cobrir pequenos vazamentos (até 0,10 cm).
-        for tol in (0.001, 0.01, self.TOLERANCIA_FECHAMENTO_CM):
+        # Depois amplia para cobrir vazamentos de união entre linhas do desenho.
+        for tol in (0.001, 0.01, 0.03, 0.06, self.TOLERANCIA_FECHAMENTO_CM, 0.20):
             for semente in sementes:
                 contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, semente, tol=tol)
                 if not contorno:
@@ -526,8 +532,6 @@ class Ferramenta(FerramentaBase):
                 if area <= 1e-8:
                     continue
                 dist_contorno = self._distancia_ponto_contorno(ponto, contorno)
-                if dist_contorno > (raio_busca * 2.2):
-                    continue
                 if (dist_contorno < melhor_dist - 1e-6) or (
                     abs(dist_contorno - melhor_dist) <= 1e-6 and area < melhor_area
                 ):
@@ -800,6 +804,18 @@ class Ferramenta(FerramentaBase):
         elif self._dialog:
             self._dialog.raise_()
             self._dialog.activateWindow()
+        self._reposicionar_dialog_config(canvas)
+
+    def _reposicionar_dialog_config(self, canvas):
+        if not self._dialog:
+            return
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            destino_local = canvas.calcular_posicao_painel_auxiliar(
+                self._dialog.width(),
+                self._dialog.height(),
+                abaixo_coordenadas=True,
+            )
+            self._dialog.move(canvas.mapToGlobal(destino_local))
 
     def _salvar_cfg(self, *_):
         self._salvar_cfg_global()
