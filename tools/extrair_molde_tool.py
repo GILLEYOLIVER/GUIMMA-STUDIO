@@ -504,40 +504,48 @@ class Ferramenta(FerramentaBase):
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
         melhor_area = float("inf")
-        raio_busca = max(0.02, self.TOLERANCIA_FECHAMENTO_CM * 3.0)
+        raio_busca = max(0.02, self.TOLERANCIA_FECHAMENTO_CM * 2.0)
+
         sementes = [ponto]
-        for fator in (1.0, 1.8, 2.6):
+        for fator in (1.0, 1.8):
             r = raio_busca * fator
-            for dx, dy in (
-                (r, 0.0),
-                (-r, 0.0),
-                (0.0, r),
-                (0.0, -r),
-                (r, r),
-                (r, -r),
-                (-r, r),
-                (-r, -r),
-            ):
+            for dx, dy in ((r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r), (r, r), (r, -r), (-r, r), (-r, -r)):
                 sementes.append((ponto[0] + dx, ponto[1] + dy))
-        # Primeiro tenta tolerâncias geométricas menores para preservar interseções reais.
-        # Depois amplia para cobrir vazamentos de união entre linhas do desenho.
-        for tol in (0.001, 0.01, 0.03, 0.06, self.TOLERANCIA_FECHAMENTO_CM, 0.20):
-            for semente in sementes:
-                contorno = extract_smallest_enclosing_contour(canvas.cena.elementos, semente, tol=tol)
-                if not contorno:
-                    continue
-                if not self._ponto_dentro_poligono_coords(ponto, contorno):
-                    continue
-                area = abs(self._area_contorno(contorno))
-                if area <= 1e-8:
-                    continue
-                dist_contorno = self._distancia_ponto_contorno(ponto, contorno)
-                if (dist_contorno < melhor_dist - 1e-6) or (
-                    abs(dist_contorno - melhor_dist) <= 1e-6 and area < melhor_area
-                ):
-                    melhor = contorno
-                    melhor_dist = dist_contorno
-                    melhor_area = area
+
+        raio_cena_base = max(4.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * 0.35)
+        estrategias = [
+            {"tolerancias": (0.001, 0.01), "sementes": sementes[:5], "search_radius": raio_cena_base},
+            {"tolerancias": (0.03, self.TOLERANCIA_FECHAMENTO_CM), "sementes": sementes, "search_radius": raio_cena_base * 1.6},
+            {"tolerancias": (0.20,), "sementes": sementes, "search_radius": None},
+        ]
+
+        for etapa in estrategias:
+            encontrou_na_etapa = False
+            for tol in etapa["tolerancias"]:
+                for semente in etapa["sementes"]:
+                    contorno = extract_smallest_enclosing_contour(
+                        canvas.cena.elementos,
+                        semente,
+                        tol=tol,
+                        search_radius=etapa["search_radius"],
+                    )
+                    if not contorno:
+                        continue
+                    if not self._ponto_dentro_poligono_coords(ponto, contorno):
+                        continue
+                    area = abs(self._area_contorno(contorno))
+                    if area <= 1e-8:
+                        continue
+                    dist_contorno = self._distancia_ponto_contorno(ponto, contorno)
+                    if (dist_contorno < melhor_dist - 1e-6) or (
+                        abs(dist_contorno - melhor_dist) <= 1e-6 and area < melhor_area
+                    ):
+                        melhor = contorno
+                        melhor_dist = dist_contorno
+                        melhor_area = area
+                        encontrou_na_etapa = True
+            if encontrou_na_etapa and melhor is not None:
+                return melhor
         return melhor
 
     def _ponto_dentro_poligono_coords(self, pt: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
