@@ -301,7 +301,7 @@ def _faces_from_segments(
     for k in outgoing:
         outgoing[k].sort(key=lambda it: it[1])
 
-    def prox_ccw(node: tuple[int, int], from_node: tuple[int, int]) -> tuple[int, int] | None:
+    def prox_face_esquerda(node: tuple[int, int], from_node: tuple[int, int]) -> tuple[int, int] | None:
         lista = outgoing.get(node, [])
         if not lista:
             return None
@@ -311,7 +311,9 @@ def _faces_from_segments(
         melhor_nxt = None
         melhor_delta = float("inf")
         for nxt, ang in lista:
-            delta = (ang - ang_back) % (2.0 * pi)
+            # Para caminhar com a face à esquerda, escolhe a próxima meia-aresta
+            # imediatamente no sentido horário a partir da reversa da aresta de entrada.
+            delta = (ang_back - ang) % (2.0 * pi)
             if delta <= 1e-12:
                 delta += 2.0 * pi
             if delta < melhor_delta:
@@ -335,7 +337,7 @@ def _faces_from_segments(
                     break
                 visited.add((cur_u, cur_v))
                 face_nodes.append(cur_u)
-                nxt = prox_ccw(cur_v, cur_u)
+                nxt = prox_face_esquerda(cur_v, cur_u)
                 if nxt is None:
                     break
                 cur_u, cur_v = cur_v, nxt
