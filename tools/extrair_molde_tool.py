@@ -22,6 +22,7 @@ from core.geometry.engine import internal_angle
 from core.geometry_bridge import (
     compose_closed_contour,
     create_mold_payload,
+    extract_local_enclosing_contour,
     extract_smallest_enclosing_contour,
 )
 from tools.tool_base import FerramentaBase
@@ -500,6 +501,18 @@ class Ferramenta(FerramentaBase):
                 pontos_el = self._normalizar_pontos_contorno(el.get("pontos", []))
                 if len(pontos_el) >= 4:
                     return pontos_el
+
+        # Caminho rápido para fechamentos feitos por linhas de elementos:
+        # usa grafo planar local no raio de 20 cm, retornando a menor face válida.
+        for tol_local in (0.005, 0.01, 0.02):
+            contorno_local = extract_local_enclosing_contour(
+                canvas.cena.elementos,
+                ponto,
+                search_radius=20.0,
+                tol=tol_local,
+            )
+            if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
+                return contorno_local
 
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
