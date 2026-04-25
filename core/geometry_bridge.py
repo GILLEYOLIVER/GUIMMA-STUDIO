@@ -98,9 +98,10 @@ def extract_smallest_enclosing_contour(
     elements: list[dict],
     point: tuple[float, float],
     tol: float = 0.001,
+    search_radius: float | None = None,
 ) -> list[tuple[float, float]] | None:
     """Extrai a menor face fechada que contém o ponto, a partir de polylines abertas/fechadas."""
-    segments = _explode_segments(elements)
+    segments = _explode_segments(elements, point=point, search_radius=search_radius)
     if not segments:
         return None
     split_segments = _split_segments_at_intersections(segments, tol=tol)
@@ -130,8 +131,19 @@ def _near(a: tuple[float, float], b: tuple[float, float], tol: float) -> bool:
     return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
 
 
-def _explode_segments(elements: list[dict]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+def _explode_segments(
+    elements: list[dict],
+    point: tuple[float, float] | None = None,
+    search_radius: float | None = None,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    limite_min_x = limite_max_x = limite_min_y = limite_max_y = None
+    if point is not None and search_radius is not None and search_radius > 0:
+        px, py = point
+        limite_min_x = px - search_radius
+        limite_max_x = px + search_radius
+        limite_min_y = py - search_radius
+        limite_max_y = py + search_radius
     for el in elements:
         pts = polyline_from_element(el)
         if len(pts) < 2:
@@ -139,6 +151,13 @@ def _explode_segments(elements: list[dict]) -> list[tuple[tuple[float, float], t
         for a, b in zip(pts, pts[1:]):
             if _near(a, b, 1e-12):
                 continue
+            if limite_min_x is not None:
+                seg_min_x = min(a[0], b[0])
+                seg_max_x = max(a[0], b[0])
+                seg_min_y = min(a[1], b[1])
+                seg_max_y = max(a[1], b[1])
+                if seg_max_x < limite_min_x or seg_min_x > limite_max_x or seg_max_y < limite_min_y or seg_min_y > limite_max_y:
+                    continue
             segments.append((a, b))
     return segments
 
