@@ -149,11 +149,15 @@ def extract_local_enclosing_contour(
     if not split_segments:
         return None
     faces = _faces_from_segments(split_segments, tol=tol)
+    # Fallback adicional local: ciclos simples também podem representar
+    # corretamente faces internas em geometrias com prolongamentos.
+    faces.extend(_find_cycles(split_segments, tol=tol))
     if not faces:
         return None
 
     best: list[tuple[float, float]] | None = None
     best_area = float("inf")
+    best_perimetro = float("inf")
     for face in faces:
         poly = normalize_closed_polyline(face, clockwise=True)
         if not contour_is_valid(poly):
@@ -163,9 +167,15 @@ def extract_local_enclosing_contour(
         area = abs(_polygon_area(poly))
         if area <= 1e-6:
             continue
-        if area < best_area:
+        perimetro = 0.0
+        for a, b in zip(poly, poly[1:]):
+            dx = b[0] - a[0]
+            dy = b[1] - a[1]
+            perimetro += ((dx * dx) + (dy * dy)) ** 0.5
+        if (area < best_area - 1e-8) or (abs(area - best_area) <= 1e-8 and perimetro < best_perimetro):
             best = poly
             best_area = area
+            best_perimetro = perimetro
     return best
 
 
