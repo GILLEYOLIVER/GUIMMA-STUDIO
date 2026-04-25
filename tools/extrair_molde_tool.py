@@ -5,7 +5,7 @@ from math import atan2, cos, pi, sin, sqrt
 from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -102,7 +102,8 @@ class Ferramenta(FerramentaBase):
         self._indices_molde_em_arraste = set()
 
     def on_mouse_press(self, canvas, event) -> bool:
-        pos = canvas._ponto_com_snap(event.position())
+        pos_tela_exata = self._posicao_tela_exata_no_canvas(canvas, event.position())
+        pos = canvas._ponto_com_snap(pos_tela_exata)
         self._sincronizar_cfg_da_ui()
 
         if self._arrastando_molde:
@@ -120,7 +121,7 @@ class Ferramenta(FerramentaBase):
         if event.button() == Qt.LeftButton:
             # Para extrair molde por área, usar o ponto real do clique (sem snap),
             # evitando capturar regiões distantes por aproximação de snap.
-            pos_clique = canvas._tela_para_cena(event.position())
+            pos_clique = canvas._tela_para_cena(pos_tela_exata)
             contorno = self._detectar_contorno_fechado(canvas, pos_clique)
             if not contorno:
                 self._mostrar_aviso_sem_molde(canvas)
@@ -168,7 +169,7 @@ class Ferramenta(FerramentaBase):
     def on_mouse_move(self, canvas, event) -> bool:
         if not self._arrastando_molde:
             return False
-        pos = canvas._ponto_com_snap(event.position())
+        pos = canvas._ponto_com_snap(self._posicao_tela_exata_no_canvas(canvas, event.position()))
         if self._ultimo_pos_arrasto is None:
             self._ultimo_pos_arrasto = pos
             return True
@@ -180,6 +181,22 @@ class Ferramenta(FerramentaBase):
             canvas.update()
         event.accept()
         return True
+
+    def _posicao_tela_exata_no_canvas(self, canvas, pos_evento: QPointF) -> QPointF:
+        """
+        Usa a posição mais fiel possível do cursor no momento do evento e
+        restringe ao retângulo útil do canvas para evitar deslocamentos fora da área.
+        """
+        pos = QPointF(pos_evento)
+        try:
+            pos_global = canvas.mapFromGlobal(QCursor.pos())
+            if 0 <= pos_global.x() < canvas.width() and 0 <= pos_global.y() < canvas.height():
+                pos = QPointF(float(pos_global.x()), float(pos_global.y()))
+        except Exception:
+            pass
+        x = min(max(pos.x(), 0.0), max(0.0, float(canvas.width()) - 1e-6))
+        y = min(max(pos.y(), 0.0), max(0.0, float(canvas.height()) - 1e-6))
+        return QPointF(x, y)
 
     def on_paint_overlay(self, canvas, painter: QPainter):
         for idx in self._selecoes_manuais:
