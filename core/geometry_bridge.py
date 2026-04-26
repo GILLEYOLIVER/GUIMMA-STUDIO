@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import atan2, pi
+
 from core.geometry.engine import (
     build_mold_from_shape,
     build_shape_from_polyline,
@@ -98,9 +100,10 @@ def extract_smallest_enclosing_contour(
     elements: list[dict],
     point: tuple[float, float],
     tol: float = 0.001,
+    search_radius: float | None = None,
 ) -> list[tuple[float, float]] | None:
     """Extrai a menor face fechada que contém o ponto, a partir de polylines abertas/fechadas."""
-    segments = _explode_segments(elements)
+    segments = _explode_segments(elements, point=point, search_radius=search_radius)
     if not segments:
         return None
     split_segments = _split_segments_at_intersections(segments, tol=tol)
@@ -115,7 +118,7 @@ def extract_smallest_enclosing_contour(
         poly = normalize_closed_polyline(cycle, clockwise=True)
         if not contour_is_valid(poly):
             continue
-        if not point_in_polygon(point, poly):
+        if not _point_in_polygon_or_boundary(point, poly):
             continue
         area = abs(_polygon_area(poly))
         if area <= 1e-6:
@@ -126,12 +129,73 @@ def extract_smallest_enclosing_contour(
     return best
 
 
+def extract_local_enclosing_contour(
+    elements: list[dict],
+    point: tuple[float, float],
+    search_radius: float = 20.0,
+    tol: float = 0.01,
+) -> list[tuple[float, float]] | None:
+    """
+    Extrai a face fechada que contém o ponto usando apenas segmentos locais.
+    Estratégia:
+      1) filtra segmentos por raio local,
+      2) divide nas interseções reais,
+      3) monta grafo planar orientado e percorre faces via meia-arestas.
+    """
+    segments = _explode_segments(elements, point=point, search_radius=search_radius)
+    if not segments:
+        return None
+    split_segments = _split_segments_at_intersections(segments, tol=tol)
+    if not split_segments:
+        return None
+    faces = _faces_from_segments(split_segments, tol=tol)
+    # Fallback adicional local: ciclos simples também podem representar
+    # corretamente faces internas em geometrias com prolongamentos.
+    faces.extend(_find_cycles(split_segments, tol=tol))
+    if not faces:
+        return None
+
+    best: list[tuple[float, float]] | None = None
+    best_area = float("inf")
+    best_perimetro = float("inf")
+    for face in faces:
+        poly = normalize_closed_polyline(face, clockwise=True)
+        if not contour_is_valid(poly):
+            continue
+        if not _point_in_polygon_or_boundary(point, poly):
+            continue
+        area = abs(_polygon_area(poly))
+        if area <= 1e-6:
+            continue
+        perimetro = 0.0
+        for a, b in zip(poly, poly[1:]):
+            dx = b[0] - a[0]
+            dy = b[1] - a[1]
+            perimetro += ((dx * dx) + (dy * dy)) ** 0.5
+        if (area < best_area - 1e-8) or (abs(area - best_area) <= 1e-8 and perimetro < best_perimetro):
+            best = poly
+            best_area = area
+            best_perimetro = perimetro
+    return best
+
+
 def _near(a: tuple[float, float], b: tuple[float, float], tol: float) -> bool:
     return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
 
 
-def _explode_segments(elements: list[dict]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+def _explode_segments(
+    elements: list[dict],
+    point: tuple[float, float] | None = None,
+    search_radius: float | None = None,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    limite_min_x = limite_max_x = limite_min_y = limite_max_y = None
+    if point is not None and search_radius is not None and search_radius > 0:
+        px, py = point
+        limite_min_x = px - search_radius
+        limite_max_x = px + search_radius
+        limite_min_y = py - search_radius
+        limite_max_y = py + search_radius
     for el in elements:
         pts = polyline_from_element(el)
         if len(pts) < 2:
@@ -139,6 +203,13 @@ def _explode_segments(elements: list[dict]) -> list[tuple[tuple[float, float], t
         for a, b in zip(pts, pts[1:]):
             if _near(a, b, 1e-12):
                 continue
+            if limite_min_x is not None:
+                seg_min_x = min(a[0], b[0])
+                seg_max_x = max(a[0], b[0])
+                seg_min_y = min(a[1], b[1])
+                seg_max_y = max(a[1], b[1])
+                if seg_max_x < limite_min_x or seg_min_x > limite_max_x or seg_max_y < limite_min_y or seg_min_y > limite_max_y:
+                    continue
             segments.append((a, b))
     return segments
 
@@ -213,6 +284,84 @@ def _find_cycles(
     return list(cycles.values())
 
 
+def _faces_from_segments(
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+    tol: float,
+) -> list[list[tuple[float, float]]]:
+    if not segments:
+        return []
+
+    def key(p: tuple[float, float]) -> tuple[int, int]:
+        return (round(p[0] / tol), round(p[1] / tol))
+
+    node_pt: dict[tuple[int, int], tuple[float, float]] = {}
+    outgoing: dict[tuple[int, int], list[tuple[tuple[int, int], float]]] = {}
+    for a, b in segments:
+        ka = key(a)
+        kb = key(b)
+        if ka == kb:
+            continue
+        node_pt.setdefault(ka, a)
+        node_pt.setdefault(kb, b)
+        ang_ab = atan2(b[1] - a[1], b[0] - a[0])
+        ang_ba = atan2(a[1] - b[1], a[0] - b[0])
+        outgoing.setdefault(ka, []).append((kb, ang_ab))
+        outgoing.setdefault(kb, []).append((ka, ang_ba))
+
+    for k in outgoing:
+        outgoing[k].sort(key=lambda it: it[1])
+
+    def prox_face_esquerda(node: tuple[int, int], from_node: tuple[int, int]) -> tuple[int, int] | None:
+        lista = outgoing.get(node, [])
+        if not lista:
+            return None
+        p_node = node_pt[node]
+        p_from = node_pt[from_node]
+        ang_back = atan2(p_from[1] - p_node[1], p_from[0] - p_node[0])
+        melhor_nxt = None
+        melhor_delta = float("inf")
+        for nxt, ang in lista:
+            # Para caminhar com a face à esquerda, escolhe a próxima meia-aresta
+            # imediatamente no sentido horário a partir da reversa da aresta de entrada.
+            delta = (ang_back - ang) % (2.0 * pi)
+            if delta <= 1e-12:
+                delta += 2.0 * pi
+            if delta < melhor_delta:
+                melhor_delta = delta
+                melhor_nxt = nxt
+        return melhor_nxt
+
+    visited: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+    faces: list[list[tuple[float, float]]] = []
+    max_steps = max(16, len(segments) * 4)
+
+    for u in list(outgoing.keys()):
+        for v, _ in outgoing.get(u, []):
+            edge = (u, v)
+            if edge in visited:
+                continue
+            face_nodes: list[tuple[int, int]] = []
+            cur_u, cur_v = u, v
+            for _ in range(max_steps):
+                if (cur_u, cur_v) in visited:
+                    break
+                visited.add((cur_u, cur_v))
+                face_nodes.append(cur_u)
+                nxt = prox_face_esquerda(cur_v, cur_u)
+                if nxt is None:
+                    break
+                cur_u, cur_v = cur_v, nxt
+                if cur_u == u and cur_v == v:
+                    face_nodes.append(cur_u)
+                    pts = [node_pt[n] for n in face_nodes]
+                    if len(pts) >= 4:
+                        area = _polygon_area(pts)
+                        if abs(area) > 1e-8:
+                            faces.append(pts)
+                    break
+    return faces
+
+
 def _canonical_cycle(cycle: list[tuple[int, int]]) -> tuple[tuple[int, int], ...]:
     if not cycle:
         return tuple()
@@ -269,3 +418,43 @@ def _polygon_area(poly: list[tuple[float, float]]) -> float:
     for a, b in zip(poly, poly[1:]):
         acc += (a[0] * b[1]) - (b[0] * a[1])
     return 0.5 * acc
+
+
+def _point_in_polygon_or_boundary(
+    point: tuple[float, float],
+    polygon: list[tuple[float, float]],
+    tol: float = 1e-7,
+) -> bool:
+    poly = ensure_closed_polyline(list(polygon))
+    if len(poly) < 4:
+        return False
+    px, py = point
+    for a, b in zip(poly, poly[1:]):
+        if _point_on_segment(point, a, b, tol):
+            return True
+    return point_in_polygon((px, py), poly)
+
+
+def _point_on_segment(
+    p: tuple[float, float],
+    a: tuple[float, float],
+    b: tuple[float, float],
+    tol: float,
+) -> bool:
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    abx = bx - ax
+    aby = by - ay
+    apx = px - ax
+    apy = py - ay
+    cruz = abs((abx * apy) - (aby * apx))
+    if cruz > tol:
+        return False
+    dot = (apx * abx) + (apy * aby)
+    if dot < -tol:
+        return False
+    ab2 = (abx * abx) + (aby * aby)
+    if dot - ab2 > tol:
+        return False
+    return True

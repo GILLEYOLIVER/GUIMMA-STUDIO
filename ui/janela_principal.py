@@ -1220,6 +1220,25 @@ class GuimmaStudioMainWindow(QMainWindow):
         geo_dialogo.moveCenter(centro_janela)
         dialog.move(geo_dialogo.topLeft())
 
+    def _centralizar_widget_na_tela(self, widget: QWidget):
+        widget.adjustSize()
+        tela = None
+        try:
+            if widget.windowHandle() is not None:
+                tela = widget.windowHandle().screen()
+        except Exception:
+            tela = None
+        if tela is None:
+            tela = self.screen()
+        if tela is None:
+            if isinstance(widget, QDialog):
+                self._centralizar_dialogo_na_janela(widget)
+            return
+        geo_tela = tela.availableGeometry()
+        geo_widget = widget.frameGeometry()
+        geo_widget.moveCenter(geo_tela.center())
+        widget.move(geo_widget.topLeft())
+
     def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
         dialog.setStyleSheet(
             '''
@@ -2376,6 +2395,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         caixa.setText("Deseja recuperar arquivo(s) perdido(s)?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         self._traduzir_botoes_padrao_message_box(caixa)
+        QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
         if caixa.exec() != QMessageBox.Yes:
             self._limpar_arquivo_recuperacao()
             return
