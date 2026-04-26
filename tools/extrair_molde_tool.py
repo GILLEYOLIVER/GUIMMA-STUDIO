@@ -371,7 +371,6 @@ class Ferramenta(FerramentaBase):
             "pontos_controle_principais": [],
             "pontos_auxiliares": [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
-            "preservar_todos_vertices_controle": True,
             "pontos_controle_referencia": self._coletar_pontos_controle_existentes(canvas, payload["pontos"]),
         }
         self._enriquecer_metadados_molde(novo)
@@ -452,8 +451,6 @@ class Ferramenta(FerramentaBase):
         pontos_ref: list[tuple[float, float]] = []
         for el in canvas.cena.elementos:
             candidatos: list[tuple[float, float]] = []
-            for x, y in el.get("pontos", []) or []:
-                candidatos.append((float(x), float(y)))
             for x, y in el.get("controle_cantos", []) or []:
                 candidatos.append((float(x), float(y)))
             for p in el.get("pontos_controle_principais", []) or []:
