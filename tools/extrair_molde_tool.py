@@ -533,7 +533,9 @@ class Ferramenta(FerramentaBase):
             return None
         t = ((q_p[0] * s[1]) - (q_p[1] * s[0])) / rxs
         u = ((q_p[0] * r[1]) - (q_p[1] * r[0])) / rxs
-        if -tol <= t <= 1.0 + tol and -tol <= u <= 1.0 + tol:
+        # Considera apenas interseções internas aos segmentos para evitar
+        # transformar todos os vértices da aproximação da curva em "cruzamentos".
+        if tol < t < (1.0 - tol) and tol < u < (1.0 - tol):
             return (ax + t * r[0], ay + t * r[1])
         return None
 
