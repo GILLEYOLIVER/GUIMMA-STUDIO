@@ -67,7 +67,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.projeto_atual.preferencias_usuario.update(prefs_app)
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
-        self._ferramenta_ativa_id = str(self.projeto_atual.preferencias_usuario.get("ferramenta_ativa_id", "selecionar"))
+        # Regra de inicialização: sempre abrir com Selecionar ativo.
+        self._ferramenta_ativa_id = "selecionar"
+        self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = "selecionar"
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
@@ -1219,6 +1221,25 @@ class GuimmaStudioMainWindow(QMainWindow):
         geo_dialogo = dialog.frameGeometry()
         geo_dialogo.moveCenter(centro_janela)
         dialog.move(geo_dialogo.topLeft())
+
+    def _centralizar_widget_na_tela(self, widget: QWidget):
+        widget.adjustSize()
+        tela = None
+        try:
+            if widget.windowHandle() is not None:
+                tela = widget.windowHandle().screen()
+        except Exception:
+            tela = None
+        if tela is None:
+            tela = self.screen()
+        if tela is None:
+            if isinstance(widget, QDialog):
+                self._centralizar_dialogo_na_janela(widget)
+            return
+        geo_tela = tela.availableGeometry()
+        geo_widget = widget.frameGeometry()
+        geo_widget.moveCenter(geo_tela.center())
+        widget.move(geo_widget.topLeft())
 
     def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
         dialog.setStyleSheet(
@@ -2376,6 +2397,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         caixa.setText("Deseja recuperar arquivo(s) perdido(s)?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         self._traduzir_botoes_padrao_message_box(caixa)
+        QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
         if caixa.exec() != QMessageBox.Yes:
             self._limpar_arquivo_recuperacao()
             return
