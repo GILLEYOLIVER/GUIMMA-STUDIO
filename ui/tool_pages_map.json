@@ -204,7 +204,8 @@
             "editar",
             "manipular_pontos",
             "mover",
-            "redefinir_perimetro"
+            "redefinir_perimetro",
+            "dividir_curva"
           ]
         },
         {
@@ -212,14 +213,23 @@
           "tools": [
             "elemento_paralelo",
             "girar",
+            "copiar",
             "espelhar"
+          ]
+        },
+        {
+          "title": "Curva",
+          "tools": [
+            "cadastrar_curva",
+            "inserir_ponto",
+            "excluir_ponto"
           ]
         },
         {
           "title": "Manipular molde",
           "tools": [
-            "inserir_ponto",
-            "excluir_ponto",
+            "alinhar",
+            "substituir",
             "arredondar_ou_chanfrar"
           ]
         }
