@@ -953,8 +953,6 @@ class Ferramenta(FerramentaBase):
         candidatos = self._indices_por_angulo(base)
         if len(candidatos) < 4:
             candidatos = self._indices_por_amostragem(base, 4)
-        elif len(candidatos) > 8:
-            candidatos = self._indices_por_amostragem([base[i] for i in candidatos], 8, indices_originais=candidatos)
         return candidatos
 
     def _indices_por_angulo(self, base: list[tuple[float, float]]) -> list[int]:

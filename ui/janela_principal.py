@@ -67,7 +67,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.projeto_atual.preferencias_usuario.update(prefs_app)
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
-        self._ferramenta_ativa_id = str(self.projeto_atual.preferencias_usuario.get("ferramenta_ativa_id", "selecionar"))
+        # Regra de inicialização: sempre abrir com Selecionar ativo.
+        self._ferramenta_ativa_id = "selecionar"
+        self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = "selecionar"
         self._modo_navegacao = "cursor"
         self._estilo_desenho_atual = {"cor": "#ffffff", "estilo": "solid", "espessura": 1.0, "amplitude": 1.0}
         self._restaurar_estilo_desenho_memorizado()
