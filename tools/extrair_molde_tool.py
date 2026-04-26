@@ -60,8 +60,8 @@ class Ferramenta(FerramentaBase):
         self._dialog: QDialog | None = None
         self._idx_selecionado: int | None = None
         self._selecoes_manuais: set[int] = set()
-        self._contorno_extraido: list[QPointF] | None = None
-        self._contorno_auto_coords: list[tuple[float, float]] | None = None
+        self._contornos_extraidos_preview: list[list[QPointF]] = []
+        self._contornos_auto_coords: list[list[tuple[float, float]]] = []
         self._contornos_preparados: dict[int, list[tuple[float, float]]] = {}
         self._molde_criado = False
         self._molde_posicionado = False
@@ -75,8 +75,8 @@ class Ferramenta(FerramentaBase):
         super().on_activate(canvas)
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
-        self._contorno_extraido = None
-        self._contorno_auto_coords = None
+        self._contornos_extraidos_preview = []
+        self._contornos_auto_coords = []
         self._contornos_preparados = {}
         self._molde_criado = False
         self._molde_posicionado = False
@@ -93,8 +93,8 @@ class Ferramenta(FerramentaBase):
         self._sincronizar_cfg_da_ui()
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
-        self._contorno_extraido = None
-        self._contorno_auto_coords = None
+        self._contornos_extraidos_preview = []
+        self._contornos_auto_coords = []
         self._contornos_preparados = {}
         self._molde_criado = False
         self._molde_posicionado = False
@@ -134,15 +134,16 @@ class Ferramenta(FerramentaBase):
             if self._perimetro_contorno(contorno) < self.TOLERANCIA_FECHAMENTO_CM:
                 self._mostrar_aviso_sem_molde(canvas)
                 return True
-            self._contorno_auto_coords = contorno
-            self._contorno_extraido = [QPointF(float(x), float(y)) for x, y in contorno]
+            if not any(self._contornos_equivalentes(contorno, c) for c in self._contornos_auto_coords):
+                self._contornos_auto_coords.append(contorno)
+                self._contornos_extraidos_preview.append([QPointF(float(x), float(y)) for x, y in contorno])
             self._selecoes_manuais.clear()
             self._contornos_preparados = {}
             self._idx_selecionado = None
             canvas._selecionados = set()
             self._molde_criado = False
             self._molde_posicionado = False
-            self.set_status("Perímetro fechado detectado. RMB para extrair e arrastar molde.")
+            self.set_status(f"{len(self._contornos_auto_coords)} fechamento(s) selecionado(s). RMB para extrair.")
             canvas.update()
             event.accept()
             return True
@@ -156,7 +157,7 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        if not self._contorno_auto_coords:
+        if not self._contornos_auto_coords:
             self.set_status("Selecione primeiro uma área fechada com clique esquerdo.")
             event.accept()
             return True
@@ -210,8 +211,8 @@ class Ferramenta(FerramentaBase):
                 if el.get("tipo") == "polyline":
                     pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                     self._desenhar_contorno(canvas, painter, pts, QColor("#ff2fff"), 2.0)
-        if self._contorno_extraido:
-            self._desenhar_contorno(canvas, painter, self._contorno_extraido, QColor("#33a6ff"), 2.2)
+        for cont in self._contornos_extraidos_preview:
+            self._desenhar_contorno(canvas, painter, cont, QColor("#33a6ff"), 2.2)
         if self._molde_criado and self._idx_selecionado is not None and 0 <= self._idx_selecionado < len(canvas.cena.elementos):
             self._desenhar_controles_molde(canvas, painter, canvas.cena.elementos[self._idx_selecionado])
 
@@ -255,8 +256,14 @@ class Ferramenta(FerramentaBase):
         return self._ponto_dentro_poligono_coords((pt.x(), pt.y()), polygon)
 
     def _criar_molde(self, canvas) -> bool:
-        if self._contorno_auto_coords:
-            return self._criar_molde_de_contorno_extraido(canvas, self._contorno_auto_coords)
+        if self._contornos_auto_coords:
+            criou_algum = False
+            for cont in self._contornos_auto_coords:
+                criou_algum = self._criar_molde_de_contorno_extraido(canvas, cont, limpar_estado=False) or criou_algum
+            if criou_algum:
+                self._contornos_auto_coords = []
+                self._contornos_extraidos_preview = []
+            return criou_algum
         if not self._selecoes_manuais:
             return False
         idxs = sorted(self._selecoes_manuais)
@@ -345,7 +352,7 @@ class Ferramenta(FerramentaBase):
         self._molde_criado = True
         return True
 
-    def _criar_molde_de_contorno_extraido(self, canvas, pontos: list[tuple[float, float]]) -> bool:
+    def _criar_molde_de_contorno_extraido(self, canvas, pontos: list[tuple[float, float]], limpar_estado: bool = True) -> bool:
         try:
             pontos = self._normalizar_pontos_contorno(pontos)
             payload = create_mold_payload({"tipo": "polyline", "pontos": pontos})
@@ -371,7 +378,9 @@ class Ferramenta(FerramentaBase):
         self._selecoes_manuais = {self._idx_selecionado}
         canvas._selecionados = {self._idx_selecionado}
         self._molde_criado = True
-        self._contorno_auto_coords = None
+        if limpar_estado:
+            self._contornos_auto_coords = []
+            self._contornos_extraidos_preview = []
         return True
 
     def _extrair_indice(self, canvas, idx: int):
@@ -385,7 +394,7 @@ class Ferramenta(FerramentaBase):
             pontos = [QPointF(float(x), float(y)) for x, y in limpo]
         # Manter o contorno fiel: a opção de conversão não deve destruir o perímetro extraído.
         pontos = [QPointF(float(x), float(y)) for x, y in self._normalizar_pontos_contorno([(p.x(), p.y()) for p in pontos])]
-        self._contorno_extraido = pontos
+        self._contornos_extraidos_preview = [pontos]
         self._contornos_preparados[idx] = [(p.x(), p.y()) for p in pontos]
         self._molde_criado = False
 
@@ -454,8 +463,8 @@ class Ferramenta(FerramentaBase):
         self._molde_posicionado = False
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
-        self._contorno_extraido = None
-        self._contorno_auto_coords = None
+        self._contornos_extraidos_preview = []
+        self._contornos_auto_coords = []
         self._contornos_preparados = {}
         canvas._selecionados = set()
         self.set_status("Extração cancelada. Clique esquerdo para selecionar novamente.")
@@ -463,8 +472,8 @@ class Ferramenta(FerramentaBase):
     def _limpar_estado_extracao(self, canvas, msg: str):
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
-        self._contorno_extraido = None
-        self._contorno_auto_coords = None
+        self._contornos_extraidos_preview = []
+        self._contornos_auto_coords = []
         self._contornos_preparados = {}
         self._molde_criado = False
         self._molde_posicionado = False
@@ -495,15 +504,20 @@ class Ferramenta(FerramentaBase):
         # Caminho rápido principal: considera fechamentos por elementos locais,
         # incluindo curvas internas que dividem uma polyline fechada maior.
         # usa grafo planar local no raio de 20 cm, retornando a menor face válida.
+        pontos_teste = [ponto]
+        desloc = max(0.01, self.TOLERANCIA_FECHAMENTO_CM * 0.5)
+        for dx, dy in ((desloc, 0.0), (-desloc, 0.0), (0.0, desloc), (0.0, -desloc)):
+            pontos_teste.append((ponto[0] + dx, ponto[1] + dy))
         for tol_local in (0.005, 0.01, 0.02):
-            contorno_local = extract_local_enclosing_contour(
-                canvas.cena.elementos,
-                ponto,
-                search_radius=20.0,
-                tol=tol_local,
-            )
-            if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
-                return contorno_local
+            for pt in pontos_teste:
+                contorno_local = extract_local_enclosing_contour(
+                    canvas.cena.elementos,
+                    pt,
+                    search_radius=20.0,
+                    tol=tol_local,
+                )
+                if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
+                    return contorno_local
 
         # Fallback: quando não houver face local válida, usa polyline fechada já existente.
         candidatos = self._indices_polylines_contem_ponto(canvas, pos)
@@ -561,6 +575,35 @@ class Ferramenta(FerramentaBase):
             if encontrou_na_etapa and melhor is not None:
                 return melhor
         return melhor
+
+    def _contornos_equivalentes(
+        self,
+        a: list[tuple[float, float]],
+        b: list[tuple[float, float]],
+        tol: float = 1e-5,
+    ) -> bool:
+        na = self._normalizar_pontos_contorno(a)
+        nb = self._normalizar_pontos_contorno(b)
+        if len(na) != len(nb):
+            return False
+        if len(na) < 2:
+            return False
+        ba = na[:-1]
+        bb = nb[:-1]
+        if len(ba) != len(bb):
+            return False
+        n = len(ba)
+        for shift in range(n):
+            ok = True
+            for i in range(n):
+                ax, ay = ba[i]
+                bx, by = bb[(i + shift) % n]
+                if abs(ax - bx) > tol or abs(ay - by) > tol:
+                    ok = False
+                    break
+            if ok:
+                return True
+        return False
 
     def _ponto_dentro_poligono_coords(self, pt: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
         if len(polygon) < 3:
