@@ -118,7 +118,7 @@ def extract_smallest_enclosing_contour(
         poly = normalize_closed_polyline(cycle, clockwise=True)
         if not contour_is_valid(poly):
             continue
-        if not point_in_polygon(point, poly):
+        if not _point_in_polygon_or_boundary(point, poly):
             continue
         area = abs(_polygon_area(poly))
         if area <= 1e-6:
@@ -162,7 +162,7 @@ def extract_local_enclosing_contour(
         poly = normalize_closed_polyline(face, clockwise=True)
         if not contour_is_valid(poly):
             continue
-        if not point_in_polygon(point, poly):
+        if not _point_in_polygon_or_boundary(point, poly):
             continue
         area = abs(_polygon_area(poly))
         if area <= 1e-6:
@@ -418,3 +418,43 @@ def _polygon_area(poly: list[tuple[float, float]]) -> float:
     for a, b in zip(poly, poly[1:]):
         acc += (a[0] * b[1]) - (b[0] * a[1])
     return 0.5 * acc
+
+
+def _point_in_polygon_or_boundary(
+    point: tuple[float, float],
+    polygon: list[tuple[float, float]],
+    tol: float = 1e-7,
+) -> bool:
+    poly = ensure_closed_polyline(list(polygon))
+    if len(poly) < 4:
+        return False
+    px, py = point
+    for a, b in zip(poly, poly[1:]):
+        if _point_on_segment(point, a, b, tol):
+            return True
+    return point_in_polygon((px, py), poly)
+
+
+def _point_on_segment(
+    p: tuple[float, float],
+    a: tuple[float, float],
+    b: tuple[float, float],
+    tol: float,
+) -> bool:
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    abx = bx - ax
+    aby = by - ay
+    apx = px - ax
+    apy = py - ay
+    cruz = abs((abx * apy) - (aby * apx))
+    if cruz > tol:
+        return False
+    dot = (apx * abx) + (apy * aby)
+    if dot < -tol:
+        return False
+    ab2 = (abx * abx) + (aby * aby)
+    if dot - ab2 > tol:
+        return False
+    return True
