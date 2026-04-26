@@ -491,18 +491,9 @@ class Ferramenta(FerramentaBase):
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
-        # Caminho rápido: quando já existe polyline fechada contendo o clique,
-        # prioriza esse contorno direto (mais estável entre plataformas, ex.: macOS).
-        candidatos = self._indices_polylines_contem_ponto(canvas, pos)
-        if candidatos:
-            melhor_idx = self._escolher_melhor_candidato(canvas, candidatos)
-            if 0 <= melhor_idx < len(canvas.cena.elementos):
-                el = canvas.cena.elementos[melhor_idx]
-                pontos_el = self._normalizar_pontos_contorno(el.get("pontos", []))
-                if len(pontos_el) >= 4:
-                    return pontos_el
 
-        # Caminho rápido para fechamentos feitos por linhas de elementos:
+        # Caminho rápido principal: considera fechamentos por elementos locais,
+        # incluindo curvas internas que dividem uma polyline fechada maior.
         # usa grafo planar local no raio de 20 cm, retornando a menor face válida.
         for tol_local in (0.005, 0.01, 0.02):
             contorno_local = extract_local_enclosing_contour(
@@ -513,6 +504,16 @@ class Ferramenta(FerramentaBase):
             )
             if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
                 return contorno_local
+
+        # Fallback: quando não houver face local válida, usa polyline fechada já existente.
+        candidatos = self._indices_polylines_contem_ponto(canvas, pos)
+        if candidatos:
+            melhor_idx = self._escolher_melhor_candidato(canvas, candidatos)
+            if 0 <= melhor_idx < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[melhor_idx]
+                pontos_el = self._normalizar_pontos_contorno(el.get("pontos", []))
+                if len(pontos_el) >= 4:
+                    return pontos_el
 
         melhor: list[tuple[float, float]] | None = None
         melhor_dist = float("inf")
