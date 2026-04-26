@@ -204,7 +204,9 @@
             "editar",
             "manipular_pontos",
             "mover",
-            "redefinir_perimetro"
+            "mover_ponto",
+            "redefinir_perimetro",
+            "dividir_curva"
           ]
         },
         {
@@ -212,14 +214,23 @@
           "tools": [
             "elemento_paralelo",
             "girar",
+            "copiar",
             "espelhar"
+          ]
+        },
+        {
+          "title": "Curva",
+          "tools": [
+            "cadastrar_curva",
+            "inserir_ponto",
+            "excluir_ponto"
           ]
         },
         {
           "title": "Manipular molde",
           "tools": [
-            "inserir_ponto",
-            "excluir_ponto",
+            "alinhar",
+            "substituir",
             "arredondar_ou_chanfrar"
           ]
         }
@@ -664,6 +675,12 @@
       "module": "tools/mover_tool.py",
       "class": "Ferramenta",
       "icon": "mover.svg"
+    },
+    "mover_ponto": {
+      "title": "Mover Ponto",
+      "module": "tools/mover_ponto_tool.py",
+      "class": "Ferramenta",
+      "icon": "mover_ponto.svg"
     },
     "redefinir_perimetro": {
       "title": "Redefinir Perimetro",

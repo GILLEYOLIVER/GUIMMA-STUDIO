@@ -4,6 +4,7 @@ from math import atan2, degrees
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
+from PySide6.QtWidgets import QCheckBox, QDialog, QFormLayout, QLineEdit
 
 from tools.tool_base import FerramentaBase
 
@@ -11,8 +12,13 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "manipular_pontos"
     nome = "Manipular Pontos"
+    _dlg_global: QDialog | None = None
+    _edt_dx_global: QLineEdit | None = None
+    _edt_dy_global: QLineEdit | None = None
+    _chk_prop_global: QCheckBox | None = None
 
     def __init__(self):
+        super().__init__()
         self._arrastando_ponto_poly: tuple[int, int] | None = None
         self._arrastando_controle_molde: tuple[int, str, int] | None = None
         self._hover_ponto_poly: tuple[int, int] | None = None
@@ -21,6 +27,11 @@ class Ferramenta(FerramentaBase):
         self._hover_molde_idx: int | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._angulo_info: tuple[QPointF, QPointF, QPointF, float] | None = None
+        self._ponto_selecionado: tuple[int, int] | None = None
+        self._dlg_passo: QDialog | None = Ferramenta._dlg_global
+        self._edt_dx: QLineEdit | None = Ferramenta._edt_dx_global
+        self._edt_dy: QLineEdit | None = Ferramenta._edt_dy_global
+        self._chk_prop: QCheckBox | None = Ferramenta._chk_prop_global
 
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
@@ -31,7 +42,48 @@ class Ferramenta(FerramentaBase):
         self._hover_molde_idx = None
         self._guia_ponto_poly = None
         self._angulo_info = None
-        self.set_status("Manipular pontos: arraste cantos/auxiliares do molde e alças de curva com snap.")
+        self._ponto_selecionado = None
+        self._abrir_caixa_passo(canvas)
+        self.set_status("Mover ponto: passe o mouse para hover azul e clique para mover 1x por clique (ΔX/ΔY).")
+
+    def on_deactivate(self, canvas):
+        if self._dlg_passo:
+            self._dlg_passo.hide()
+
+    def _abrir_caixa_passo(self, canvas):
+        if Ferramenta._dlg_global is None:
+            Ferramenta._dlg_global = QDialog(canvas)
+            Ferramenta._dlg_global.setObjectName("guimma_mover_ponto_dialog")
+            Ferramenta._dlg_global.setWindowTitle("Mover ponto")
+            Ferramenta._dlg_global.setWindowFlags(Qt.Tool)
+            lay = QFormLayout(Ferramenta._dlg_global)
+            Ferramenta._edt_dx_global = QLineEdit("0")
+            Ferramenta._edt_dy_global = QLineEdit("0")
+            Ferramenta._chk_prop_global = QCheckBox("Proporcional")
+            lay.addRow("X", Ferramenta._edt_dx_global)
+            lay.addRow("Y", Ferramenta._edt_dy_global)
+            lay.addRow("", Ferramenta._chk_prop_global)
+            Ferramenta._dlg_global.setFixedWidth(170)
+        self._dlg_passo = Ferramenta._dlg_global
+        self._edt_dx = Ferramenta._edt_dx_global
+        self._edt_dy = Ferramenta._edt_dy_global
+        self._chk_prop = Ferramenta._chk_prop_global
+        if not self._dlg_passo.isVisible():
+            self._dlg_passo.show()
+
+    def _ler_delta_configurado(self) -> tuple[float, float]:
+        try:
+            dx = float((self._edt_dx.text() if self._edt_dx else "0").replace(",", "."))
+        except Exception:
+            dx = 0.0
+        try:
+            dy = float((self._edt_dy.text() if self._edt_dy else "0").replace(",", "."))
+        except Exception:
+            dy = 0.0
+        return dx, dy
+
+    def _modo_proporcional(self) -> bool:
+        return bool(self._chk_prop.isChecked()) if self._chk_prop else False
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -55,11 +107,51 @@ class Ferramenta(FerramentaBase):
         if ponto_poly is None:
             return False
         idx, p_idx = ponto_poly
-        self._arrastando_ponto_poly = (idx, p_idx)
+        self._ponto_selecionado = (idx, p_idx)
         self._hover_ponto_poly = (idx, p_idx)
+        dx, dy = self._ler_delta_configurado()
+        if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+            el = canvas.cena.elementos[idx]
+            pontos = el.get("pontos", [])
+            if 0 <= p_idx < len(pontos):
+                x, y = pontos[p_idx]
+                self._atualizar_ponto(canvas, idx, p_idx, QPointF(float(x) + dx, float(y) + dy))
+                if self._modo_proporcional():
+                    self._mover_ponto_proporcional(canvas, idx, p_idx, dx, dy)
+                canvas._registrar_historico()
         self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
+        canvas.update()
         event.accept()
         return True
+
+    def _mover_ponto_proporcional(self, canvas, idx: int, p_idx: int, dx: float, dy: float):
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        pontos = list(el.get("pontos", []))
+        if len(pontos) < 3:
+            return
+        fechado = False
+        if len(pontos) >= 2:
+            p0 = QPointF(float(pontos[0][0]), float(pontos[0][1]))
+            pn = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
+            fechado = canvas._dist(p0, pn) <= 1e-6
+        n = len(pontos) - 1 if fechado else len(pontos)
+        alcance = 6
+        for i in range(n):
+            if i == p_idx:
+                continue
+            d = abs(i - p_idx)
+            if fechado:
+                d = min(d, n - d)
+            peso = max(0.0, 1.0 - (d / alcance))
+            if peso <= 0.0:
+                continue
+            x, y = pontos[i]
+            pontos[i] = (float(x) + (dx * peso * 0.6), float(y) + (dy * peso * 0.6))
+        if fechado and len(pontos) >= 2:
+            pontos[-1] = pontos[0]
+        el["pontos"] = pontos
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
@@ -68,11 +160,7 @@ class Ferramenta(FerramentaBase):
         self._hover_elemento_idx = self._elemento_em_hover(canvas, pos)
         self._hover_molde_idx = self._molde_em_ponto(canvas, pos)
 
-        if self._arrastando_ponto_poly is not None:
-            idx, p_idx = self._arrastando_ponto_poly
-            self._atualizar_ponto(canvas, idx, p_idx, pos)
-            self._atualizar_info_angulo(canvas, idx, p_idx, pos)
-        elif self._arrastando_controle_molde is not None:
+        if self._arrastando_controle_molde is not None:
             idx, tipo, controle_idx = self._arrastando_controle_molde
             self._arrastar_controle_molde(canvas, idx, tipo, controle_idx, pos)
         elif canvas._arrastando_alca_curva is not None:
@@ -89,11 +177,6 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
         alterou = False
-        if self._arrastando_ponto_poly is not None:
-            self._arrastando_ponto_poly = None
-            self._guia_ponto_poly = None
-            self._angulo_info = None
-            alterou = True
         if self._arrastando_controle_molde is not None:
             self._arrastando_controle_molde = None
             alterou = True
@@ -409,6 +492,17 @@ class Ferramenta(FerramentaBase):
                     painter.setPen(QPen(QColor("#2da8ff"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
+
+        if self._ponto_selecionado is not None:
+            idx, p_idx = self._ponto_selecionado
+            if 0 <= idx < len(canvas.cena.elementos):
+                pontos = canvas.cena.elementos[idx].get("pontos", [])
+                if 0 <= p_idx < len(pontos):
+                    x, y = pontos[p_idx]
+                    pt = canvas._cena_para_tela(QPointF(float(x), float(y)))
+                    painter.setPen(QPen(QColor("#66d9ff"), 2.0))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(int(pt.x() - 11), int(pt.y() - 11), 22, 22)
 
         if self._hover_controle_molde is not None:
             idx, tipo, c_idx = self._hover_controle_molde
