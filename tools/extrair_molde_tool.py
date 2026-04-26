@@ -508,16 +508,23 @@ class Ferramenta(FerramentaBase):
         desloc = max(0.01, self.TOLERANCIA_FECHAMENTO_CM * 0.5)
         for dx, dy in ((desloc, 0.0), (-desloc, 0.0), (0.0, desloc), (0.0, -desloc)):
             pontos_teste.append((ponto[0] + dx, ponto[1] + dy))
-        for tol_local in (0.005, 0.01, 0.02):
-            for pt in pontos_teste:
-                contorno_local = extract_local_enclosing_contour(
-                    canvas.cena.elementos,
-                    pt,
-                    search_radius=20.0,
-                    tol=tol_local,
-                )
-                if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
-                    return contorno_local
+        raio_base = max(20.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * 0.45)
+        raios_busca = [20.0, raio_base, raio_base * 1.7]
+        raios_ordenados: list[float] = []
+        for r in raios_busca:
+            if not any(abs(r - ex) <= 1e-6 for ex in raios_ordenados):
+                raios_ordenados.append(r)
+        for raio_local in raios_ordenados:
+            for tol_local in (0.005, 0.01, 0.02):
+                for pt in pontos_teste:
+                    contorno_local = extract_local_enclosing_contour(
+                        canvas.cena.elementos,
+                        pt,
+                        search_radius=raio_local,
+                        tol=tol_local,
+                    )
+                    if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
+                        return contorno_local
 
         # Fallback: quando não houver face local válida, usa polyline fechada já existente.
         candidatos = self._indices_polylines_contem_ponto(canvas, pos)
