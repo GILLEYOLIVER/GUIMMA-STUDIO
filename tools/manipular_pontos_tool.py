@@ -4,7 +4,7 @@ from math import atan2, degrees
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QCheckBox, QDialog, QFormLayout, QLineEdit
 
 from tools.tool_base import FerramentaBase
 
@@ -12,6 +12,10 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "manipular_pontos"
     nome = "Manipular Pontos"
+    _dlg_global: QDialog | None = None
+    _edt_dx_global: QLineEdit | None = None
+    _edt_dy_global: QLineEdit | None = None
+    _chk_prop_global: QCheckBox | None = None
 
     def __init__(self):
         super().__init__()
@@ -24,9 +28,10 @@ class Ferramenta(FerramentaBase):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._angulo_info: tuple[QPointF, QPointF, QPointF, float] | None = None
         self._ponto_selecionado: tuple[int, int] | None = None
-        self._dlg_passo: QDialog | None = None
-        self._edt_dx: QLineEdit | None = None
-        self._edt_dy: QLineEdit | None = None
+        self._dlg_passo: QDialog | None = Ferramenta._dlg_global
+        self._edt_dx: QLineEdit | None = Ferramenta._edt_dx_global
+        self._edt_dy: QLineEdit | None = Ferramenta._edt_dy_global
+        self._chk_prop: QCheckBox | None = Ferramenta._chk_prop_global
 
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
@@ -46,16 +51,23 @@ class Ferramenta(FerramentaBase):
             self._dlg_passo.hide()
 
     def _abrir_caixa_passo(self, canvas):
-        if self._dlg_passo is None:
-            self._dlg_passo = QDialog(canvas)
-            self._dlg_passo.setWindowTitle("Mover ponto")
-            self._dlg_passo.setWindowFlags(Qt.Tool)
-            lay = QFormLayout(self._dlg_passo)
-            self._edt_dx = QLineEdit("0")
-            self._edt_dy = QLineEdit("0")
-            lay.addRow("X", self._edt_dx)
-            lay.addRow("Y", self._edt_dy)
-            self._dlg_passo.setFixedWidth(160)
+        if Ferramenta._dlg_global is None:
+            Ferramenta._dlg_global = QDialog(canvas)
+            Ferramenta._dlg_global.setObjectName("guimma_mover_ponto_dialog")
+            Ferramenta._dlg_global.setWindowTitle("Mover ponto")
+            Ferramenta._dlg_global.setWindowFlags(Qt.Tool)
+            lay = QFormLayout(Ferramenta._dlg_global)
+            Ferramenta._edt_dx_global = QLineEdit("0")
+            Ferramenta._edt_dy_global = QLineEdit("0")
+            Ferramenta._chk_prop_global = QCheckBox("Proporcional")
+            lay.addRow("X", Ferramenta._edt_dx_global)
+            lay.addRow("Y", Ferramenta._edt_dy_global)
+            lay.addRow("", Ferramenta._chk_prop_global)
+            Ferramenta._dlg_global.setFixedWidth(170)
+        self._dlg_passo = Ferramenta._dlg_global
+        self._edt_dx = Ferramenta._edt_dx_global
+        self._edt_dy = Ferramenta._edt_dy_global
+        self._chk_prop = Ferramenta._chk_prop_global
         if not self._dlg_passo.isVisible():
             self._dlg_passo.show()
 
@@ -69,6 +81,9 @@ class Ferramenta(FerramentaBase):
         except Exception:
             dy = 0.0
         return dx, dy
+
+    def _modo_proporcional(self) -> bool:
+        return bool(self._chk_prop.isChecked()) if self._chk_prop else False
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -101,11 +116,42 @@ class Ferramenta(FerramentaBase):
             if 0 <= p_idx < len(pontos):
                 x, y = pontos[p_idx]
                 self._atualizar_ponto(canvas, idx, p_idx, QPointF(float(x) + dx, float(y) + dy))
+                if self._modo_proporcional():
+                    self._mover_ponto_proporcional(canvas, idx, p_idx, dx, dy)
                 canvas._registrar_historico()
         self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
         canvas.update()
         event.accept()
         return True
+
+    def _mover_ponto_proporcional(self, canvas, idx: int, p_idx: int, dx: float, dy: float):
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        pontos = list(el.get("pontos", []))
+        if len(pontos) < 3:
+            return
+        fechado = False
+        if len(pontos) >= 2:
+            p0 = QPointF(float(pontos[0][0]), float(pontos[0][1]))
+            pn = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
+            fechado = canvas._dist(p0, pn) <= 1e-6
+        n = len(pontos) - 1 if fechado else len(pontos)
+        alcance = 6
+        for i in range(n):
+            if i == p_idx:
+                continue
+            d = abs(i - p_idx)
+            if fechado:
+                d = min(d, n - d)
+            peso = max(0.0, 1.0 - (d / alcance))
+            if peso <= 0.0:
+                continue
+            x, y = pontos[i]
+            pontos[i] = (float(x) + (dx * peso * 0.6), float(y) + (dy * peso * 0.6))
+        if fechado and len(pontos) >= 2:
+            pontos[-1] = pontos[0]
+        el["pontos"] = pontos
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
