@@ -24,6 +24,7 @@ from core.geometry_bridge import (
     create_mold_payload,
     extract_local_enclosing_contour,
     extract_smallest_enclosing_contour,
+    polyline_from_element,
 )
 from tools.tool_base import FerramentaBase
 
@@ -372,6 +373,7 @@ class Ferramenta(FerramentaBase):
             "pontos_auxiliares": [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
             "pontos_controle_referencia": self._coletar_pontos_controle_existentes(canvas, payload["pontos"]),
+            "pontos_interseccao_referencia": self._coletar_interseccoes_no_contorno(canvas, payload["pontos"]),
         }
         self._enriquecer_metadados_molde(novo)
         canvas.cena.elementos.append(novo)
@@ -432,6 +434,10 @@ class Ferramenta(FerramentaBase):
             if not isinstance(ref, (list, tuple)) or len(ref) != 2:
                 continue
             cantos.append((float(ref[0]), float(ref[1])))
+        for ref in molde.get("pontos_interseccao_referencia", []) or []:
+            if not isinstance(ref, (list, tuple)) or len(ref) != 2:
+                continue
+            cantos.append((float(ref[0]), float(ref[1])))
         cantos = self._deduplicar_pontos(cantos, tol=1e-4)
         molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
 
@@ -474,6 +480,62 @@ class Ferramenta(FerramentaBase):
             if not any(abs(x - sx) <= tol and abs(y - sy) <= tol for sx, sy in saida):
                 saida.append((float(x), float(y)))
         return saida
+
+    def _coletar_interseccoes_no_contorno(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(contorno) < 2:
+            return []
+        xs = [x for x, _ in contorno]
+        ys = [y for _, y in contorno]
+        min_x, max_x = min(xs) - 0.2, max(xs) + 0.2
+        min_y, max_y = min(ys) - 0.2, max(ys) + 0.2
+
+        segmentos: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for el in canvas.cena.elementos:
+            pts = polyline_from_element(el)
+            for a, b in zip(pts, pts[1:]):
+                seg_min_x = min(a[0], b[0])
+                seg_max_x = max(a[0], b[0])
+                seg_min_y = min(a[1], b[1])
+                seg_max_y = max(a[1], b[1])
+                if seg_max_x < min_x or seg_min_x > max_x or seg_max_y < min_y or seg_min_y > max_y:
+                    continue
+                segmentos.append((a, b))
+
+        inters: list[tuple[float, float]] = []
+        for i in range(len(segmentos)):
+            a, b = segmentos[i]
+            for j in range(i + 1, len(segmentos)):
+                c, d = segmentos[j]
+                pt = self._intersecao_segmentos(a, b, c, d, tol=1e-7)
+                if pt is None:
+                    continue
+                if self._ponto_no_contorno(pt, contorno, tol=0.08):
+                    inters.append(pt)
+        return self._deduplicar_pontos(inters, tol=1e-4)
+
+    def _intersecao_segmentos(
+        self,
+        a: tuple[float, float],
+        b: tuple[float, float],
+        c: tuple[float, float],
+        d: tuple[float, float],
+        tol: float,
+    ) -> tuple[float, float] | None:
+        ax, ay = a
+        bx, by = b
+        cx, cy = c
+        dx, dy = d
+        r = (bx - ax, by - ay)
+        s = (dx - cx, dy - cy)
+        rxs = (r[0] * s[1]) - (r[1] * s[0])
+        q_p = (cx - ax, cy - ay)
+        if abs(rxs) <= tol:
+            return None
+        t = ((q_p[0] * s[1]) - (q_p[1] * s[0])) / rxs
+        u = ((q_p[0] * r[1]) - (q_p[1] * r[0])) / rxs
+        if -tol <= t <= 1.0 + tol and -tol <= u <= 1.0 + tol:
+            return (ax + t * r[0], ay + t * r[1])
+        return None
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False
