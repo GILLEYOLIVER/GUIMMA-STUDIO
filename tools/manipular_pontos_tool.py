@@ -90,19 +90,6 @@ class Ferramenta(FerramentaBase):
             return False
         pos = canvas._ponto_com_snap(event.position())
 
-        alca = canvas._alca_curva_em_ponto(pos)
-        if alca is not None:
-            canvas._arrastando_alca_curva = alca
-            event.accept()
-            return True
-
-        controle_molde = self._controle_molde_em_ponto(canvas, pos)
-        if controle_molde is not None:
-            self._arrastando_controle_molde = controle_molde
-            self._hover_controle_molde = controle_molde
-            event.accept()
-            return True
-
         ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
         if ponto_poly is None:
             return False
@@ -156,19 +143,7 @@ class Ferramenta(FerramentaBase):
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
         self._hover_ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
-        self._hover_controle_molde = self._controle_molde_em_ponto(canvas, pos)
         self._hover_elemento_idx = self._elemento_em_hover(canvas, pos)
-        self._hover_molde_idx = self._molde_em_ponto(canvas, pos)
-
-        if self._arrastando_controle_molde is not None:
-            idx, tipo, controle_idx = self._arrastando_controle_molde
-            self._arrastar_controle_molde(canvas, idx, tipo, controle_idx, pos)
-        elif canvas._arrastando_alca_curva is not None:
-            idx, chave = canvas._arrastando_alca_curva
-            if 0 <= idx < len(canvas.cena.elementos):
-                el = canvas.cena.elementos[idx]
-                if el.get("tipo") == "bezier_quadratica":
-                    el[chave] = (pos.x(), pos.y())
         canvas.update()
         event.accept()
         return True
@@ -176,18 +151,6 @@ class Ferramenta(FerramentaBase):
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        alterou = False
-        if self._arrastando_controle_molde is not None:
-            self._arrastando_controle_molde = None
-            alterou = True
-        if canvas._arrastando_alca_curva is not None:
-            canvas._arrastando_alca_curva = None
-            alterou = True
-        if alterou:
-            canvas._registrar_historico()
-            canvas.update()
-            event.accept()
-            return True
         return False
 
     def on_paint_overlay(self, canvas, painter):
