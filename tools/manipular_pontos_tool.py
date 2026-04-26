@@ -118,24 +118,28 @@ class Ferramenta(FerramentaBase):
         pontos = list(el.get("pontos", []))
         if len(pontos) < 3:
             return
-        fechado = False
-        if len(pontos) >= 2:
-            p0 = QPointF(float(pontos[0][0]), float(pontos[0][1]))
-            pn = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
-            fechado = canvas._dist(p0, pn) <= 1e-6
+        fechado = len(pontos) >= 2 and canvas._dist(QPointF(float(pontos[0][0]), float(pontos[0][1])), QPointF(float(pontos[-1][0]), float(pontos[-1][1]))) <= 1e-6
         n = len(pontos) - 1 if fechado else len(pontos)
-        alcance = 6
-        for i in range(n):
-            if i == p_idx:
-                continue
-            d = abs(i - p_idx)
-            if fechado:
-                d = min(d, n - d)
-            peso = max(0.0, 1.0 - (d / alcance))
-            if peso <= 0.0:
-                continue
+
+        vizinhos: list[int] = []
+        prev_idx = p_idx - 1
+        next_idx = p_idx + 1
+        if fechado:
+            prev_idx %= n
+            next_idx %= n
+            vizinhos = [prev_idx, next_idx]
+        else:
+            if 0 <= prev_idx < n:
+                vizinhos.append(prev_idx)
+            if 0 <= next_idx < n:
+                vizinhos.append(next_idx)
+
+        # Modo proporcional local: afeta somente os segmentos anterior e posterior
+        # ao ponto selecionado, evitando desmontar o molde inteiro.
+        for i in vizinhos:
             x, y = pontos[i]
-            pontos[i] = (float(x) + (dx * peso * 0.6), float(y) + (dy * peso * 0.6))
+            pontos[i] = (float(x) + (dx * 0.25), float(y) + (dy * 0.25))
+
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
