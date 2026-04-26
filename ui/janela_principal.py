@@ -110,6 +110,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
         self._oferecer_recuperacao_pos_falha()
+        QTimer.singleShot(0, lambda: self._ativar_ferramenta_global("selecionar"))
         self.showMaximized()
 
     def _carregar_preferencias_app(self) -> dict:
@@ -2414,6 +2415,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._restaurar_viewport_documento_canvas(area, doc)
             self._marcar_area_como_salva(area)
             area.canvas.update()
+        self._ativar_ferramenta_global("selecionar")
         self.lbl_status.setText("Recuperação concluída.")
 
     def _abrir_projeto(self):

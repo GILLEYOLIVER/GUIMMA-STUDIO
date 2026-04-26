@@ -204,6 +204,7 @@
             "editar",
             "manipular_pontos",
             "mover",
+            "mover_ponto",
             "redefinir_perimetro",
             "dividir_curva"
           ]
@@ -674,6 +675,12 @@
       "module": "tools/mover_tool.py",
       "class": "Ferramenta",
       "icon": "mover.svg"
+    },
+    "mover_ponto": {
+      "title": "Mover Ponto",
+      "module": "tools/mover_ponto_tool.py",
+      "class": "Ferramenta",
+      "icon": "mover_ponto.svg"
     },
     "redefinir_perimetro": {
       "title": "Redefinir Perimetro",
