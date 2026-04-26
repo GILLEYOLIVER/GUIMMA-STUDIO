@@ -371,6 +371,8 @@ class Ferramenta(FerramentaBase):
             "pontos_controle_principais": [],
             "pontos_auxiliares": [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
+            "preservar_todos_vertices_controle": True,
+            "pontos_controle_referencia": self._coletar_pontos_controle_existentes(canvas, payload["pontos"]),
         }
         self._enriquecer_metadados_molde(novo)
         canvas.cena.elementos.append(novo)
@@ -421,8 +423,17 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
 
-        indices_cantos = self._indices_controles_principais(base)
-        cantos = [base[i] for i in indices_cantos]
+        if bool(molde.get("preservar_todos_vertices_controle")):
+            cantos = list(base)
+            indices_cantos = list(range(len(base)))
+        else:
+            indices_cantos = self._indices_controles_principais(base)
+            cantos = [base[i] for i in indices_cantos]
+        for ref in molde.get("pontos_controle_referencia", []) or []:
+            if not isinstance(ref, (list, tuple)) or len(ref) != 2:
+                continue
+            cantos.append((float(ref[0]), float(ref[1])))
+        cantos = self._deduplicar_pontos(cantos, tol=1e-4)
         molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
 
         usar_auxiliares = bool(self._cfg.get("usar_auxiliares", True))
@@ -434,6 +445,38 @@ class Ferramenta(FerramentaBase):
         molde["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
         molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
         molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
+
+    def _coletar_pontos_controle_existentes(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if not contorno:
+            return []
+        pontos_ref: list[tuple[float, float]] = []
+        for el in canvas.cena.elementos:
+            candidatos: list[tuple[float, float]] = []
+            for x, y in el.get("pontos", []) or []:
+                candidatos.append((float(x), float(y)))
+            for x, y in el.get("controle_cantos", []) or []:
+                candidatos.append((float(x), float(y)))
+            for p in el.get("pontos_controle_principais", []) or []:
+                if isinstance(p, dict):
+                    candidatos.append((float(p.get("x", 0.0)), float(p.get("y", 0.0))))
+            for pt in candidatos:
+                if self._ponto_no_contorno(pt, contorno, tol=0.08):
+                    pontos_ref.append(pt)
+        return self._deduplicar_pontos(pontos_ref, tol=1e-4)
+
+    def _ponto_no_contorno(self, ponto: tuple[float, float], contorno: list[tuple[float, float]], tol: float) -> bool:
+        px, py = ponto
+        for a, b in zip(contorno, contorno[1:]):
+            if self._ponto_no_segmento((px, py), a, b, tol):
+                return True
+        return False
+
+    def _deduplicar_pontos(self, pontos: list[tuple[float, float]], tol: float) -> list[tuple[float, float]]:
+        saida: list[tuple[float, float]] = []
+        for x, y in pontos:
+            if not any(abs(x - sx) <= tol and abs(y - sy) <= tol for sx, sy in saida):
+                saida.append((float(x), float(y)))
+        return saida
 
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False
