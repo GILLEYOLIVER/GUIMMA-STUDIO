@@ -249,15 +249,9 @@ class Ferramenta(FerramentaBase):
                 continue
             dxa, dya = disp_principais.get(a, (0.0, 0.0))
             dxb, dyb = disp_principais.get(b, (0.0, 0.0))
-            pa = QPointF(float(pontos_base[a][0]), float(pontos_base[a][1]))
-            pb = QPointF(float(pontos_base[b][0]), float(pontos_base[b][1]))
-            comprimento = max(canvas._dist(pa, pb), 1e-9)
-            acumulado = 0.0
-            anterior = pa
-            for idx_local in indices[1:-1]:
-                atual = QPointF(float(pontos_base[idx_local][0]), float(pontos_base[idx_local][1]))
-                acumulado += canvas._dist(anterior, atual)
-                t = max(0.0, min(1.0, acumulado / comprimento))
+            denom = max(1, len(indices) - 1)
+            for pos, idx_local in enumerate(indices[1:-1], start=1):
+                t = max(0.0, min(1.0, pos / float(denom)))
                 ddx = (dxa * (1.0 - t)) + (dxb * t)
                 ddy = (dya * (1.0 - t)) + (dyb * t)
                 nx = float(pontos_base[idx_local][0]) + ddx
@@ -266,7 +260,6 @@ class Ferramenta(FerramentaBase):
                     nx = round(nx, 2)
                     ny = round(ny, 2)
                 novos[idx_local] = (nx, ny)
-                anterior = atual
 
         if fechado and len(novos) >= 2:
             novos[-1] = novos[0]
