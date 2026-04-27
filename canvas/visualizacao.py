@@ -351,31 +351,66 @@ class VisualizacaoCanvas(QWidget):
     def colar(self):
         if not self._buffer_copia:
             return
-        self._offset_colagem += 10
         self._selecionados.clear()
+        itens = self._buffer_copia.get("elementos", []) if self._buffer_copia.get("tipo") == "multiplos" else [self._buffer_copia]
+        dx, dy = self._delta_colagem_para_centro(itens)
         if self._buffer_copia.get("tipo") == "multiplos":
             for item in self._buffer_copia.get("elementos", []):
                 novo = deepcopy(item)
-                if novo.get("tipo") == "polyline":
-                    novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-                elif novo.get("tipo") == "bezier_quadratica":
-                    for chave in ("p0", "p1", "p2"):
-                        x, y = novo[chave]
-                        novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+                self._transladar_elemento(novo, dx, dy)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
         else:
             novo = deepcopy(self._buffer_copia)
-            if novo.get("tipo") == "polyline":
-                novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-            elif novo.get("tipo") == "bezier_quadratica":
-                for chave in ("p0", "p1", "p2"):
-                    x, y = novo[chave]
-                    novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+            self._transladar_elemento(novo, dx, dy)
             self.cena.elementos.append(novo)
             self._selecionados.add(len(self.cena.elementos) - 1)
         self._registrar_historico()
         self.update()
+
+    def _delta_colagem_para_centro(self, elementos: list[dict]) -> tuple[float, float]:
+        pontos: list[tuple[float, float]] = []
+        for el in elementos:
+            if el.get("tipo") == "polyline":
+                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            elif el.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    if chave in el:
+                        x, y = el[chave]
+                        pontos.append((float(x), float(y)))
+        if not pontos:
+            return 0.0, 0.0
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        cx = (min(xs) + max(xs)) / 2.0
+        cy = (min(ys) + max(ys)) / 2.0
+        centro_tela = QPointF(float(self.width()) * 0.5, float(self.height()) * 0.5)
+        centro_cena = self._tela_para_cena(centro_tela)
+        return centro_cena.x() - cx, centro_cena.y() - cy
+
+    def _transladar_elemento(self, elemento: dict, dx: float, dy: float):
+        if elemento.get("tipo") == "polyline":
+            elemento["pontos"] = [(float(x) + dx, float(y) + dy) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            for chave in ("p0", "p1", "p2"):
+                if chave in elemento:
+                    x, y = elemento[chave]
+                    elemento[chave] = (float(x) + dx, float(y) + dy)
+
+        for chave in ("controle_cantos", "controle_auxiliares", "fio_origem", "fio_fim"):
+            valor = elemento.get(chave)
+            if isinstance(valor, list):
+                elemento[chave] = [(float(x) + dx, float(y) + dy) for x, y in valor]
+            elif isinstance(valor, (tuple, list)) and len(valor) == 2:
+                elemento[chave] = (float(valor[0]) + dx, float(valor[1]) + dy)
+
+        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
+            valor = elemento.get(chave)
+            if isinstance(valor, list):
+                for item in valor:
+                    if isinstance(item, dict):
+                        item["x"] = float(item.get("x", 0.0)) + dx
+                        item["y"] = float(item.get("y", 0.0)) + dy
 
     def recortar(self):
         self.copiar()
@@ -416,6 +451,9 @@ class VisualizacaoCanvas(QWidget):
             parent = parent.parentWidget()
 
     def _abrir_menu_contexto_canvas(self, pos_global: QPoint):
+        pos_local = self.mapFromGlobal(pos_global)
+        pos_cena = self._ponto_com_snap(QPointF(float(pos_local.x()), float(pos_local.y())))
+        molde_no_cursor = self._indice_molde_em_ponto(pos_cena)
         menu = QMenu(self)
         a_props = menu.addAction("Propriedades\tCtrl+Enter")
         a_vars = menu.addAction("Variantes")
@@ -447,6 +485,9 @@ class VisualizacaoCanvas(QWidget):
         if escolhido is None:
             return
         if escolhido is a_props:
+            if molde_no_cursor is not None:
+                self._selecionados = {molde_no_cursor}
+                self.update()
             self._ativar_ferramenta_janela_principal("propriedades")
         elif escolhido is a_vars:
             self._ativar_ferramenta_janela_principal("variantes")
@@ -996,7 +1037,10 @@ class VisualizacaoCanvas(QWidget):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
             pos = self._ponto_com_snap(event.position())
-            if self._clique_em_molde_selecionado(pos):
+            molde_alvo = self._indice_molde_em_ponto(pos)
+            if molde_alvo is not None:
+                self._selecionados = {molde_alvo}
+                self.update()
                 self._ativar_ferramenta_janela_principal("propriedades")
                 event.accept()
                 return
@@ -1577,7 +1621,21 @@ class VisualizacaoCanvas(QWidget):
                     p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
+                if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
+                    pontos_nome = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                    base_nome = pontos_nome[:-1] if len(pontos_nome) >= 3 and pontos_nome[0] == pontos_nome[-1] else pontos_nome
+                    if base_nome:
+                        cx = sum(p.x() for p in base_nome) / len(base_nome)
+                        cy = sum(p.y() for p in base_nome) / len(base_nome)
+                        if self._dist(QPointF(cx, cy), pos) <= (tolerancia * 2.0):
+                            candidatos.append(idx)
         return candidatos
+
+    def _indice_molde_em_ponto(self, pos: QPointF) -> int | None:
+        for idx in self._indices_elementos_em_ponto(pos):
+            if 0 <= idx < len(self.cena.elementos) and self.cena.elementos[idx].get("molde"):
+                return idx
+        return None
 
     def _clique_em_molde_selecionado(self, pos: QPointF) -> bool:
         if not self._selecionados:
