@@ -180,7 +180,11 @@ class Ferramenta(FerramentaBase):
         else:
             # Modo "1 ponto": move exclusivamente o ponto clicado.
             # (o deslocamento do ponto selecionado já foi aplicado em _atualizar_ponto)
-            pass
+            if el.get("molde"):
+                # Reajusta apenas os pontos intermediários/auxiliares para que não
+                # "segurem" a linha quando um ponto principal é movido.
+                self._mover_molde_n_pontos(canvas, el, p_idx, dx, dy)
+                pontos = list(el.get("pontos", []))
 
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
