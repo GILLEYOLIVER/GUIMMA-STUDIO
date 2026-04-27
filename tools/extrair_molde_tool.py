@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from math import atan2, cos, pi, sin, sqrt
+import os
+from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
@@ -55,6 +57,7 @@ class Ferramenta(FerramentaBase):
         "quebrar_auxiliares": True,
         "converter_auxiliares": True,
     }
+    _log_extracao_habilitado = os.environ.get("GUIMMA_EXTRACAO_LOG", "1").strip().lower() not in {"0", "false", "off", "no"}
 
     def __init__(self):
         super().__init__()
@@ -258,6 +261,15 @@ class Ferramenta(FerramentaBase):
 
     def _criar_molde(self, canvas) -> bool:
         if self._contornos_auto_coords:
+            if len(self._contornos_auto_coords) > 1:
+                contorno_unificado = self._unificar_contornos_extraidos(self._contornos_auto_coords)
+                if contorno_unificado:
+                    criou_unificado = self._criar_molde_de_contorno_extraido(canvas, contorno_unificado, limpar_estado=False)
+                    if criou_unificado:
+                        self.set_status("Partes selecionadas unificadas em um único molde.")
+                        self._contornos_auto_coords = []
+                        self._contornos_extraidos_preview = []
+                        return True
             criou_algum = False
             for cont in self._contornos_auto_coords:
                 criou_algum = self._criar_molde_de_contorno_extraido(canvas, cont, limpar_estado=False) or criou_algum
@@ -386,6 +398,49 @@ class Ferramenta(FerramentaBase):
             self._contornos_extraidos_preview = []
         return True
 
+    def _unificar_contornos_extraidos(self, contornos: list[list[tuple[float, float]]]) -> list[tuple[float, float]] | None:
+        """
+        Tenta unificar múltiplos fechamentos selecionados em um único contorno.
+        Estratégia:
+          1) coleta todos os segmentos dos contornos selecionados;
+          2) remove segmentos internos compartilhados (aparecem duas vezes);
+          3) recompõe o perímetro externo restante.
+        """
+        if len(contornos) < 2:
+            return contornos[0] if contornos else None
+
+        tol = 1e-4
+
+        def _kpt(p: tuple[float, float]) -> tuple[int, int]:
+            return (round(float(p[0]) / tol), round(float(p[1]) / tol))
+
+        segmentos: dict[tuple[tuple[int, int], tuple[int, int]], dict] = {}
+        for cont in contornos:
+            if len(cont) < 2:
+                continue
+            for a, b in zip(cont, cont[1:]):
+                ka = _kpt(a)
+                kb = _kpt(b)
+                if ka == kb:
+                    continue
+                chave = (ka, kb) if ka <= kb else (kb, ka)
+                info = segmentos.setdefault(chave, {"count": 0, "segmento": (a, b)})
+                info["count"] += 1
+
+        elementos_borda: list[dict] = []
+        for info in segmentos.values():
+            if info["count"] % 2 == 1:
+                a, b = info["segmento"]
+                elementos_borda.append({"tipo": "polyline", "pontos": [a, b]})
+
+        if not elementos_borda:
+            return None
+
+        try:
+            return compose_closed_contour(elementos_borda, tol=1e-3)
+        except ValueError:
+            return None
+
     def _extrair_indice(self, canvas, idx: int):
         if idx < 0 or idx >= len(canvas.cena.elementos):
             return
@@ -423,6 +478,8 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
+        molde.setdefault("molde_pronto", True)
+        molde.setdefault("permitir_alteracoes_encaixe", True)
 
         if bool(molde.get("preservar_todos_vertices_controle")):
             cantos = list(base)
@@ -604,6 +661,12 @@ class Ferramenta(FerramentaBase):
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
+        inicio_busca = monotonic()
+        limite_tempo_s = 2.2
+        tentativas_local = 0
+        tentativas_fallback = 0
+        total_elementos = len(canvas.cena.elementos)
+        self._log_extracao(f"início busca ponto={ponto} elementos={total_elementos}")
 
         # Caminho rápido principal: considera fechamentos por elementos locais,
         # incluindo curvas internas que dividem uma polyline fechada maior.
@@ -618,16 +681,72 @@ class Ferramenta(FerramentaBase):
         for r in raios_busca:
             if not any(abs(r - ex) <= 1e-6 for ex in raios_ordenados):
                 raios_ordenados.append(r)
+        raio_max_local = max(raios_ordenados) if raios_ordenados else 20.0
+        elementos_locais = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio_max_local * 1.8)
+        if not elementos_locais:
+            elementos_locais = list(canvas.cena.elementos)
+        self._log_extracao(
+            f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={raio_max_local:.2f} zoom={canvas.zoom:.4f}"
+        )
+
+        # Micro-faces: tentativa dedicada para fechamentos muito pequenos.
+        # Estratégia de "onda local": expande raios curtos e pequenas perturbações
+        # do ponto de clique para capturar faces mínimas.
+        micro_sementes = [ponto]
+        micro_d = max(0.002, self.TOLERANCIA_FECHAMENTO_CM * 0.08)
+        for dx, dy in (
+            (micro_d, 0.0), (-micro_d, 0.0), (0.0, micro_d), (0.0, -micro_d),
+            (micro_d, micro_d), (micro_d, -micro_d), (-micro_d, micro_d), (-micro_d, -micro_d),
+        ):
+            micro_sementes.append((ponto[0] + dx, ponto[1] + dy))
+        melhor_micro: list[tuple[float, float]] | None = None
+        melhor_micro_area = float("inf")
+        for raio_micro in (2.0, 4.0, 8.0):
+            for tol_micro in (0.0005, 0.001, 0.002, 0.005):
+                for semente in micro_sementes:
+                    if (monotonic() - inicio_busca) > limite_tempo_s:
+                        return melhor_micro
+                    tentativas_local += 1
+                    cont_micro = extract_smallest_enclosing_contour(
+                        elementos_locais,
+                        semente,
+                        tol=tol_micro,
+                        search_radius=raio_micro,
+                    )
+                    if not cont_micro:
+                        continue
+                    if not self._ponto_dentro_poligono_coords(ponto, cont_micro):
+                        continue
+                    area_micro = abs(self._area_contorno(cont_micro))
+                    if area_micro <= 1e-10:
+                        continue
+                    if area_micro < melhor_micro_area:
+                        melhor_micro = cont_micro
+                        melhor_micro_area = area_micro
+        if melhor_micro is not None:
+            self._log_extracao(
+                f"sucesso micro-face em {(monotonic()-inicio_busca):.3f}s area={melhor_micro_area:.8f}"
+            )
+            return melhor_micro
         for raio_local in raios_ordenados:
             for tol_local in (0.005, 0.01, 0.02):
                 for pt in pontos_teste:
+                    tentativas_local += 1
+                    if (monotonic() - inicio_busca) > limite_tempo_s:
+                        self._log_extracao(
+                            f"timeout local após {tentativas_local} tentativas em {(monotonic()-inicio_busca):.3f}s"
+                        )
+                        return None
                     contorno_local = extract_local_enclosing_contour(
-                        canvas.cena.elementos,
+                        elementos_locais,
                         pt,
                         search_radius=raio_local,
                         tol=tol_local,
                     )
                     if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
+                        self._log_extracao(
+                            f"sucesso local em {(monotonic()-inicio_busca):.3f}s tentativas_local={tentativas_local}"
+                        )
                         return contorno_local
 
         # Fallback: quando não houver face local válida, usa polyline fechada já existente.
@@ -655,15 +774,21 @@ class Ferramenta(FerramentaBase):
         estrategias = [
             {"tolerancias": (0.001, 0.01), "sementes": sementes[:5], "search_radius": raio_cena_base},
             {"tolerancias": (0.03, self.TOLERANCIA_FECHAMENTO_CM), "sementes": sementes, "search_radius": raio_cena_base * 1.6},
-            {"tolerancias": (0.20,), "sementes": sementes, "search_radius": None},
+            {"tolerancias": (0.20,), "sementes": sementes, "search_radius": raio_max_local * 2.2},
         ]
 
         for etapa in estrategias:
             encontrou_na_etapa = False
             for tol in etapa["tolerancias"]:
                 for semente in etapa["sementes"]:
+                    tentativas_fallback += 1
+                    if (monotonic() - inicio_busca) > limite_tempo_s:
+                        self._log_extracao(
+                            f"timeout fallback após {tentativas_fallback} tentativas em {(monotonic()-inicio_busca):.3f}s"
+                        )
+                        return melhor
                     contorno = extract_smallest_enclosing_contour(
-                        canvas.cena.elementos,
+                        elementos_locais,
                         semente,
                         tol=tol,
                         search_radius=etapa["search_radius"],
@@ -684,8 +809,41 @@ class Ferramenta(FerramentaBase):
                         melhor_area = area
                         encontrou_na_etapa = True
             if encontrou_na_etapa and melhor is not None:
+                self._log_extracao(
+                    f"sucesso fallback em {(monotonic()-inicio_busca):.3f}s tentativas_fallback={tentativas_fallback}"
+                )
                 return melhor
+        self._log_extracao(
+            f"fim sem contorno em {(monotonic()-inicio_busca):.3f}s "
+            f"tentativas_local={tentativas_local} tentativas_fallback={tentativas_fallback}"
+        )
         return melhor
+
+    def _elementos_proximos_para_extracao(
+        self,
+        elementos: list[dict],
+        ponto: tuple[float, float],
+        raio: float,
+    ) -> list[dict]:
+        px, py = ponto
+        min_x, max_x = px - raio, px + raio
+        min_y, max_y = py - raio, py + raio
+        filtrados: list[dict] = []
+        for el in elementos:
+            pts = polyline_from_element(el)
+            if len(pts) < 2:
+                continue
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            if max(xs) < min_x or min(xs) > max_x or max(ys) < min_y or min(ys) > max_y:
+                continue
+            filtrados.append(el)
+        return filtrados
+
+    def _log_extracao(self, msg: str):
+        if not self._log_extracao_habilitado:
+            return
+        print(f"[extrair_molde][perf] {msg}")
 
     def _contornos_equivalentes(
         self,
