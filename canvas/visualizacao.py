@@ -451,6 +451,9 @@ class VisualizacaoCanvas(QWidget):
             parent = parent.parentWidget()
 
     def _abrir_menu_contexto_canvas(self, pos_global: QPoint):
+        pos_local = self.mapFromGlobal(pos_global)
+        pos_cena = self._ponto_com_snap(QPointF(float(pos_local.x()), float(pos_local.y())))
+        molde_no_cursor = self._indice_molde_em_ponto(pos_cena)
         menu = QMenu(self)
         a_props = menu.addAction("Propriedades\tCtrl+Enter")
         a_vars = menu.addAction("Variantes")
@@ -482,6 +485,9 @@ class VisualizacaoCanvas(QWidget):
         if escolhido is None:
             return
         if escolhido is a_props:
+            if molde_no_cursor is not None:
+                self._selecionados = {molde_no_cursor}
+                self.update()
             self._ativar_ferramenta_janela_principal("propriedades")
         elif escolhido is a_vars:
             self._ativar_ferramenta_janela_principal("variantes")
@@ -1031,7 +1037,10 @@ class VisualizacaoCanvas(QWidget):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
             pos = self._ponto_com_snap(event.position())
-            if self._clique_em_molde_selecionado(pos):
+            molde_alvo = self._indice_molde_em_ponto(pos)
+            if molde_alvo is not None:
+                self._selecionados = {molde_alvo}
+                self.update()
                 self._ativar_ferramenta_janela_principal("propriedades")
                 event.accept()
                 return
@@ -1612,7 +1621,21 @@ class VisualizacaoCanvas(QWidget):
                     p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
+                if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
+                    pontos_nome = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                    base_nome = pontos_nome[:-1] if len(pontos_nome) >= 3 and pontos_nome[0] == pontos_nome[-1] else pontos_nome
+                    if base_nome:
+                        cx = sum(p.x() for p in base_nome) / len(base_nome)
+                        cy = sum(p.y() for p in base_nome) / len(base_nome)
+                        if self._dist(QPointF(cx, cy), pos) <= (tolerancia * 2.0):
+                            candidatos.append(idx)
         return candidatos
+
+    def _indice_molde_em_ponto(self, pos: QPointF) -> int | None:
+        for idx in self._indices_elementos_em_ponto(pos):
+            if 0 <= idx < len(self.cena.elementos) and self.cena.elementos[idx].get("molde"):
+                return idx
+        return None
 
     def _clique_em_molde_selecionado(self, pos: QPointF) -> bool:
         if not self._selecionados:
