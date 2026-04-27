@@ -6,6 +6,7 @@ from uuid import uuid4
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPen
 
+from core.geometry_bridge import create_mold_payload
 from tools.tool_base import FerramentaBase
 
 
@@ -127,20 +128,26 @@ class Ferramenta(FerramentaBase):
         p2 = QPointF(p3.x(), p1.y())
         p4 = QPointF(p1.x(), p3.y())
         cantos = [p1, p2, p3, p4]
-        pontos_auxiliares: list[QPointF] = []
         if self._criar_molde:
-            pontos_fechados: list[QPointF] = []
-            for idx, inicio in enumerate(cantos):
-                fim = cantos[(idx + 1) % len(cantos)]
-                pontos_fechados.append(inicio)
-                aux_segmento = self._pontos_auxiliares_segmento(inicio, fim)
-                pontos_auxiliares.extend(aux_segmento)
-                pontos_fechados.extend(aux_segmento)
-            pontos_fechados.append(cantos[0])
+            pontos_fechados = [*cantos, cantos[0]]
+            try:
+                payload = create_mold_payload(
+                    {"tipo": "polyline", "pontos": [(pt.x(), pt.y()) for pt in pontos_fechados]}
+                )
+            except ValueError:
+                self._inicio = None
+                self._preview = None
+                return
+            xs = [pt.x() for pt in cantos]
+            ys = [pt.y() for pt in cantos]
+            min_x, max_x = min(xs), max(xs)
+            cy = sum(ys) / len(ys)
+            largura = max_x - min_x
+            margem = largura * 0.20
             canvas.cena.elementos.append(
                 {
                     "tipo": "polyline",
-                    "pontos": [(pt.x(), pt.y()) for pt in pontos_fechados],
+                    "pontos": payload["pontos"],
                     "cor": canvas._linha_cor,
                     "espessura": canvas._linha_espessura,
                     "estilo": canvas._linha_estilo,
@@ -148,9 +155,22 @@ class Ferramenta(FerramentaBase):
                     "fase_inicio": 0.0,
                     "molde": True,
                     "molde_id": str(uuid4()),
+                    "nome_molde": f"K{len(canvas.cena.elementos) + 1}",
+                    "shape_id": payload["shape_id"],
+                    "node_ids": payload["node_ids"],
+                    "segment_ids": payload["segment_ids"],
                     "fio_angulo": 0.0,
-                    "controle_cantos": [(pt.x(), pt.y()) for pt in cantos],
-                    "controle_auxiliares": [(pt.x(), pt.y()) for pt in pontos_auxiliares],
+                    "fio_origem": (min_x + margem, cy),
+                    "fio_fim": (max_x - margem, cy),
+                    "mostrar_nome": True,
+                    "mostrar_fio": True,
+                    "mostrar_controles": True,
+                    "molde_pronto": True,
+                    "permitir_alteracoes_encaixe": True,
+                    "controle_cantos": payload["controle_cantos"],
+                    "controle_auxiliares": payload["pontos_auxiliares"],
+                    "pontos_controle_principais": [{"x": float(x), "y": float(y)} for x, y in payload["controle_cantos"]],
+                    "pontos_auxiliares": [{"x": float(x), "y": float(y)} for x, y in payload["pontos_auxiliares"]],
                 }
             )
             canvas._selecionados = {len(canvas.cena.elementos) - 1}

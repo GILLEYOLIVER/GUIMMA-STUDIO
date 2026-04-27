@@ -9,7 +9,7 @@ from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -456,7 +456,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             botao_rect = self.botao_arquivo.rect().translated(botao_topo)
             if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
                 self.backstage.hide()
+        if isinstance(watched, QDialog) and event.type() in (QEvent.Close, QEvent.Hide):
+            self._garantir_selecionar_apos_fechar_janela()
         return super().eventFilter(watched, event)
+
+    def _garantir_selecionar_apos_fechar_janela(self):
+        def _ativar():
+            if getattr(self, "_ferramenta_ativa_id", "selecionar") != "selecionar":
+                self._ativar_ferramenta_global("selecionar")
+        QTimer.singleShot(0, _ativar)
 
     def _topo_backstage(self) -> int:
         return self.barra_superior.height()
@@ -1309,6 +1317,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         filtro: str,
         *,
         modo_salvar: bool = False,
+        com_preview_projeto: bool = False,
     ) -> tuple[str, str]:
         dialog = QFileDialog(self, titulo, "", filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
@@ -1320,12 +1329,80 @@ class GuimmaStudioMainWindow(QMainWindow):
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
         self._forcar_dialogo_arquivo_claro(dialog)
+        if com_preview_projeto and not modo_salvar:
+            self._anexar_preview_dialogo_arquivo(dialog)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
             return "", ""
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         return caminho, dialog.selectedNameFilter()
+
+    def _anexar_preview_dialogo_arquivo(self, dialog: QFileDialog):
+        layout = dialog.layout()
+        if not isinstance(layout, QGridLayout):
+            return
+        painel = QFrame(dialog)
+        painel.setFrameShape(QFrame.StyledPanel)
+        painel.setMinimumWidth(280)
+        box = QVBoxLayout(painel)
+        box.setContentsMargins(8, 8, 8, 8)
+        box.setSpacing(6)
+        lbl_titulo = QLabel("Pré-visualização", painel)
+        lbl_titulo.setStyleSheet("font-weight:600;")
+        lbl_img = QLabel("Selecione um arquivo .gstudio", painel)
+        lbl_img.setAlignment(Qt.AlignCenter)
+        lbl_img.setMinimumSize(260, 180)
+        lbl_img.setStyleSheet("background:#101010;color:#d8d8d8;border:1px solid #3a3a3a;")
+        box.addWidget(lbl_titulo)
+        box.addWidget(lbl_img, 1)
+
+        row_count = max(1, layout.rowCount())
+        col_count = max(1, layout.columnCount())
+        layout.addWidget(painel, 0, col_count, row_count, 1)
+
+        def _atualizar(caminho: str):
+            pix = self._carregar_preview_do_projeto(Path(caminho)) if caminho else None
+            if pix is None:
+                lbl_img.setText("Sem prévia")
+                lbl_img.setPixmap(QPixmap())
+                return
+            lbl_img.setText("")
+            lbl_img.setPixmap(pix.scaled(lbl_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        dialog.currentChanged.connect(_atualizar)
+        arquivos = dialog.selectedFiles()
+        if arquivos:
+            _atualizar(arquivos[0])
+
+    def _criptografar_preview(self, dados: bytes) -> bytes:
+        chave = b"GUIMMA_PREVIEW_V1"
+        return bytes(b ^ chave[i % len(chave)] for i, b in enumerate(dados))
+
+    def _descriptografar_preview(self, dados: bytes) -> bytes:
+        return self._criptografar_preview(dados)
+
+    def _carregar_preview_do_projeto(self, caminho: Path) -> QPixmap | None:
+        if not caminho.exists() or caminho.suffix.lower() not in {EXTENSAO_PROJETO.lower(), ".gstudio"}:
+            return None
+        try:
+            with ZipFile(caminho, mode="r") as pacote:
+                nomes = set(pacote.namelist())
+                if "preview/thumbnail.enc" in nomes:
+                    bruto = pacote.read("preview/thumbnail.enc")
+                    png = self._descriptografar_preview(bruto)
+                elif "preview/thumbnail.png" in nomes:
+                    png = pacote.read("preview/thumbnail.png")
+                elif "thumbnail.png" in nomes:
+                    png = pacote.read("thumbnail.png")
+                else:
+                    return None
+        except Exception:
+            return None
+        img = QImage.fromData(png, "PNG")
+        if img.isNull():
+            return None
+        return QPixmap.fromImage(img)
 
 
     def _nome_documento_ativo_saida(self) -> str:
@@ -2422,6 +2499,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir projeto",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
+            com_preview_projeto=True,
         )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)
@@ -3650,6 +3728,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         png_bytes = bytes(arr)
         with ZipFile(destino, mode="a", compression=ZIP_DEFLATED) as pacote:
             pacote.writestr("preview/thumbnail.png", png_bytes)
+            pacote.writestr("preview/thumbnail.enc", self._criptografar_preview(png_bytes))
             pacote.writestr("thumbnail.png", png_bytes)
             pacote.writestr("meta/thumbnail.png", png_bytes)
         self.projeto_atual.preferencias_usuario["thumbnail_internal"] = "preview/thumbnail.png"
