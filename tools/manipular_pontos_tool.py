@@ -155,7 +155,9 @@ class Ferramenta(FerramentaBase):
         if n < 2:
             return
 
-        if mover_n_pontos:
+        if mover_n_pontos and el.get("molde") and self._mover_molde_n_pontos(canvas, el, p_idx, dx, dy):
+            pontos = list(el.get("pontos", []))
+        elif mover_n_pontos:
             alcance = max(2, n // 2)
             for i in range(n):
                 if i == p_idx:
@@ -208,6 +210,103 @@ class Ferramenta(FerramentaBase):
                 if canvas._dist(anterior_pt, novo_pt) > 1e-9:
                     self._mover_controles_correspondentes(canvas, el, anterior_pt, novo_pt)
             self._reajustar_fio_no_molde(el)
+
+    def _mover_molde_n_pontos(self, canvas, el: dict, p_idx: int, dx: float, dy: float) -> bool:
+        pontos_base = list(el.get("pontos", []))
+        if len(pontos_base) < 4:
+            return False
+        fechado = len(pontos_base) >= 2 and canvas._dist(
+            QPointF(float(pontos_base[0][0]), float(pontos_base[0][1])),
+            QPointF(float(pontos_base[-1][0]), float(pontos_base[-1][1])),
+        ) <= 1e-6
+        n = len(pontos_base) - 1 if fechado else len(pontos_base)
+        if not (0 <= p_idx < n):
+            return False
+
+        principais = sorted(i for i in self._indices_pontos_principais_molde(canvas, el) if 0 <= i < n)
+        if len(principais) < 2 or p_idx not in principais:
+            return False
+
+        # Deslocamento por "anel" de pontos principais (decaimento suave).
+        ordem = {p: i for i, p in enumerate(principais)}
+        pos_sel = ordem[p_idx]
+        total_principais = len(principais)
+        disp_principais: dict[int, tuple[float, float]] = {p_idx: (dx, dy)}
+        for p in principais:
+            if p == p_idx:
+                continue
+            dist_ordem = abs(ordem[p] - pos_sel)
+            if fechado:
+                dist_ordem = min(dist_ordem, total_principais - dist_ordem)
+            fator = 0.60 ** max(dist_ordem, 1)
+            disp_principais[p] = (dx * fator, dy * fator)
+
+        novos = list(pontos_base)
+        for p in principais:
+            if p == p_idx:
+                continue
+            ddx, ddy = disp_principais[p]
+            x, y = pontos_base[p]
+            nx = float(x) + ddx
+            ny = float(y) + ddy
+            if self._modo_discreto():
+                nx = round(nx, 2)
+                ny = round(ny, 2)
+            novos[p] = (nx, ny)
+
+        pares: list[tuple[int, int]] = []
+        if fechado:
+            for i, a in enumerate(principais):
+                b = principais[(i + 1) % len(principais)]
+                pares.append((a, b))
+        else:
+            pares.extend((a, b) for a, b in zip(principais, principais[1:]))
+
+        for a, b in pares:
+            indices = self._indices_intervalo(a, b, n, fechado)
+            if len(indices) <= 2:
+                continue
+            dxa, dya = disp_principais.get(a, (0.0, 0.0))
+            dxb, dyb = disp_principais.get(b, (0.0, 0.0))
+            pa = QPointF(float(pontos_base[a][0]), float(pontos_base[a][1]))
+            pb = QPointF(float(pontos_base[b][0]), float(pontos_base[b][1]))
+            comprimento = max(canvas._dist(pa, pb), 1e-9)
+            acumulado = 0.0
+            anterior = pa
+            for idx_local in indices[1:-1]:
+                atual = QPointF(float(pontos_base[idx_local][0]), float(pontos_base[idx_local][1]))
+                acumulado += canvas._dist(anterior, atual)
+                t = max(0.0, min(1.0, acumulado / comprimento))
+                ddx = (dxa * (1.0 - t)) + (dxb * t)
+                ddy = (dya * (1.0 - t)) + (dyb * t)
+                nx = float(pontos_base[idx_local][0]) + ddx
+                ny = float(pontos_base[idx_local][1]) + ddy
+                if self._modo_discreto():
+                    nx = round(nx, 2)
+                    ny = round(ny, 2)
+                novos[idx_local] = (nx, ny)
+                anterior = atual
+
+        if fechado and len(novos) >= 2:
+            novos[-1] = novos[0]
+        el["pontos"] = novos
+        return True
+
+    def _indices_intervalo(self, a: int, b: int, n: int, fechado: bool) -> list[int]:
+        if n <= 0:
+            return []
+        if not fechado:
+            if a <= b:
+                return list(range(a, b + 1))
+            return list(range(b, a + 1))
+        out = [a]
+        i = a
+        while i != b:
+            i = (i + 1) % n
+            out.append(i)
+            if len(out) > (n + 1):
+                break
+        return out
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
