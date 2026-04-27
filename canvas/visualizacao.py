@@ -351,31 +351,66 @@ class VisualizacaoCanvas(QWidget):
     def colar(self):
         if not self._buffer_copia:
             return
-        self._offset_colagem += 10
         self._selecionados.clear()
+        itens = self._buffer_copia.get("elementos", []) if self._buffer_copia.get("tipo") == "multiplos" else [self._buffer_copia]
+        dx, dy = self._delta_colagem_para_centro(itens)
         if self._buffer_copia.get("tipo") == "multiplos":
             for item in self._buffer_copia.get("elementos", []):
                 novo = deepcopy(item)
-                if novo.get("tipo") == "polyline":
-                    novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-                elif novo.get("tipo") == "bezier_quadratica":
-                    for chave in ("p0", "p1", "p2"):
-                        x, y = novo[chave]
-                        novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+                self._transladar_elemento(novo, dx, dy)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
         else:
             novo = deepcopy(self._buffer_copia)
-            if novo.get("tipo") == "polyline":
-                novo["pontos"] = [(x + self._offset_colagem, y + self._offset_colagem) for x, y in novo.get("pontos", [])]
-            elif novo.get("tipo") == "bezier_quadratica":
-                for chave in ("p0", "p1", "p2"):
-                    x, y = novo[chave]
-                    novo[chave] = (x + self._offset_colagem, y + self._offset_colagem)
+            self._transladar_elemento(novo, dx, dy)
             self.cena.elementos.append(novo)
             self._selecionados.add(len(self.cena.elementos) - 1)
         self._registrar_historico()
         self.update()
+
+    def _delta_colagem_para_centro(self, elementos: list[dict]) -> tuple[float, float]:
+        pontos: list[tuple[float, float]] = []
+        for el in elementos:
+            if el.get("tipo") == "polyline":
+                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
+            elif el.get("tipo") == "bezier_quadratica":
+                for chave in ("p0", "p1", "p2"):
+                    if chave in el:
+                        x, y = el[chave]
+                        pontos.append((float(x), float(y)))
+        if not pontos:
+            return 0.0, 0.0
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        cx = (min(xs) + max(xs)) / 2.0
+        cy = (min(ys) + max(ys)) / 2.0
+        centro_tela = QPointF(float(self.width()) * 0.5, float(self.height()) * 0.5)
+        centro_cena = self._tela_para_cena(centro_tela)
+        return centro_cena.x() - cx, centro_cena.y() - cy
+
+    def _transladar_elemento(self, elemento: dict, dx: float, dy: float):
+        if elemento.get("tipo") == "polyline":
+            elemento["pontos"] = [(float(x) + dx, float(y) + dy) for x, y in elemento.get("pontos", [])]
+        elif elemento.get("tipo") == "bezier_quadratica":
+            for chave in ("p0", "p1", "p2"):
+                if chave in elemento:
+                    x, y = elemento[chave]
+                    elemento[chave] = (float(x) + dx, float(y) + dy)
+
+        for chave in ("controle_cantos", "controle_auxiliares", "fio_origem", "fio_fim"):
+            valor = elemento.get(chave)
+            if isinstance(valor, list):
+                elemento[chave] = [(float(x) + dx, float(y) + dy) for x, y in valor]
+            elif isinstance(valor, (tuple, list)) and len(valor) == 2:
+                elemento[chave] = (float(valor[0]) + dx, float(valor[1]) + dy)
+
+        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
+            valor = elemento.get(chave)
+            if isinstance(valor, list):
+                for item in valor:
+                    if isinstance(item, dict):
+                        item["x"] = float(item.get("x", 0.0)) + dx
+                        item["y"] = float(item.get("y", 0.0)) + dy
 
     def recortar(self):
         self.copiar()
