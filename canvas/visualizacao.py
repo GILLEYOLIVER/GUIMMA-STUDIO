@@ -1057,9 +1057,6 @@ class VisualizacaoCanvas(QWidget):
             if molde_alvo is not None:
                 self._selecionados = {molde_alvo}
                 self.update()
-                self._ativar_ferramenta_janela_principal("propriedades")
-                event.accept()
-                return
             if event.modifiers() & Qt.ControlModifier:
                 if self._selecionar_proximo_em_ponto(pos):
                     event.accept()
