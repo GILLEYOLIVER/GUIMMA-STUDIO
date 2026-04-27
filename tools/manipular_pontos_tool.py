@@ -178,27 +178,9 @@ class Ferramenta(FerramentaBase):
                     ny = round(ny, 2)
                 pontos[i] = (nx, ny)
         else:
-            vizinhos: list[int] = []
-            prev_idx = p_idx - 1
-            next_idx = p_idx + 1
-            if fechado:
-                prev_idx %= n
-                next_idx %= n
-                vizinhos = [prev_idx, next_idx]
-            else:
-                if 0 <= prev_idx < n:
-                    vizinhos.append(prev_idx)
-                if 0 <= next_idx < n:
-                    vizinhos.append(next_idx)
-
-            for i in vizinhos:
-                x, y = pontos[i]
-                nx = float(x) + (dx * 0.25)
-                ny = float(y) + (dy * 0.25)
-                if self._modo_discreto():
-                    nx = round(nx, 2)
-                    ny = round(ny, 2)
-                pontos[i] = (nx, ny)
+            # Modo "1 ponto": move exclusivamente o ponto clicado.
+            # (o deslocamento do ponto selecionado já foi aplicado em _atualizar_ponto)
+            pass
 
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
