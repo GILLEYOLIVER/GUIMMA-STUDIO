@@ -1081,6 +1081,13 @@ class VisualizacaoCanvas(QWidget):
                 return
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if self.ferramenta_ativa != "selecionar" and event.button() in (Qt.LeftButton, Qt.RightButton):
+            self.ferramenta_padrao_solicitada.emit("selecionar")
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)

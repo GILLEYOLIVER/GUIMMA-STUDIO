@@ -456,7 +456,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             botao_rect = self.botao_arquivo.rect().translated(botao_topo)
             if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
                 self.backstage.hide()
+        if isinstance(watched, QDialog) and event.type() in (QEvent.Close, QEvent.Hide):
+            self._garantir_selecionar_apos_fechar_janela()
         return super().eventFilter(watched, event)
+
+    def _garantir_selecionar_apos_fechar_janela(self):
+        def _ativar():
+            if getattr(self, "_ferramenta_ativa_id", "selecionar") != "selecionar":
+                self._ativar_ferramenta_global("selecionar")
+        QTimer.singleShot(0, _ativar)
 
     def _topo_backstage(self) -> int:
         return self.barra_superior.height()
