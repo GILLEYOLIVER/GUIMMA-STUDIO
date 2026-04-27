@@ -4,7 +4,7 @@ from math import atan2, degrees
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QCheckBox, QDialog, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit
 
 from tools.tool_base import FerramentaBase
 
@@ -15,7 +15,8 @@ class Ferramenta(FerramentaBase):
     _dlg_global: QDialog | None = None
     _edt_dx_global: QLineEdit | None = None
     _edt_dy_global: QLineEdit | None = None
-    _chk_prop_global: QCheckBox | None = None
+    _cmb_n_pontos_global: QComboBox | None = None
+    _chk_discreto_global: QCheckBox | None = None
 
     def __init__(self):
         super().__init__()
@@ -31,7 +32,8 @@ class Ferramenta(FerramentaBase):
         self._dlg_passo: QDialog | None = Ferramenta._dlg_global
         self._edt_dx: QLineEdit | None = Ferramenta._edt_dx_global
         self._edt_dy: QLineEdit | None = Ferramenta._edt_dy_global
-        self._chk_prop: QCheckBox | None = Ferramenta._chk_prop_global
+        self._cmb_n_pontos: QComboBox | None = Ferramenta._cmb_n_pontos_global
+        self._chk_discreto: QCheckBox | None = Ferramenta._chk_discreto_global
 
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
@@ -44,11 +46,14 @@ class Ferramenta(FerramentaBase):
         self._angulo_info = None
         self._ponto_selecionado = None
         self._abrir_caixa_passo(canvas)
-        self.set_status("Mover ponto: passe o mouse para hover azul e clique para mover 1x por clique (ΔX/ΔY).")
+        self.set_status("Mover ponto: ajuste DX/DY, escolha 1 ponto ou N pontos e clique no vértice.")
 
     def on_deactivate(self, canvas):
         if self._dlg_passo:
             self._dlg_passo.hide()
+
+    def on_canvas_resize(self, canvas) -> None:
+        self._reposicionar_caixa_passo(canvas)
 
     def _abrir_caixa_passo(self, canvas):
         if Ferramenta._dlg_global is None:
@@ -59,17 +64,33 @@ class Ferramenta(FerramentaBase):
             lay = QFormLayout(Ferramenta._dlg_global)
             Ferramenta._edt_dx_global = QLineEdit("0")
             Ferramenta._edt_dy_global = QLineEdit("0")
-            Ferramenta._chk_prop_global = QCheckBox("Proporcional")
-            lay.addRow("X", Ferramenta._edt_dx_global)
-            lay.addRow("Y", Ferramenta._edt_dy_global)
-            lay.addRow("", Ferramenta._chk_prop_global)
-            Ferramenta._dlg_global.setFixedWidth(170)
+            Ferramenta._cmb_n_pontos_global = QComboBox()
+            Ferramenta._cmb_n_pontos_global.addItems(["1 ponto", "N pontos"])
+            Ferramenta._chk_discreto_global = QCheckBox("Discreto")
+            lay.addRow("DX (cm)", Ferramenta._edt_dx_global)
+            lay.addRow("DY (cm)", Ferramenta._edt_dy_global)
+            lay.addRow("Nº pontos", Ferramenta._cmb_n_pontos_global)
+            lay.addRow("", Ferramenta._chk_discreto_global)
+            Ferramenta._dlg_global.setFixedWidth(210)
         self._dlg_passo = Ferramenta._dlg_global
         self._edt_dx = Ferramenta._edt_dx_global
         self._edt_dy = Ferramenta._edt_dy_global
-        self._chk_prop = Ferramenta._chk_prop_global
+        self._cmb_n_pontos = Ferramenta._cmb_n_pontos_global
+        self._chk_discreto = Ferramenta._chk_discreto_global
         if not self._dlg_passo.isVisible():
             self._dlg_passo.show()
+        self._reposicionar_caixa_passo(canvas)
+
+    def _reposicionar_caixa_passo(self, canvas):
+        if not self._dlg_passo:
+            return
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(
+                self._dlg_passo.width(),
+                self._dlg_passo.height(),
+                abaixo_coordenadas=True,
+            )
+            self._dlg_passo.move(canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
         try:
@@ -82,8 +103,13 @@ class Ferramenta(FerramentaBase):
             dy = 0.0
         return dx, dy
 
-    def _modo_proporcional(self) -> bool:
-        return bool(self._chk_prop.isChecked()) if self._chk_prop else False
+    def _modo_n_pontos(self) -> bool:
+        if not self._cmb_n_pontos:
+            return False
+        return self._cmb_n_pontos.currentText().strip().lower() == "n pontos"
+
+    def _modo_discreto(self) -> bool:
+        return bool(self._chk_discreto.isChecked()) if self._chk_discreto else False
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -98,51 +124,163 @@ class Ferramenta(FerramentaBase):
         self._hover_ponto_poly = (idx, p_idx)
         dx, dy = self._ler_delta_configurado()
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+            delta_x = dx
+            # Convenção solicitada: DY negativo move para baixo, DY positivo para cima.
+            delta_y = -dy
             el = canvas.cena.elementos[idx]
             pontos = el.get("pontos", [])
             if 0 <= p_idx < len(pontos):
                 x, y = pontos[p_idx]
-                self._atualizar_ponto(canvas, idx, p_idx, QPointF(float(x) + dx, float(y) + dy))
-                if self._modo_proporcional():
-                    self._mover_ponto_proporcional(canvas, idx, p_idx, dx, dy)
+                destino = QPointF(float(x) + delta_x, float(y) + delta_y)
+                if self._modo_discreto():
+                    destino = QPointF(round(destino.x(), 2), round(destino.y(), 2))
+                self._atualizar_ponto(canvas, idx, p_idx, destino)
+                self._mover_ponto_proporcional(canvas, idx, p_idx, delta_x, delta_y, mover_n_pontos=self._modo_n_pontos())
                 canvas._registrar_historico()
         self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
         canvas.update()
         event.accept()
         return True
 
-    def _mover_ponto_proporcional(self, canvas, idx: int, p_idx: int, dx: float, dy: float):
+    def _mover_ponto_proporcional(self, canvas, idx: int, p_idx: int, dx: float, dy: float, mover_n_pontos: bool = False):
         if not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
         pontos = list(el.get("pontos", []))
+        pontos_anteriores = list(pontos)
         if len(pontos) < 3:
             return
         fechado = len(pontos) >= 2 and canvas._dist(QPointF(float(pontos[0][0]), float(pontos[0][1])), QPointF(float(pontos[-1][0]), float(pontos[-1][1]))) <= 1e-6
         n = len(pontos) - 1 if fechado else len(pontos)
+        if n < 2:
+            return
 
-        vizinhos: list[int] = []
-        prev_idx = p_idx - 1
-        next_idx = p_idx + 1
-        if fechado:
-            prev_idx %= n
-            next_idx %= n
-            vizinhos = [prev_idx, next_idx]
+        if mover_n_pontos and el.get("molde") and self._mover_molde_n_pontos(canvas, el, p_idx, dx, dy):
+            pontos = list(el.get("pontos", []))
+        elif mover_n_pontos:
+            alcance = max(2, n // 2)
+            for i in range(n):
+                if i == p_idx:
+                    continue
+                if fechado:
+                    dist_passos = min((i - p_idx) % n, (p_idx - i) % n)
+                else:
+                    dist_passos = abs(i - p_idx)
+                peso = max(0.0, 1.0 - (dist_passos / float(alcance + 1)))
+                if peso <= 0.0:
+                    continue
+                fator = 0.60 * peso
+                x, y = pontos[i]
+                nx = float(x) + (dx * fator)
+                ny = float(y) + (dy * fator)
+                if self._modo_discreto():
+                    nx = round(nx, 2)
+                    ny = round(ny, 2)
+                pontos[i] = (nx, ny)
         else:
-            if 0 <= prev_idx < n:
-                vizinhos.append(prev_idx)
-            if 0 <= next_idx < n:
-                vizinhos.append(next_idx)
-
-        # Modo proporcional local: afeta somente os segmentos anterior e posterior
-        # ao ponto selecionado, evitando desmontar o molde inteiro.
-        for i in vizinhos:
-            x, y = pontos[i]
-            pontos[i] = (float(x) + (dx * 0.25), float(y) + (dy * 0.25))
+            # Modo "1 ponto": move exclusivamente o ponto clicado.
+            # (o deslocamento do ponto selecionado já foi aplicado em _atualizar_ponto)
+            if el.get("molde"):
+                # Reajusta apenas os pontos intermediários/auxiliares para que não
+                # "segurem" a linha quando um ponto principal é movido.
+                self._mover_molde_n_pontos(canvas, el, p_idx, dx, dy)
+                pontos = list(el.get("pontos", []))
 
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
+        if el.get("molde"):
+            for antigo, novo in zip(pontos_anteriores, pontos):
+                anterior_pt = QPointF(float(antigo[0]), float(antigo[1]))
+                novo_pt = QPointF(float(novo[0]), float(novo[1]))
+                if canvas._dist(anterior_pt, novo_pt) > 1e-9:
+                    self._mover_controles_correspondentes(canvas, el, anterior_pt, novo_pt)
+            self._reajustar_fio_no_molde(el)
+
+    def _mover_molde_n_pontos(self, canvas, el: dict, p_idx: int, dx: float, dy: float) -> bool:
+        pontos_base = list(el.get("pontos", []))
+        if len(pontos_base) < 4:
+            return False
+        fechado = len(pontos_base) >= 2 and canvas._dist(
+            QPointF(float(pontos_base[0][0]), float(pontos_base[0][1])),
+            QPointF(float(pontos_base[-1][0]), float(pontos_base[-1][1])),
+        ) <= 1e-6
+        n = len(pontos_base) - 1 if fechado else len(pontos_base)
+        if not (0 <= p_idx < n):
+            return False
+
+        principais = sorted(i for i in self._indices_pontos_principais_molde(canvas, el) if 0 <= i < n)
+        if len(principais) < 2 or p_idx not in principais:
+            return False
+
+        # No modo N pontos do molde, apenas o ponto principal selecionado
+        # recebe deslocamento direto. Os demais principais ficam estáveis e
+        # os pontos intermediários são redistribuídos proporcionalmente.
+        disp_principais: dict[int, tuple[float, float]] = {p_idx: (dx, dy)}
+        for p in principais:
+            if p == p_idx:
+                continue
+            disp_principais[p] = (0.0, 0.0)
+
+        novos = list(pontos_base)
+        for p in principais:
+            if p == p_idx:
+                continue
+            ddx, ddy = disp_principais[p]
+            x, y = pontos_base[p]
+            nx = float(x) + ddx
+            ny = float(y) + ddy
+            if self._modo_discreto():
+                nx = round(nx, 2)
+                ny = round(ny, 2)
+            novos[p] = (nx, ny)
+
+        pares: list[tuple[int, int]] = []
+        if fechado:
+            for i, a in enumerate(principais):
+                b = principais[(i + 1) % len(principais)]
+                pares.append((a, b))
+        else:
+            pares.extend((a, b) for a, b in zip(principais, principais[1:]))
+
+        for a, b in pares:
+            indices = self._indices_intervalo(a, b, n, fechado)
+            if len(indices) <= 2:
+                continue
+            dxa, dya = disp_principais.get(a, (0.0, 0.0))
+            dxb, dyb = disp_principais.get(b, (0.0, 0.0))
+            denom = max(1, len(indices) - 1)
+            for pos, idx_local in enumerate(indices[1:-1], start=1):
+                t = max(0.0, min(1.0, pos / float(denom)))
+                ddx = (dxa * (1.0 - t)) + (dxb * t)
+                ddy = (dya * (1.0 - t)) + (dyb * t)
+                nx = float(pontos_base[idx_local][0]) + ddx
+                ny = float(pontos_base[idx_local][1]) + ddy
+                if self._modo_discreto():
+                    nx = round(nx, 2)
+                    ny = round(ny, 2)
+                novos[idx_local] = (nx, ny)
+
+        if fechado and len(novos) >= 2:
+            novos[-1] = novos[0]
+        el["pontos"] = novos
+        return True
+
+    def _indices_intervalo(self, a: int, b: int, n: int, fechado: bool) -> list[int]:
+        if n <= 0:
+            return []
+        if not fechado:
+            if a <= b:
+                return list(range(a, b + 1))
+            return list(range(b, a + 1))
+        out = [a]
+        i = a
+        while i != b:
+            i = (i + 1) % n
+            out.append(i)
+            if len(out) > (n + 1):
+                break
+        return out
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
@@ -173,10 +311,53 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
-            for p_idx, (x, y) in enumerate(el.get("pontos", [])):
+            pontos = el.get("pontos", [])
+            if el.get("molde"):
+                indices_permitidos = self._indices_pontos_principais_molde(canvas, el)
+                if not indices_permitidos:
+                    continue
+                indices_para_testar = sorted(indices_permitidos)
+            else:
+                indices_para_testar = range(len(pontos))
+            for p_idx in indices_para_testar:
+                if not (0 <= p_idx < len(pontos)):
+                    continue
+                x, y = pontos[p_idx]
                 if canvas._dist(QPointF(float(x), float(y)), ponto) <= tolerancia:
                     return idx, p_idx
         return None
+
+    def _indices_pontos_principais_molde(self, canvas, el: dict) -> set[int]:
+        """
+        Em moldes, a ferramenta Mover ponto deve operar apenas em pontos principais
+        (controle_cantos), ignorando pontos auxiliares intermediários do contorno.
+        """
+        pontos = list(el.get("pontos", []))
+        if not pontos:
+            return set()
+
+        controles = el.get("controle_cantos", []) or []
+        if not controles:
+            return set(range(len(pontos)))
+
+        tol = 8.0 / max(canvas.zoom, 0.001)
+        usados: set[int] = set()
+        indices: set[int] = set()
+        for cx, cy in controles:
+            cp = QPointF(float(cx), float(cy))
+            melhor_idx = -1
+            melhor_dist = float("inf")
+            for i, (x, y) in enumerate(pontos):
+                if i in usados:
+                    continue
+                dist = canvas._dist(cp, QPointF(float(x), float(y)))
+                if dist < melhor_dist:
+                    melhor_dist = dist
+                    melhor_idx = i
+            if melhor_idx >= 0 and melhor_dist <= tol:
+                indices.add(melhor_idx)
+                usados.add(melhor_idx)
+        return indices
 
     def _controle_molde_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, str, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
@@ -406,19 +587,11 @@ class Ferramenta(FerramentaBase):
             return
 
         cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-        aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-
         painter.setPen(QPen(QColor("#2da8ff"), 1.0))
         painter.setBrush(QColor("#001522"))
         for pt in cantos:
             tela = canvas._cena_para_tela(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
-
-        painter.setPen(QPen(QColor("#64d2ff"), 1.0))
-        painter.setBrush(QColor("#64d2ff"))
-        for pt in aux:
-            tela = canvas._cena_para_tela(pt)
-            painter.drawRect(int(tela.x() - 2), int(tela.y() - 2), 4, 4)
 
     def _desenhar_elemento_hover(self, canvas, painter):
         idx = self._hover_elemento_idx
