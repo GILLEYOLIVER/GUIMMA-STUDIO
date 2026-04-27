@@ -335,10 +335,17 @@ class Ferramenta(FerramentaBase):
         pontos = list(el.get("pontos", []))
         if not pontos:
             return set()
+        fechado = len(pontos) >= 2 and canvas._dist(
+            QPointF(float(pontos[0][0]), float(pontos[0][1])),
+            QPointF(float(pontos[-1][0]), float(pontos[-1][1])),
+        ) <= 1e-6
+        n_base = len(pontos) - 1 if fechado else len(pontos)
+        if n_base <= 0:
+            return set()
 
         controles = el.get("controle_cantos", []) or []
         if not controles:
-            return set(range(len(pontos)))
+            return set(range(n_base))
 
         tol = 8.0 / max(canvas.zoom, 0.001)
         usados: set[int] = set()
@@ -347,7 +354,8 @@ class Ferramenta(FerramentaBase):
             cp = QPointF(float(cx), float(cy))
             melhor_idx = -1
             melhor_dist = float("inf")
-            for i, (x, y) in enumerate(pontos):
+            for i in range(n_base):
+                x, y = pontos[i]
                 if i in usados:
                     continue
                 dist = canvas._dist(cp, QPointF(float(x), float(y)))
@@ -357,7 +365,7 @@ class Ferramenta(FerramentaBase):
             if melhor_idx >= 0 and melhor_dist <= tol:
                 indices.add(melhor_idx)
                 usados.add(melhor_idx)
-        return indices
+        return {i for i in indices if 0 <= i < n_base}
 
     def _controle_molde_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, str, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
