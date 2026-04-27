@@ -79,10 +79,10 @@ class PreviewMoldeWidget(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#f1f1f1"))
+        painter.fillRect(self.rect(), QColor("#000000"))
         info = self._dados_transformacao()
         if not info:
-            painter.setPen(QPen(QColor("#8a8a8a"), 1))
+            painter.setPen(QPen(QColor("#9a9a9a"), 1))
             painter.drawText(self.rect(), Qt.AlignCenter, "Nenhum molde selecionado")
             return
 
