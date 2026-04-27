@@ -129,6 +129,7 @@ class Ferramenta(FerramentaBase):
             return
         el = canvas.cena.elementos[idx]
         pontos = list(el.get("pontos", []))
+        pontos_anteriores = list(pontos)
         if len(pontos) < 3:
             return
         fechado = len(pontos) >= 2 and canvas._dist(QPointF(float(pontos[0][0]), float(pontos[0][1])), QPointF(float(pontos[-1][0]), float(pontos[-1][1]))) <= 1e-6
@@ -182,6 +183,13 @@ class Ferramenta(FerramentaBase):
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
+        if el.get("molde"):
+            for antigo, novo in zip(pontos_anteriores, pontos):
+                anterior_pt = QPointF(float(antigo[0]), float(antigo[1]))
+                novo_pt = QPointF(float(novo[0]), float(novo[1]))
+                if canvas._dist(anterior_pt, novo_pt) > 1e-9:
+                    self._mover_controles_correspondentes(canvas, el, anterior_pt, novo_pt)
+            self._reajustar_fio_no_molde(el)
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
@@ -212,10 +220,53 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
-            for p_idx, (x, y) in enumerate(el.get("pontos", [])):
+            pontos = el.get("pontos", [])
+            if el.get("molde"):
+                indices_permitidos = self._indices_pontos_principais_molde(canvas, el)
+                if not indices_permitidos:
+                    continue
+                indices_para_testar = sorted(indices_permitidos)
+            else:
+                indices_para_testar = range(len(pontos))
+            for p_idx in indices_para_testar:
+                if not (0 <= p_idx < len(pontos)):
+                    continue
+                x, y = pontos[p_idx]
                 if canvas._dist(QPointF(float(x), float(y)), ponto) <= tolerancia:
                     return idx, p_idx
         return None
+
+    def _indices_pontos_principais_molde(self, canvas, el: dict) -> set[int]:
+        """
+        Em moldes, a ferramenta Mover ponto deve operar apenas em pontos principais
+        (controle_cantos), ignorando pontos auxiliares intermediários do contorno.
+        """
+        pontos = list(el.get("pontos", []))
+        if not pontos:
+            return set()
+
+        controles = el.get("controle_cantos", []) or []
+        if not controles:
+            return set(range(len(pontos)))
+
+        tol = 8.0 / max(canvas.zoom, 0.001)
+        usados: set[int] = set()
+        indices: set[int] = set()
+        for cx, cy in controles:
+            cp = QPointF(float(cx), float(cy))
+            melhor_idx = -1
+            melhor_dist = float("inf")
+            for i, (x, y) in enumerate(pontos):
+                if i in usados:
+                    continue
+                dist = canvas._dist(cp, QPointF(float(x), float(y)))
+                if dist < melhor_dist:
+                    melhor_dist = dist
+                    melhor_idx = i
+            if melhor_idx >= 0 and melhor_dist <= tol:
+                indices.add(melhor_idx)
+                usados.add(melhor_idx)
+        return indices
 
     def _controle_molde_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, str, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
