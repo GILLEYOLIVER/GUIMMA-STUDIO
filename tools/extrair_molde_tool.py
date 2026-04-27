@@ -660,7 +660,7 @@ class Ferramenta(FerramentaBase):
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
         inicio_busca = monotonic()
-        limite_tempo_s = 1.2
+        limite_tempo_s = 2.2
         tentativas_local = 0
         tentativas_fallback = 0
         total_elementos = len(canvas.cena.elementos)
@@ -686,6 +686,46 @@ class Ferramenta(FerramentaBase):
         self._log_extracao(
             f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={raio_max_local:.2f} zoom={canvas.zoom:.4f}"
         )
+
+        # Micro-faces: tentativa dedicada para fechamentos muito pequenos.
+        # Estratégia de "onda local": expande raios curtos e pequenas perturbações
+        # do ponto de clique para capturar faces mínimas.
+        micro_sementes = [ponto]
+        micro_d = max(0.002, self.TOLERANCIA_FECHAMENTO_CM * 0.08)
+        for dx, dy in (
+            (micro_d, 0.0), (-micro_d, 0.0), (0.0, micro_d), (0.0, -micro_d),
+            (micro_d, micro_d), (micro_d, -micro_d), (-micro_d, micro_d), (-micro_d, -micro_d),
+        ):
+            micro_sementes.append((ponto[0] + dx, ponto[1] + dy))
+        melhor_micro: list[tuple[float, float]] | None = None
+        melhor_micro_area = float("inf")
+        for raio_micro in (2.0, 4.0, 8.0):
+            for tol_micro in (0.0005, 0.001, 0.002, 0.005):
+                for semente in micro_sementes:
+                    if (monotonic() - inicio_busca) > limite_tempo_s:
+                        return melhor_micro
+                    tentativas_local += 1
+                    cont_micro = extract_smallest_enclosing_contour(
+                        elementos_locais,
+                        semente,
+                        tol=tol_micro,
+                        search_radius=raio_micro,
+                    )
+                    if not cont_micro:
+                        continue
+                    if not self._ponto_dentro_poligono_coords(ponto, cont_micro):
+                        continue
+                    area_micro = abs(self._area_contorno(cont_micro))
+                    if area_micro <= 1e-10:
+                        continue
+                    if area_micro < melhor_micro_area:
+                        melhor_micro = cont_micro
+                        melhor_micro_area = area_micro
+        if melhor_micro is not None:
+            self._log_extracao(
+                f"sucesso micro-face em {(monotonic()-inicio_busca):.3f}s area={melhor_micro_area:.8f}"
+            )
+            return melhor_micro
         for raio_local in raios_ordenados:
             for tol_local in (0.005, 0.01, 0.02):
                 for pt in pontos_teste:
