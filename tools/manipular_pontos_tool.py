@@ -209,19 +209,14 @@ class Ferramenta(FerramentaBase):
         if len(principais) < 2 or p_idx not in principais:
             return False
 
-        # Deslocamento por "anel" de pontos principais (decaimento suave).
-        ordem = {p: i for i, p in enumerate(principais)}
-        pos_sel = ordem[p_idx]
-        total_principais = len(principais)
+        # No modo N pontos do molde, apenas o ponto principal selecionado
+        # recebe deslocamento direto. Os demais principais ficam estáveis e
+        # os pontos intermediários são redistribuídos proporcionalmente.
         disp_principais: dict[int, tuple[float, float]] = {p_idx: (dx, dy)}
         for p in principais:
             if p == p_idx:
                 continue
-            dist_ordem = abs(ordem[p] - pos_sel)
-            if fechado:
-                dist_ordem = min(dist_ordem, total_principais - dist_ordem)
-            fator = 0.60 ** max(dist_ordem, 1)
-            disp_principais[p] = (dx * fator, dy * fator)
+            disp_principais[p] = (0.0, 0.0)
 
         novos = list(pontos_base)
         for p in principais:
