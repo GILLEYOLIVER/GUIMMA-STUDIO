@@ -58,19 +58,20 @@ class Ferramenta(FerramentaBase):
                 indices = [idx_snap]
         if indices:
             selecionado = indices[0]
-            if selecionado in canvas._selecionados and not (event.modifiers() & Qt.ShiftModifier):
-                self._arrastando_selecao = True
-                self._ultimo_ponto_arrasto = pos
-                self._movido = False
-                event.accept()
-                return True
             if event.modifiers() & Qt.ShiftModifier:
                 if selecionado in canvas._selecionados:
                     canvas._selecionados.remove(selecionado)
                 else:
                     canvas._selecionados.add(selecionado)
+                self._arrastando_selecao = False
+                self._ultimo_ponto_arrasto = None
             else:
                 canvas._selecionados = {selecionado}
+                # Inicia arraste já no primeiro clique pressionado sobre o elemento
+                # para evitar exigir um segundo clique para mover.
+                self._arrastando_selecao = True
+                self._ultimo_ponto_arrasto = pos
+                self._movido = False
             self._inicio_caixa = None
             self._fim_caixa = None
             self.set_status(f"{len(canvas._selecionados)} elemento(s) selecionado(s).")
