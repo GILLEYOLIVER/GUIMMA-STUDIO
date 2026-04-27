@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from math import atan2, cos, pi, sin, sqrt
+import os
 from time import monotonic
 from uuid import uuid4
 
@@ -56,6 +57,7 @@ class Ferramenta(FerramentaBase):
         "quebrar_auxiliares": True,
         "converter_auxiliares": True,
     }
+    _log_extracao_habilitado = os.environ.get("GUIMMA_EXTRACAO_LOG", "1").strip().lower() not in {"0", "false", "off", "no"}
 
     def __init__(self):
         super().__init__()
@@ -659,6 +661,10 @@ class Ferramenta(FerramentaBase):
         ponto = (pos.x(), pos.y())
         inicio_busca = monotonic()
         limite_tempo_s = 1.2
+        tentativas_local = 0
+        tentativas_fallback = 0
+        total_elementos = len(canvas.cena.elementos)
+        self._log_extracao(f"início busca ponto={ponto} elementos={total_elementos}")
 
         # Caminho rápido principal: considera fechamentos por elementos locais,
         # incluindo curvas internas que dividem uma polyline fechada maior.
@@ -677,10 +683,17 @@ class Ferramenta(FerramentaBase):
         elementos_locais = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio_max_local * 1.8)
         if not elementos_locais:
             elementos_locais = list(canvas.cena.elementos)
+        self._log_extracao(
+            f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={raio_max_local:.2f} zoom={canvas.zoom:.4f}"
+        )
         for raio_local in raios_ordenados:
             for tol_local in (0.005, 0.01, 0.02):
                 for pt in pontos_teste:
+                    tentativas_local += 1
                     if (monotonic() - inicio_busca) > limite_tempo_s:
+                        self._log_extracao(
+                            f"timeout local após {tentativas_local} tentativas em {(monotonic()-inicio_busca):.3f}s"
+                        )
                         return None
                     contorno_local = extract_local_enclosing_contour(
                         elementos_locais,
@@ -689,6 +702,9 @@ class Ferramenta(FerramentaBase):
                         tol=tol_local,
                     )
                     if contorno_local and self._ponto_dentro_poligono_coords(ponto, contorno_local):
+                        self._log_extracao(
+                            f"sucesso local em {(monotonic()-inicio_busca):.3f}s tentativas_local={tentativas_local}"
+                        )
                         return contorno_local
 
         # Fallback: quando não houver face local válida, usa polyline fechada já existente.
@@ -723,7 +739,11 @@ class Ferramenta(FerramentaBase):
             encontrou_na_etapa = False
             for tol in etapa["tolerancias"]:
                 for semente in etapa["sementes"]:
+                    tentativas_fallback += 1
                     if (monotonic() - inicio_busca) > limite_tempo_s:
+                        self._log_extracao(
+                            f"timeout fallback após {tentativas_fallback} tentativas em {(monotonic()-inicio_busca):.3f}s"
+                        )
                         return melhor
                     contorno = extract_smallest_enclosing_contour(
                         elementos_locais,
@@ -747,7 +767,14 @@ class Ferramenta(FerramentaBase):
                         melhor_area = area
                         encontrou_na_etapa = True
             if encontrou_na_etapa and melhor is not None:
+                self._log_extracao(
+                    f"sucesso fallback em {(monotonic()-inicio_busca):.3f}s tentativas_fallback={tentativas_fallback}"
+                )
                 return melhor
+        self._log_extracao(
+            f"fim sem contorno em {(monotonic()-inicio_busca):.3f}s "
+            f"tentativas_local={tentativas_local} tentativas_fallback={tentativas_fallback}"
+        )
         return melhor
 
     def _elementos_proximos_para_extracao(
@@ -770,6 +797,11 @@ class Ferramenta(FerramentaBase):
                 continue
             filtrados.append(el)
         return filtrados
+
+    def _log_extracao(self, msg: str):
+        if not self._log_extracao_habilitado:
+            return
+        print(f"[extrair_molde][perf] {msg}")
 
     def _contornos_equivalentes(
         self,
