@@ -1033,6 +1033,19 @@ class VisualizacaoCanvas(QWidget):
                 self.ferramenta_padrao_solicitada.emit("selecionar")
                 event.accept()
                 return
+            if not (event.modifiers() & Qt.ControlModifier):
+                pos_cena_bruta = self._tela_para_cena(event.position())
+                molde_alvo = self._indice_molde_em_ponto(pos_cena_bruta)
+                if molde_alvo is None and self._snap_resultado is not None and self._snap_resultado.elemento_idx is not None:
+                    idx_snap = int(self._snap_resultado.elemento_idx)
+                    if 0 <= idx_snap < len(self.cena.elementos) and self.cena.elementos[idx_snap].get("molde"):
+                        molde_alvo = idx_snap
+                if molde_alvo is not None:
+                    self._selecionados = {molde_alvo}
+                    self.update()
+                    self._ativar_ferramenta_janela_principal("propriedades")
+                    event.accept()
+                    return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
