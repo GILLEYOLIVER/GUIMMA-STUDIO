@@ -478,6 +478,8 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
+        molde.setdefault("molde_pronto", True)
+        molde.setdefault("permitir_alteracoes_encaixe", True)
 
         if bool(molde.get("preservar_todos_vertices_controle")):
             cantos = list(base)

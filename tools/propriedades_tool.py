@@ -311,10 +311,10 @@ class PreviewMoldeWidget(QWidget):
             return None
 
     def zoom_in(self):
-        self._aplicar_zoom(1.15)
+        self._aplicar_zoom(1.1)
 
     def zoom_out(self):
-        self._aplicar_zoom(1.0 / 1.15)
+        self._aplicar_zoom(1.0 / 1.1)
 
     def reset_view(self):
         self._zoom = 1.0
@@ -328,9 +328,9 @@ class PreviewMoldeWidget(QWidget):
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
         delta = event.angleDelta().y()
         if delta > 0:
-            self._aplicar_zoom(1.15, event.position())
+            self._aplicar_zoom(1.1, event.position())
         elif delta < 0:
-            self._aplicar_zoom(1.0 / 1.15, event.position())
+            self._aplicar_zoom(1.0 / 1.1, event.position())
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802

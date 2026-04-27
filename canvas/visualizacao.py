@@ -721,6 +721,9 @@ class VisualizacaoCanvas(QWidget):
                     pm = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
                     for tipo, ponto in (("fio", p1), ("fio", p2), ("fio", pm)):
                         self._adicionar_candidato_snap(candidatos, pos_cena, ponto, tipo, idx, tol_cena)
+                    proj_fio = self._projecao_no_segmento(pos_cena, p1, p2)
+                    if self._dist(proj_fio, pos_cena) <= (tol_cena * 1.4):
+                        self._adicionar_candidato_snap(candidatos, pos_cena, proj_fio, "fio", idx, tol_cena * 1.5)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
                     pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                     base = pts[:-1] if len(pts) >= 2 and pts[0] == pts[-1] else pts
@@ -1030,6 +1033,19 @@ class VisualizacaoCanvas(QWidget):
                 self.ferramenta_padrao_solicitada.emit("selecionar")
                 event.accept()
                 return
+            if not (event.modifiers() & Qt.ControlModifier):
+                pos_cena_bruta = self._tela_para_cena(event.position())
+                molde_alvo = self._indice_molde_em_ponto(pos_cena_bruta)
+                if molde_alvo is None and self._snap_resultado is not None and self._snap_resultado.elemento_idx is not None:
+                    idx_snap = int(self._snap_resultado.elemento_idx)
+                    if 0 <= idx_snap < len(self.cena.elementos) and self.cena.elementos[idx_snap].get("molde"):
+                        molde_alvo = idx_snap
+                if molde_alvo is not None:
+                    self._selecionados = {molde_alvo}
+                    self.update()
+                    self._ativar_ferramenta_janela_principal("propriedades")
+                    event.accept()
+                    return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
@@ -1596,6 +1612,17 @@ class VisualizacaoCanvas(QWidget):
         t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
         proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
         return sqrt((p.x() - proj.x()) ** 2 + (p.y() - proj.y()) ** 2)
+
+    def _projecao_no_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> QPointF:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 1e-9:
+            return QPointF(a)
+        apx = p.x() - a.x()
+        apy = p.y() - a.y()
+        t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
+        return QPointF(a.x() + (abx * t), a.y() + (aby * t))
 
     def _indices_elementos_em_ponto(self, pos: QPointF) -> list[int]:
         tolerancia = 8.0 / max(self.zoom, 0.001)
