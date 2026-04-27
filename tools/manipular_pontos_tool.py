@@ -52,6 +52,9 @@ class Ferramenta(FerramentaBase):
         if self._dlg_passo:
             self._dlg_passo.hide()
 
+    def on_canvas_resize(self, canvas) -> None:
+        self._reposicionar_caixa_passo(canvas)
+
     def _abrir_caixa_passo(self, canvas):
         if Ferramenta._dlg_global is None:
             Ferramenta._dlg_global = QDialog(canvas)
@@ -76,6 +79,18 @@ class Ferramenta(FerramentaBase):
         self._chk_discreto = Ferramenta._chk_discreto_global
         if not self._dlg_passo.isVisible():
             self._dlg_passo.show()
+        self._reposicionar_caixa_passo(canvas)
+
+    def _reposicionar_caixa_passo(self, canvas):
+        if not self._dlg_passo:
+            return
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(
+                self._dlg_passo.width(),
+                self._dlg_passo.height(),
+                abaixo_coordenadas=True,
+            )
+            self._dlg_passo.move(canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
         try:
@@ -109,15 +124,18 @@ class Ferramenta(FerramentaBase):
         self._hover_ponto_poly = (idx, p_idx)
         dx, dy = self._ler_delta_configurado()
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+            delta_x = dx
+            # Convenção solicitada: DY negativo move para baixo, DY positivo para cima.
+            delta_y = -dy
             el = canvas.cena.elementos[idx]
             pontos = el.get("pontos", [])
             if 0 <= p_idx < len(pontos):
                 x, y = pontos[p_idx]
-                destino = QPointF(float(x) + dx, float(y) + dy)
+                destino = QPointF(float(x) + delta_x, float(y) + delta_y)
                 if self._modo_discreto():
                     destino = QPointF(round(destino.x(), 2), round(destino.y(), 2))
                 self._atualizar_ponto(canvas, idx, p_idx, destino)
-                self._mover_ponto_proporcional(canvas, idx, p_idx, dx, dy, mover_n_pontos=self._modo_n_pontos())
+                self._mover_ponto_proporcional(canvas, idx, p_idx, delta_x, delta_y, mover_n_pontos=self._modo_n_pontos())
                 canvas._registrar_historico()
         self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
         canvas.update()
@@ -496,19 +514,11 @@ class Ferramenta(FerramentaBase):
             return
 
         cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-        aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-
         painter.setPen(QPen(QColor("#2da8ff"), 1.0))
         painter.setBrush(QColor("#001522"))
         for pt in cantos:
             tela = canvas._cena_para_tela(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
-
-        painter.setPen(QPen(QColor("#64d2ff"), 1.0))
-        painter.setBrush(QColor("#64d2ff"))
-        for pt in aux:
-            tela = canvas._cena_para_tela(pt)
-            painter.drawRect(int(tela.x() - 2), int(tela.y() - 2), 4, 4)
 
     def _desenhar_elemento_hover(self, canvas, painter):
         idx = self._hover_elemento_idx
