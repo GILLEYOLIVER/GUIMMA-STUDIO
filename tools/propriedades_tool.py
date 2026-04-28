@@ -935,6 +935,11 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectItems)
         self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
+        self.tbl_graduacao.setStyleSheet(
+            "QTableWidget::item:selected { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:active { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:!active { background: transparent; color:#111111; }"
+        )
         self.tbl_graduacao.cellClicked.connect(self._on_tabela_graduacao_clicada)
         self._popular_tabela_graduacao()
         grid_esq.addWidget(self.tbl_graduacao)
