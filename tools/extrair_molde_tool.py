@@ -61,6 +61,7 @@ class Ferramenta(FerramentaBase):
 
     def __init__(self):
         super().__init__()
+        self._canvas = None
         self._dialog: QDialog | None = None
         self._idx_selecionado: int | None = None
         self._selecoes_manuais: set[int] = set()
@@ -77,6 +78,10 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._canvas = canvas
+        cfg_mem = self.carregar_preferencias_ferramenta(canvas, type(self)._cfg_global)
+        type(self)._cfg_global = dict(cfg_mem)
+        self._cfg = dict(cfg_mem)
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
         self._contornos_extraidos_preview = []
@@ -95,6 +100,8 @@ class Ferramenta(FerramentaBase):
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
         self._sincronizar_cfg_da_ui()
+        self.salvar_preferencias_ferramenta(canvas, type(self)._cfg_global)
+        self._canvas = None
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
         self._contornos_extraidos_preview = []
@@ -1154,6 +1161,9 @@ class Ferramenta(FerramentaBase):
     def _salvar_cfg(self, *_):
         self._salvar_cfg_global()
         self._sincronizar_cfg_da_ui()
+        canvas = getattr(self, "_canvas", None)
+        if canvas is not None:
+            self.salvar_preferencias_ferramenta(canvas, type(self)._cfg_global)
 
     @classmethod
     def _salvar_cfg_global(cls, *_):
