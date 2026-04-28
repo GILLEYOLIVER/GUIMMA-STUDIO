@@ -1063,6 +1063,9 @@ class PropriedadesMoldesDialog(QDialog):
             if cor.isValid():
                 item["cor"] = cor.name()
                 self._renderizar_tabela_graduacao()
+            if hasattr(self, "tbl_graduacao"):
+                self.tbl_graduacao.clearSelection()
+                self.tbl_graduacao.setCurrentCell(linha, 1)
         self._sincronizar_gradacao_no_molde()
 
     def _linha_selecionada_graduacao(self) -> int:
