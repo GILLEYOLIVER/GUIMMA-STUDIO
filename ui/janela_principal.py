@@ -13,6 +13,7 @@ from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRect
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -1323,7 +1324,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             '''
         )
         self._aplicar_estilo_claro_dialogo(dialog)
-        for view in dialog.findChildren((QListView, QTreeView)):
+        for view in dialog.findChildren(QAbstractItemView):
             view.setStyleSheet(
                 "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
                 "selection-color:#111111;border:1px solid #c6ccd3;"
