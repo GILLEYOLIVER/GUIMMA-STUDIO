@@ -1122,13 +1122,25 @@ class PropriedadesMoldesDialog(QDialog):
         return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
 
     def _sincronizar_gradacao_no_molde(self):
-        molde = self._molde_atual()
-        if not molde:
+        moldes_alvo = self._moldes_alvo_graduacao()
+        if not moldes_alvo:
             return
-        molde["graduacao_grade_nome"] = self.cmb_grade_tamanhos.currentText().strip()
-        molde["graduacao_tamanhos"] = [dict(l) for l in self._graduacao_linhas]
+        grade_nome = self.cmb_grade_tamanhos.currentText().strip()
+        linhas = [dict(l) for l in self._graduacao_linhas]
         ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
-        molde["graduacao_tamanhos_ativos"] = ativos
+        for molde in moldes_alvo:
+            molde["graduacao_grade_nome"] = grade_nome
+            molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
+            molde["graduacao_tamanhos_ativos"] = list(ativos)
+
+    def _moldes_alvo_graduacao(self) -> list[dict]:
+        modo_aplicar = self.cmb_aplicar_grade.currentText().strip().lower()
+        molde_atual = self._molde_atual()
+        if molde_atual is None:
+            return []
+        if modo_aplicar == "ao molde":
+            return [molde_atual]
+        return [ref.dados for ref in self._refs if isinstance(ref.dados, dict)]
 
     def _atualizar_opcoes_tecido(self):
         cena = getattr(self.canvas, "cena", None)
