@@ -1292,65 +1292,6 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
         self._traduzir_rotulos_dialogo_arquivo(dialog)
-        dialog.setStyleSheet(
-            '''
-            QFileDialog {
-                background: #f3f3f3;
-                color: #111111;
-            }
-            QFileDialog QWidget,
-            QFileDialog QFrame,
-            QFileDialog QLabel,
-            QFileDialog QToolButton,
-            QFileDialog QPushButton,
-            QFileDialog QComboBox,
-            QFileDialog QLineEdit,
-            QFileDialog QListView,
-            QFileDialog QTreeView,
-            QFileDialog QHeaderView::section,
-            QFileDialog QScrollBar,
-            QFileDialog QSplitter,
-            QFileDialog QAbstractItemView {
-                background: #ffffff;
-                color: #111111;
-            }
-            QFileDialog QTreeView,
-            QFileDialog QListView,
-            QFileDialog QAbstractItemView {
-                alternate-background-color: #f7f7f7;
-                selection-background-color: #cfe8ff;
-                selection-color: #111111;
-                border: 1px solid #c6ccd3;
-            }
-            QFileDialog QLineEdit,
-            QFileDialog QComboBox {
-                border: 1px solid #b8c0c8;
-                padding: 4px 6px;
-                min-height: 24px;
-            }
-            QFileDialog QPushButton,
-            QFileDialog QToolButton {
-                border: 1px solid #b8c0c8;
-                padding: 4px 8px;
-                min-height: 24px;
-            }
-            QFileDialog QPushButton:hover,
-            QFileDialog QToolButton:hover {
-                background: #eaf4ff;
-            }
-            QFileDialog QHeaderView::section {
-                background: #f0f2f4;
-                border: 1px solid #d2d7dd;
-                padding: 4px;
-            }
-            '''
-        )
-        self._aplicar_estilo_claro_dialogo(dialog)
-        for view in dialog.findChildren(QAbstractItemView):
-            view.setStyleSheet(
-                "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
-                "selection-color:#111111;border:1px solid #c6ccd3;"
-            )
         self._traduzir_textos_internos_dialogo_arquivo(dialog)
         self._melhorar_coluna_nome_dialogo_arquivo(dialog)
 
@@ -2649,7 +2590,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_projeto(self):
         self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
-            "Abrir projeto",
+            "Abrir",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)",
             com_preview_projeto=True,
         )
