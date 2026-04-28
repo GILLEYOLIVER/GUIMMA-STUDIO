@@ -1192,11 +1192,12 @@ class VisualizacaoCanvas(QWidget):
             cor = cor_base
             esp = float(elemento.get("espessura", 1.0))
             if elemento.get("tipo") == "polyline":
+                cor, esp, estilo = self._estilo_por_subtipo_audaces(elemento, cor, esp, str(elemento.get("estilo", "solid")))
                 pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
                 if len(pontos) < 2:
                     continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
-                                         estilo=str(elemento.get("estilo", "solid")),
+                                         estilo=estilo,
                                          amplitude=float(elemento.get("amplitude", 1.0)),
                                          fase_inicial=float(elemento.get("fase_inicio", 0.0)))
             elif elemento.get("tipo") == "bezier_quadratica":
@@ -1779,7 +1780,32 @@ class VisualizacaoCanvas(QWidget):
                         cy = sum(p.y() for p in base_nome) / len(base_nome)
                         if self._dist(QPointF(cx, cy), pos) <= (tolerancia * 2.0):
                             candidatos.append(idx)
-        return candidatos
+        return sorted(candidatos, key=self._prioridade_selecao_elemento)
+
+    def _prioridade_selecao_elemento(self, idx: int) -> tuple[int, int]:
+        el = self.cena.elementos[idx] if 0 <= idx < len(self.cena.elementos) else {}
+        subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").strip()
+        if el.get("molde") or subtipo == "contorno":
+            return (0, -idx)
+        if subtipo == "linha_interna":
+            return (1, -idx)
+        if subtipo == "costura":
+            return (2, -idx)
+        return (3, -idx)
+
+    def _estilo_por_subtipo_audaces(self, elemento: dict, cor: str, esp: float, estilo: str) -> tuple[str, float, str]:
+        subtipo = str(elemento.get("subtipo_audaces") or elemento.get("metadados", {}).get("subtipo_audaces") or "").strip()
+        if subtipo == "contorno":
+            return cor, max(1.35, esp), "solid"
+        if subtipo == "costura":
+            return "#a5c7ff", max(0.85, esp * 0.82), "dash"
+        if subtipo == "linha_interna":
+            return "#bfbfbf", max(0.75, esp * 0.8), "solid"
+        if subtipo in {"fio", "pique"}:
+            return "#83ffb6", max(0.8, esp * 0.8), "dot"
+        if subtipo in {"texto", "anotacao"}:
+            return "#9a9a9a", max(0.7, esp * 0.7), "dot"
+        return cor, esp, estilo
 
     def _indice_molde_em_ponto(self, pos: QPointF) -> int | None:
         for idx in self._indices_elementos_em_ponto(pos):

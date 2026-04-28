@@ -91,6 +91,7 @@ class AudacesEMFImport:
         self._viewport_ext = (1.0, 1.0)
         self._map_mode = 1
         self._frame_cm: tuple[float, float, float, float] | None = None
+        self._dedupe_stats: dict[str, int] = {"removidas": 0, "reclassificadas_costura": 0, "ignoradas": 0}
 
     @classmethod
     def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
@@ -234,6 +235,7 @@ class AudacesEMFImport:
         elementos = [e for e in elementos if len(e.pontos) >= 2]
         self._normalizar_para_cm(elementos, textos, bounds)
         elementos = self._filtrar_ruido_emf(elementos)
+        elementos = self._limpar_duplicatas_e_classificar_pares(elementos)
         self._classificar_subtipos(elementos)
         return elementos, textos, bounds
 
@@ -284,7 +286,10 @@ class AudacesEMFImport:
 
         contorno = elementos[idx_contorno] if idx_contorno is not None else None
         for i, el in enumerate(elementos):
-            if el.fechado:
+            subtipo_forcado = str(el.metadados.get("subtipo_audaces") or "").strip()
+            if subtipo_forcado in {"texto", "fio", "pique", "anotacao", "costura", "linha_interna", "contorno"}:
+                subtipo = subtipo_forcado
+            elif el.fechado:
                 if i == idx_contorno:
                     subtipo = "contorno"
                 elif contorno is not None and el.pontos and self._ponto_em_poligono(el.pontos[0], contorno.pontos):
@@ -294,6 +299,7 @@ class AudacesEMFImport:
             else:
                 subtipo = "linha_interna"
             el.metadados["subtipo_audaces"] = subtipo
+            el.metadados["snap_habilitado"] = subtipo in {"contorno", "costura", "linha_interna", "fio", "pique"}
 
     def converter_para_elementos_guimma(self, doc: AudacesEMFDocument) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -322,6 +328,8 @@ class AudacesEMFImport:
                 "cor": "#d9d9d9",
                 "tamanho": 0.9,
                 "origem": "audaces_emf_texto",
+                "subtipo_audaces": "texto",
+                "metadados": {"subtipo_audaces": "texto", "snap_habilitado": False},
             })
         return out
 
@@ -341,6 +349,13 @@ class AudacesEMFImport:
             "elementos_convertidos": len(elementos),
             "contornos_fechados": sum(1 for e in elementos if e.fechado),
             "possiveis_moldes": sum(1 for e in elementos if e.fechado),
+            "contornos_detectados": sum(1 for e in elementos if e.metadados.get("subtipo_audaces") == "contorno"),
+            "costuras_detectadas": sum(1 for e in elementos if e.metadados.get("subtipo_audaces") == "costura"),
+            "linhas_internas_detectadas": sum(1 for e in elementos if e.metadados.get("subtipo_audaces") == "linha_interna"),
+            "textos_detectados": len(textos),
+            "duplicatas_removidas": int(self._dedupe_stats.get("removidas", 0)),
+            "duplicatas_reclassificadas_costura": int(self._dedupe_stats.get("reclassificadas_costura", 0)),
+            "elementos_ignorados": int(self._dedupe_stats.get("ignoradas", 0)),
             "map_mode": self._map_mode,
             "window_org": self._window_org,
             "window_ext": self._window_ext,
@@ -594,7 +609,7 @@ class AudacesEMFImport:
             return pontos
         out = [pontos[0]]
         i = 1
-        steps = 48
+        steps = 96
         while i + 2 < len(pontos):
             p0 = out[-1]
             p1, p2, p3 = pontos[i], pontos[i + 1], pontos[i + 2]
@@ -603,7 +618,8 @@ class AudacesEMFImport:
                 mt = 1 - t
                 x = (mt**3) * p0[0] + 3 * (mt**2) * t * p1[0] + 3 * mt * (t**2) * p2[0] + (t**3) * p3[0]
                 y = (mt**3) * p0[1] + 3 * (mt**2) * t * p1[1] + 3 * mt * (t**2) * p2[1] + (t**3) * p3[1]
-                out.append((x, y))
+                if not out or abs(out[-1][0] - x) > 1e-9 or abs(out[-1][1] - y) > 1e-9:
+                    out.append((x, y))
             i += 3
         return out
 
@@ -684,12 +700,16 @@ class AudacesEMFImport:
 
             # Ruído muito pequeno de caracteres, graus, números e logo.
             if max(w, h) < 0.04:
+                self._dedupe_stats["ignoradas"] += 1
                 continue
             if comp < 0.06:
+                self._dedupe_stats["ignoradas"] += 1
                 continue
             if el.fechado and area < 0.008:
+                self._dedupe_stats["ignoradas"] += 1
                 continue
             if el.raw_record_type == EMR_RECTANGLE and area < 0.08:
+                self._dedupe_stats["ignoradas"] += 1
                 continue
 
             # Remove duplicata exata/quase exata sem apagar costuras paralelas.
@@ -707,6 +727,57 @@ class AudacesEMFImport:
                 el.metadados.setdefault("subtipo_audaces", "costura_ou_linha_tecnica")
             filtrados.append(el)
         return filtrados
+
+    @staticmethod
+    def _dist_pt(a: tuple[float, float], b: tuple[float, float]) -> float:
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return (dx * dx + dy * dy) ** 0.5
+
+    def _similaridade_geometrica(self, a: EMFVectorElement, b: EMFVectorElement) -> tuple[bool, bool]:
+        if not a.bbox or not b.bbox:
+            return False, False
+        a_minx, a_miny, a_maxx, a_maxy = a.bbox
+        b_minx, b_miny, b_maxx, b_maxy = b.bbox
+        aw, ah = max(a_maxx - a_minx, 1e-9), max(a_maxy - a_miny, 1e-9)
+        bw, bh = max(b_maxx - b_minx, 1e-9), max(b_maxy - b_miny, 1e-9)
+        tol_bbox = max(0.06, max(aw, ah, bw, bh) * 0.01)
+        bbox_quase_igual = (
+            abs(a_minx - b_minx) <= tol_bbox and abs(a_miny - b_miny) <= tol_bbox and
+            abs(a_maxx - b_maxx) <= tol_bbox and abs(a_maxy - b_maxy) <= tol_bbox
+        )
+        ca = self._comprimento_polyline(a.pontos)
+        cb = self._comprimento_polyline(b.pontos)
+        tol_len = max(0.08, max(ca, cb) * 0.02)
+        len_quase_igual = abs(ca - cb) <= tol_len
+        pa = a.pontos[min(len(a.pontos) - 1, len(a.pontos) // 2)]
+        pb = b.pontos[min(len(b.pontos) - 1, len(b.pontos) // 2)]
+        desloc = self._dist_pt(pa, pb)
+        quase_identico = bbox_quase_igual and len_quase_igual and desloc <= max(0.03, tol_bbox * 0.5)
+        paralelo_proximo = bbox_quase_igual and len_quase_igual and desloc <= max(0.22, tol_bbox * 3.0)
+        return quase_identico, paralelo_proximo
+
+    def _limpar_duplicatas_e_classificar_pares(self, elementos: list[EMFVectorElement]) -> list[EMFVectorElement]:
+        saida: list[EMFVectorElement] = []
+        for el in elementos:
+            if len(el.pontos) < 2:
+                self._dedupe_stats["ignoradas"] += 1
+                continue
+            duplicado = False
+            for kept in saida:
+                quase_identico, paralelo_proximo = self._similaridade_geometrica(kept, el)
+                if quase_identico:
+                    self._dedupe_stats["removidas"] += 1
+                    duplicado = True
+                    break
+                if paralelo_proximo and kept.fechado and el.fechado:
+                    if kept.metadados.get("subtipo_audaces") != "costura":
+                        kept.metadados["subtipo_audaces"] = "contorno"
+                    el.metadados["subtipo_audaces"] = "costura"
+                    self._dedupe_stats["reclassificadas_costura"] += 1
+            if not duplicado:
+                saida.append(el)
+        return saida
 
     def _calc_scale(self) -> dict[str, float]:
         sx_vp = self._viewport_ext[0] / self._window_ext[0] if abs(self._window_ext[0]) > 1e-9 else 1.0
