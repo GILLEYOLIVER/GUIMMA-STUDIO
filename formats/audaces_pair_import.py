@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 from core.projeto import Documento, Molde, Parte, Ponto, Projeto
@@ -53,6 +54,12 @@ class AudacesPairImport:
             "xml": xml_doc_para_dict(xml_doc),
             "emf": emf_doc_para_dict(emf_doc),
             "associacoes": total_assoc,
+            "pecas_xml": len(xml_doc.pecas),
+            "pecas_xml_sem_associacao": max(0, len(xml_doc.pecas) - total_assoc),
+            "contornos_fechados": len(contornos),
+            "moldes_reais": len(doc.moldes),
+            "bounds_emf": emf_doc.bounds,
+            "escala": dict(emf_doc.relatorio.get("escala", {})),
         }
 
         projeto.preferencias_usuario["audaces_importados_originais"] = {
@@ -65,6 +72,9 @@ class AudacesPairImport:
                 "conteudo_base64": base64.b64encode(Path(xml_path).read_bytes()).decode("ascii"),
             },
         }
+        relatorio = cls._gerar_relatorio_importacao(xml_doc, emf_doc, projeto.preferencias_usuario["audaces_emf_xml_importacao"])
+        report_path = cls._salvar_relatorio_debug(relatorio)
+        projeto.preferencias_usuario["audaces_emf_xml_importacao"]["debug_report_path"] = str(report_path)
 
         return projeto
 
@@ -91,3 +101,34 @@ class AudacesPairImport:
             "conteudo_base64": base64.b64encode(Path(emf_path).read_bytes()).decode("ascii"),
         }
         return projeto
+
+    @staticmethod
+    def _gerar_relatorio_importacao(xml_doc, emf_doc, info: dict) -> dict:
+        rel = dict(emf_doc.relatorio)
+        records_tipos = rel.get("records_tipos", {})
+        return {
+            "arquivo_emf": str(emf_doc.caminho),
+            "records_emf_total": rel.get("records_total", 0),
+            "records_emf_tipos": records_tipos,
+            "quantidade_polyline": rel.get("quantidade_polylines", 0),
+            "quantidade_polygon": rel.get("quantidade_polygons", 0),
+            "quantidade_polybezier": rel.get("quantidade_beziers", 0),
+            "quantidade_textos": rel.get("quantidade_textos", 0),
+            "elementos_vetoriais_convertidos": rel.get("elementos_convertidos", 0),
+            "contornos_fechados": info.get("contornos_fechados", 0),
+            "moldes_reais_criados": info.get("moldes_reais", 0),
+            "pecas_xml_lidas": len(xml_doc.pecas),
+            "pecas_xml_associadas": info.get("associacoes", 0),
+            "pecas_xml_sem_associacao": info.get("pecas_xml_sem_associacao", 0),
+            "bounds_emf": emf_doc.bounds,
+            "escala_usada": rel.get("escala", {}),
+            "records_nao_suportados": rel.get("records_nao_suportados", {}),
+            "avisos": list(info.get("avisos", [])) + list(rel.get("avisos", [])),
+        }
+
+    @staticmethod
+    def _salvar_relatorio_debug(relatorio: dict) -> Path:
+        out = Path("debug") / "audaces_emf_xml_import_report.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(relatorio, ensure_ascii=False, indent=2), encoding="utf-8")
+        return out

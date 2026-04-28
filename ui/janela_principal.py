@@ -52,7 +52,6 @@ from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
-from formats.audaces_emf_import import AudacesEMFImport
 from formats.audaces_pair_import import AudacesPairImport
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
@@ -2304,11 +2303,15 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
                 info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
                 self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF + XML", emf_path)
+                moldes_reais = int(info.get("moldes_reais", 0))
                 msg = (
-                    f"Audaces EMF + XML importado. Vetores: {int(info.get('vetores', 0))}. "
-                    f"Moldes detectados: {int(info.get('moldes_detectados', 0))}. "
+                    f"EMF+XML importado. Vetores: {int(info.get('vetores', 0))}. "
+                    f"Contornos fechados: {int(info.get('contornos_fechados', 0))}. "
+                    f"Moldes reais: {moldes_reais}. "
                     f"Metadados XML aplicados: {int(info.get('metadados_xml_aplicados', 0))}."
                 )
+                if moldes_reais == 0:
+                    msg += " O EMF foi lido, mas nenhum contorno fechado confiável foi encontrado. Verifique o relatório técnico."
                 self.lbl_status.setText(msg)
                 caixa = QMessageBox(self)
                 self._estilizar_message_box(caixa)
@@ -2397,69 +2400,6 @@ class GuimmaStudioMainWindow(QMainWindow):
             elementos = [{"tipo": "texto", "texto": l, "pos": (6.0, 6.0 + (i * 3.0)), "cor": "#111111", "tamanho": 0.95} for i, l in enumerate(linhas)]
             self._aplicar_elementos_importados_canvas(elementos, "Audaces XML", caminho)
             self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
-            return
-
-        if tipo == "adsx":
-            opcoes_adsx = self._dialogo_opcoes_importacao_adsx()
-            if opcoes_adsx is None:
-                return
-            try:
-                self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
-                self.projeto_atual.preferencias_usuario["adsx_modo_importacao"] = dict(opcoes_adsx)
-                self._arquivo_atual = None
-                self._atualizar_interface_pos_importacao_adsx(caminho)
-            except ADSXImportError as exc:
-                caixa = QMessageBox(self)
-                self._estilizar_message_box(caixa)
-                caixa.setWindowTitle("Importação ADSX")
-                caixa.setIcon(QMessageBox.Warning)
-                caixa.setText(str(exc))
-                caixa.setStandardButtons(QMessageBox.Ok)
-                self._traduzir_botoes_padrao_message_box(caixa)
-                caixa.exec()
-                self.lbl_status.setText(str(exc))
-                return
-            except Exception as exc:
-                import traceback
-
-                traceback.print_exc()
-                caixa = QMessageBox(self)
-                self._estilizar_message_box(caixa)
-                caixa.setWindowTitle("Importação ADSX")
-                caixa.setIcon(QMessageBox.Critical)
-                caixa.setText(f"Não foi possível importar o arquivo ADSX.\n\n{type(exc).__name__}: {exc}")
-                caixa.setStandardButtons(QMessageBox.Ok)
-                self._traduzir_botoes_padrao_message_box(caixa)
-                caixa.exec()
-                self.lbl_status.setText("Falha ao importar ADSX.")
-                return
-
-            self._arquivo_atual = None
-            self._atualizar_titulo()
-            self.backstage.hide()
-            self._agendar_salvar_estado_silencioso()
-
-            info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
-            avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
-            msg = (
-                "ADSX importado como referência visual. A geometria editável ainda depende de conversor vetorial "
-                "ou exportação DXF/AAMA/ASTM."
-            )
-            if bool(info_adsx.get("trace_preview_gerado")):
-                msg += " Contornos experimentais foram gerados da imagem preview (revisão manual obrigatória)."
-            if avisos:
-                msg += " Avisos: " + " | ".join(str(a) for a in avisos)
-
-            self.lbl_status.setText(msg)
-
-            caixa = QMessageBox(self)
-            self._estilizar_message_box(caixa)
-            caixa.setWindowTitle("Importação ADSX")
-            caixa.setIcon(QMessageBox.Information)
-            caixa.setText(msg)
-            caixa.setStandardButtons(QMessageBox.Ok)
-            self._traduzir_botoes_padrao_message_box(caixa)
-            caixa.exec()
             return
 
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])

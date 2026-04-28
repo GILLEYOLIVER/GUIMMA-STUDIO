@@ -77,6 +77,7 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
             self.assertEqual(projeto.nome, 'Camisa Base')
             self.assertGreaterEqual(info.get('vetores', 0), 1)
             self.assertIn('audaces_importados_originais', projeto.preferencias_usuario)
+            self.assertTrue(Path(info.get('debug_report_path', '')).exists())
 
 
 if __name__ == '__main__':
