@@ -3824,11 +3824,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             pts = el.get("pontos", [])
             if len(pts) < 2:
                 continue
-            (x1, y1), (x2, y2) = pts[0], pts[1]
-            sx1 = (x1 - cx) * escala + (largura / 2)
-            sy1 = (y1 - cy) * escala + (altura / 2)
-            sx2 = (x2 - cx) * escala + (largura / 2)
-            sy2 = (y2 - cy) * escala + (altura / 2)
-            painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
+            pontos_norm = [(float(x), float(y)) for x, y in pts]
+            for (x1, y1), (x2, y2) in zip(pontos_norm, pontos_norm[1:]):
+                sx1 = (x1 - cx) * escala + (largura / 2)
+                sy1 = (y1 - cy) * escala + (altura / 2)
+                sx2 = (x2 - cx) * escala + (largura / 2)
+                sy2 = (y2 - cy) * escala + (altura / 2)
+                painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
         painter.end()
         return img
