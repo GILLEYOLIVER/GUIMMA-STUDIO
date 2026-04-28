@@ -1384,7 +1384,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         box.setSpacing(6)
         lbl_titulo = QLabel("Pré-visualização", painel)
         lbl_titulo.setStyleSheet("font-weight:600;")
-        lbl_img = QLabel("Selecione um arquivo .gstudio", painel)
+        lbl_img = QLabel(f"Selecione um arquivo *{EXTENSAO_PROJETO}", painel)
         lbl_img.setAlignment(Qt.AlignCenter)
         lbl_img.setMinimumSize(260, 180)
         lbl_img.setStyleSheet("background:#101010;color:#d8d8d8;border:1px solid #3a3a3a;")
@@ -1417,7 +1417,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         return self._criptografar_preview(dados)
 
     def _carregar_preview_do_projeto(self, caminho: Path) -> QPixmap | None:
-        if not caminho.exists() or caminho.suffix.lower() not in {EXTENSAO_PROJETO.lower(), ".gstudio"}:
+        if not caminho.exists() or caminho.suffix.lower() != EXTENSAO_PROJETO.lower():
             return None
         try:
             with ZipFile(caminho, mode="r") as pacote:
@@ -2533,8 +2533,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir projeto",
-            f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
-            com_preview_projeto=False,
+            f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)",
+            com_preview_projeto=True,
         )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)

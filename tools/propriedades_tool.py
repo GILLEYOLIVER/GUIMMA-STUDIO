@@ -1512,11 +1512,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
-        tecidos_disponiveis: set[str] = {"1"}
-        for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
-            tecido = str(chave).strip()
-            if tecido:
-                tecidos_disponiveis.add(tecido)
+        tecidos_disponiveis: set[str] = set()
         for ref in self._refs:
             tecido = str(ref.dados.get("tecido") or "").strip()
             grupo = tecido if tecido else "1"
