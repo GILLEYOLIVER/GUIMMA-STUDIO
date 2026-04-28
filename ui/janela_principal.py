@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QSlider,
+    QStyledItemDelegate,
 )
 
 from canvas.cena import CenaDocumento
@@ -54,6 +55,26 @@ from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
+
+
+class _DelegateTraducaoArquivo(QStyledItemDelegate):
+    _mapa = {
+        "my computer": "Este Computador",
+        "desktop": "Área de Trabalho",
+        "documents": "Documentos",
+        "downloads": "Downloads",
+        "network": "Rede",
+        "home": "Início",
+        "directories": "Diretórios",
+        "directory": "Diretório",
+        "file folder": "Pasta de arquivos",
+        "drive": "Unidade",
+        "file": "Arquivo",
+    }
+
+    def displayText(self, value, locale):
+        txt = str(value or "").strip()
+        return self._mapa.get(txt.lower(), txt)
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -1384,6 +1405,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                     if novo:
                         modelo.setHeaderData(col, Qt.Horizontal, novo)
                 self._traduzir_itens_modelo(modelo)
+            except Exception:
+                pass
+        delegate = _DelegateTraducaoArquivo(dialog)
+        for view in dialog.findChildren(QAbstractItemView):
+            try:
+                view.setItemDelegate(delegate)
             except Exception:
                 pass
 

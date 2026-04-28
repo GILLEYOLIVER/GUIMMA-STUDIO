@@ -19,8 +19,29 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QTreeView,
     QVBoxLayout,
+    QStyledItemDelegate,
 )
 from config import EXTENSAO_PROJETO
+
+
+class _DelegateTraducaoArquivo(QStyledItemDelegate):
+    _mapa = {
+        "my computer": "Este Computador",
+        "desktop": "Área de Trabalho",
+        "documents": "Documentos",
+        "downloads": "Downloads",
+        "network": "Rede",
+        "home": "Início",
+        "directories": "Diretórios",
+        "directory": "Diretório",
+        "file folder": "Pasta de arquivos",
+        "drive": "Unidade",
+        "file": "Arquivo",
+    }
+
+    def displayText(self, value, locale):
+        txt = str(value or "").strip()
+        return self._mapa.get(txt.lower(), txt)
 
 
 class SalvarComoDialog(QDialog):
@@ -200,6 +221,12 @@ class SalvarComoDialog(QDialog):
                     if novo:
                         modelo.setHeaderData(col, Qt.Horizontal, novo)
                 self._traduzir_itens_modelo(modelo)
+            except Exception:
+                pass
+        delegate = _DelegateTraducaoArquivo(dialog)
+        for view in dialog.findChildren(QTreeView):
+            try:
+                view.setItemDelegate(delegate)
             except Exception:
                 pass
 
