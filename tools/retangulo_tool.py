@@ -144,6 +144,13 @@ class Ferramenta(FerramentaBase):
             cy = sum(ys) / len(ys)
             largura = max_x - min_x
             margem = largura * 0.20
+            controle_cantos = [(float(x), float(y)) for x, y in payload["controle_cantos"]]
+            helpers_raw = payload.get("pontos_auxiliares", [])
+            controle_auxiliares = [
+                (float(item.get("x", 0.0)), float(item.get("y", 0.0)))
+                for item in helpers_raw
+                if isinstance(item, dict)
+            ]
             canvas.cena.elementos.append(
                 {
                     "tipo": "polyline",
@@ -167,10 +174,10 @@ class Ferramenta(FerramentaBase):
                     "mostrar_controles": True,
                     "molde_pronto": True,
                     "permitir_alteracoes_encaixe": True,
-                    "controle_cantos": payload["controle_cantos"],
-                    "controle_auxiliares": payload["pontos_auxiliares"],
-                    "pontos_controle_principais": [{"x": float(x), "y": float(y)} for x, y in payload["controle_cantos"]],
-                    "pontos_auxiliares": [{"x": float(x), "y": float(y)} for x, y in payload["pontos_auxiliares"]],
+                    "controle_cantos": controle_cantos,
+                    "controle_auxiliares": controle_auxiliares,
+                    "pontos_controle_principais": [{"x": float(x), "y": float(y)} for x, y in controle_cantos],
+                    "pontos_auxiliares": [{"x": float(x), "y": float(y)} for x, y in controle_auxiliares],
                 }
             )
             canvas._selecionados = {len(canvas.cena.elementos) - 1}
