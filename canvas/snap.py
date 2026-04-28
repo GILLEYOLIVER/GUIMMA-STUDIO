@@ -53,7 +53,7 @@ class SnapManager:
         self._candidato_grade(cursor, tolerancia_cena, candidatos)
 
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
-        candidatos_validos.sort(key=lambda c: (self._prioridade(c.tipo), c.distancia))
+        candidatos_validos.sort(key=lambda c: (self._prioridade_elemento(cena, c.elemento_idx), self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
 
     def _candidato_grade(self, cursor: QPointF, tolerancia_cena: float, candidatos: list[SnapResult]):
@@ -178,6 +178,18 @@ class SnapManager:
     def _dist_ponto_segmento(self, ponto: QPointF, inicio: QPointF, fim: QPointF) -> float:
         proj = self._projetar_em_segmento(ponto, inicio, fim)
         return self._dist(ponto, proj)
+
+    def _prioridade_elemento(self, cena: CenaDocumento, idx: int | None) -> int:
+        if idx is None or idx < 0 or idx >= len(cena.elementos):
+            return 4
+        subtipo = str(cena.elementos[idx].get("subtipo_audaces") or "")
+        if subtipo == "contorno":
+            return 0
+        if subtipo == "costura":
+            return 2
+        if subtipo == "linha_interna":
+            return 3
+        return 1
 
     def _prioridade(self, tipo: str) -> int:
         if tipo == "interseção":

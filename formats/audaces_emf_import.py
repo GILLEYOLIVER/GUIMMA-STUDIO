@@ -234,7 +234,66 @@ class AudacesEMFImport:
         elementos = [e for e in elementos if len(e.pontos) >= 2]
         self._normalizar_para_cm(elementos, textos, bounds)
         elementos = self._filtrar_ruido_emf(elementos)
+        self._classificar_subtipos(elementos)
         return elementos, textos, bounds
+
+    @staticmethod
+    def _area_assinada(pontos: list[tuple[float, float]]) -> float:
+        if len(pontos) < 3:
+            return 0.0
+        area = 0.0
+        pts = list(pontos)
+        if pts and pts[0] != pts[-1]:
+            pts.append(pts[0])
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            area += (ax * by) - (bx * ay)
+        return area / 2.0
+
+    @staticmethod
+    def _ponto_em_poligono(pt: tuple[float, float], poly: list[tuple[float, float]]) -> bool:
+        if len(poly) < 3:
+            return False
+        x, y = pt
+        inside = False
+        pts = list(poly)
+        if pts and pts[0] != pts[-1]:
+            pts.append(pts[0])
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            if (y1 > y) != (y2 > y):
+                xin = (x2 - x1) * (y - y1) / ((y2 - y1) or 1e-9) + x1
+                if x < xin:
+                    inside = not inside
+        return inside
+
+    def _classificar_subtipos(self, elementos: list[EMFVectorElement]) -> None:
+        """Classifica vetores Audaces para snap/medição.
+
+        O contorno principal deve ser o único elemento fechado marcado como
+        molde. Costura/margem pontilhada continua visível, mas não deve ser
+        tratada como molde principal. Linhas abertas permanecem como
+        linhas internas/técnicas.
+        """
+        fechados = [
+            (i, e, abs(self._area_assinada(e.pontos)))
+            for i, e in enumerate(elementos)
+            if e.fechado and len(e.pontos) >= 4
+        ]
+        idx_contorno = None
+        if fechados:
+            idx_contorno = max(fechados, key=lambda item: item[2])[0]
+
+        contorno = elementos[idx_contorno] if idx_contorno is not None else None
+        for i, el in enumerate(elementos):
+            if el.fechado:
+                if i == idx_contorno:
+                    subtipo = "contorno"
+                elif contorno is not None and el.pontos and self._ponto_em_poligono(el.pontos[0], contorno.pontos):
+                    subtipo = "costura"
+                else:
+                    subtipo = "linha_interna"
+            else:
+                subtipo = "linha_interna"
+            el.metadados["subtipo_audaces"] = subtipo
 
     def converter_para_elementos_guimma(self, doc: AudacesEMFDocument) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -250,8 +309,8 @@ class AudacesEMFImport:
                     "origem": "audaces_emf",
                     "raw_record_type": el.raw_record_type,
                     "metadados": dict(el.metadados),
-                    "molde": bool(el.fechado),
-                    "subtipo_audaces": el.metadados.get("subtipo_audaces") or ("contorno" if el.fechado else "costura_ou_linha_tecnica"),
+                    "subtipo_audaces": el.metadados.get("subtipo_audaces", "linha_interna"),
+                    "molde": bool(el.fechado and el.metadados.get("subtipo_audaces") == "contorno"),
                     "bloqueado": False,
                 }
             )
