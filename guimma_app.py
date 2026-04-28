@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Sequence
 
+from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -15,8 +16,18 @@ class GuimmaStudioApp:
         self._argv = list(argv or sys.argv)
         self.qt_app = QApplication(self._argv)
         self.qt_app.setApplicationName(APP_NOME)
+        self._aplicar_traducao_qt_ptbr()
         self._aplicar_tema_claro_global()
         self.janela_principal = GuimmaStudioMainWindow()
+
+    def _aplicar_traducao_qt_ptbr(self):
+        self._tradutor_qt = QTranslator(self.qt_app)
+        caminho_i18n = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        for idioma in ("pt_BR", "pt"):
+            if self._tradutor_qt.load(f"qtbase_{idioma}", caminho_i18n):
+                self.qt_app.installTranslator(self._tradutor_qt)
+                QLocale.setDefault(QLocale(idioma))
+                return
 
     def _aplicar_tema_claro_global(self):
         self.qt_app.setStyle("Fusion")
