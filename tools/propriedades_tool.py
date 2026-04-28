@@ -1506,30 +1506,30 @@ class PropriedadesMoldesDialog(QDialog):
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
         self._suspender_item_changed = True
         self.arvore.clear()
-        raiz = QTreeWidgetItem(["1"])
+        raiz = QTreeWidgetItem(["Tecidos"])
         raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
-        diretos: list[MoldeRef] = []
+        tecidos_disponiveis: set[str] = {"1"}
+        for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
+            tecido = str(chave).strip()
+            if tecido:
+                tecidos_disponiveis.add(tecido)
         for ref in self._refs:
             tecido = str(ref.dados.get("tecido") or "").strip()
-            grupo = tecido if tecido else str(ref.dados.get("grupo_molde") or "").strip()
-            if not grupo or grupo == "1":
-                diretos.append(ref)
-            else:
-                grupos.setdefault(grupo, []).append(ref)
+            grupo = tecido if tecido else "1"
+            tecidos_disponiveis.add(grupo)
+            grupos.setdefault(grupo, []).append(ref)
 
-        for ref in diretos:
-            item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
-            item.setData(0, Qt.UserRole, ref.indice)
-            item.setFlags(item.flags() | Qt.ItemIsEditable)
-            item.setIcon(0, self._icone_status_molde(ref, referencia_grade=self._assinatura_grade(diretos[0].dados if diretos else {})))
-            raiz.addChild(item)
+        def _ord_tecido(valor: str):
+            txt = str(valor).strip()
+            return (0, int(txt)) if txt.isdigit() else (1, txt.lower())
 
         referencia_global = self._assinatura_grade_referencia_global()
-        for grupo_nome, itens in grupos.items():
+        for grupo_nome in sorted(tecidos_disponiveis, key=_ord_tecido):
+            itens = grupos.get(grupo_nome, [])
             pai = QTreeWidgetItem([grupo_nome])
             pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
