@@ -1134,7 +1134,8 @@ class PropriedadesMoldesDialog(QDialog):
             molde["graduacao_tamanhos_ativos"] = list(ativos)
 
     def _moldes_alvo_graduacao(self) -> list[dict]:
-        modo_aplicar = self.cmb_aplicar_grade.currentText().strip().lower()
+        combo_aplicar = getattr(self, "cmb_aplicar_grade", None)
+        modo_aplicar = combo_aplicar.currentText().strip().lower() if isinstance(combo_aplicar, QComboBox) else "ao molde"
         molde_atual = self._molde_atual()
         if molde_atual is None:
             return []
