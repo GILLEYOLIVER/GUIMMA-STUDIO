@@ -86,6 +86,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
+        self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
@@ -3081,6 +3082,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.copiar()
+            if hasattr(area.canvas, "obter_buffer_copia"):
+                self._clipboard_elementos_global = area.canvas.obter_buffer_copia()
 
     def _refazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -3090,6 +3093,8 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _colar_canvas_atual(self):
         area = self._area_documento_atual()
         if area:
+            if self._clipboard_elementos_global and hasattr(area.canvas, "definir_buffer_copia"):
+                area.canvas.definir_buffer_copia(self._clipboard_elementos_global)
             area.canvas.colar()
 
     def _apagar_canvas_atual(self):
