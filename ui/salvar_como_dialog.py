@@ -142,6 +142,8 @@ class SalvarComoDialog(QDialog):
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.resize(1180, 760)
+        dialog.setMinimumSize(1040, 680)
         dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Local:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Diretório:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")

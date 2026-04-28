@@ -1396,6 +1396,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.resize(1320, 820)
+        dialog.setMinimumSize(1180, 740)
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
             dialog.setFileMode(QFileDialog.FileMode.AnyFile)
@@ -1435,7 +1437,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         painel = QFrame(dialog)
         painel.setFrameShape(QFrame.StyledPanel)
-        painel.setMinimumWidth(280)
+        painel.setMinimumWidth(390)
         box = QVBoxLayout(painel)
         box.setContentsMargins(8, 8, 8, 8)
         box.setSpacing(6)
@@ -1443,7 +1445,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         lbl_titulo.setStyleSheet("font-weight:600;")
         lbl_img = QLabel(f"Selecione um arquivo *{EXTENSAO_PROJETO}", painel)
         lbl_img.setAlignment(Qt.AlignCenter)
-        lbl_img.setMinimumSize(260, 180)
+        lbl_img.setMinimumSize(360, 520)
         lbl_img.setStyleSheet("background:#101010;color:#d8d8d8;border:1px solid #3a3a3a;")
         box.addWidget(lbl_titulo)
         box.addWidget(lbl_img, 1)
