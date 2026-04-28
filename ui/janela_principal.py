@@ -50,9 +50,10 @@ from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO, ICONS_DIR
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
-from formats.dxf_import import importar_dxf_para_elementos
 from formats.adsx_io import ADSXIO, ADSXImportError
-from formats.adsx_image_trace import vetorizar_preview_adsx
+from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
+from formats.audaces_emf_import import AudacesEMFImport
+from formats.audaces_pair_import import AudacesPairImport
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -861,14 +862,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
         )
-        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
         menu.addAction("Audaces ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
-        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama"))
-        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plot"))
-        menu.addAction("Lectra", lambda: self._importar_por_tipo("lectra"))
-        menu.addAction("Investronica", lambda: self._importar_por_tipo("investronica"))
-        menu.addAction("Gerber", lambda: self._importar_por_tipo("gerber"))
-        menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
+        menu.addAction("Audaces Metafile EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
+        menu.addAction("Audaces Arquivo de dados XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
+        menu.addAction("Audaces EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
         menu.addSeparator()
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
@@ -2281,31 +2278,125 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
-            "dxf": "DXF (*.dxf)",
-            "aama": "AAMA/ASTM (*.aama *.astm *.zip)",
-            "plot": "Plotagem (*.plt *.hpgl *.txt)",
-            "lectra": "Lectra (*.mdl *.iba *.zip)",
-            "investronica": "Investronica (*.vec *.pat *.zip)",
-            "gerber": "Gerber (*.ger *.gbr *.zip)",
-            "assyst": "Assyst (*.assyst *.ast *.zip)",
             "adsx": "Audaces ADSX (*.adsx)",
+            "audaces_emf": "Metafile EMF (*.emf)",
+            "audaces_xml": "Arquivo de dados XML (*.xml)",
         }
+
+        if tipo == "audaces_emf_xml":
+            emf_path, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces EMF + XML (EMF)", filtros["audaces_emf"])
+            if not emf_path:
+                return
+            pergunta = QMessageBox(self)
+            self._estilizar_message_box(pergunta)
+            pergunta.setWindowTitle("Importação Audaces EMF + XML")
+            pergunta.setIcon(QMessageBox.Question)
+            pergunta.setText("Deseja selecionar o XML correspondente do Audaces?")
+            pergunta.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+            self._traduzir_botoes_padrao_message_box(pergunta)
+            resp = pergunta.exec()
+            if resp == QMessageBox.Cancel:
+                return
+            if resp == QMessageBox.Yes:
+                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar XML Audaces", filtros["audaces_xml"])
+                if not xml_path:
+                    return
+                self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
+                info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
+                self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF + XML", emf_path)
+                msg = (
+                    f"Audaces EMF + XML importado. Vetores: {int(info.get('vetores', 0))}. "
+                    f"Moldes detectados: {int(info.get('moldes_detectados', 0))}. "
+                    f"Metadados XML aplicados: {int(info.get('metadados_xml_aplicados', 0))}."
+                )
+                self.lbl_status.setText(msg)
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação Audaces")
+                caixa.setIcon(QMessageBox.Information)
+                caixa.setText(msg)
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                return
+            self.projeto_atual = AudacesPairImport.importar_apenas_emf(emf_path, self.projeto_atual)
+            info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF", emf_path)
+            msg = "EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas."
+            self.lbl_status.setText(msg)
+            return
+
         caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
         if not caminho:
             return
-        area = self._area_documento_atual()
-        if tipo == "dxf" and area:
-            elementos = importar_dxf_para_elementos(caminho)
-            if not elementos:
-                self.lbl_status.setText("DXF sem entidades LINE/LWPOLYLINE suportadas.")
+
+        if tipo == "adsx":
+            opcoes_adsx = self._dialogo_opcoes_importacao_adsx()
+            if opcoes_adsx is None:
                 return
-            area.canvas.cena.elementos.extend(elementos)
-            area.canvas._registrar_historico()
-            self._centralizar_canvas_em_elementos(area.canvas, elementos)
-            area._on_zoom_changed(area.canvas.zoom)
-            area.canvas.update()
+            try:
+                self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+                self.projeto_atual.preferencias_usuario["adsx_modo_importacao"] = dict(opcoes_adsx)
+                self._arquivo_atual = None
+                self._atualizar_interface_pos_importacao_adsx(caminho)
+            except ADSXImportError as exc:
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Warning)
+                caixa.setText(str(exc))
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText(str(exc))
+                return
+            except Exception as exc:
+                import traceback
+                traceback.print_exc()
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Critical)
+                caixa.setText(f"Não foi possível importar o arquivo ADSX.\n\n{type(exc).__name__}: {exc}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText("Falha ao importar ADSX.")
+                return
+            self._arquivo_atual = None
+            self._atualizar_titulo()
             self.backstage.hide()
-            self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")
+            self._agendar_salvar_estado_silencioso()
+            msg = (
+                "ADSX importado como referência visual. "
+                "A geometria editável ainda depende de conversor vetorial de EMF + XML."
+            )
+            self.lbl_status.setText(msg)
+            return
+
+        if tipo == "audaces_emf":
+            self.projeto_atual = AudacesPairImport.importar_apenas_emf(caminho, self.projeto_atual)
+            info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF", caminho)
+            self.lbl_status.setText("EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas.")
+            return
+
+        if tipo == "audaces_xml":
+            xml_doc = AudacesXMLImport.abrir(caminho)
+            self.projeto_atual.preferencias_usuario["audaces_xml_importacao"] = xml_doc_para_dict(xml_doc)
+            self.projeto_atual.preferencias_usuario.setdefault("audaces_importados_originais", {})["xml"] = {
+                "nome": Path(caminho).name,
+                "conteudo_base64": base64.b64encode(Path(caminho).read_bytes()).decode("ascii"),
+            }
+            linhas = [
+                f"Modelo: {xml_doc.nome_modelo}",
+                f"Tamanhos do modelo: {len(xml_doc.tamanhos_modelo)}",
+                f"Peças no XML: {len(xml_doc.pecas)}",
+                "XML carregado como metadado técnico (sem contorno geométrico).",
+            ]
+            elementos = [{"tipo": "texto", "texto": l, "pos": (6.0, 6.0 + (i * 3.0)), "cor": "#111111", "tamanho": 0.95} for i, l in enumerate(linhas)]
+            self._aplicar_elementos_importados_canvas(elementos, "Audaces XML", caminho)
+            self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
             return
 
         if tipo == "adsx":
@@ -2376,42 +2467,89 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
 
+    def _aplicar_elementos_importados_canvas(self, elementos: list[dict], titulo_aba: str, caminho_origem: str):
+        self._arquivo_atual = None
+        self._limpar_abas_documentos()
+        self._adicionar_aba_documento(titulo_aba, caminho_origem)
+        area = self._area_documento_atual()
+        if area:
+            area.canvas.cena.elementos = [dict(el) for el in elementos if isinstance(el, dict)]
+            if hasattr(area.canvas, "_registrar_historico"):
+                area.canvas._registrar_historico()
+            self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
+            if hasattr(area, "_on_zoom_changed"):
+                area._on_zoom_changed(area.canvas.zoom)
+            area.canvas.update()
+        self._atualizar_titulo()
+        self.backstage.hide()
+        self._agendar_salvar_estado_silencioso()
+
     def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Modo de importação ADSX")
         layout = QVBoxLayout(dialog)
+
         chk_preservar = QCheckBox("Preservar arquivo original no .gs")
         chk_preservar.setChecked(True)
         chk_preservar.setEnabled(False)
+
         chk_preview = QCheckBox("Mostrar preview JPG como referência")
         chk_preview.setChecked(True)
-        chk_tracar = QCheckBox("Tentar vetorização da imagem preview (experimental)")
-        chk_tracar.setChecked(False)
-        chk_ads = QCheckBox("Importar geometria real do file.ads, se decodificador confiável existir no futuro")
-        chk_ads.setChecked(False)
-        chk_ads.setEnabled(False)
-        opacidade = QDoubleSpinBox()
-        opacidade.setRange(0.10, 1.00)
-        opacidade.setSingleStep(0.05)
-        opacidade.setValue(0.72)
-        opacidade.setSuffix(" opacidade")
+
+        info = QLabel(
+            "A conversão para molde editável ainda não está disponível nesta etapa.\n"
+            "O ADSX será preservado dentro do projeto .gs e o preview JPG poderá ser usado apenas como referência visual."
+        )
+        info.setWordWrap(True)
+
+        dica = QLabel("Para importar moldes editáveis reais, use Audaces EMF + XML.")
+        dica.setWordWrap(True)
+        dica.setStyleSheet("color:#4a5568; font-size:12px;")
+
+        lbl_opacidade = QLabel("Opacidade do preview")
+        sld_opacidade = QSlider(Qt.Horizontal)
+        sld_opacidade.setRange(10, 100)
+        sld_opacidade.setValue(72)
+        lbl_pct = QLabel("72%")
+
+        def _sync_opacidade(v: int):
+            lbl_pct.setText(f"{int(v)}%")
+
+        def _toggle_opacidade():
+            habilitado = chk_preview.isChecked()
+            lbl_opacidade.setEnabled(habilitado)
+            sld_opacidade.setEnabled(habilitado)
+            lbl_pct.setEnabled(habilitado)
+
+        sld_opacidade.valueChanged.connect(_sync_opacidade)
+        chk_preview.toggled.connect(_toggle_opacidade)
+        _toggle_opacidade()
+
+        op_layout = QHBoxLayout()
+        op_layout.addWidget(lbl_opacidade)
+        op_layout.addWidget(sld_opacidade, 1)
+        op_layout.addWidget(lbl_pct)
+
         layout.addWidget(chk_preservar)
         layout.addWidget(chk_preview)
-        layout.addWidget(chk_tracar)
-        layout.addWidget(chk_ads)
-        layout.addWidget(opacidade)
+        layout.addWidget(info)
+        layout.addWidget(dica)
+        layout.addLayout(op_layout)
+
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         botoes.accepted.connect(dialog.accept)
         botoes.rejected.connect(dialog.reject)
         layout.addWidget(botoes)
+
         if dialog.exec() != QDialog.Accepted:
             return None
+
         return {
             "preservar_original": True,
             "mostrar_preview_jpg": bool(chk_preview.isChecked()),
-            "tentar_vetorizacao_preview": bool(chk_tracar.isChecked()),
+            "tentar_vetorizacao_preview": False,
             "importar_geometria_file_ads": False,
-            "opacidade_preview": float(opacidade.value()),
+            "opacidade_preview": float(sld_opacidade.value() / 100.0),
         }
 
     def _acao_converter_manual_tracado_adsx(self):
@@ -2488,16 +2626,6 @@ class GuimmaStudioMainWindow(QMainWindow):
             elementos.extend([dict(el) for el in elementos_reais if isinstance(el, dict)])
         else:
             trace_msg = None
-            if preview_ok and bool(modo_adsx.get("tentar_vetorizacao_preview", False)):
-                trace = vetorizar_preview_adsx(preview_b64)
-                info["trace_preview_gerado"] = bool(trace.get("sucesso"))
-                info["trace_preview_relatorio"] = dict(trace)
-                self.projeto_atual.preferencias_usuario["adsx_importacao"] = info
-                if trace.get("sucesso"):
-                    elementos.extend([dict(el) for el in trace.get("elementos", []) if isinstance(el, dict)])
-                    trace_msg = "Contornos gerados a partir de imagem de baixa resolução. Revise antes de usar."
-                else:
-                    trace_msg = "Vetorização experimental não gerou contornos confiáveis; mantendo somente referência visual."
             total_moldes = len([m for m in moldes if isinstance(m, dict)])
             elementos.append(
                 {
@@ -2541,16 +2669,6 @@ class GuimmaStudioMainWindow(QMainWindow):
                         "pos": (10.0, (i * 3.0) + (4.0 if preview_ok else 24.0)),
                         "cor": "#333333",
                         "tamanho": 0.85,
-                    }
-                )
-            if trace_msg:
-                elementos.append(
-                    {
-                        "tipo": "texto",
-                        "texto": trace_msg,
-                        "pos": (10.0, (len(moldes) * 3.0) + (10.0 if preview_ok else 32.0)),
-                        "cor": "#ffd166",
-                        "tamanho": 0.9,
                     }
                 )
             if preview_ok:
