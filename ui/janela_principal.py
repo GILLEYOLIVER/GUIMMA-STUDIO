@@ -9,7 +9,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QSlider,
+    QStyledItemDelegate,
 )
 
 from canvas.cena import CenaDocumento
@@ -49,11 +50,32 @@ from config import EXTENSAO_PROJETO, ICONS_DIR
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.dxf_import import importar_dxf_para_elementos
+from formats.adsx_io import ADSXIO, ADSXImportError
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
+
+
+class _DelegateTraducaoArquivo(QStyledItemDelegate):
+    _mapa = {
+        "my computer": "Este Computador",
+        "desktop": "Área de Trabalho",
+        "documents": "Documentos",
+        "downloads": "Downloads",
+        "network": "Rede",
+        "home": "Início",
+        "directories": "Diretórios",
+        "directory": "Diretório",
+        "file folder": "Pasta de arquivos",
+        "drive": "Unidade",
+        "file": "Arquivo",
+    }
+
+    def displayText(self, value, locale):
+        txt = str(value or "").strip()
+        return self._mapa.get(txt.lower(), txt)
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -838,6 +860,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
         )
         menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Audaces ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
         menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama"))
         menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plot"))
         menu.addAction("Lectra", lambda: self._importar_por_tipo("lectra"))
@@ -1270,65 +1293,98 @@ class GuimmaStudioMainWindow(QMainWindow):
         widget.move(geo_widget.topLeft())
 
     def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
-        dialog.setStyleSheet(
-            '''
-            QFileDialog {
-                background: #f3f3f3;
-                color: #111111;
-            }
-            QFileDialog QWidget,
-            QFileDialog QFrame,
-            QFileDialog QLabel,
-            QFileDialog QToolButton,
-            QFileDialog QPushButton,
-            QFileDialog QComboBox,
-            QFileDialog QLineEdit,
-            QFileDialog QListView,
-            QFileDialog QTreeView,
-            QFileDialog QHeaderView::section,
-            QFileDialog QScrollBar,
-            QFileDialog QSplitter,
-            QFileDialog QAbstractItemView {
-                background: #ffffff;
-                color: #111111;
-            }
-            QFileDialog QTreeView,
-            QFileDialog QListView,
-            QFileDialog QAbstractItemView {
-                alternate-background-color: #f7f7f7;
-                selection-background-color: #cfe8ff;
-                selection-color: #111111;
-                border: 1px solid #c6ccd3;
-            }
-            QFileDialog QLineEdit,
-            QFileDialog QComboBox {
-                border: 1px solid #b8c0c8;
-                padding: 4px 6px;
-                min-height: 24px;
-            }
-            QFileDialog QPushButton,
-            QFileDialog QToolButton {
-                border: 1px solid #b8c0c8;
-                padding: 4px 8px;
-                min-height: 24px;
-            }
-            QFileDialog QPushButton:hover,
-            QFileDialog QToolButton:hover {
-                background: #eaf4ff;
-            }
-            QFileDialog QHeaderView::section {
-                background: #f0f2f4;
-                border: 1px solid #d2d7dd;
-                padding: 4px;
-            }
-            '''
-        )
-        self._aplicar_estilo_claro_dialogo(dialog)
+        self._traduzir_rotulos_dialogo_arquivo(dialog)
+        self._traduzir_textos_internos_dialogo_arquivo(dialog)
+        self._melhorar_coluna_nome_dialogo_arquivo(dialog)
+
+    def _traduzir_rotulos_dialogo_arquivo(self, dialog: QFileDialog, *, texto_acao: str | None = None):
+        look_in = "Examinar:" if (texto_acao or "Abrir") == "Abrir" else "Salvar em:"
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, look_in)
+        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Nome:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
+        dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        dialog.setLabelText(QFileDialog.DialogLabel.Accept, texto_acao or "Abrir")
+
+    def _melhorar_coluna_nome_dialogo_arquivo(self, dialog: QFileDialog):
+        for arvore in dialog.findChildren(QTreeView):
+            try:
+                arvore.setColumnWidth(0, 420)
+                header = arvore.header()
+                if header is not None:
+                    header.setStretchLastSection(False)
+                    header.resizeSection(0, 420)
+            except Exception:
+                pass
+
+    def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
+        mapa_botoes = {
+            "open": "Abrir",
+            "&open": "Abrir",
+            "choose": "Selecionar",
+            "&choose": "Selecionar",
+            "cancel": "Cancelar",
+            "&cancel": "Cancelar",
+        }
+        for botao in dialog.findChildren(QPushButton):
+            txt = botao.text().strip()
+            chave = txt.lower()
+            if chave in mapa_botoes:
+                botao.setText(mapa_botoes[chave])
+
+        colunas_pt = {
+            "name": "Nome",
+            "size": "Tamanho",
+            "type": "Tipo",
+            "date modified": "Data de modificação",
+        }
+        for arvore in dialog.findChildren(QTreeView):
+            modelo = arvore.model()
+            if modelo is None:
+                continue
+            try:
+                for col in range(min(8, modelo.columnCount())):
+                    atual = str(modelo.headerData(col, Qt.Horizontal) or "").strip()
+                    novo = colunas_pt.get(atual.lower())
+                    if novo:
+                        modelo.setHeaderData(col, Qt.Horizontal, novo)
+                self._traduzir_itens_modelo(modelo)
+            except Exception:
+                pass
+        delegate = _DelegateTraducaoArquivo(dialog)
         for view in dialog.findChildren(QAbstractItemView):
-            view.setStyleSheet(
-                "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
-                "selection-color:#111111;border:1px solid #c6ccd3;"
-            )
+            try:
+                view.setItemDelegate(delegate)
+            except Exception:
+                pass
+
+    def _traduzir_itens_modelo(self, modelo):
+        mapa = {
+            "my computer": "Este Computador",
+            "desktop": "Área de Trabalho",
+            "documents": "Documentos",
+            "downloads": "Downloads",
+            "network": "Rede",
+            "home": "Início",
+            "directories": "Diretórios",
+        }
+
+        def _visitar(indice_pai):
+            try:
+                linhas = modelo.rowCount(indice_pai)
+            except Exception:
+                return
+            for linha in range(linhas):
+                idx = modelo.index(linha, 0, indice_pai)
+                txt = str(modelo.data(idx) or "").strip()
+                traduzido = mapa.get(txt.lower())
+                if traduzido:
+                    try:
+                        modelo.setData(idx, traduzido)
+                    except Exception:
+                        pass
+                _visitar(idx)
+
+        _visitar(QModelIndex())
 
     def _abrir_dialogo_arquivo_claro(
         self,
@@ -1341,12 +1397,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.resize(1320, 820)
+        dialog.setMinimumSize(1180, 740)
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
             dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+            self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Salvar")
         else:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Abrir")
         self._forcar_dialogo_arquivo_claro(dialog)
         if com_preview_projeto and not modo_salvar:
             self._anexar_preview_dialogo_arquivo(dialog)
@@ -1378,7 +1438,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         painel = QFrame(dialog)
         painel.setFrameShape(QFrame.StyledPanel)
-        painel.setMinimumWidth(280)
+        painel.setMinimumWidth(390)
         box = QVBoxLayout(painel)
         box.setContentsMargins(8, 8, 8, 8)
         box.setSpacing(6)
@@ -1386,7 +1446,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         lbl_titulo.setStyleSheet("font-weight:600;")
         lbl_img = QLabel(f"Selecione um arquivo *{EXTENSAO_PROJETO}", painel)
         lbl_img.setAlignment(Qt.AlignCenter)
-        lbl_img.setMinimumSize(260, 180)
+        lbl_img.setMinimumSize(360, 520)
         lbl_img.setStyleSheet("background:#101010;color:#d8d8d8;border:1px solid #3a3a3a;")
         box.addWidget(lbl_titulo)
         box.addWidget(lbl_img, 1)
@@ -2224,6 +2284,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "investronica": "Investronica (*.vec *.pat *.zip)",
             "gerber": "Gerber (*.ger *.gbr *.zip)",
             "assyst": "Assyst (*.assyst *.ast *.zip)",
+            "adsx": "Audaces ADSX (*.adsx)",
         }
         caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
         if not caminho:
@@ -2243,10 +2304,152 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")
             return
 
+        if tipo == "adsx":
+            try:
+                self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+                self._arquivo_atual = None
+                self._atualizar_interface_pos_importacao_adsx(caminho)
+            except ADSXImportError as exc:
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Warning)
+                caixa.setText(str(exc))
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText(str(exc))
+                return
+            except Exception as exc:
+                import traceback
+
+                traceback.print_exc()
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Critical)
+                caixa.setText(f"Não foi possível importar o arquivo ADSX.\n\n{type(exc).__name__}: {exc}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText("Falha ao importar ADSX.")
+                return
+
+            self._arquivo_atual = None
+            self._atualizar_titulo()
+            self.backstage.hide()
+            self._agendar_salvar_estado_silencioso()
+
+            info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
+            avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
+            msg = (
+                "ADSX importado e preservado dentro do projeto .gs.\n"
+                "A geometria Audaces do file.ads ainda não pôde ser convertida com segurança."
+            )
+            if avisos:
+                msg += " Avisos: " + " | ".join(str(a) for a in avisos)
+
+            self.lbl_status.setText(msg)
+
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("Importação ADSX")
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText(msg)
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            return
+
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
+
+    def _atualizar_interface_pos_importacao_adsx(self, caminho_adsx: str):
+        """
+        Atualiza a interface depois da importação ADSX.
+        Exibe a geometria real somente quando houver decodificação confiável do file.ads.
+        Caso contrário, mostra apenas informações textuais e diagnóstico.
+        """
+        self._limpar_abas_documentos()
+        self._adicionar_aba_documento("ADSX importado", caminho_adsx)
+
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        info = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
+        moldes = info.get("moldes", [])
+        if not isinstance(moldes, list):
+            moldes = []
+        elementos_reais = info.get("elementos_canvas", [])
+        confianca = str(info.get("geometry_confidence", "none")).lower().strip()
+        geometria_convertida = (
+            confianca == "high" and bool(info.get("geometria_convertida")) and isinstance(elementos_reais, list) and bool(elementos_reais)
+        )
+        diagnostico = info.get("diagnostico_file_ads", {})
+        elementos: list[dict] = []
+        if geometria_convertida:
+            elementos = [dict(el) for el in elementos_reais if isinstance(el, dict)]
+        else:
+            total_moldes = len([m for m in moldes if isinstance(m, dict)])
+            elementos.append(
+                {
+                    "tipo": "texto",
+                    "texto": (
+                        "Arquivo ADSX reconhecido.\n"
+                        f"Moldes detectados no XML: {total_moldes}.\n"
+                        "Binário file.ads preservado.\n"
+                        "Conversão geométrica ainda pendente."
+                    ),
+                    "pos": (10.0, 10.0),
+                    "cor": "#111111",
+                    "tamanho": 1.0,
+                }
+            )
+            elementos.append(
+                {
+                    "tipo": "texto",
+                    "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')} (confiança: {confianca})",
+                    "pos": (10.0, 20.0),
+                    "cor": "#444444",
+                    "tamanho": 0.9,
+                }
+            )
+            for i, molde in enumerate(moldes, start=1):
+                if not isinstance(molde, dict):
+                    continue
+                nome = str(molde.get("nome") or f"Molde {i}")
+                tamanho = str(molde.get("tamanho") or "")
+                quantidade = molde.get("quantidade")
+                linha = f"- {nome}"
+                if tamanho:
+                    linha += f" — tamanho {tamanho}"
+                if quantidade is not None:
+                    linha += f" — quantidade {quantidade}"
+                elementos.append(
+                    {
+                        "tipo": "texto",
+                        "texto": linha,
+                        "pos": (10.0, 24.0 + (i * 3.0)),
+                        "cor": "#333333",
+                        "tamanho": 0.85,
+                    }
+                )
+
+        if hasattr(canvas, "cena") and hasattr(canvas.cena, "elementos"):
+            canvas.cena.elementos = []
+            canvas.cena.elementos.extend(elementos)
+
+        if hasattr(canvas, "_registrar_historico"):
+            canvas._registrar_historico()
+        if geometria_convertida and elementos:
+            self._centralizar_canvas_em_elementos(canvas, elementos)
+        if hasattr(area, "_on_zoom_changed"):
+            area._on_zoom_changed(canvas.zoom)
+        canvas.update()
+        self._agendar_salvar_estado_silencioso()
 
     def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
         pontos: list[tuple[float, float]] = []
@@ -2532,7 +2735,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_projeto(self):
         self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
-            "Abrir projeto",
+            "Abrir",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)",
             com_preview_projeto=True,
         )
