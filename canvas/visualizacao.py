@@ -1567,6 +1567,17 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00",
                             espessura: float = 1.0, estilo: str = "solid", amplitude: float = 1.0,
                             fase_inicial: float = 0.0):
+        if len(pontos) >= 2 and not is_geometric_line_style(estilo):
+            path = QPainterPath(self._cena_para_tela(pontos[0]))
+            for p in pontos[1:]:
+                path.lineTo(self._cena_para_tela(p))
+            pen = QPen(QColor(cor), espessura)
+            self._aplicar_estilo_caneta(pen, estilo)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPath(path)
+            return
         fase = fase_inicial
         for inicio, fim in zip(pontos, pontos[1:]):
             fase = self._desenhar_segmento(painter, inicio, fim, cor=cor, espessura=espessura,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import asdict, dataclass, field
-from math import atan2, cos, pi, sin
+from math import acos, atan2, cos, pi, sin
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +92,14 @@ class AudacesEMFImport:
         self._map_mode = 1
         self._frame_cm: tuple[float, float, float, float] | None = None
         self._dedupe_stats: dict[str, int] = {"removidas": 0, "reclassificadas_costura": 0, "ignoradas": 0}
+        self.suavizar_curvas_audaces = True
+        self._smooth_stats: dict[str, int] = {
+            "elementos_suavizados": 0,
+            "pontos_removidos_jitter": 0,
+            "cantos_preservados": 0,
+            "suavizados_contorno": 0,
+            "suavizados_costura": 0,
+        }
 
     @classmethod
     def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
@@ -237,6 +245,8 @@ class AudacesEMFImport:
         elementos = self._filtrar_ruido_emf(elementos)
         elementos = self._limpar_duplicatas_e_classificar_pares(elementos)
         self._classificar_subtipos(elementos)
+        if self.suavizar_curvas_audaces:
+            self._aplicar_suavizacao_audaces(elementos)
         return elementos, textos, bounds
 
     @staticmethod
@@ -356,6 +366,12 @@ class AudacesEMFImport:
             "duplicatas_removidas": int(self._dedupe_stats.get("removidas", 0)),
             "duplicatas_reclassificadas_costura": int(self._dedupe_stats.get("reclassificadas_costura", 0)),
             "elementos_ignorados": int(self._dedupe_stats.get("ignoradas", 0)),
+            "suavizacao_curvas_audaces": bool(self.suavizar_curvas_audaces),
+            "elementos_suavizados": int(self._smooth_stats.get("elementos_suavizados", 0)),
+            "pontos_removidos_jitter": int(self._smooth_stats.get("pontos_removidos_jitter", 0)),
+            "cantos_preservados": int(self._smooth_stats.get("cantos_preservados", 0)),
+            "suavizados_contorno": int(self._smooth_stats.get("suavizados_contorno", 0)),
+            "suavizados_costura": int(self._smooth_stats.get("suavizados_costura", 0)),
             "map_mode": self._map_mode,
             "window_org": self._window_org,
             "window_ext": self._window_ext,
@@ -579,7 +595,7 @@ class AudacesEMFImport:
         l, t, r, b = struct.unpack_from("<4i", payload, 0)
         cx, cy = (l + r) / 2.0, (t + b) / 2.0
         rx, ry = abs(r - l) / 2.0, abs(b - t) / 2.0
-        steps = 96
+        steps = 128
         return [(cx + (rx * cos((2 * pi * i) / steps)), cy + (ry * sin((2 * pi * i) / steps))) for i in range(steps + 1)]
 
     def _parse_arc_poly(self, payload: bytes) -> list[tuple[float, float]]:
@@ -727,6 +743,100 @@ class AudacesEMFImport:
                 el.metadados.setdefault("subtipo_audaces", "costura_ou_linha_tecnica")
             filtrados.append(el)
         return filtrados
+
+    @staticmethod
+    def _angulo_interno_graus(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+        v1x, v1y = a[0] - b[0], a[1] - b[1]
+        v2x, v2y = c[0] - b[0], c[1] - b[1]
+        n1 = (v1x * v1x + v1y * v1y) ** 0.5
+        n2 = (v2x * v2x + v2y * v2y) ** 0.5
+        if n1 <= 1e-9 or n2 <= 1e-9:
+            return 180.0
+        cosv = max(-1.0, min(1.0, ((v1x * v2x) + (v1y * v2y)) / (n1 * n2)))
+        return abs(acos(cosv) * 180.0 / pi)
+
+    def _suavizar_curvas_audaces(self, pontos: list[tuple[float, float]], fechado: bool = False) -> list[tuple[float, float]]:
+        if len(pontos) < 4:
+            return pontos
+        base = list(pontos)
+        if fechado and base[0] == base[-1]:
+            base = base[:-1]
+        if len(base) < 4:
+            return pontos
+
+        deslocamento_maximo = 0.15
+        threshold_canto_graus = 30.0
+        pontos_removidos = 0
+        cantos_preservados = 0
+
+        # remove jitter mínimo preservando extremos
+        limp: list[tuple[float, float]] = [base[0]]
+        for i in range(1, len(base) - 1):
+            prev = limp[-1]
+            cur = base[i]
+            nxt = base[i + 1]
+            seg = self._dist_pt(prev, cur)
+            if seg < 0.012 and self._dist_pt(prev, nxt) < 0.05:
+                pontos_removidos += 1
+                continue
+            limp.append(cur)
+        limp.append(base[-1])
+        work = limp
+        if len(work) < 4:
+            return pontos
+
+        iters = 2 if len(work) > 24 else 1
+        for _ in range(iters):
+            novo = list(work)
+            start = 0 if fechado else 1
+            end = len(work) if fechado else len(work) - 1
+            for i in range(start, end):
+                im1 = (i - 1) % len(work)
+                ip1 = (i + 1) % len(work)
+                a, b, c = work[im1], work[i], work[ip1]
+                ang = self._angulo_interno_graus(a, b, c)
+                if ang <= threshold_canto_graus:
+                    cantos_preservados += 1
+                    continue
+                midx = (a[0] + c[0]) * 0.5
+                midy = (a[1] + c[1]) * 0.5
+                nx = (b[0] * 0.6) + (midx * 0.4)
+                ny = (b[1] * 0.6) + (midy * 0.4)
+                dx = nx - b[0]
+                dy = ny - b[1]
+                d = (dx * dx + dy * dy) ** 0.5
+                if d > deslocamento_maximo:
+                    f = deslocamento_maximo / max(d, 1e-9)
+                    nx = b[0] + (dx * f)
+                    ny = b[1] + (dy * f)
+                novo[i] = (nx, ny)
+            work = novo
+        if not fechado:
+            work[0] = base[0]
+            work[-1] = base[-1]
+        self._smooth_stats["pontos_removidos_jitter"] += pontos_removidos
+        self._smooth_stats["cantos_preservados"] += cantos_preservados
+        if fechado:
+            work.append(work[0])
+        return work
+
+    def _aplicar_suavizacao_audaces(self, elementos: list[EMFVectorElement]) -> None:
+        for el in elementos:
+            subtipo = str(el.metadados.get("subtipo_audaces") or "").strip()
+            if subtipo not in {"contorno", "costura", "linha_interna"}:
+                continue
+            if subtipo == "linha_interna" and (not el.fechado or len(el.pontos) < 16):
+                continue
+            antes = list(el.pontos)
+            depois = self._suavizar_curvas_audaces(antes, fechado=el.fechado)
+            if len(depois) >= 2 and depois != antes:
+                el.pontos = depois
+                el.bbox = self._bbox(el.pontos)
+                self._smooth_stats["elementos_suavizados"] += 1
+                if subtipo == "contorno":
+                    self._smooth_stats["suavizados_contorno"] += 1
+                elif subtipo == "costura":
+                    self._smooth_stats["suavizados_costura"] += 1
 
     @staticmethod
     def _dist_pt(a: tuple[float, float], b: tuple[float, float]) -> float:
