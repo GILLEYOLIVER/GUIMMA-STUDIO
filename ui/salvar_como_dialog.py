@@ -147,6 +147,7 @@ class SalvarComoDialog(QDialog):
         dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, "Selecionar")
         dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        self._traduzir_textos_internos_dialogo_arquivo(dialog)
         for arvore in dialog.findChildren(QTreeView):
             try:
                 arvore.setColumnWidth(0, 420)
@@ -164,6 +165,40 @@ class SalvarComoDialog(QDialog):
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))
             self._atualizar_lista_arquivos_existentes()
+
+    def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
+        mapa_botoes = {
+            "open": "Abrir",
+            "&open": "Abrir",
+            "choose": "Selecionar",
+            "&choose": "Selecionar",
+            "cancel": "Cancelar",
+            "&cancel": "Cancelar",
+        }
+        for botao in dialog.findChildren(QPushButton):
+            txt = botao.text().strip()
+            chave = txt.lower()
+            if chave in mapa_botoes:
+                botao.setText(mapa_botoes[chave])
+
+        colunas_pt = {
+            "name": "Nome",
+            "size": "Tamanho",
+            "type": "Tipo",
+            "date modified": "Data de modificação",
+        }
+        for arvore in dialog.findChildren(QTreeView):
+            modelo = arvore.model()
+            if modelo is None:
+                continue
+            try:
+                for col in range(min(8, modelo.columnCount())):
+                    atual = str(modelo.headerData(col, Qt.Horizontal) or "").strip()
+                    novo = colunas_pt.get(atual.lower())
+                    if novo:
+                        modelo.setHeaderData(col, Qt.Horizontal, novo)
+            except Exception:
+                pass
 
     def _atualizar_lista_arquivos_existentes(self):
         self.lst_arquivos_existentes.clear()

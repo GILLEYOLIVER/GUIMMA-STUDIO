@@ -1507,6 +1507,8 @@ class PropriedadesMoldesDialog(QDialog):
         self._suspender_item_changed = True
         self.arvore.clear()
         raiz = QTreeWidgetItem(["Tecidos"])
+        icone_tecido = QIcon(str(ICONS_DIR / "tecidos.svg"))
+        raiz.setIcon(0, icone_tecido)
         raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
@@ -1527,6 +1529,7 @@ class PropriedadesMoldesDialog(QDialog):
         for grupo_nome in sorted(tecidos_disponiveis, key=_ord_tecido):
             itens = grupos.get(grupo_nome, [])
             pai = QTreeWidgetItem([grupo_nome])
+            pai.setIcon(0, icone_tecido)
             pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
             for ref in itens:
