@@ -1335,7 +1335,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         modo_salvar: bool = False,
         com_preview_projeto: bool = False,
     ) -> tuple[str, str]:
-        dialog = QFileDialog(self, titulo, "", filtro)
+        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         if modo_salvar:
@@ -1352,7 +1352,22 @@ class GuimmaStudioMainWindow(QMainWindow):
             return "", ""
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
+        if caminho:
+            self._memorizar_diretorio_arquivo(Path(caminho))
         return caminho, dialog.selectedNameFilter()
+
+    def _diretorio_arquivo_inicial(self) -> str:
+        ultimo = self.projeto_atual.preferencias_usuario.get("ultimo_diretorio_arquivo", "")
+        if isinstance(ultimo, str) and ultimo.strip():
+            return ultimo
+        if self._arquivo_atual is not None:
+            return str(self._arquivo_atual.parent)
+        return str(Path.home())
+
+    def _memorizar_diretorio_arquivo(self, caminho: Path):
+        pasta = caminho if caminho.is_dir() else caminho.parent
+        self.projeto_atual.preferencias_usuario["ultimo_diretorio_arquivo"] = str(pasta)
+        self._salvar_preferencias_app()
 
     def _anexar_preview_dialogo_arquivo(self, dialog: QFileDialog):
         layout = dialog.layout()
@@ -2523,6 +2538,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _abrir_projeto_em_caminho(self, caminho: str):
         caminho_resolvido = str(Path(caminho).resolve())
+        self._memorizar_diretorio_arquivo(Path(caminho_resolvido))
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
@@ -2581,11 +2597,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
 
     def _salvar_projeto_como(self) -> bool:
-        pasta_inicial = self._arquivo_atual.parent if self._arquivo_atual else Path.home()
+        pasta_inicial = Path(self._diretorio_arquivo_inicial())
         nome_inicial = self._arquivo_atual.stem if self._arquivo_atual else "novo_projeto"
         dlg = SalvarComoDialog(self, pasta_inicial=pasta_inicial, nome_inicial=nome_inicial)
         if dlg.exec():
             destino = dlg.caminho_destino()
+            self._memorizar_diretorio_arquivo(destino)
             self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
             self._renomear_abas_sem_nome(destino.stem)
             self._sincronizar_documentos_canvas_no_projeto()
