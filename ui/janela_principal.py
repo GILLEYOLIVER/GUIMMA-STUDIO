@@ -9,7 +9,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -1334,9 +1334,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._melhorar_coluna_nome_dialogo_arquivo(dialog)
 
     def _traduzir_rotulos_dialogo_arquivo(self, dialog: QFileDialog, *, texto_acao: str | None = None):
-        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Local:")
-        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Nome do arquivo:")
-        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo de arquivo:")
+        look_in = "Examinar:" if (texto_acao or "Abrir") == "Abrir" else "Salvar em:"
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, look_in)
+        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Nome:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
         dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, texto_acao or "Abrir")
 
@@ -1382,8 +1383,38 @@ class GuimmaStudioMainWindow(QMainWindow):
                     novo = colunas_pt.get(atual.lower())
                     if novo:
                         modelo.setHeaderData(col, Qt.Horizontal, novo)
+                self._traduzir_itens_modelo(modelo)
             except Exception:
                 pass
+
+    def _traduzir_itens_modelo(self, modelo):
+        mapa = {
+            "my computer": "Este Computador",
+            "desktop": "Área de Trabalho",
+            "documents": "Documentos",
+            "downloads": "Downloads",
+            "network": "Rede",
+            "home": "Início",
+            "directories": "Diretórios",
+        }
+
+        def _visitar(indice_pai):
+            try:
+                linhas = modelo.rowCount(indice_pai)
+            except Exception:
+                return
+            for linha in range(linhas):
+                idx = modelo.index(linha, 0, indice_pai)
+                txt = str(modelo.data(idx) or "").strip()
+                traduzido = mapa.get(txt.lower())
+                if traduzido:
+                    try:
+                        modelo.setData(idx, traduzido)
+                    except Exception:
+                        pass
+                _visitar(idx)
+
+        _visitar(QModelIndex())
 
     def _abrir_dialogo_arquivo_claro(
         self,

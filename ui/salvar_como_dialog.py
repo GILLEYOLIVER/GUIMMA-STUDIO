@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -144,7 +144,7 @@ class SalvarComoDialog(QDialog):
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         dialog.resize(1180, 760)
         dialog.setMinimumSize(1040, 680)
-        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Local:")
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Examinar:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Diretório:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, "Selecionar")
@@ -199,8 +199,38 @@ class SalvarComoDialog(QDialog):
                     novo = colunas_pt.get(atual.lower())
                     if novo:
                         modelo.setHeaderData(col, Qt.Horizontal, novo)
+                self._traduzir_itens_modelo(modelo)
             except Exception:
                 pass
+
+    def _traduzir_itens_modelo(self, modelo):
+        mapa = {
+            "my computer": "Este Computador",
+            "desktop": "Área de Trabalho",
+            "documents": "Documentos",
+            "downloads": "Downloads",
+            "network": "Rede",
+            "home": "Início",
+            "directories": "Diretórios",
+        }
+
+        def _visitar(indice_pai):
+            try:
+                linhas = modelo.rowCount(indice_pai)
+            except Exception:
+                return
+            for linha in range(linhas):
+                idx = modelo.index(linha, 0, indice_pai)
+                txt = str(modelo.data(idx) or "").strip()
+                traduzido = mapa.get(txt.lower())
+                if traduzido:
+                    try:
+                        modelo.setData(idx, traduzido)
+                    except Exception:
+                        pass
+                _visitar(idx)
+
+        _visitar(QModelIndex())
 
     def _atualizar_lista_arquivos_existentes(self):
         self.lst_arquivos_existentes.clear()
