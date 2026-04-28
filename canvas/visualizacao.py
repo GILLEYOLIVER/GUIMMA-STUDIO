@@ -97,6 +97,7 @@ class VisualizacaoCanvas(QWidget):
         self._sequencia_clique_direito = 0
         self.lbl_status = None  # Será definido pela janela principal
         self._imagem_cache: dict[str, QPixmap] = {}
+        self._mostrar_curva_original_emf = False
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -1193,7 +1194,7 @@ class VisualizacaoCanvas(QWidget):
             esp = float(elemento.get("espessura", 1.0))
             if elemento.get("tipo") == "polyline":
                 cor, esp, estilo = self._estilo_por_subtipo_audaces(elemento, cor, esp, str(elemento.get("estilo", "solid")))
-                pontos = [QPointF(x, y) for x, y in elemento.get("pontos", [])]
+                pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
@@ -1817,6 +1818,18 @@ class VisualizacaoCanvas(QWidget):
         if subtipo in {"texto", "anotacao"}:
             return "#9a9a9a", max(0.7, esp * 0.7), "dot"
         return cor, esp, estilo
+
+    def set_mostrar_curva_original_emf(self, ativo: bool):
+        self._mostrar_curva_original_emf = bool(ativo)
+        self.update()
+
+    def _pontos_render_elemento(self, elemento: dict) -> list[QPointF]:
+        if self._mostrar_curva_original_emf:
+            meta = elemento.get("metadados", {})
+            orig = meta.get("pontos_originais_emf")
+            if isinstance(orig, list) and len(orig) >= 2:
+                return [QPointF(float(x), float(y)) for x, y in orig]
+        return [QPointF(x, y) for x, y in elemento.get("pontos", [])]
 
     def _indice_molde_em_ponto(self, pos: QPointF) -> int | None:
         for idx in self._indices_elementos_em_ponto(pos):

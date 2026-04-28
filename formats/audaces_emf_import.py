@@ -93,12 +93,15 @@ class AudacesEMFImport:
         self._frame_cm: tuple[float, float, float, float] | None = None
         self._dedupe_stats: dict[str, int] = {"removidas": 0, "reclassificadas_costura": 0, "ignoradas": 0}
         self.suavizar_curvas_audaces = True
+        self.reconstruir_curvas_audaces = True
         self._smooth_stats: dict[str, int] = {
             "elementos_suavizados": 0,
             "pontos_removidos_jitter": 0,
             "cantos_preservados": 0,
             "suavizados_contorno": 0,
             "suavizados_costura": 0,
+            "trechos_reconstruidos": 0,
+            "trechos_rejeitados_perimetro": 0,
         }
 
     @classmethod
@@ -245,6 +248,8 @@ class AudacesEMFImport:
         elementos = self._filtrar_ruido_emf(elementos)
         elementos = self._limpar_duplicatas_e_classificar_pares(elementos)
         self._classificar_subtipos(elementos)
+        if self.reconstruir_curvas_audaces:
+            self._aplicar_reconstrucao_curvas(elementos)
         if self.suavizar_curvas_audaces:
             self._aplicar_suavizacao_audaces(elementos)
         return elementos, textos, bounds
@@ -367,11 +372,14 @@ class AudacesEMFImport:
             "duplicatas_reclassificadas_costura": int(self._dedupe_stats.get("reclassificadas_costura", 0)),
             "elementos_ignorados": int(self._dedupe_stats.get("ignoradas", 0)),
             "suavizacao_curvas_audaces": bool(self.suavizar_curvas_audaces),
+            "reconstrucao_curvas_audaces": bool(self.reconstruir_curvas_audaces),
             "elementos_suavizados": int(self._smooth_stats.get("elementos_suavizados", 0)),
             "pontos_removidos_jitter": int(self._smooth_stats.get("pontos_removidos_jitter", 0)),
             "cantos_preservados": int(self._smooth_stats.get("cantos_preservados", 0)),
             "suavizados_contorno": int(self._smooth_stats.get("suavizados_contorno", 0)),
             "suavizados_costura": int(self._smooth_stats.get("suavizados_costura", 0)),
+            "trechos_reconstruidos": int(self._smooth_stats.get("trechos_reconstruidos", 0)),
+            "trechos_rejeitados_perimetro": int(self._smooth_stats.get("trechos_rejeitados_perimetro", 0)),
             "map_mode": self._map_mode,
             "window_org": self._window_org,
             "window_ext": self._window_ext,
@@ -837,6 +845,100 @@ class AudacesEMFImport:
                     self._smooth_stats["suavizados_contorno"] += 1
                 elif subtipo == "costura":
                     self._smooth_stats["suavizados_costura"] += 1
+
+    def _aplicar_reconstrucao_curvas(self, elementos: list[EMFVectorElement]) -> None:
+        for el in elementos:
+            subtipo = str(el.metadados.get("subtipo_audaces") or "").strip()
+            if subtipo not in {"contorno", "costura"}:
+                continue
+            if len(el.pontos) < 8:
+                continue
+            novos = self._reconstruir_curvas_por_trechos(el)
+            if novos and novos != el.pontos:
+                el.metadados["pontos_originais_emf"] = list(el.pontos)
+                el.pontos = novos
+                el.bbox = self._bbox(el.pontos)
+
+    def _reconstruir_curvas_por_trechos(self, elemento: EMFVectorElement) -> list[tuple[float, float]]:
+        pts = list(elemento.pontos)
+        fechado = bool(elemento.fechado)
+        if fechado and pts and pts[0] == pts[-1]:
+            pts = pts[:-1]
+        if len(pts) < 6:
+            return elemento.pontos
+        forte = 30.0
+        cortes = [0]
+        for i in range(1, len(pts) - 1):
+            ang = self._angulo_interno_graus(pts[i - 1], pts[i], pts[i + 1])
+            if ang <= forte:
+                cortes.append(i)
+                self._smooth_stats["cantos_preservados"] += 1
+        cortes.append(len(pts) - 1)
+        cortes = sorted(set(cortes))
+        saida: list[tuple[float, float]] = [pts[0]]
+        per_antes = self._comprimento_polyline(pts + ([pts[0]] if fechado else []))
+        for a, b in zip(cortes, cortes[1:]):
+            trecho = pts[a:b + 1]
+            if len(trecho) < 5:
+                for p in trecho[1:]:
+                    saida.append(p)
+                continue
+            novo = self._reamostrar_catmull_rom(trecho, amostras=max(len(trecho) * 2, 18))
+            limitado = self._limitar_deslocamento(trecho, novo, max_desloc=0.15)
+            comp_a = self._comprimento_polyline(trecho)
+            comp_b = self._comprimento_polyline(limitado)
+            if comp_a > 1e-9 and abs(comp_b - comp_a) / comp_a > 0.005:
+                self._smooth_stats["trechos_rejeitados_perimetro"] += 1
+                for p in trecho[1:]:
+                    saida.append(p)
+                continue
+            self._smooth_stats["trechos_reconstruidos"] += 1
+            for p in limitado[1:]:
+                saida.append(p)
+        if fechado and saida[0] != saida[-1]:
+            saida.append(saida[0])
+        per_dep = self._comprimento_polyline(saida)
+        if per_antes > 1e-9 and abs(per_dep - per_antes) / per_antes > 0.005:
+            return elemento.pontos
+        elemento.metadados["curva_reconstruida"] = True
+        elemento.metadados["metodo_curva"] = "catmull_rom_centripeto"
+        elemento.metadados["perimetro_antes"] = per_antes
+        elemento.metadados["perimetro_depois"] = per_dep
+        return saida
+
+    def _reamostrar_catmull_rom(self, pts: list[tuple[float, float]], amostras: int) -> list[tuple[float, float]]:
+        if len(pts) < 4:
+            return pts
+        out: list[tuple[float, float]] = [pts[0]]
+        for i in range(1, len(pts) - 2):
+            p0, p1, p2, p3 = pts[i - 1], pts[i], pts[i + 1], pts[i + 2]
+            n = max(6, amostras // max(1, len(pts) - 3))
+            for j in range(1, n + 1):
+                t = j / n
+                t2, t3 = t * t, t * t * t
+                x = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2*p0[0]-5*p1[0]+4*p2[0]-p3[0]) * t2 + (-p0[0]+3*p1[0]-3*p2[0]+p3[0]) * t3)
+                y = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2*p0[1]-5*p1[1]+4*p2[1]-p3[1]) * t2 + (-p0[1]+3*p1[1]-3*p2[1]+p3[1]) * t3)
+                out.append((x, y))
+        out.append(pts[-1])
+        return out
+
+    def _limitar_deslocamento(self, original: list[tuple[float, float]], novo: list[tuple[float, float]], max_desloc: float) -> list[tuple[float, float]]:
+        if len(novo) <= 2:
+            return novo
+        res = [novo[0]]
+        for i in range(1, len(novo) - 1):
+            t = i / max(1, len(novo) - 1)
+            idx = min(len(original) - 1, max(0, int(round(t * (len(original) - 1)))))
+            ref = original[idx]
+            cur = novo[i]
+            dx, dy = cur[0] - ref[0], cur[1] - ref[1]
+            d = (dx * dx + dy * dy) ** 0.5
+            if d > max_desloc:
+                f = max_desloc / d
+                cur = (ref[0] + dx * f, ref[1] + dy * f)
+            res.append(cur)
+        res.append(novo[-1])
+        return res
 
     @staticmethod
     def _dist_pt(a: tuple[float, float], b: tuple[float, float]) -> float:
