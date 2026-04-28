@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -52,8 +52,8 @@ class Documento:
 class Projeto:
     id: str = field(default_factory=lambda: str(uuid4()))
     nome: str = "Novo Projeto"
-    criado_em: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    atualizado_em: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    criado_em: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    atualizado_em: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     documentos: list[Documento] = field(default_factory=list)
     preferencias_usuario: dict[str, Any] = field(default_factory=dict)
     configuracao_snap: dict[str, bool] = field(
@@ -64,6 +64,7 @@ class Projeto:
             "snap_grade": True,
         }
     )
+    audaces_adsx_original: dict[str, Any] = field(default_factory=dict)
 
     def para_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,9 +101,10 @@ class Projeto:
         return cls(
             id=dados.get("id", str(uuid4())),
             nome=dados.get("nome", "Novo Projeto"),
-            criado_em=dados.get("criado_em", datetime.now(UTC).isoformat()),
-            atualizado_em=dados.get("atualizado_em", datetime.now(UTC).isoformat()),
+            criado_em=dados.get("criado_em", datetime.now(timezone.utc).isoformat()),
+            atualizado_em=dados.get("atualizado_em", datetime.now(timezone.utc).isoformat()),
             documentos=documentos,
             preferencias_usuario=dados.get("preferencias_usuario", {}),
             configuracao_snap=dados.get("configuracao_snap", {}),
+            audaces_adsx_original=dados.get("audaces_adsx_original", {}),
         )
