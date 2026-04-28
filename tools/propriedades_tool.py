@@ -723,18 +723,22 @@ class PropriedadesMoldesDialog(QDialog):
             pass
 
     def _ajustar_larguras_campos(self):
-        combos = [
-            self.cmb_aplicar_grade,
-            self.cmb_area_tamanho,
-            self.cmb_grade_tamanhos,
-            self.cmb_elementos_molde,
-            self.cmb_tipo_corte,
-            self.cmb_molde,
-            self.cmb_espelhar,
-            self.cmb_giro,
-            self.cmb_tipo_corte_cam,
-            self.ed_tecido,
-        ]
+        combos: list[QComboBox] = []
+        for nome in (
+            "cmb_aplicar_grade",
+            "cmb_area_tamanho",
+            "cmb_grade_tamanhos",
+            "cmb_elementos_molde",
+            "cmb_tipo_corte",
+            "cmb_molde",
+            "cmb_espelhar",
+            "cmb_giro",
+            "cmb_tipo_corte_cam",
+            "ed_tecido",
+        ):
+            widget = getattr(self, nome, None)
+            if isinstance(widget, QComboBox):
+                combos.append(widget)
         for combo in combos:
             combo.setMinimumContentsLength(18)
             combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -1495,16 +1499,16 @@ class PropriedadesMoldesDialog(QDialog):
             item.setIcon(0, self._icone_status_molde(ref, referencia_grade=self._assinatura_grade(diretos[0].dados if diretos else {})))
             raiz.addChild(item)
 
+        referencia_global = self._assinatura_grade_referencia_global()
         for grupo_nome, itens in grupos.items():
             pai = QTreeWidgetItem([grupo_nome])
             pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
-            referencia = self._assinatura_grade(itens[0].dados if itens else {})
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
                 item.setFlags(item.flags() | Qt.ItemIsEditable)
-                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia))
+                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
                 pai.addChild(item)
 
         raiz.setExpanded(True)
@@ -1542,6 +1546,14 @@ class PropriedadesMoldesDialog(QDialog):
             return nome
         tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
         return f"{nome}|{'/'.join(tags)}"
+
+    def _assinatura_grade_referencia_global(self) -> str:
+        for ref in sorted(self._refs, key=lambda r: r.indice):
+            dados = ref.dados if isinstance(ref.dados, dict) else {}
+            assinatura = self._assinatura_grade(dados)
+            if assinatura:
+                return assinatura
+        return ""
 
     def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
         dados = ref.dados if isinstance(ref.dados, dict) else {}
