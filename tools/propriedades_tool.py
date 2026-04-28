@@ -463,6 +463,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._confirmado_ok = False
         self._suspender_auto_aplicar = False
         self._suspender_item_changed = False
+        self._linha_gradacao_atual = 0
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -723,18 +724,22 @@ class PropriedadesMoldesDialog(QDialog):
             pass
 
     def _ajustar_larguras_campos(self):
-        combos = [
-            self.cmb_aplicar_grade,
-            self.cmb_area_tamanho,
-            self.cmb_grade_tamanhos,
-            self.cmb_elementos_molde,
-            self.cmb_tipo_corte,
-            self.cmb_molde,
-            self.cmb_espelhar,
-            self.cmb_giro,
-            self.cmb_tipo_corte_cam,
-            self.ed_tecido,
-        ]
+        combos: list[QComboBox] = []
+        for nome in (
+            "cmb_aplicar_grade",
+            "cmb_area_tamanho",
+            "cmb_grade_tamanhos",
+            "cmb_elementos_molde",
+            "cmb_tipo_corte",
+            "cmb_molde",
+            "cmb_espelhar",
+            "cmb_giro",
+            "cmb_tipo_corte_cam",
+            "ed_tecido",
+        ):
+            widget = getattr(self, nome, None)
+            if isinstance(widget, QComboBox):
+                combos.append(widget)
         for combo in combos:
             combo.setMinimumContentsLength(18)
             combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -929,8 +934,13 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.setFixedWidth(230)
         self.tbl_graduacao.setFixedHeight(286)
         self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
+        self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectItems)
+        self.tbl_graduacao.setSelectionMode(QTableWidget.NoSelection)
+        self.tbl_graduacao.setStyleSheet(
+            "QTableWidget::item:selected { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:active { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:!active { background: transparent; color:#111111; }"
+        )
         self.tbl_graduacao.cellClicked.connect(self._on_tabela_graduacao_clicada)
         self._popular_tabela_graduacao()
         grid_esq.addWidget(self.tbl_graduacao)
@@ -1002,7 +1012,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         base_idx = next((i for i, d in enumerate(linhas) if d.get("base", False)), 0)
         if linhas:
-            self.tbl_graduacao.selectRow(base_idx)
+            self.tbl_graduacao.setCurrentCell(base_idx, 1)
 
     def _aplicar_grade_tamanhos(self, grade_texto: str):
         tamanhos, base = self._extrair_tamanhos_grade(grade_texto)
@@ -1049,6 +1059,7 @@ class PropriedadesMoldesDialog(QDialog):
     def _on_tabela_graduacao_clicada(self, linha: int, coluna: int):
         if not (0 <= linha < len(self._graduacao_linhas)):
             return
+        self._linha_gradacao_atual = linha
         item = self._graduacao_linhas[linha]
         if coluna == 0:
             item["ativo"] = not bool(item.get("ativo", True))
@@ -1059,9 +1070,15 @@ class PropriedadesMoldesDialog(QDialog):
             if cor.isValid():
                 item["cor"] = cor.name()
                 self._renderizar_tabela_graduacao()
+            if hasattr(self, "tbl_graduacao"):
+                self.tbl_graduacao.clearSelection()
+                self.tbl_graduacao.setCurrentCell(linha, 1)
         self._sincronizar_gradacao_no_molde()
 
     def _linha_selecionada_graduacao(self) -> int:
+        row = int(getattr(self, "_linha_gradacao_atual", -1))
+        if 0 <= row < len(self._graduacao_linhas):
+            return row
         row = self.tbl_graduacao.currentRow()
         return row if 0 <= row < len(self._graduacao_linhas) else -1
 
@@ -1118,13 +1135,29 @@ class PropriedadesMoldesDialog(QDialog):
         return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
 
     def _sincronizar_gradacao_no_molde(self):
-        molde = self._molde_atual()
-        if not molde:
+        moldes_alvo = self._moldes_alvo_graduacao()
+        if not moldes_alvo:
             return
-        molde["graduacao_grade_nome"] = self.cmb_grade_tamanhos.currentText().strip()
-        molde["graduacao_tamanhos"] = [dict(l) for l in self._graduacao_linhas]
+        combo_grade = getattr(self, "cmb_grade_tamanhos", None)
+        if not isinstance(combo_grade, QComboBox):
+            return
+        grade_nome = combo_grade.currentText().strip()
+        linhas = [dict(l) for l in self._graduacao_linhas]
         ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
-        molde["graduacao_tamanhos_ativos"] = ativos
+        for molde in moldes_alvo:
+            molde["graduacao_grade_nome"] = grade_nome
+            molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
+            molde["graduacao_tamanhos_ativos"] = list(ativos)
+
+    def _moldes_alvo_graduacao(self) -> list[dict]:
+        combo_aplicar = getattr(self, "cmb_aplicar_grade", None)
+        modo_aplicar = combo_aplicar.currentText().strip().lower() if isinstance(combo_aplicar, QComboBox) else "ao molde"
+        molde_atual = self._molde_atual()
+        if molde_atual is None:
+            return []
+        if modo_aplicar == "ao molde":
+            return [molde_atual]
+        return [ref.dados for ref in self._refs if isinstance(ref.dados, dict)]
 
     def _atualizar_opcoes_tecido(self):
         cena = getattr(self.canvas, "cena", None)
@@ -1473,38 +1506,38 @@ class PropriedadesMoldesDialog(QDialog):
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
         self._suspender_item_changed = True
         self.arvore.clear()
-        raiz = QTreeWidgetItem(["1"])
+        raiz = QTreeWidgetItem(["Tecidos"])
         raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
-        diretos: list[MoldeRef] = []
+        tecidos_disponiveis: set[str] = {"1"}
+        for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
+            tecido = str(chave).strip()
+            if tecido:
+                tecidos_disponiveis.add(tecido)
         for ref in self._refs:
             tecido = str(ref.dados.get("tecido") or "").strip()
-            grupo = tecido if tecido else str(ref.dados.get("grupo_molde") or "").strip()
-            if not grupo or grupo == "1":
-                diretos.append(ref)
-            else:
-                grupos.setdefault(grupo, []).append(ref)
+            grupo = tecido if tecido else "1"
+            tecidos_disponiveis.add(grupo)
+            grupos.setdefault(grupo, []).append(ref)
 
-        for ref in diretos:
-            item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
-            item.setData(0, Qt.UserRole, ref.indice)
-            item.setFlags(item.flags() | Qt.ItemIsEditable)
-            item.setIcon(0, self._icone_status_molde(ref, referencia_grade=self._assinatura_grade(diretos[0].dados if diretos else {})))
-            raiz.addChild(item)
+        def _ord_tecido(valor: str):
+            txt = str(valor).strip()
+            return (0, int(txt)) if txt.isdigit() else (1, txt.lower())
 
-        for grupo_nome, itens in grupos.items():
+        referencia_global = self._assinatura_grade_referencia_global()
+        for grupo_nome in sorted(tecidos_disponiveis, key=_ord_tecido):
+            itens = grupos.get(grupo_nome, [])
             pai = QTreeWidgetItem([grupo_nome])
             pai.setFlags(pai.flags() | Qt.ItemIsEditable)
             raiz.addChild(pai)
-            referencia = self._assinatura_grade(itens[0].dados if itens else {})
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
                 item.setFlags(item.flags() | Qt.ItemIsEditable)
-                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia))
+                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
                 pai.addChild(item)
 
         raiz.setExpanded(True)
@@ -1542,6 +1575,14 @@ class PropriedadesMoldesDialog(QDialog):
             return nome
         tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
         return f"{nome}|{'/'.join(tags)}"
+
+    def _assinatura_grade_referencia_global(self) -> str:
+        for ref in sorted(self._refs, key=lambda r: r.indice):
+            dados = ref.dados if isinstance(ref.dados, dict) else {}
+            assinatura = self._assinatura_grade(dados)
+            if assinatura:
+                return assinatura
+        return ""
 
     def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
         dados = ref.dados if isinstance(ref.dados, dict) else {}
