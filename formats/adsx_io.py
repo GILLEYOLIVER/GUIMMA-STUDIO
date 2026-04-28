@@ -135,6 +135,7 @@ class ADSXIO:
             "moldes": placeholders,
             "preview_disponivel": "file.jpg" in doc.arquivos_preservados,
         }
+        projeto.preferencias_usuario["adsx_placeholders_canvas"] = cls.gerar_elementos_canvas(placeholders)
 
         if not projeto.documentos:
             projeto.documentos.append(Documento(nome="Documento 1"))
@@ -143,6 +144,45 @@ class ADSXIO:
 
         cls._preservar_pacote_original(doc, projeto)
         return projeto
+
+    @classmethod
+    def gerar_elementos_canvas(cls, moldes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        elementos: list[dict[str, Any]] = []
+        cursor_x = 0.0
+        gap = 14.0
+        for idx, molde in enumerate(moldes, start=1):
+            largura = float(molde.get("largura") or 120.0)
+            altura = float(molde.get("altura") or 80.0)
+            largura = max(largura, 20.0)
+            altura = max(altura, 20.0)
+            x0 = cursor_x
+            y0 = 0.0
+            x1 = x0 + largura
+            y1 = y0 + altura
+            cursor_x = x1 + gap
+            nome = str(molde.get("nome") or f"Molde {idx}")
+            elementos.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)],
+                    "molde": True,
+                    "nome_molde": nome,
+                    "origem": "adsx",
+                    "origem_adsx": True,
+                    "geometria_convertida": False,
+                    "geometria_adsx_nao_convertida": True,
+                    "tamanho": molde.get("tamanho"),
+                    "quantidade": molde.get("quantidade"),
+                    "area": molde.get("area"),
+                    "perimetro": molde.get("perimetro"),
+                    "largura": largura,
+                    "altura": altura,
+                    "metadados_adsx": dict(molde.get("metadados_adsx") or {}),
+                    "cor": "#7dcfff",
+                    "espessura": 1.3,
+                }
+            )
+        return elementos
 
     @classmethod
     def _ler_index_json(

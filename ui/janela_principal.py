@@ -2332,6 +2332,15 @@ class GuimmaStudioMainWindow(QMainWindow):
 
             self._arquivo_atual = None
             self._atualizar_titulo()
+            if area:
+                placeholders = self.projeto_atual.preferencias_usuario.get("adsx_placeholders_canvas", [])
+                if isinstance(placeholders, list):
+                    area.canvas.cena.elementos = [dict(el) for el in placeholders if isinstance(el, dict)]
+                    if area.canvas.cena.elementos:
+                        area.canvas._registrar_historico()
+                        self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
+                        area._on_zoom_changed(area.canvas.zoom)
+                        area.canvas.update()
             self.backstage.hide()
             self._agendar_salvar_estado_silencioso()
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])

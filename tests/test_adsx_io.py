@@ -49,6 +49,9 @@ class ADSXIOTestCase(unittest.TestCase):
 
             self.assertIn("audaces_adsx_original", projeto.para_dict())
             self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.ads"))
+            placeholders_canvas = projeto.preferencias_usuario.get("adsx_placeholders_canvas", [])
+            self.assertTrue(placeholders_canvas)
+            self.assertEqual(placeholders_canvas[0].get("tipo"), "polyline")
 
             caminho_gs = pasta / "teste.gs"
             GSProjectIO.salvar(projeto, caminho_gs)
