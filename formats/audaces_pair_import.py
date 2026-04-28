@@ -10,10 +10,24 @@ from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 
 
 class AudacesPairImport:
+    # Calibração manual temporária medida no teste real ATUAL.
+    # A versão anterior ficou grande demais:
+    #   referência 1: Audaces 400.17 mm / GUIMMA 544.28 mm = 0.7352281914
+    #   referência 2: Audaces 407.25 mm / GUIMMA 549.57 mm = 0.7410338992
+    #   correção média = 0.7381310453
+    #
+    # Fator anterior fino: 19.2020894467
+    # Fator final corrigido: 19.2020894467 * 0.7381310453 = 14.1736583552598
+    ESCALA_CALIBRACAO_PADRAO = 14.1736583552598
+
     @classmethod
     def importar(cls, emf_path: str | Path, xml_path: str | Path, projeto: Projeto) -> Projeto:
         xml_doc = AudacesXMLImport.abrir(xml_path)
         emf_doc = AudacesEMFImport.abrir(emf_path)
+
+        fator_escala_final = cls._fator_escala_calibrado(xml_doc, emf_doc)
+        cls._aplicar_escala_emf_doc(emf_doc, fator_escala_final)
+
         elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
 
         projeto.nome = xml_doc.nome_modelo or projeto.nome
@@ -60,6 +74,11 @@ class AudacesPairImport:
             "moldes_reais": len(doc.moldes),
             "bounds_emf": emf_doc.bounds,
             "escala": dict(emf_doc.relatorio.get("escala", {})),
+            "escala_manual_aplicada": fator_escala_final,
+            "medida_guimma_referencia_mm": 544.28,
+            "medida_audaces_referencia_mm": 400.17,
+            "fator_escala_final": fator_escala_final,
+            "unidade_resultado": "cm_calibrado_por_referencia_mm",
         }
 
         projeto.preferencias_usuario["audaces_importados_originais"] = {
@@ -81,6 +100,8 @@ class AudacesPairImport:
     @classmethod
     def importar_apenas_emf(cls, emf_path: str | Path, projeto: Projeto) -> Projeto:
         emf_doc = AudacesEMFImport.abrir(emf_path)
+        fator_escala_final = cls.ESCALA_CALIBRACAO_PADRAO
+        cls._aplicar_escala_emf_doc(emf_doc, fator_escala_final)
         elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
         if not projeto.documentos:
             projeto.documentos.append(Documento(nome="Documento 1"))
@@ -95,12 +116,72 @@ class AudacesPairImport:
             "emf_path": str(emf_path),
             "elementos_canvas": elementos_canvas,
             "relatorio": dict(emf_doc.relatorio),
+            "escala_manual_aplicada": fator_escala_final,
+            "medida_guimma_referencia_mm": 544.28,
+            "medida_audaces_referencia_mm": 400.17,
+            "fator_escala_final": fator_escala_final,
+            "unidade_resultado": "cm_calibrado_por_referencia_mm",
         }
         projeto.preferencias_usuario.setdefault("audaces_importados_originais", {})["emf"] = {
             "nome": Path(emf_path).name,
             "conteudo_base64": base64.b64encode(Path(emf_path).read_bytes()).decode("ascii"),
         }
         return projeto
+
+
+    @classmethod
+    def _fator_escala_calibrado(cls, xml_doc, emf_doc) -> float:
+        """Retorna o fator final de escala para EMF do Audaces.
+
+        A escala automática do EMF exportado como Metafile nesta instalação
+        não bate com a régua técnica do Audaces. O fator abaixo foi calibrado
+        com a medida real enviada: 544.28 mm no GUIMMA corresponde a 400.17 mm no Audaces,
+        com validação secundária de 549.57 mm para 407.25 mm. Depois a interface pode expor esse fator como calibração
+        manual editável.
+        """
+        return float(cls.ESCALA_CALIBRACAO_PADRAO)
+
+    @staticmethod
+    def _aplicar_escala_emf_doc(emf_doc, fator: float):
+        fator = float(fator or 1.0)
+        if abs(fator - 1.0) < 1e-12:
+            return
+
+        def _scale_pt(pt):
+            x, y = pt
+            return float(x) * fator, float(y) * fator
+
+        for el in getattr(emf_doc, "elementos", []):
+            el.pontos = [_scale_pt(p) for p in el.pontos]
+            if el.pontos:
+                xs = [p[0] for p in el.pontos]
+                ys = [p[1] for p in el.pontos]
+                el.bbox = (min(xs), min(ys), max(xs), max(ys))
+            el.metadados["escala_manual_aplicada"] = fator
+            el.metadados["unidade_resultado"] = "cm_calibrado"
+
+        for tx in getattr(emf_doc, "textos", []):
+            if "pos" in tx:
+                tx["pos"] = _scale_pt(tx["pos"])
+
+        try:
+            l, t, r, b = emf_doc.bounds
+            emf_doc.bounds = (l * fator, t * fator, r * fator, b * fator)
+            emf_doc.largura = max(emf_doc.bounds[2] - emf_doc.bounds[0], 0.0)
+            emf_doc.altura = max(emf_doc.bounds[3] - emf_doc.bounds[1], 0.0)
+        except Exception:
+            pass
+
+        rel = getattr(emf_doc, "relatorio", {})
+        if isinstance(rel, dict):
+            rel["escala_manual_aplicada"] = fator
+            rel["medida_guimma_referencia_mm"] = 544.28
+            rel["medida_audaces_referencia_mm"] = 400.17
+            rel["fator_escala_final"] = fator
+            rel["unidade_resultado"] = "cm_calibrado_por_referencia_mm"
+            rel.setdefault("avisos", []).append(
+                f"Escala calibrada manualmente aplicada ao EMF: fator {fator:.8f}."
+            )
 
     @staticmethod
     def _gerar_relatorio_importacao(xml_doc, emf_doc, info: dict) -> dict:
@@ -122,6 +203,11 @@ class AudacesPairImport:
             "pecas_xml_sem_associacao": info.get("pecas_xml_sem_associacao", 0),
             "bounds_emf": emf_doc.bounds,
             "escala_usada": rel.get("escala", {}),
+            "escala_manual_aplicada": info.get("escala_manual_aplicada"),
+            "medida_guimma_referencia_mm": info.get("medida_guimma_referencia_mm"),
+            "medida_audaces_referencia_mm": info.get("medida_audaces_referencia_mm"),
+            "fator_escala_final": info.get("fator_escala_final") or info.get("escala_manual_aplicada"),
+            "unidade_resultado": info.get("unidade_resultado"),
             "records_nao_suportados": rel.get("records_nao_suportados", {}),
             "avisos": list(info.get("avisos", [])) + list(rel.get("avisos", [])),
         }

@@ -8,13 +8,15 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
+    QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
+
 
 class VisualizacaoCanvas(QWidget):
     zoom_changed = Signal(float)
@@ -94,6 +96,7 @@ class VisualizacaoCanvas(QWidget):
         self._ultimo_clique_direito_ts = 0.0
         self._sequencia_clique_direito = 0
         self.lbl_status = None  # Será definido pela janela principal
+        self._imagem_cache: dict[str, QPixmap] = {}
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -293,8 +296,45 @@ class VisualizacaoCanvas(QWidget):
         if self._runtime_tool and hasattr(self._runtime_tool, "set_criar_molde"):
             self._runtime_tool.set_criar_molde(criar_molde)
 
+    def _elemento_serializavel(self, elemento: dict) -> dict:
+        """Retorna uma cópia limpa do elemento, sem objetos Qt/runtime.
+
+        Nunca salve QPixmap, QImage, QWidget ou caches dentro de
+        self.cena.elementos. Esses objetos existem só em tempo de execução e
+        quebram deepcopy/json/.gs.
+        """
+        if not isinstance(elemento, dict):
+            return {}
+        limpo = {}
+        for chave, valor in elemento.items():
+            nome_chave = str(chave)
+            if nome_chave.startswith("_"):
+                continue
+            if nome_chave in {"pixmap", "qimage", "qpixmap", "imagem_qt", "_pixmap_cache"}:
+                continue
+            if isinstance(valor, (QPixmap, QImage)):
+                continue
+            try:
+                limpo[chave] = deepcopy(valor)
+            except Exception:
+                continue
+        return limpo
+
+    def _elementos_serializaveis(self, elementos: list[dict] | None = None) -> list[dict]:
+        origem = self.cena.elementos if elementos is None else elementos
+        return [self._elemento_serializavel(el) for el in origem if isinstance(el, dict)]
+
+    def _limpar_cache_runtime_elementos(self):
+        """Remove caches Qt gravados acidentalmente na cena."""
+        for elemento in self.cena.elementos:
+            if isinstance(elemento, dict):
+                for chave in list(elemento.keys()):
+                    if str(chave).startswith("_") or isinstance(elemento.get(chave), (QPixmap, QImage)):
+                        elemento.pop(chave, None)
+
     def elementos_para_salvar(self) -> list[dict]:
-        elementos = deepcopy(self.cena.elementos)
+        self._limpar_cache_runtime_elementos()
+        elementos = self._elementos_serializaveis()
         if len(self._pontos_reta) >= 2:
             fase = 0.0
             for inicio, fim in zip(self._pontos_reta, self._pontos_reta[1:]):
@@ -318,21 +358,22 @@ class VisualizacaoCanvas(QWidget):
         if self._indice_historico == 0:
             return
         self._indice_historico -= 1
-        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
         self.update()
 
     def refazer_acao(self):
         if self._indice_historico >= len(self._historico_elementos) - 1:
             return
         self._indice_historico += 1
-        self.cena.elementos = deepcopy(self._historico_elementos[self._indice_historico])
+        self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
         self.update()
 
     def copiar(self):
         if self._selecionados:
             self._buffer_copia = {
                 "tipo": "multiplos",
-                "elementos": [deepcopy(self.cena.elementos[idx]) for idx in sorted(self._selecionados)],
+                "elementos": [self._elemento_serializavel(self.cena.elementos[idx]) for idx in
+                              sorted(self._selecionados)],
             }
             return
         if self._pontos_reta and len(self._pontos_reta) >= 2:
@@ -347,30 +388,31 @@ class VisualizacaoCanvas(QWidget):
             }
             return
         if self.cena.elementos:
-            self._buffer_copia = deepcopy(self.cena.elementos[-1])
-    
+            self._buffer_copia = self._elemento_serializavel(self.cena.elementos[-1])
+
     def obter_buffer_copia(self) -> dict | None:
         if not self._buffer_copia:
             return None
-        return deepcopy(self._buffer_copia)
+        return self._elemento_serializavel(self._buffer_copia)
 
     def definir_buffer_copia(self, buffer_copia: dict | None):
-        self._buffer_copia = deepcopy(buffer_copia) if isinstance(buffer_copia, dict) else None
+        self._buffer_copia = self._elemento_serializavel(buffer_copia) if isinstance(buffer_copia, dict) else None
 
     def colar(self):
         if not self._buffer_copia:
             return
         self._selecionados.clear()
-        itens = self._buffer_copia.get("elementos", []) if self._buffer_copia.get("tipo") == "multiplos" else [self._buffer_copia]
+        itens = self._buffer_copia.get("elementos", []) if self._buffer_copia.get("tipo") == "multiplos" else [
+            self._buffer_copia]
         dx, dy = self._delta_colagem_para_centro(itens)
         if self._buffer_copia.get("tipo") == "multiplos":
             for item in self._buffer_copia.get("elementos", []):
-                novo = deepcopy(item)
+                novo = self._elemento_serializavel(item)
                 self._transladar_elemento(novo, dx, dy)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
         else:
-            novo = deepcopy(self._buffer_copia)
+            novo = self._elemento_serializavel(self._buffer_copia)
             self._transladar_elemento(novo, dx, dy)
             self.cena.elementos.append(novo)
             self._selecionados.add(len(self.cena.elementos) - 1)
@@ -524,7 +566,8 @@ class VisualizacaoCanvas(QWidget):
 
     def _registrar_historico(self):
         self._aplicar_padrao_grade_primeiro_molde()
-        snapshot = deepcopy(self.cena.elementos)
+        self._limpar_cache_runtime_elementos()
+        snapshot = self._elementos_serializaveis()
         if self._indice_historico < len(self._historico_elementos) - 1:
             self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
         self._historico_elementos.append(snapshot)
@@ -640,13 +683,13 @@ class VisualizacaoCanvas(QWidget):
                        (ponto.y() - self.origem_cena.y()) * self.zoom)
 
     def _adicionar_candidato_snap(
-        self,
-        candidatos: list[SnapResult],
-        pos_cena: QPointF,
-        ponto: QPointF | None,
-        tipo: str,
-        elemento_idx: int | None = None,
-        tol_cena: float | None = None,
+            self,
+            candidatos: list[SnapResult],
+            pos_cena: QPointF,
+            ponto: QPointF | None,
+            tipo: str,
+            elemento_idx: int | None = None,
+            tol_cena: float | None = None,
     ):
         if ponto is None:
             return
@@ -744,7 +787,9 @@ class VisualizacaoCanvas(QWidget):
             if el.get("molde"):
                 fio_origem = el.get("fio_origem")
                 fio_fim = el.get("fio_fim")
-                if isinstance(fio_origem, (list, tuple)) and len(fio_origem) == 2 and isinstance(fio_fim, (list, tuple)) and len(fio_fim) == 2:
+                if isinstance(fio_origem, (list, tuple)) and len(fio_origem) == 2 and isinstance(fio_fim,
+                                                                                                 (list, tuple)) and len(
+                        fio_fim) == 2:
                     p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
                     p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
                     pm = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
@@ -808,7 +853,8 @@ class VisualizacaoCanvas(QWidget):
             return destino
         if liberar_angular:
             return destino
-        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+        if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro",
+                                                                                        "borda", "coord", "interseção"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
@@ -819,17 +865,17 @@ class VisualizacaoCanvas(QWidget):
         ang_principal = round(ang / 45.0) * 45.0
         if travar_principais:
             return QPointF(origem.x() + dist * cos(radians(ang_principal)),
-                          origem.y() - dist * sin(radians(ang_principal)))
+                           origem.y() - dist * sin(radians(ang_principal)))
         if self._snap_contextual_ativo and len(self._pontos_reta) >= 2:
             ang_contextual = self._snap_angular_contextual(origem, ang)
             if ang_contextual is not None:
                 return QPointF(origem.x() + dist * cos(radians(ang_contextual)),
-                              origem.y() - dist * sin(radians(ang_contextual)))
+                               origem.y() - dist * sin(radians(ang_contextual)))
         angulo_dist = self._dist_angular(ang, ang_principal)
         tolerancia_principal = max(1.8, min(5.0, self._snap_angular_passo * 0.12))
         if angulo_dist <= tolerancia_principal:
             return QPointF(origem.x() + dist * cos(radians(ang_principal)),
-                          origem.y() - dist * sin(radians(ang_principal)))
+                           origem.y() - dist * sin(radians(ang_principal)))
         return destino
 
     def _snap_angular_contextual(self, origem: QPointF, ang_atual: float) -> float | None:
@@ -886,7 +932,8 @@ class VisualizacaoCanvas(QWidget):
         self._guias_alinhamento = []
         if not self._snap_ativo:
             return destino
-        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord",
+                                                                  "interseção"}:
             return destino
         candidatos: list[QPointF] = []
         candidatos.extend(self._pontos_reta[:-1])
@@ -1153,9 +1200,11 @@ class VisualizacaoCanvas(QWidget):
                                          amplitude=float(elemento.get("amplitude", 1.0)),
                                          fase_inicial=float(elemento.get("fase_inicio", 0.0)))
             elif elemento.get("tipo") == "bezier_quadratica":
-                self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"]),
+                self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]),
+                                                 QPointF(*elemento["p2"]),
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
-                                                 amplitude=float(elemento.get("amplitude", 1.0)), destacar_controles=(idx in self._selecionados))
+                                                 amplitude=float(elemento.get("amplitude", 1.0)),
+                                                 destacar_controles=(idx in self._selecionados))
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
@@ -1169,7 +1218,8 @@ class VisualizacaoCanvas(QWidget):
         imagem_b64 = str(elemento.get("imagem_base64") or "").strip()
         if not imagem_b64:
             return
-        pixmap = elemento.get("_pixmap_cache")
+        cache_key = str(elemento.get("cache_id") or elemento.get("nome") or "imagem") + ":" + str(hash(imagem_b64))
+        pixmap = self._imagem_cache.get(cache_key)
         if not isinstance(pixmap, QPixmap) or pixmap.isNull():
             try:
                 bruto = base64.b64decode(imagem_b64)
@@ -1177,7 +1227,7 @@ class VisualizacaoCanvas(QWidget):
                 if img.isNull():
                     return
                 pixmap = QPixmap.fromImage(img)
-                elemento["_pixmap_cache"] = pixmap
+                self._imagem_cache[cache_key] = pixmap
             except Exception:
                 return
         if pixmap.isNull():
@@ -1234,7 +1284,8 @@ class VisualizacaoCanvas(QWidget):
                     cy = sum(p.y() for p in base) / len(base)
                     tela = self._cena_para_tela(QPointF(cx, cy))
                     fonte_nome = painter.font()
-                    fonte_nome.setPointSizeF(self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 10.0))
+                    fonte_nome.setPointSizeF(
+                        self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 10.0))
                     painter.setFont(fonte_nome)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(tela.x() - 20), int(tela.y()), nome)
@@ -1256,11 +1307,11 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_seta_fio(painter, p1, p2)
 
                 rotulo_fio = (
-                    el.get("fio_rotulo")
-                    or el.get("fio_texto")
-                    or el.get("titulo_fio")
-                    or el.get("nome_fio")
-                    or ""
+                        el.get("fio_rotulo")
+                        or el.get("fio_texto")
+                        or el.get("titulo_fio")
+                        or el.get("nome_fio")
+                        or ""
                 )
                 if rotulo_fio:
                     self._desenhar_rotulo_fio(
@@ -1274,7 +1325,8 @@ class VisualizacaoCanvas(QWidget):
                     fim_tela = self._cena_para_tela(p2)
                     ang = float(el.get("fio_angulo", 90.0))
                     fonte_fio = painter.font()
-                    fonte_fio.setPointSizeF(self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0))
+                    fonte_fio.setPointSizeF(
+                        self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0))
                     painter.setFont(fonte_fio)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     painter.drawText(int(fim_tela.x() + 6), int(fim_tela.y() + 4), f"{int(round(ang))}°")
@@ -1288,7 +1340,8 @@ class VisualizacaoCanvas(QWidget):
                     cx, cy = 0.0, 0.0
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 fonte_num = painter.font()
-                fonte_num.setPointSizeF(self._tamanho_visual_molde(el, ("tam_numero", "tamanho_numero", "fonte_numeracao"), 9.0))
+                fonte_num.setPointSizeF(
+                    self._tamanho_visual_molde(el, ("tam_numero", "tamanho_numero", "fonte_numeracao"), 9.0))
                 painter.setFont(fonte_num)
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
@@ -1415,13 +1468,13 @@ class VisualizacaoCanvas(QWidget):
         )
 
     def _desenhar_ponta_seta_fechada(
-        self,
-        painter: QPainter,
-        ponta: QPointF,
-        direcao: QPointF,
-        normal: QPointF,
-        comprimento: float,
-        meia_largura: float,
+            self,
+            painter: QPainter,
+            ponta: QPointF,
+            direcao: QPointF,
+            normal: QPointF,
+            comprimento: float,
+            meia_largura: float,
     ):
         base = QPointF(
             ponta.x() - (direcao.x() * comprimento),
@@ -1446,7 +1499,8 @@ class VisualizacaoCanvas(QWidget):
         painter.drawPath(path)
         painter.restore()
 
-    def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str, tamanho: float | None = None):
+    def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str,
+                             tamanho: float | None = None):
         meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
         meio_tela = self._cena_para_tela(meio)
         dx = fim.x() - inicio.x()
@@ -1710,14 +1764,16 @@ class VisualizacaoCanvas(QWidget):
             if el.get("molde"):
                 fio_origem = el.get("fio_origem")
                 fio_fim = el.get("fio_fim")
-                if isinstance(fio_origem, (list, tuple)) and isinstance(fio_fim, (list, tuple)) and len(fio_origem) == 2 and len(fio_fim) == 2:
+                if isinstance(fio_origem, (list, tuple)) and isinstance(fio_fim, (list, tuple)) and len(
+                        fio_origem) == 2 and len(fio_fim) == 2:
                     p1 = QPointF(float(fio_origem[0]), float(fio_origem[1]))
                     p2 = QPointF(float(fio_fim[0]), float(fio_fim[1]))
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
                     pontos_nome = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-                    base_nome = pontos_nome[:-1] if len(pontos_nome) >= 3 and pontos_nome[0] == pontos_nome[-1] else pontos_nome
+                    base_nome = pontos_nome[:-1] if len(pontos_nome) >= 3 and pontos_nome[0] == pontos_nome[
+                        -1] else pontos_nome
                     if base_nome:
                         cx = sum(p.x() for p in base_nome) / len(base_nome)
                         cy = sum(p.y() for p in base_nome) / len(base_nome)
@@ -1746,9 +1802,10 @@ class VisualizacaoCanvas(QWidget):
         if not candidatos:
             return False
         mesmo_cursor = (
-            self._ciclo_selecao_cursor is not None
-            and sqrt((self._ciclo_selecao_cursor.x() - pos.x()) ** 2 + (self._ciclo_selecao_cursor.y() - pos.y()) ** 2)
-            <= (8.0 / max(self.zoom, 0.001))
+                self._ciclo_selecao_cursor is not None
+                and sqrt(
+            (self._ciclo_selecao_cursor.x() - pos.x()) ** 2 + (self._ciclo_selecao_cursor.y() - pos.y()) ** 2)
+                <= (8.0 / max(self.zoom, 0.001))
         )
         if not mesmo_cursor or candidatos != self._ciclo_selecao_indices:
             self._ciclo_selecao_indices = candidatos

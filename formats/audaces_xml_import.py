@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -48,6 +49,13 @@ class AudacesXMLDocument:
 
 
 class AudacesXMLImport:
+    """Importa o XML exportado pelo Audaces em Exportar > Arquivo de dados.
+
+    Observação importante: este XML é metadado técnico. Ele NÃO contém o contorno
+    vetorial completo. A geometria deve vir do EMF; este XML fornece nomes,
+    tamanhos, medidas, quantidades, tecidos, piques e propriedades.
+    """
+
     def __init__(self, raiz: ET.Element, bruto_normalizado: dict[str, Any]):
         self.raiz = raiz
         self.bruto_normalizado = bruto_normalizado
@@ -61,10 +69,15 @@ class AudacesXMLImport:
             try:
                 texto = bruto.decode(enc)
                 break
-            except Exception:
+            except UnicodeDecodeError:
                 continue
         if not texto:
             texto = bruto.decode("latin-1", errors="ignore")
+
+        # Alguns exports antigos podem trazer caracteres inválidos antes/depois do XML.
+        inicio = texto.find("<")
+        if inicio > 0:
+            texto = texto[inicio:]
         raiz = ET.fromstring(texto)
         bruto_normalizado = cls._xml_to_dict(raiz)
         parser = cls(raiz, bruto_normalizado)
@@ -75,21 +88,23 @@ class AudacesXMLImport:
         nome = ""
         adsx = ""
         if model is not None:
-            nome = (model.attrib.get("NAME_M") or model.findtext("NAME_M") or "").strip()
+            nome = self._txt(model, "NAME_M", "MODEL_NAME", default="").strip()
         info = self.raiz.find(".//INFO")
         if info is not None:
-            adsx = (info.attrib.get("FILE") or info.findtext("FILE") or "").strip()
+            adsx = self._txt(info, "FILE", "ARQUIVO", default="").strip()
         return nome or "Modelo Audaces", adsx
 
     def extrair_tamanhos(self) -> list[AudacesXMLSize]:
         tamanhos: list[AudacesXMLSize] = []
         for no in self.raiz.findall(".//SIZES_M/SIZE_M"):
-            nome = self._norm_size(no.attrib.get("NAME_SM") or no.findtext("NAME_SM"))
+            # No XML real enviado pelo usuário o atributo é NAME_SP, não NAME_SM.
+            nome = self._norm_size(self._txt(no, "NAME_SP", "NAME_SM", "SIZE", "NAME"))
             tamanhos.append(
                 AudacesXMLSize(
                     nome=nome or "",
-                    perimetro_total=self._num(no.attrib.get("PERIMETER_SM") or no.findtext("PERIMETER_SM")),
-                    area_total=self._num(no.attrib.get("AREA_SM") or no.findtext("AREA_SM")),
+                    # No XML real os campos são PER_SM e AREA_SM.
+                    perimetro_total=self._num(self._txt(no, "PER_SM", "PERIMETER_SM", "PERIMETRO_SM")),
+                    area_total=self._num(self._txt(no, "AREA_SM", "AREA_TOTAL_SM")),
                 )
             )
         return [t for t in tamanhos if t.nome]
@@ -101,26 +116,27 @@ class AudacesXMLImport:
             for sp in pat.findall(".//SIZES_P/SIZE_P"):
                 tamanhos.append(
                     AudacesXMLPatternSize(
-                        tamanho=self._norm_size(sp.attrib.get("NAME_SP") or sp.findtext("NAME_SP") or ""),
-                        perimetro=self._num(sp.attrib.get("PERIMETER_SP") or sp.findtext("PERIMETER_SP")),
-                        area=self._num(sp.attrib.get("AREA_SP") or sp.findtext("AREA_SP")),
-                        perimetro_retilineo=self._num(sp.attrib.get("RECTILINEAR_PERIMETER_SP") or sp.findtext("RECTILINEAR_PERIMETER_SP")),
-                        perimetro_curva=self._num(sp.attrib.get("CURVE_PERIMETER_SP") or sp.findtext("CURVE_PERIMETER_SP")),
-                        largura=self._num(sp.attrib.get("WIDTH_SP") or sp.findtext("WIDTH_SP")),
-                        altura=self._num(sp.attrib.get("HEIGHT_SP") or sp.findtext("HEIGHT_SP")),
+                        tamanho=self._norm_size(self._txt(sp, "NAME_SP", "NAME_SIZE", "SIZE")),
+                        # No XML real do Audaces os nomes curtos são estes.
+                        perimetro=self._num(self._txt(sp, "PER_SP", "PERIMETER_SP", "PERIMETRO_SP")),
+                        area=self._num(self._txt(sp, "AREA_SP")),
+                        perimetro_retilineo=self._num(self._txt(sp, "RECTILINE_PER_SP", "RECTILINEAR_PERIMETER_SP")),
+                        perimetro_curva=self._num(self._txt(sp, "CURVE_PER_SP", "CURVE_PERIMETER_SP")),
+                        largura=self._num(self._txt(sp, "WIDTH_SP", "LARGURA_SP")),
+                        altura=self._num(self._txt(sp, "HEIGHT_SP", "ALTURA_SP")),
                     )
                 )
             pecas.append(
                 AudacesXMLPattern(
-                    nome=(pat.attrib.get("NAME_P") or pat.findtext("NAME_P") or "Peça").strip(),
-                    descricao=(pat.attrib.get("DESCRIPTION_P") or pat.findtext("DESCRIPTION_P") or "").strip(),
-                    tecido=(pat.attrib.get("FABRIC_P") or pat.findtext("FABRIC_P") or "").strip(),
-                    quantidade=self._int(pat.attrib.get("QUANTITY_P") or pat.findtext("QUANTITY_P")),
-                    rotacao=self._int(pat.attrib.get("ROTATION_P") or pat.findtext("ROTATION_P")),
-                    dobra_horizontal=self._int(pat.attrib.get("HORIZONTAL_FOLD_P") or pat.findtext("HORIZONTAL_FOLD_P")),
-                    dobra_vertical=self._int(pat.attrib.get("VERTICAL_FOLD_P") or pat.findtext("VERTICAL_FOLD_P")),
-                    piques=self._int(pat.attrib.get("NOTCHS_P") or pat.findtext("NOTCHS_P")),
-                    piques_internos=self._int(pat.attrib.get("INTERNAL_NOTCHS_P") or pat.findtext("INTERNAL_NOTCHS_P")),
+                    nome=self._txt(pat, "NAME_P", "NAME", default="Peça").strip() or "Peça",
+                    descricao=self._txt(pat, "DESC_P", "DESCRIPTION_P", "DESC", default="").strip(),
+                    tecido=self._txt(pat, "NAME_FAB", "FABRIC_P", "TECIDO", default="").strip(),
+                    quantidade=self._int(self._txt(pat, "QT_MOD", "QUANTITY_P", "QTD", "QUANTIDADE")),
+                    rotacao=self._int(self._txt(pat, "ROT_P", "ROTATION_P")),
+                    dobra_horizontal=self._int(self._txt(pat, "FOLD_HOR", "HORIZONTAL_FOLD_P")),
+                    dobra_vertical=self._int(self._txt(pat, "FOLD_VER", "VERTICAL_FOLD_P")),
+                    piques=self._int(self._txt(pat, "NOTCHES_COUNT", "NOTCHS_P", "NOTCHES_P")),
+                    piques_internos=self._int(self._txt(pat, "INTERNAL_NOTCHES_COUNT", "INTERNAL_NOTCHS_P")),
                     tamanhos=[t for t in tamanhos if t.tamanho],
                 )
             )
@@ -147,7 +163,7 @@ class AudacesXMLImport:
 
     @staticmethod
     def _norm_size(valor: str | None) -> str:
-        return str(valor or "").strip()
+        return " ".join(str(valor or "").strip().split())
 
     @staticmethod
     def _num(valor: str | None) -> float | None:
@@ -156,8 +172,12 @@ class AudacesXMLImport:
         txt = str(valor).strip().replace(",", ".")
         if not txt:
             return None
+        # Remove comentários/unidades que venham junto por segurança.
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", txt)
+        if not m:
+            return None
         try:
-            return float(txt)
+            return float(m.group(0))
         except ValueError:
             return None
 
@@ -167,9 +187,20 @@ class AudacesXMLImport:
         if n is None:
             return None
         try:
-            return int(n)
+            return int(round(n))
         except Exception:
             return None
+
+    @staticmethod
+    def _txt(no: ET.Element, *nomes: str, default: str | None = None) -> str | None:
+        for nome in nomes:
+            if nome in no.attrib:
+                return no.attrib.get(nome)
+        for nome in nomes:
+            filho = no.find(nome)
+            if filho is not None and filho.text is not None:
+                return filho.text
+        return default
 
 
 def xml_doc_para_dict(doc: AudacesXMLDocument) -> dict[str, Any]:

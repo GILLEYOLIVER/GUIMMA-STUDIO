@@ -90,6 +90,7 @@ class AudacesEMFImport:
         self._viewport_org = (0.0, 0.0)
         self._viewport_ext = (1.0, 1.0)
         self._map_mode = 1
+        self._frame_cm: tuple[float, float, float, float] | None = None
 
     @classmethod
     def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
@@ -134,6 +135,7 @@ class AudacesEMFImport:
 
             if t == EMR_HEADER:
                 bounds = self._parse_bounds_header(p) or bounds
+                self._frame_cm = self._parse_frame_header_cm(p) or self._frame_cm
             elif t in {EMR_SETWINDOWORGEX, EMR_SETWINDOWEXTEX, EMR_SETVIEWPORTORGEX, EMR_SETVIEWPORTEXTEX, EMR_SETMAPMODE,
                        EMR_SETWORLDTRANSFORM, EMR_MODIFYWORLDTRANSFORM}:
                 self._process_transform_record(t, p)
@@ -230,7 +232,8 @@ class AudacesEMFImport:
                 self._unsupported[t] = self._unsupported.get(t, 0) + 1
 
         elementos = [e for e in elementos if len(e.pontos) >= 2]
-        self._normalizar_eixo_y(elementos, textos, bounds)
+        self._normalizar_para_cm(elementos, textos, bounds)
+        elementos = self._filtrar_ruido_emf(elementos)
         return elementos, textos, bounds
 
     def converter_para_elementos_guimma(self, doc: AudacesEMFDocument) -> list[dict[str, Any]]:
@@ -248,16 +251,27 @@ class AudacesEMFImport:
                     "raw_record_type": el.raw_record_type,
                     "metadados": dict(el.metadados),
                     "molde": bool(el.fechado),
+                    "subtipo_audaces": el.metadados.get("subtipo_audaces") or ("contorno" if el.fechado else "costura_ou_linha_tecnica"),
+                    "bloqueado": False,
                 }
             )
         for tx in doc.textos:
-            out.append({"tipo": "texto", "texto": tx.get("texto", ""), "pos": tx.get("pos", (0.0, 0.0)), "cor": "#22313f", "tamanho": 0.9})
+            out.append({
+                "tipo": "texto",
+                "texto": tx.get("texto", ""),
+                "pos": tx.get("pos", (0.0, 0.0)),
+                "cor": "#d9d9d9",
+                "tamanho": 0.9,
+                "origem": "audaces_emf_texto",
+            })
         return out
 
     def gerar_relatorio(self, elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]) -> dict[str, Any]:
         return {
             "tamanho_arquivo": len(self.raw),
             "bounds_emf": bounds,
+            "frame_cm": self._frame_cm,
+            "orientacao_y": "preservada_do_emf_sem_espelhar_vertical",
             "records_total": len(self.records),
             "records_tipos": dict(sorted(self._record_types.items())),
             "records_nao_suportados": dict(sorted(self._unsupported.items())),
@@ -491,7 +505,8 @@ class AudacesEMFImport:
         l, t, r, b = struct.unpack_from("<4i", payload, 0)
         cx, cy = (l + r) / 2.0, (t + b) / 2.0
         rx, ry = abs(r - l) / 2.0, abs(b - t) / 2.0
-        return [(cx + (rx * cos((2 * pi * i) / 40.0)), cy + (ry * sin((2 * pi * i) / 40.0))) for i in range(41)]
+        steps = 96
+        return [(cx + (rx * cos((2 * pi * i) / steps)), cy + (ry * sin((2 * pi * i) / steps))) for i in range(steps + 1)]
 
     def _parse_arc_poly(self, payload: bytes) -> list[tuple[float, float]]:
         if len(payload) < 32:
@@ -505,19 +520,27 @@ class AudacesEMFImport:
         a1 = atan2((ey - cy) / max(ry, 1e-6), (ex - cx) / max(rx, 1e-6))
         if a1 < a0:
             a1 += 2 * pi
-        return [(cx + (rx * cos(a0 + ((a1 - a0) * (i / 24.0)))), cy + (ry * sin(a0 + ((a1 - a0) * (i / 24.0))))) for i in range(25)]
+        steps = 64
+        return [(cx + (rx * cos(a0 + ((a1 - a0) * (i / steps)))), cy + (ry * sin(a0 + ((a1 - a0) * (i / steps))))) for i in range(steps + 1)]
 
     @staticmethod
     def _densificar_bezier(pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """Converte Bézier cúbica em pontos densos.
+
+        O Audaces usa curvas suaves. Com poucas subdivisões, a cava,
+        decote, gancho e laterais ficam serrilhados. Usamos 48
+        subdivisões por trecho para deixar as curvas mais nítidas.
+        """
         if len(pontos) < 4:
             return pontos
         out = [pontos[0]]
         i = 1
+        steps = 48
         while i + 2 < len(pontos):
             p0 = out[-1]
             p1, p2, p3 = pontos[i], pontos[i + 1], pontos[i + 2]
-            for j in range(1, 9):
-                t = j / 8.0
+            for j in range(1, steps + 1):
+                t = j / float(steps)
                 mt = 1 - t
                 x = (mt**3) * p0[0] + 3 * (mt**2) * t * p1[0] + 3 * mt * (t**2) * p2[0] + (t**3) * p3[0]
                 y = (mt**3) * p0[1] + 3 * (mt**2) * t * p1[1] + 3 * mt * (t**2) * p2[1] + (t**3) * p3[1]
@@ -537,20 +560,102 @@ class AudacesEMFImport:
         return {"texto": txt, "pos": (float(x), float(y))}
 
     @staticmethod
-    def _normalizar_eixo_y(elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]):
-        _, top, _, bottom = bounds
-        h = max(bottom - top, 1.0)
+    def _parse_frame_header_cm(payload: bytes) -> tuple[float, float, float, float] | None:
+        # EMR_HEADER.rclFrame fica logo após rclBounds e usa unidade 0,01 mm.
+        # Como o canvas do GUIMMA trabalha em cm, convertemos: 0,01 mm = 0,001 cm.
+        if len(payload) < 32:
+            return None
+        l, t, r, b = struct.unpack_from("<4i", payload, 16)
+        return (l / 1000.0, t / 1000.0, r / 1000.0, b / 1000.0)
+
+    def _normalizar_para_cm(self, elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]):
+        left, top, right, bottom = bounds
+        bw = max(right - left, 1.0)
+        bh = max(bottom - top, 1.0)
+        if self._frame_cm:
+            fl, ft, fr, fb = self._frame_cm
+            fw = abs(fr - fl) or bw
+            fh = abs(fb - ft) or bh
+            sx = fw / bw
+            sy = fh / bh
+        else:
+            sx = 1.0
+            sy = 1.0
+
+        def conv(pt: tuple[float, float]) -> tuple[float, float]:
+            x, y = pt
+            return ((x - left) * sx, (y - top) * sy)
+
         for el in elementos:
-            el.pontos = [(x, h - (y - top)) for x, y in el.pontos]
+            el.pontos = [conv((float(x), float(y))) for x, y in el.pontos]
             el.bbox = AudacesEMFImport._bbox(el.pontos)
+            el.metadados.setdefault("escala_origem", "emf_frame_cm")
         for tx in textos:
             x, y = tx.get("pos", (0.0, 0.0))
-            tx["pos"] = (x, h - (y - top))
+            tx["pos"] = conv((float(x), float(y)))
+
+    @staticmethod
+    def _comprimento_polyline(pontos: list[tuple[float, float]]) -> float:
+        total = 0.0
+        for a, b in zip(pontos, pontos[1:]):
+            dx = b[0] - a[0]
+            dy = b[1] - a[1]
+            total += (dx * dx + dy * dy) ** 0.5
+        return total
+
+    def _filtrar_ruido_emf(self, elementos: list[EMFVectorElement]) -> list[EMFVectorElement]:
+        """Filtra somente sujeira real, preservando costura/margem.
+
+        No EMF do Audaces, a linha pontilhada em volta do molde é
+        informação técnica de costura/margem. Ela não deve ser descartada.
+        Removemos apenas fragmentos mínimos típicos de textos, números e
+        símbolos pequenos.
+        """
+        filtrados: list[EMFVectorElement] = []
+        vistos: set[tuple] = set()
+        for el in elementos:
+            bbox = el.bbox or self._bbox(el.pontos)
+            if not bbox:
+                continue
+            minx, miny, maxx, maxy = bbox
+            w = abs(maxx - minx)
+            h = abs(maxy - miny)
+            area = w * h
+            comp = self._comprimento_polyline(el.pontos)
+
+            # Ruído muito pequeno de caracteres, graus, números e logo.
+            if max(w, h) < 0.04:
+                continue
+            if comp < 0.06:
+                continue
+            if el.fechado and area < 0.008:
+                continue
+            if el.raw_record_type == EMR_RECTANGLE and area < 0.08:
+                continue
+
+            # Remove duplicata exata/quase exata sem apagar costuras paralelas.
+            chave = (
+                round(minx, 3), round(miny, 3), round(maxx, 3), round(maxy, 3),
+                round(comp, 3), bool(el.fechado), el.raw_record_type,
+            )
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+
+            if el.fechado:
+                el.metadados.setdefault("subtipo_audaces", "contorno")
+            else:
+                el.metadados.setdefault("subtipo_audaces", "costura_ou_linha_tecnica")
+            filtrados.append(el)
+        return filtrados
 
     def _calc_scale(self) -> dict[str, float]:
-        sx = self._viewport_ext[0] / self._window_ext[0] if abs(self._window_ext[0]) > 1e-9 else 1.0
-        sy = self._viewport_ext[1] / self._window_ext[1] if abs(self._window_ext[1]) > 1e-9 else 1.0
-        return {"sx": float(sx), "sy": float(sy)}
+        sx_vp = self._viewport_ext[0] / self._window_ext[0] if abs(self._window_ext[0]) > 1e-9 else 1.0
+        sy_vp = self._viewport_ext[1] / self._window_ext[1] if abs(self._window_ext[1]) > 1e-9 else 1.0
+        if self._frame_cm:
+            # escala real aplicada ao EMF: pixel/EMF bounds -> centímetros de cena.
+            return {"sx": float(sx_vp), "sy": float(sy_vp), "frame_cm": list(self._frame_cm)}
+        return {"sx": float(sx_vp), "sy": float(sy_vp)}
 
 
 def emf_doc_para_dict(doc: AudacesEMFDocument) -> dict[str, Any]:
