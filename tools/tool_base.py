@@ -73,3 +73,35 @@ class FerramentaBase:
         painel = getattr(self, "_painel_auxiliar", None)
         if painel:
             painel.hide()
+
+    def _obter_janela_principal(self, canvas):
+        if canvas is None:
+            return None
+        janela = canvas.window() if hasattr(canvas, "window") else None
+        if janela is None:
+            return None
+        if not hasattr(janela, "projeto_atual"):
+            return None
+        return janela
+
+    def carregar_preferencias_ferramenta(self, canvas, padrao: dict | None = None) -> dict:
+        janela = self._obter_janela_principal(canvas)
+        if janela is None:
+            return dict(padrao or {})
+        prefs_usuario = getattr(janela.projeto_atual, "preferencias_usuario", {})
+        ferramentas_cfg = prefs_usuario.get("ferramentas_cfg", {})
+        cfg = ferramentas_cfg.get(self.id_ferramenta, {})
+        base = dict(padrao or {})
+        if isinstance(cfg, dict):
+            base.update(cfg)
+        return base
+
+    def salvar_preferencias_ferramenta(self, canvas, cfg: dict) -> None:
+        janela = self._obter_janela_principal(canvas)
+        if janela is None:
+            return
+        prefs_usuario = janela.projeto_atual.preferencias_usuario
+        ferramentas_cfg = prefs_usuario.setdefault("ferramentas_cfg", {})
+        ferramentas_cfg[self.id_ferramenta] = dict(cfg)
+        if hasattr(janela, "_salvar_preferencias_app"):
+            janela._salvar_preferencias_app()
