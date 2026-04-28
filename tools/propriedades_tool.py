@@ -1886,6 +1886,13 @@ class PropriedadesMoldesDialog(QDialog):
         if self._aplicar():
             self.close()
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._ok()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event):
         if not self._confirmado_ok:
             self._restaurar_snapshot_moldes()
