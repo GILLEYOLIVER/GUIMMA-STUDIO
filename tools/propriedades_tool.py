@@ -2330,6 +2330,7 @@ class ConfigurarCoresTecidosDialog(QDialog):
         )
         self._mapa: dict[str, str] = dict(mapa_cores)
         self._contador_novos = 0
+        self._linha_tecido_atual = -1
         self._construir_ui()
         self._popular_tecidos(tecidos)
 
@@ -2354,6 +2355,12 @@ class ConfigurarCoresTecidosDialog(QDialog):
         self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         self.tbl.setColumnWidth(1, 70)
+        self.tbl.setSelectionMode(QTableWidget.NoSelection)
+        self.tbl.setStyleSheet(
+            "QTableWidget::item:selected { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:active { background: transparent; color:#111111; }"
+            "QTableWidget::item:selected:!active { background: transparent; color:#111111; }"
+        )
         self.tbl.cellClicked.connect(self._on_cell_clicked)
         lay.addWidget(self.tbl, 1)
 
@@ -2389,11 +2396,15 @@ class ConfigurarCoresTecidosDialog(QDialog):
         self._adicionar_linha(f"TECIDO_{self._contador_novos}", self._cor_aleatoria())
 
     def _excluir_tecido(self):
-        row = self.tbl.currentRow()
+        row = int(getattr(self, "_linha_tecido_atual", -1))
+        if row < 0:
+            row = self.tbl.currentRow()
         if row >= 0:
             self.tbl.removeRow(row)
+            self._linha_tecido_atual = -1
 
     def _on_cell_clicked(self, row: int, col: int):
+        self._linha_tecido_atual = row
         if col != 1 or row < 0:
             return
         atual = self.tbl.item(row, 1)
