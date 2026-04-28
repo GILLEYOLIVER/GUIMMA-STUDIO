@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QTextEdit,
+    QTreeView,
     QVBoxLayout,
 )
 from config import EXTENSAO_PROJETO
@@ -136,12 +137,29 @@ class SalvarComoDialog(QDialog):
         self._atualizar_lista_arquivos_existentes()
 
     def _selecionar_pasta(self):
-        pasta = QFileDialog.getExistingDirectory(
-            self,
-            "Selecionar pasta",
-            str(self._pasta),
-            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog,
-        )
+        dialog = QFileDialog(self, "Selecionar pasta", str(self._pasta))
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Local:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Diretório:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
+        dialog.setLabelText(QFileDialog.DialogLabel.Accept, "Selecionar")
+        dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        for arvore in dialog.findChildren(QTreeView):
+            try:
+                arvore.setColumnWidth(0, 420)
+                header = arvore.header()
+                if header is not None:
+                    header.setStretchLastSection(False)
+                    header.resizeSection(0, 420)
+            except Exception:
+                pass
+        if dialog.exec() != QDialog.Accepted:
+            return
+        arquivos = dialog.selectedFiles()
+        pasta = arquivos[0] if arquivos else ""
         if pasta:
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))

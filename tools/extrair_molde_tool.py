@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from core.geometry.engine import internal_angle
 from core.geometry_bridge import (
@@ -58,6 +59,38 @@ class Ferramenta(FerramentaBase):
         "converter_auxiliares": True,
     }
     _log_extracao_habilitado = os.environ.get("GUIMMA_EXTRACAO_LOG", "1").strip().lower() not in {"0", "false", "off", "no"}
+
+    @classmethod
+    def _limpar_referencias_ui_global(cls):
+        cls._dialog_global = None
+        cls._cmb_modo_global = None
+        cls._chk_grad_global = None
+        cls._chk_piques_global = None
+        cls._chk_aux_global = None
+        cls._chk_compor_global = None
+        cls._chk_usar_global = None
+        cls._chk_quebrar_global = None
+        cls._chk_converter_global = None
+
+    @classmethod
+    def _ui_global_disponivel(cls) -> bool:
+        widgets = (
+            cls._dialog_global,
+            cls._cmb_modo_global,
+            cls._chk_grad_global,
+            cls._chk_piques_global,
+            cls._chk_aux_global,
+            cls._chk_compor_global,
+            cls._chk_usar_global,
+            cls._chk_quebrar_global,
+            cls._chk_converter_global,
+        )
+        if any(widget is None for widget in widgets):
+            return False
+        if not all(isValid(widget) for widget in widgets):
+            cls._limpar_referencias_ui_global()
+            return False
+        return True
 
     def __init__(self):
         super().__init__()
@@ -1029,7 +1062,7 @@ class Ferramenta(FerramentaBase):
 
     def _abrir_config(self, canvas):
         cls = type(self)
-        if cls._dialog_global is None:
+        if not cls._ui_global_disponivel():
             dialog = QDialog(canvas)
             dialog.setObjectName("guimma_extrair_molde_config")
             dialog.setWindowTitle("Definir contorno")
@@ -1125,6 +1158,7 @@ class Ferramenta(FerramentaBase):
                 chk.toggled.connect(self._salvar_cfg_global)
 
             cls._dialog_global = dialog
+            dialog.destroyed.connect(lambda *_: type(self)._limpar_referencias_ui_global())
             self._aplicar_cfg_na_ui()
         else:
             self._aplicar_cfg_na_ui()
@@ -1148,7 +1182,7 @@ class Ferramenta(FerramentaBase):
         self._reposicionar_dialog_config(canvas)
 
     def _reposicionar_dialog_config(self, canvas):
-        if not self._dialog:
+        if not self._dialog or not isValid(self._dialog):
             return
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
             destino_local = canvas.calcular_posicao_painel_auxiliar(
@@ -1167,7 +1201,7 @@ class Ferramenta(FerramentaBase):
 
     @classmethod
     def _salvar_cfg_global(cls, *_):
-        if cls._cmb_modo_global is None:
+        if not cls._ui_global_disponivel():
             return
         cls._cfg_global.update(
             {
@@ -1184,7 +1218,7 @@ class Ferramenta(FerramentaBase):
 
     def _aplicar_cfg_na_ui(self):
         cls = type(self)
-        if cls._cmb_modo_global is None:
+        if not cls._ui_global_disponivel():
             return
         cls._cmb_modo_global.setCurrentText(str(self._cfg.get("modo", cls._cfg_global["modo"])))
         cls._chk_grad_global.setChecked(bool(self._cfg.get("detectar_graduacoes", cls._cfg_global["detectar_graduacoes"])))
