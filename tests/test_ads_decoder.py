@@ -22,8 +22,9 @@ class ADSDecoderTestCase(unittest.TestCase):
         rel = ADSGeometryDecoder(bruto).analisar()
         self.assertEqual(rel.get("assinatura"), "CADZ")
         self.assertGreaterEqual(rel.get("blocos_comprimidos_detectados", 0), 1)
-        self.assertTrue(rel.get("geometria_convertida"))
-        self.assertTrue(rel.get("elementos_canvas"))
+        self.assertIn(rel.get("geometry_confidence"), {"low", "medium"})
+        self.assertFalse(rel.get("geometria_convertida"))
+        self.assertIn("Geometria rejeitada", rel.get("motivo", ""))
 
 
 if __name__ == "__main__":

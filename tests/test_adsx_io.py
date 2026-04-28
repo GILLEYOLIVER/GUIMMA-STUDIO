@@ -51,6 +51,7 @@ class ADSXIOTestCase(unittest.TestCase):
             self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.ads"))
             adsx_info = projeto.preferencias_usuario.get("adsx_importacao", {})
             self.assertIn("diagnostico_file_ads", adsx_info)
+            self.assertIn(adsx_info.get("geometry_confidence"), {"none", "low", "medium", "high"})
             self.assertFalse(adsx_info.get("geometria_convertida", True))
             self.assertFalse(adsx_info.get("elementos_canvas", []))
             self.assertFalse(projeto.documentos[0].moldes)

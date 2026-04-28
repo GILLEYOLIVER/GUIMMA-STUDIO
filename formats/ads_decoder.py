@@ -22,9 +22,13 @@ class ADSGeometryDecoder:
         pontos32 = self.extrair_pontos_float32()
         pontos64 = self.extrair_pontos_float64()
         polilinhas = self.detectar_polilinhas()
-
-        geometria_convertida = bool(polilinhas)
-        motivo = "contornos coerentes detectados" if geometria_convertida else "nenhum contorno confiável detectado"
+        confianca = self._avaliar_confianca(assinatura, polilinhas, strings)
+        geometria_convertida = confianca == "high"
+        motivo = (
+            "Geometria aceita: contornos validados por regras estritas do decoder."
+            if geometria_convertida
+            else "Geometria rejeitada: o decoder encontrou possíveis coordenadas no binário, mas elas não formam contornos confiáveis de moldes."
+        )
 
         self._relatorio = {
             "assinatura": assinatura,
@@ -35,9 +39,10 @@ class ADSGeometryDecoder:
             "possiveis_pontos_float64": len(pontos64),
             "contornos_candidatos": len(polilinhas),
             "geometria_convertida": geometria_convertida,
+            "geometry_confidence": confianca,
             "motivo": motivo,
-            "polilinhas": polilinhas,
-            "elementos_canvas": [self._polyline_para_elemento(i, p) for i, p in enumerate(polilinhas, start=1)],
+            "polilinhas_candidatas": polilinhas[:5],
+            "elementos_canvas": [],
         }
         return self._relatorio
 
@@ -115,18 +120,6 @@ class ADSGeometryDecoder:
         return None
 
     @staticmethod
-    def _polyline_para_elemento(idx: int, poly: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "tipo": "polyline",
-            "pontos": [(float(x), float(y)) for x, y in poly.get("pontos", [])],
-            "molde": True,
-            "nome_molde": f"Molde ADSX {idx}",
-            "origem": "adsx",
-            "geometria_convertida": True,
-            "cor": "#6fa8dc",
-        }
-
-    @staticmethod
     def _extrair_pontos_de_buffer(buf: bytes, fmt: str, size: int) -> list[tuple[float, float]]:
         pontos: list[tuple[float, float]] = []
         step = size * 2
@@ -185,6 +178,18 @@ class ADSGeometryDecoder:
         if largura > 100000 or altura > 100000:
             return False
         return ADSGeometryDecoder._eh_fechado(seq)
+
+    @staticmethod
+    def _avaliar_confianca(assinatura: str | None, polilinhas: list[dict[str, Any]], strings: list[str]) -> str:
+        if not assinatura:
+            return "none"
+        if not polilinhas:
+            return "none"
+        if len(polilinhas) >= 3 and len(strings) >= 5:
+            # Ainda não há parser estrutural proprietário do ADS;
+            # portanto, a confiança não passa de "medium" nesta etapa.
+            return "medium"
+        return "low"
 
 
 def salvar_relatorio_debug(caminho_json: str | Path, relatorio: dict):

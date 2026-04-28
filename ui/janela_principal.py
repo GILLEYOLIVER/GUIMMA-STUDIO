@@ -2342,14 +2342,10 @@ class GuimmaStudioMainWindow(QMainWindow):
 
             info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
-            if info_adsx.get("geometria_convertida"):
-                msg = "ADSX importado com geometria real decodificada a partir do file.ads."
-            else:
-                msg = (
-                    "Arquivo ADSX importado e preservado.\n"
-                    "Porém a geometria real está no file.ads e ainda não foi decodificada.\n"
-                    "Foi gerado um relatório técnico para avançar no conversor."
-                )
+            msg = (
+                "ADSX importado e preservado dentro do projeto .gs.\n"
+                "A geometria Audaces do file.ads ainda não pôde ser convertida com segurança."
+            )
             if avisos:
                 msg += " Avisos: " + " | ".join(str(a) for a in avisos)
 
@@ -2388,7 +2384,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not isinstance(moldes, list):
             moldes = []
         elementos_reais = info.get("elementos_canvas", [])
-        geometria_convertida = bool(info.get("geometria_convertida")) and isinstance(elementos_reais, list) and bool(elementos_reais)
+        confianca = str(info.get("geometry_confidence", "none")).lower().strip()
+        geometria_convertida = (
+            confianca == "high" and bool(info.get("geometria_convertida")) and isinstance(elementos_reais, list) and bool(elementos_reais)
+        )
         diagnostico = info.get("diagnostico_file_ads", {})
         elementos: list[dict] = []
         if geometria_convertida:
@@ -2399,9 +2398,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 {
                     "tipo": "texto",
                     "texto": (
-                        "Arquivo ADSX importado e preservado.\n"
-                        f"Moldes detectados em metadados: {total_moldes}.\n"
-                        "A geometria real está no file.ads e ainda não foi decodificada."
+                        "Arquivo ADSX reconhecido.\n"
+                        f"Moldes detectados no XML: {total_moldes}.\n"
+                        "Binário file.ads preservado.\n"
+                        "Conversão geométrica ainda pendente."
                     ),
                     "pos": (10.0, 10.0),
                     "cor": "#111111",
@@ -2411,7 +2411,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             elementos.append(
                 {
                     "tipo": "texto",
-                    "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')}",
+                    "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')} (confiança: {confianca})",
                     "pos": (10.0, 20.0),
                     "cor": "#444444",
                     "tamanho": 0.9,
