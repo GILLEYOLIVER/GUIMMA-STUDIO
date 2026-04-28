@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from importlib import import_module
 from math import ceil, cos, pi, sin, sqrt
@@ -85,6 +86,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
+        self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
@@ -668,7 +670,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             janela = QDialog(self)
             janela.setWindowTitle("Definir retângulos")
             janela.setModal(False)
-            janela.setWindowFlag(Qt.Tool, True)
+            if sys.platform == "darwin":
+                janela.setWindowFlag(Qt.Tool, False)
+                janela.setWindowFlag(Qt.Window, True)
+            else:
+                janela.setWindowFlag(Qt.Tool, True)
             janela.setMinimumWidth(260)
             janela.setStyleSheet(
                 "QDialog { background:#f0f0f0; border:1px solid #bfc7cf; }"
@@ -678,6 +684,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             layout = QVBoxLayout(janela)
             layout.addWidget(QLabel("<b>Definir retângulos</b>"))
             chk_criar_molde = QCheckBox("Criar molde")
+            chk_criar_molde.setTristate(False)
+            chk_criar_molde.setEnabled(True)
             chk_criar_molde.setChecked(self._retangulo_criar_molde)
             chk_criar_molde.toggled.connect(self._atualizar_config_retangulo)
             layout.addWidget(chk_criar_molde)
@@ -3074,6 +3082,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.copiar()
+            if hasattr(area.canvas, "obter_buffer_copia"):
+                self._clipboard_elementos_global = area.canvas.obter_buffer_copia()
 
     def _refazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -3083,6 +3093,8 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _colar_canvas_atual(self):
         area = self._area_documento_atual()
         if area:
+            if self._clipboard_elementos_global and hasattr(area.canvas, "definir_buffer_copia"):
+                area.canvas.definir_buffer_copia(self._clipboard_elementos_global)
             area.canvas.colar()
 
     def _apagar_canvas_atual(self):
