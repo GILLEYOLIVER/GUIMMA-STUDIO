@@ -463,6 +463,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._confirmado_ok = False
         self._suspender_auto_aplicar = False
         self._suspender_item_changed = False
+        self._linha_gradacao_atual = 0
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -934,7 +935,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.setFixedHeight(286)
         self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectItems)
-        self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
+        self.tbl_graduacao.setSelectionMode(QTableWidget.NoSelection)
         self.tbl_graduacao.setStyleSheet(
             "QTableWidget::item:selected { background: transparent; color:#111111; }"
             "QTableWidget::item:selected:active { background: transparent; color:#111111; }"
@@ -1058,6 +1059,7 @@ class PropriedadesMoldesDialog(QDialog):
     def _on_tabela_graduacao_clicada(self, linha: int, coluna: int):
         if not (0 <= linha < len(self._graduacao_linhas)):
             return
+        self._linha_gradacao_atual = linha
         item = self._graduacao_linhas[linha]
         if coluna == 0:
             item["ativo"] = not bool(item.get("ativo", True))
@@ -1074,6 +1076,9 @@ class PropriedadesMoldesDialog(QDialog):
         self._sincronizar_gradacao_no_molde()
 
     def _linha_selecionada_graduacao(self) -> int:
+        row = int(getattr(self, "_linha_gradacao_atual", -1))
+        if 0 <= row < len(self._graduacao_linhas):
+            return row
         row = self.tbl_graduacao.currentRow()
         return row if 0 <= row < len(self._graduacao_linhas) else -1
 
