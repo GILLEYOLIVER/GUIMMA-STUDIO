@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -90,11 +93,16 @@ class SalvarComoDialog(QDialog):
         g.addWidget(self.edt_pasta, 0, 0)
         g.addWidget(btn_escolher_pasta, 0, 1)
 
+        self.lst_arquivos_existentes = QListWidget()
+        self.lst_arquivos_existentes.setMinimumHeight(110)
+        self.lst_arquivos_existentes.itemClicked.connect(self._usar_nome_arquivo_existente)
+        g.addWidget(self.lst_arquivos_existentes, 1, 0, 1, 2)
+
         self.edt_nome = QLineEdit(nome_inicial)
         self.cmb_tipo = QComboBox()
         self.cmb_tipo.addItem(f"Projeto GUIMMA (*{EXTENSAO_PROJETO})")
-        g.addWidget(self.edt_nome, 1, 0, 1, 2)
-        g.addWidget(self.cmb_tipo, 2, 0, 1, 2)
+        g.addWidget(self.edt_nome, 2, 0, 1, 2)
+        g.addWidget(self.cmb_tipo, 3, 0, 1, 2)
         raiz.addWidget(topo)
 
         meta = QGroupBox("Informações do modelo")
@@ -125,6 +133,7 @@ class SalvarComoDialog(QDialog):
         botoes.addWidget(btn_cancelar)
         botoes.addWidget(btn_salvar)
         raiz.addLayout(botoes)
+        self._atualizar_lista_arquivos_existentes()
 
     def _selecionar_pasta(self):
         pasta = QFileDialog.getExistingDirectory(
@@ -136,6 +145,22 @@ class SalvarComoDialog(QDialog):
         if pasta:
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))
+            self._atualizar_lista_arquivos_existentes()
+
+    def _atualizar_lista_arquivos_existentes(self):
+        self.lst_arquivos_existentes.clear()
+        if not self._pasta.exists():
+            return
+        arquivos = sorted(self._pasta.glob(f"*{EXTENSAO_PROJETO}"), key=lambda p: p.name.lower())
+        for caminho in arquivos:
+            item = QListWidgetItem(caminho.name)
+            item.setData(Qt.UserRole, caminho.stem)
+            self.lst_arquivos_existentes.addItem(item)
+
+    def _usar_nome_arquivo_existente(self, item: QListWidgetItem):
+        nome = str(item.data(Qt.UserRole) or "").strip()
+        if nome:
+            self.edt_nome.setText(nome)
 
     def caminho_destino(self) -> Path:
         nome = self.edt_nome.text().strip() or "novo_projeto"
