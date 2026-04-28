@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from importlib import import_module
 from math import ceil, cos, pi, sin, sqrt
@@ -12,6 +13,7 @@ from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPoint, QRect
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -28,12 +30,14 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QListView,
     QPushButton,
     QRadioButton,
     QSizePolicy,
     QTabBar,
     QTabWidget,
     QToolButton,
+    QTreeView,
     QVBoxLayout,
     QWidget,
     QSlider,
@@ -85,6 +89,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
+        self._mostrar_cor_tecidos_global = bool(self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_global", False))
+        cores_cfg = self.projeto_atual.preferencias_usuario.get("cores_tecidos_global", {})
+        self._cores_tecidos_global: dict[str, str] = dict(cores_cfg) if isinstance(cores_cfg, dict) else {}
+        self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
@@ -563,7 +571,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
             self._log_debug_propriedades(f"Falha ao abrir {tool_def.title!r}: {type(exc).__name__}: {exc}")
             try:
-                QMessageBox.critical(self, "Erro ao abrir ferramenta", f"{type(exc).__name__}: {exc}")
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Erro ao abrir ferramenta")
+                caixa.setIcon(QMessageBox.Critical)
+                caixa.setText(f"{type(exc).__name__}: {exc}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
             except Exception as exc2:
                 self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
 
@@ -668,7 +683,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             janela = QDialog(self)
             janela.setWindowTitle("Definir retângulos")
             janela.setModal(False)
-            janela.setWindowFlag(Qt.Tool, True)
+            if sys.platform == "darwin":
+                janela.setWindowFlag(Qt.Tool, False)
+                janela.setWindowFlag(Qt.Window, True)
+            else:
+                janela.setWindowFlag(Qt.Tool, True)
             janela.setMinimumWidth(260)
             janela.setStyleSheet(
                 "QDialog { background:#f0f0f0; border:1px solid #bfc7cf; }"
@@ -678,6 +697,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             layout = QVBoxLayout(janela)
             layout.addWidget(QLabel("<b>Definir retângulos</b>"))
             chk_criar_molde = QCheckBox("Criar molde")
+            chk_criar_molde.setTristate(False)
+            chk_criar_molde.setEnabled(True)
             chk_criar_molde.setChecked(self._retangulo_criar_molde)
             chk_criar_molde.toggled.connect(self._atualizar_config_retangulo)
             layout.addWidget(chk_criar_molde)
@@ -1129,7 +1150,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         linha_tecidos = QHBoxLayout()
         chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
-        chk_cor_tecidos.setChecked(bool(getattr(canvas, "_mostrar_cor_tecidos", False)))
+        chk_cor_tecidos.setChecked(bool(self._mostrar_cor_tecidos_global))
         linha_tecidos.addWidget(chk_cor_tecidos)
         btn_config = QPushButton("Configurar cor dos tecidos")
         linha_tecidos.addWidget(btn_config)
@@ -1178,14 +1199,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                 for el in canvas.cena.elementos
                 if el.get("molde") and str(el.get("tecido") or "").strip()
             })
-            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(getattr(canvas, "_cores_tecidos", {})), dialog)
+            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(self._cores_tecidos_global), dialog)
             if dialog_tecidos.exec() == QDialog.Accepted:
-                canvas._cores_tecidos = dialog_tecidos.cores_tecidos()
-                canvas.update()
+                self.aplicar_config_cores_tecidos_global(mapa_cores=dialog_tecidos.cores_tecidos())
 
         def aplicar_e_fechar():
-            canvas._mostrar_cor_tecidos = chk_cor_tecidos.isChecked()
-            canvas.update()
+            self.aplicar_config_cores_tecidos_global(mostrar=chk_cor_tecidos.isChecked())
             dialog.accept()
 
         btn_config.clicked.connect(abrir_config)
@@ -1305,7 +1324,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             '''
         )
         self._aplicar_estilo_claro_dialogo(dialog)
-        for view in dialog.findChildren((QListView, QTreeView)):
+        for view in dialog.findChildren(QAbstractItemView):
             view.setStyleSheet(
                 "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
                 "selection-color:#111111;border:1px solid #c6ccd3;"
@@ -1319,7 +1338,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         modo_salvar: bool = False,
         com_preview_projeto: bool = False,
     ) -> tuple[str, str]:
-        dialog = QFileDialog(self, titulo, "", filtro)
+        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         if modo_salvar:
@@ -1336,7 +1355,22 @@ class GuimmaStudioMainWindow(QMainWindow):
             return "", ""
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
+        if caminho:
+            self._memorizar_diretorio_arquivo(Path(caminho))
         return caminho, dialog.selectedNameFilter()
+
+    def _diretorio_arquivo_inicial(self) -> str:
+        ultimo = self.projeto_atual.preferencias_usuario.get("ultimo_diretorio_arquivo", "")
+        if isinstance(ultimo, str) and ultimo.strip():
+            return ultimo
+        if self._arquivo_atual is not None:
+            return str(self._arquivo_atual.parent)
+        return str(Path.home())
+
+    def _memorizar_diretorio_arquivo(self, caminho: Path):
+        pasta = caminho if caminho.is_dir() else caminho.parent
+        self.projeto_atual.preferencias_usuario["ultimo_diretorio_arquivo"] = str(pasta)
+        self._salvar_preferencias_app()
 
     def _anexar_preview_dialogo_arquivo(self, dialog: QFileDialog):
         layout = dialog.layout()
@@ -2496,16 +2530,18 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText("Recuperação concluída.")
 
     def _abrir_projeto(self):
+        self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir projeto",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
-            com_preview_projeto=True,
+            com_preview_projeto=False,
         )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)
 
     def _abrir_projeto_em_caminho(self, caminho: str):
         caminho_resolvido = str(Path(caminho).resolve())
+        self._memorizar_diretorio_arquivo(Path(caminho_resolvido))
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
@@ -2564,11 +2600,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
 
     def _salvar_projeto_como(self) -> bool:
-        pasta_inicial = self._arquivo_atual.parent if self._arquivo_atual else Path.home()
+        pasta_inicial = Path(self._diretorio_arquivo_inicial())
         nome_inicial = self._arquivo_atual.stem if self._arquivo_atual else "novo_projeto"
         dlg = SalvarComoDialog(self, pasta_inicial=pasta_inicial, nome_inicial=nome_inicial)
         if dlg.exec():
             destino = dlg.caminho_destino()
+            self._memorizar_diretorio_arquivo(destino)
             self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
             self._renomear_abas_sem_nome(destino.stem)
             self._sincronizar_documentos_canvas_no_projeto()
@@ -2972,6 +3009,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+        area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+        area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
@@ -3074,6 +3113,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if area:
             area.canvas.copiar()
+            if hasattr(area.canvas, "obter_buffer_copia"):
+                self._clipboard_elementos_global = area.canvas.obter_buffer_copia()
 
     def _refazer_canvas_atual(self):
         area = self._area_documento_atual()
@@ -3083,6 +3124,8 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _colar_canvas_atual(self):
         area = self._area_documento_atual()
         if area:
+            if self._clipboard_elementos_global and hasattr(area.canvas, "definir_buffer_copia"):
+                area.canvas.definir_buffer_copia(self._clipboard_elementos_global)
             area.canvas.colar()
 
     def _apagar_canvas_atual(self):
@@ -3179,6 +3222,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+            area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+            area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
             area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
@@ -3212,6 +3257,22 @@ class GuimmaStudioMainWindow(QMainWindow):
             },
             "snap_ativo": bool(area.canvas._snap_ativo),
         }
+
+    def aplicar_config_cores_tecidos_global(self, mostrar: bool | None = None, mapa_cores: dict[str, str] | None = None):
+        if mostrar is not None:
+            self._mostrar_cor_tecidos_global = bool(mostrar)
+            self.projeto_atual.preferencias_usuario["mostrar_cor_tecidos_global"] = self._mostrar_cor_tecidos_global
+        if mapa_cores is not None:
+            self._cores_tecidos_global = dict(mapa_cores)
+            self.projeto_atual.preferencias_usuario["cores_tecidos_global"] = dict(self._cores_tecidos_global)
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            area.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
+            area.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+            area.canvas.update()
+        self._salvar_preferencias_app()
 
     def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
         zoom = doc.get("zoom")
