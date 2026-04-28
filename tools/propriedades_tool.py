@@ -933,7 +933,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.setFixedWidth(230)
         self.tbl_graduacao.setFixedHeight(286)
         self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectItems)
         self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
         self.tbl_graduacao.cellClicked.connect(self._on_tabela_graduacao_clicada)
         self._popular_tabela_graduacao()
@@ -1006,7 +1006,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         base_idx = next((i for i, d in enumerate(linhas) if d.get("base", False)), 0)
         if linhas:
-            self.tbl_graduacao.selectRow(base_idx)
+            self.tbl_graduacao.setCurrentCell(base_idx, 1)
 
     def _aplicar_grade_tamanhos(self, grade_texto: str):
         tamanhos, base = self._extrair_tamanhos_grade(grade_texto)
