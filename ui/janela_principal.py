@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from importlib import import_module
 from math import ceil, cos, pi, sin, sqrt
@@ -668,7 +669,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             janela = QDialog(self)
             janela.setWindowTitle("Definir retângulos")
             janela.setModal(False)
-            janela.setWindowFlag(Qt.Tool, True)
+            if sys.platform == "darwin":
+                janela.setWindowFlag(Qt.Tool, False)
+                janela.setWindowFlag(Qt.Window, True)
+            else:
+                janela.setWindowFlag(Qt.Tool, True)
             janela.setMinimumWidth(260)
             janela.setStyleSheet(
                 "QDialog { background:#f0f0f0; border:1px solid #bfc7cf; }"
@@ -678,6 +683,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             layout = QVBoxLayout(janela)
             layout.addWidget(QLabel("<b>Definir retângulos</b>"))
             chk_criar_molde = QCheckBox("Criar molde")
+            chk_criar_molde.setTristate(False)
+            chk_criar_molde.setEnabled(True)
             chk_criar_molde.setChecked(self._retangulo_criar_molde)
             chk_criar_molde.toggled.connect(self._atualizar_config_retangulo)
             layout.addWidget(chk_criar_molde)

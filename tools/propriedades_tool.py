@@ -723,18 +723,22 @@ class PropriedadesMoldesDialog(QDialog):
             pass
 
     def _ajustar_larguras_campos(self):
-        combos = [
-            self.cmb_aplicar_grade,
-            self.cmb_area_tamanho,
-            self.cmb_grade_tamanhos,
-            self.cmb_elementos_molde,
-            self.cmb_tipo_corte,
-            self.cmb_molde,
-            self.cmb_espelhar,
-            self.cmb_giro,
-            self.cmb_tipo_corte_cam,
-            self.ed_tecido,
-        ]
+        combos: list[QComboBox] = []
+        for nome in (
+            "cmb_aplicar_grade",
+            "cmb_area_tamanho",
+            "cmb_grade_tamanhos",
+            "cmb_elementos_molde",
+            "cmb_tipo_corte",
+            "cmb_molde",
+            "cmb_espelhar",
+            "cmb_giro",
+            "cmb_tipo_corte_cam",
+            "ed_tecido",
+        ):
+            widget = getattr(self, nome, None)
+            if isinstance(widget, QComboBox):
+                combos.append(widget)
         for combo in combos:
             combo.setMinimumContentsLength(18)
             combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
