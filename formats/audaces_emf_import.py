@@ -1,0 +1,565 @@
+from __future__ import annotations
+
+import struct
+from dataclasses import asdict, dataclass, field
+from math import atan2, cos, pi, sin
+from pathlib import Path
+from typing import Any
+
+EMR_HEADER = 1
+EMR_POLYBEZIER = 2
+EMR_POLYGON = 3
+EMR_POLYLINE = 4
+EMR_POLYBEZIERTO = 5
+EMR_POLYLINETO = 6
+EMR_POLYPOLYLINE = 7
+EMR_POLYPOLYGON = 8
+EMR_SETWINDOWEXTEX = 9
+EMR_SETWINDOWORGEX = 10
+EMR_SETVIEWPORTEXTEX = 11
+EMR_SETVIEWPORTORGEX = 12
+EMR_EOF = 14
+EMR_SETMAPMODE = 17
+EMR_MOVETOEX = 27
+EMR_SETWORLDTRANSFORM = 35
+EMR_MODIFYWORLDTRANSFORM = 36
+EMR_SELECTOBJECT = 37
+EMR_CREATEPEN = 38
+EMR_DELETEOBJECT = 40
+EMR_ELLIPSE = 42
+EMR_RECTANGLE = 43
+EMR_ARC = 45
+EMR_LINETO = 54
+EMR_BEGINPATH = 59
+EMR_ENDPATH = 60
+EMR_CLOSEFIGURE = 61
+EMR_FILLPATH = 62
+EMR_STROKEANDFILLPATH = 63
+EMR_STROKEPATH = 64
+EMR_EXTTEXTOUTA = 83
+EMR_EXTTEXTOUTW = 84
+EMR_POLYBEZIER16 = 85
+EMR_POLYGON16 = 86
+EMR_POLYLINE16 = 87
+EMR_POLYBEZIERTO16 = 88
+EMR_POLYLINETO16 = 89
+EMR_POLYPOLYLINE16 = 90
+EMR_POLYPOLYGON16 = 91
+EMR_POLYDRAW = 56
+EMR_POLYDRAW16 = 92
+
+
+@dataclass
+class EMFVectorElement:
+    tipo: str
+    pontos: list[tuple[float, float]]
+    fechado: bool
+    cor: str | None
+    espessura: float | None
+    bbox: tuple[float, float, float, float] | None
+    raw_record_type: int
+    metadados: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AudacesEMFDocument:
+    caminho: str
+    largura: float
+    altura: float
+    bounds: tuple[float, float, float, float]
+    elementos: list[EMFVectorElement]
+    textos: list[dict[str, Any]]
+    relatorio: dict[str, Any]
+
+
+class AudacesEMFImport:
+    def __init__(self, raw: bytes, caminho: str | Path):
+        self.raw = raw
+        self.caminho = str(caminho)
+        self.records: list[dict[str, Any]] = []
+        self._record_types: dict[int, int] = {}
+        self._warnings: list[str] = []
+        self._unsupported: dict[int, int] = {}
+        self._current_point: tuple[float, float] | None = None
+        self._in_path = False
+        self._path_points: list[tuple[float, float]] = []
+        self._path_closed = False
+        self._world = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        self._window_org = (0.0, 0.0)
+        self._window_ext = (1.0, 1.0)
+        self._viewport_org = (0.0, 0.0)
+        self._viewport_ext = (1.0, 1.0)
+        self._map_mode = 1
+
+    @classmethod
+    def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
+        raw = Path(caminho).read_bytes()
+        parser = cls(raw, caminho)
+        parser.parse_records()
+        elementos, textos, bounds = parser.extrair_elementos_vetoriais()
+        relatorio = parser.gerar_relatorio(elementos, textos, bounds)
+        return AudacesEMFDocument(
+            caminho=str(caminho),
+            largura=max(bounds[2] - bounds[0], 0.0),
+            altura=max(bounds[3] - bounds[1], 0.0),
+            bounds=bounds,
+            elementos=elementos,
+            textos=textos,
+            relatorio=relatorio,
+        )
+
+    def parse_records(self):
+        off = 0
+        total = len(self.raw)
+        while off + 8 <= total:
+            tipo, tamanho = struct.unpack_from("<II", self.raw, off)
+            if tamanho < 8 or off + tamanho > total:
+                self._warnings.append(f"Record EMF inválido em offset {off}.")
+                break
+            payload = self.raw[off + 8 : off + tamanho]
+            self.records.append({"tipo": tipo, "tamanho": tamanho, "offset": off, "payload": payload})
+            self._record_types[tipo] = self._record_types.get(tipo, 0) + 1
+            off += tamanho
+            if tipo == EMR_EOF:
+                break
+
+    def extrair_elementos_vetoriais(self) -> tuple[list[EMFVectorElement], list[dict[str, Any]], tuple[float, float, float, float]]:
+        elementos: list[EMFVectorElement] = []
+        textos: list[dict[str, Any]] = []
+        bounds = (0.0, 0.0, 100.0, 100.0)
+
+        for rec in self.records:
+            t = rec["tipo"]
+            p = rec["payload"]
+
+            if t == EMR_HEADER:
+                bounds = self._parse_bounds_header(p) or bounds
+            elif t in {EMR_SETWINDOWORGEX, EMR_SETWINDOWEXTEX, EMR_SETVIEWPORTORGEX, EMR_SETVIEWPORTEXTEX, EMR_SETMAPMODE,
+                       EMR_SETWORLDTRANSFORM, EMR_MODIFYWORLDTRANSFORM}:
+                self._process_transform_record(t, p)
+            elif t in {EMR_POLYLINE, EMR_POLYGON, EMR_POLYBEZIER, EMR_POLYLINETO, EMR_POLYBEZIERTO}:
+                pontos = self._parse_poly_points32(p)
+                pontos = self._apply_transform_points(pontos)
+                if t in {EMR_POLYBEZIER, EMR_POLYBEZIERTO}:
+                    pontos = self._densificar_bezier(pontos)
+                fechado = t == EMR_POLYGON
+                if t in {EMR_POLYLINETO, EMR_POLYBEZIERTO} and self._current_point:
+                    pontos = [self._current_point] + pontos
+                if pontos:
+                    self._current_point = pontos[-1]
+                    self._push_points(t, pontos, fechado, elementos)
+            elif t in {EMR_POLYLINE16, EMR_POLYGON16, EMR_POLYBEZIER16, EMR_POLYLINETO16, EMR_POLYBEZIERTO16}:
+                pontos = self._parse_poly_points16(p)
+                pontos = self._apply_transform_points(pontos)
+                if t in {EMR_POLYBEZIER16, EMR_POLYBEZIERTO16}:
+                    pontos = self._densificar_bezier(pontos)
+                fechado = t == EMR_POLYGON16
+                if t in {EMR_POLYLINETO16, EMR_POLYBEZIERTO16} and self._current_point:
+                    pontos = [self._current_point] + pontos
+                if pontos:
+                    self._current_point = pontos[-1]
+                    self._push_points(t, pontos, fechado, elementos)
+            elif t in {EMR_POLYPOLYLINE, EMR_POLYPOLYGON}:
+                for pts in self._parse_poly_poly32(p):
+                    pts = self._apply_transform_points(pts)
+                    self._push_points(t, pts, t == EMR_POLYPOLYGON, elementos)
+            elif t in {EMR_POLYPOLYLINE16, EMR_POLYPOLYGON16}:
+                for pts in self._parse_poly_poly16(p):
+                    pts = self._apply_transform_points(pts)
+                    self._push_points(t, pts, t == EMR_POLYPOLYGON16, elementos)
+            elif t == EMR_POLYDRAW:
+                pts = self._apply_transform_points(self._parse_poly_points32(p))
+                types = self._parse_polydraw_types32(p)
+                self._apply_polydraw(pts, types, t, elementos)
+            elif t == EMR_POLYDRAW16:
+                pts = self._apply_transform_points(self._parse_poly_points16(p))
+                types = self._parse_polydraw_types16(p)
+                self._apply_polydraw(pts, types, t, elementos)
+            elif t == EMR_MOVETOEX:
+                pt = self._parse_pointl(p, 0)
+                if pt:
+                    pt = self._apply_transform_point(pt)
+                    self._current_point = pt
+                    if self._in_path:
+                        self._path_points = [pt]
+                        self._path_closed = False
+            elif t == EMR_LINETO:
+                pt = self._parse_pointl(p, 0)
+                if pt:
+                    pt = self._apply_transform_point(pt)
+                    if self._current_point:
+                        self._push_points(t, [self._current_point, pt], False, elementos)
+                    self._current_point = pt
+                    if self._in_path:
+                        self._path_points.append(pt)
+            elif t == EMR_BEGINPATH:
+                self._in_path = True
+                self._path_points = []
+                self._path_closed = False
+            elif t == EMR_CLOSEFIGURE:
+                if self._path_points:
+                    self._path_points.append(self._path_points[0])
+                    self._path_closed = True
+            elif t in {EMR_ENDPATH, EMR_FILLPATH, EMR_STROKEPATH, EMR_STROKEANDFILLPATH}:
+                if t in {EMR_FILLPATH, EMR_STROKEANDFILLPATH} and self._path_points:
+                    self._push_points(t, list(self._path_points), True or self._path_closed, elementos)
+                elif t == EMR_STROKEPATH and self._path_points:
+                    self._push_points(t, list(self._path_points), self._path_closed, elementos)
+                if t != EMR_ENDPATH:
+                    self._in_path = False
+                    self._path_points = []
+                    self._path_closed = False
+            elif t == EMR_RECTANGLE:
+                pts = self._apply_transform_points(self._parse_rect_poly(p))
+                self._push_points(t, pts, True, elementos)
+            elif t == EMR_ELLIPSE:
+                pts = self._apply_transform_points(self._parse_ellipse_poly(p))
+                self._push_points(t, pts, True, elementos)
+            elif t == EMR_ARC:
+                pts = self._apply_transform_points(self._parse_arc_poly(p))
+                self._push_points(t, pts, False, elementos)
+            elif t in {EMR_EXTTEXTOUTA, EMR_EXTTEXTOUTW}:
+                txt = self._parse_text_record(p, wide=t == EMR_EXTTEXTOUTW)
+                if txt:
+                    x, y = txt.get("pos", (0.0, 0.0))
+                    txt["pos"] = self._apply_transform_point((x, y))
+                    textos.append(txt)
+            elif t in {EMR_CREATEPEN, EMR_SELECTOBJECT, EMR_DELETEOBJECT}:
+                continue
+            else:
+                self._unsupported[t] = self._unsupported.get(t, 0) + 1
+
+        elementos = [e for e in elementos if len(e.pontos) >= 2]
+        self._normalizar_eixo_y(elementos, textos, bounds)
+        return elementos, textos, bounds
+
+    def converter_para_elementos_guimma(self, doc: AudacesEMFDocument) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for el in doc.elementos:
+            pts = list(el.pontos)
+            if el.fechado and pts and pts[0] != pts[-1]:
+                pts.append(pts[0])
+            out.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": pts,
+                    "cor": el.cor or "#ff7b00",
+                    "origem": "audaces_emf",
+                    "raw_record_type": el.raw_record_type,
+                    "metadados": dict(el.metadados),
+                    "molde": bool(el.fechado),
+                }
+            )
+        for tx in doc.textos:
+            out.append({"tipo": "texto", "texto": tx.get("texto", ""), "pos": tx.get("pos", (0.0, 0.0)), "cor": "#22313f", "tamanho": 0.9})
+        return out
+
+    def gerar_relatorio(self, elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]) -> dict[str, Any]:
+        return {
+            "tamanho_arquivo": len(self.raw),
+            "bounds_emf": bounds,
+            "records_total": len(self.records),
+            "records_tipos": dict(sorted(self._record_types.items())),
+            "records_nao_suportados": dict(sorted(self._unsupported.items())),
+            "quantidade_polylines": sum(self._record_types.get(k, 0) for k in (EMR_POLYLINE, EMR_POLYLINE16, EMR_POLYLINETO, EMR_POLYLINETO16, EMR_POLYPOLYLINE, EMR_POLYPOLYLINE16, EMR_POLYDRAW, EMR_POLYDRAW16)),
+            "quantidade_polygons": sum(self._record_types.get(k, 0) for k in (EMR_POLYGON, EMR_POLYGON16, EMR_POLYPOLYGON, EMR_POLYPOLYGON16)),
+            "quantidade_beziers": sum(self._record_types.get(k, 0) for k in (EMR_POLYBEZIER, EMR_POLYBEZIER16, EMR_POLYBEZIERTO, EMR_POLYBEZIERTO16)),
+            "quantidade_textos": len(textos),
+            "elementos_convertidos": len(elementos),
+            "contornos_fechados": sum(1 for e in elementos if e.fechado),
+            "possiveis_moldes": sum(1 for e in elementos if e.fechado),
+            "map_mode": self._map_mode,
+            "window_org": self._window_org,
+            "window_ext": self._window_ext,
+            "viewport_org": self._viewport_org,
+            "viewport_ext": self._viewport_ext,
+            "world_transform": self._world,
+            "escala": self._calc_scale(),
+            "avisos": list(self._warnings),
+        }
+
+    def _process_transform_record(self, t: int, payload: bytes):
+        if t == EMR_SETMAPMODE and len(payload) >= 4:
+            self._map_mode = struct.unpack_from("<i", payload, 0)[0]
+        elif t == EMR_SETWINDOWORGEX and len(payload) >= 8:
+            self._window_org = tuple(float(v) for v in struct.unpack_from("<2i", payload, 0))
+        elif t == EMR_SETWINDOWEXTEX and len(payload) >= 8:
+            w, h = struct.unpack_from("<2i", payload, 0)
+            self._window_ext = (float(w or 1), float(h or 1))
+        elif t == EMR_SETVIEWPORTORGEX and len(payload) >= 8:
+            self._viewport_org = tuple(float(v) for v in struct.unpack_from("<2i", payload, 0))
+        elif t == EMR_SETVIEWPORTEXTEX and len(payload) >= 8:
+            w, h = struct.unpack_from("<2i", payload, 0)
+            self._viewport_ext = (float(w or 1), float(h or 1))
+        elif t == EMR_SETWORLDTRANSFORM and len(payload) >= 24:
+            self._world = tuple(float(v) for v in struct.unpack_from("<6f", payload, 0))
+        elif t == EMR_MODIFYWORLDTRANSFORM and len(payload) >= 28:
+            m = tuple(float(v) for v in struct.unpack_from("<6f", payload, 0))
+            mode = struct.unpack_from("<I", payload, 24)[0]
+            self._world = self._combine_world(self._world, m, mode)
+
+    @staticmethod
+    def _combine_world(a: tuple[float, ...], b: tuple[float, ...], mode: int) -> tuple[float, ...]:
+        if mode == 1:  # MWT_IDENTITY
+            return (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        if mode == 2:  # left multiply
+            return AudacesEMFImport._mul_world(b, a)
+        if mode == 3:  # right multiply
+            return AudacesEMFImport._mul_world(a, b)
+        return b
+
+    @staticmethod
+    def _mul_world(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, ...]:
+        a11, a12, a21, a22, adx, ady = a
+        b11, b12, b21, b22, bdx, bdy = b
+        return (
+            a11 * b11 + a12 * b21,
+            a11 * b12 + a12 * b22,
+            a21 * b11 + a22 * b21,
+            a21 * b12 + a22 * b22,
+            adx * b11 + ady * b21 + bdx,
+            adx * b12 + ady * b22 + bdy,
+        )
+
+    def _apply_transform_point(self, pt: tuple[float, float]) -> tuple[float, float]:
+        x, y = pt
+        a11, a12, a21, a22, dx, dy = self._world
+        wx = (x * a11) + (y * a21) + dx
+        wy = (x * a12) + (y * a22) + dy
+        wo_x, wo_y = self._window_org
+        we_x, we_y = self._window_ext
+        vo_x, vo_y = self._viewport_org
+        ve_x, ve_y = self._viewport_ext
+        sx = ve_x / we_x if abs(we_x) > 1e-9 else 1.0
+        sy = ve_y / we_y if abs(we_y) > 1e-9 else 1.0
+        mx = ((wx - wo_x) * sx) + vo_x
+        my = ((wy - wo_y) * sy) + vo_y
+        return float(mx), float(my)
+
+    def _apply_transform_points(self, pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        return [self._apply_transform_point(p) for p in pts]
+
+    def _push_points(self, rec_type: int, pontos: list[tuple[float, float]], fechado: bool, elementos: list[EMFVectorElement]):
+        if not pontos:
+            return
+        if self._in_path:
+            if not self._path_points:
+                self._path_points = list(pontos)
+            else:
+                self._path_points.extend(pontos[1:] if len(pontos) > 1 else pontos)
+            self._path_closed = self._path_closed or fechado
+            return
+        elementos.append(self._mk_element("polyline", pontos, fechado, rec_type))
+
+    @staticmethod
+    def _bbox(pontos: list[tuple[float, float]]) -> tuple[float, float, float, float] | None:
+        if not pontos:
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _mk_element(self, tipo: str, pontos: list[tuple[float, float]], fechado: bool, raw_type: int) -> EMFVectorElement:
+        if fechado and pontos and pontos[0] != pontos[-1]:
+            pontos = list(pontos) + [pontos[0]]
+        return EMFVectorElement(tipo=tipo, pontos=list(pontos), fechado=fechado, cor="#ff7b00", espessura=None, bbox=self._bbox(pontos), raw_record_type=raw_type)
+
+    @staticmethod
+    def _parse_bounds_header(payload: bytes) -> tuple[float, float, float, float] | None:
+        if len(payload) < 16:
+            return None
+        return tuple(float(v) for v in struct.unpack_from("<4i", payload, 0))
+
+    @staticmethod
+    def _parse_pointl(payload: bytes, offset: int) -> tuple[float, float] | None:
+        if len(payload) < offset + 8:
+            return None
+        x, y = struct.unpack_from("<2i", payload, offset)
+        return float(x), float(y)
+
+    @staticmethod
+    def _parse_points16(payload: bytes, offset: int, count: int) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for i in range(count):
+            start = offset + (i * 4)
+            if len(payload) < start + 4:
+                break
+            x, y = struct.unpack_from("<2h", payload, start)
+            out.append((float(x), float(y)))
+        return out
+
+    @staticmethod
+    def _parse_points32(payload: bytes, offset: int, count: int) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for i in range(count):
+            start = offset + (i * 8)
+            if len(payload) < start + 8:
+                break
+            x, y = struct.unpack_from("<2i", payload, start)
+            out.append((float(x), float(y)))
+        return out
+
+    def _parse_poly_points32(self, payload: bytes) -> list[tuple[float, float]]:
+        if len(payload) < 20:
+            return []
+        cpt = struct.unpack_from("<I", payload, 16)[0]
+        return self._parse_points32(payload, 20, cpt)
+
+    def _parse_poly_points16(self, payload: bytes) -> list[tuple[float, float]]:
+        if len(payload) < 20:
+            return []
+        cpt = struct.unpack_from("<I", payload, 16)[0]
+        return self._parse_points16(payload, 20, cpt)
+
+    def _parse_polydraw_types32(self, payload: bytes) -> list[int]:
+        if len(payload) < 20:
+            return []
+        cpt = struct.unpack_from("<I", payload, 16)[0]
+        types_off = 20 + (cpt * 8)
+        return list(payload[types_off : types_off + cpt])
+
+    def _parse_polydraw_types16(self, payload: bytes) -> list[int]:
+        if len(payload) < 20:
+            return []
+        cpt = struct.unpack_from("<I", payload, 16)[0]
+        types_off = 20 + (cpt * 4)
+        return list(payload[types_off : types_off + cpt])
+
+    def _apply_polydraw(self, pts: list[tuple[float, float]], types: list[int], rec_type: int, elementos: list[EMFVectorElement]):
+        if not pts:
+            return
+        seq: list[tuple[float, float]] = []
+        for pt, tp in zip(pts, types):
+            base = tp & 0x06
+            close = bool(tp & 0x01)
+            if base == 0x06:  # move
+                if len(seq) >= 2:
+                    self._push_points(rec_type, seq, False, elementos)
+                seq = [pt]
+            elif base in {0x02, 0x04}:
+                seq.append(pt)
+            else:
+                seq.append(pt)
+            if close and seq:
+                seq.append(seq[0])
+                self._push_points(rec_type, seq, True, elementos)
+                seq = []
+        if len(seq) >= 2:
+            self._push_points(rec_type, seq, False, elementos)
+
+    def _parse_poly_poly32(self, payload: bytes) -> list[list[tuple[float, float]]]:
+        if len(payload) < 24:
+            return []
+        n_poly, cpt = struct.unpack_from("<2I", payload, 16)
+        counts = [struct.unpack_from("<I", payload, 24 + (i * 4))[0] for i in range(n_poly) if len(payload) >= 28 + (i * 4)]
+        pts_off = 24 + (4 * len(counts))
+        all_pts = self._parse_points32(payload, pts_off, cpt)
+        out = []
+        idx = 0
+        for c in counts:
+            chunk = all_pts[idx : idx + c]
+            if chunk:
+                out.append(chunk)
+            idx += c
+        return out
+
+    def _parse_poly_poly16(self, payload: bytes) -> list[list[tuple[float, float]]]:
+        if len(payload) < 24:
+            return []
+        n_poly, cpt = struct.unpack_from("<2I", payload, 16)
+        counts = [struct.unpack_from("<I", payload, 24 + (i * 4))[0] for i in range(n_poly) if len(payload) >= 28 + (i * 4)]
+        pts_off = 24 + (4 * len(counts))
+        all_pts = self._parse_points16(payload, pts_off, cpt)
+        out = []
+        idx = 0
+        for c in counts:
+            chunk = all_pts[idx : idx + c]
+            if chunk:
+                out.append(chunk)
+            idx += c
+        return out
+
+    def _parse_rect_poly(self, payload: bytes) -> list[tuple[float, float]]:
+        if len(payload) < 16:
+            return []
+        l, t, r, b = struct.unpack_from("<4i", payload, 0)
+        return [(l, t), (r, t), (r, b), (l, b), (l, t)]
+
+    def _parse_ellipse_poly(self, payload: bytes) -> list[tuple[float, float]]:
+        if len(payload) < 16:
+            return []
+        l, t, r, b = struct.unpack_from("<4i", payload, 0)
+        cx, cy = (l + r) / 2.0, (t + b) / 2.0
+        rx, ry = abs(r - l) / 2.0, abs(b - t) / 2.0
+        return [(cx + (rx * cos((2 * pi * i) / 40.0)), cy + (ry * sin((2 * pi * i) / 40.0))) for i in range(41)]
+
+    def _parse_arc_poly(self, payload: bytes) -> list[tuple[float, float]]:
+        if len(payload) < 32:
+            return []
+        l, t, r, b, sx, sy, ex, ey = struct.unpack_from("<8i", payload, 0)
+        cx, cy = (l + r) / 2.0, (t + b) / 2.0
+        rx, ry = abs(r - l) / 2.0, abs(b - t) / 2.0
+        if rx <= 0 or ry <= 0:
+            return []
+        a0 = atan2((sy - cy) / max(ry, 1e-6), (sx - cx) / max(rx, 1e-6))
+        a1 = atan2((ey - cy) / max(ry, 1e-6), (ex - cx) / max(rx, 1e-6))
+        if a1 < a0:
+            a1 += 2 * pi
+        return [(cx + (rx * cos(a0 + ((a1 - a0) * (i / 24.0)))), cy + (ry * sin(a0 + ((a1 - a0) * (i / 24.0))))) for i in range(25)]
+
+    @staticmethod
+    def _densificar_bezier(pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(pontos) < 4:
+            return pontos
+        out = [pontos[0]]
+        i = 1
+        while i + 2 < len(pontos):
+            p0 = out[-1]
+            p1, p2, p3 = pontos[i], pontos[i + 1], pontos[i + 2]
+            for j in range(1, 9):
+                t = j / 8.0
+                mt = 1 - t
+                x = (mt**3) * p0[0] + 3 * (mt**2) * t * p1[0] + 3 * mt * (t**2) * p2[0] + (t**3) * p3[0]
+                y = (mt**3) * p0[1] + 3 * (mt**2) * t * p1[1] + 3 * mt * (t**2) * p2[1] + (t**3) * p3[1]
+                out.append((x, y))
+            i += 3
+        return out
+
+    @staticmethod
+    def _parse_text_record(payload: bytes, wide: bool) -> dict[str, Any] | None:
+        if len(payload) < 8:
+            return None
+        x, y = struct.unpack_from("<2i", payload, 0)
+        txt = payload.decode("utf-16-le" if wide else "latin-1", errors="ignore")
+        txt = " ".join("".join(ch for ch in txt if ch.isprintable()).split())[:140]
+        if not txt:
+            return None
+        return {"texto": txt, "pos": (float(x), float(y))}
+
+    @staticmethod
+    def _normalizar_eixo_y(elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]):
+        _, top, _, bottom = bounds
+        h = max(bottom - top, 1.0)
+        for el in elementos:
+            el.pontos = [(x, h - (y - top)) for x, y in el.pontos]
+            el.bbox = AudacesEMFImport._bbox(el.pontos)
+        for tx in textos:
+            x, y = tx.get("pos", (0.0, 0.0))
+            tx["pos"] = (x, h - (y - top))
+
+    def _calc_scale(self) -> dict[str, float]:
+        sx = self._viewport_ext[0] / self._window_ext[0] if abs(self._window_ext[0]) > 1e-9 else 1.0
+        sy = self._viewport_ext[1] / self._window_ext[1] if abs(self._window_ext[1]) > 1e-9 else 1.0
+        return {"sx": float(sx), "sy": float(sy)}
+
+
+def emf_doc_para_dict(doc: AudacesEMFDocument) -> dict[str, Any]:
+    return {
+        "caminho": doc.caminho,
+        "largura": doc.largura,
+        "altura": doc.altura,
+        "bounds": doc.bounds,
+        "elementos": [asdict(e) for e in doc.elementos],
+        "textos": list(doc.textos),
+        "relatorio": dict(doc.relatorio),
+    }
