@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QTextEdit,
+    QTreeView,
     QVBoxLayout,
 )
 from config import EXTENSAO_PROJETO
@@ -136,16 +137,100 @@ class SalvarComoDialog(QDialog):
         self._atualizar_lista_arquivos_existentes()
 
     def _selecionar_pasta(self):
-        pasta = QFileDialog.getExistingDirectory(
-            self,
-            "Selecionar pasta",
-            str(self._pasta),
-            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog,
-        )
+        dialog = QFileDialog(self, "Selecionar pasta", str(self._pasta))
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.resize(1180, 760)
+        dialog.setMinimumSize(1040, 680)
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Examinar:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Diretório:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
+        dialog.setLabelText(QFileDialog.DialogLabel.Accept, "Selecionar")
+        dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        self._traduzir_textos_internos_dialogo_arquivo(dialog)
+        for arvore in dialog.findChildren(QTreeView):
+            try:
+                arvore.setColumnWidth(0, 420)
+                header = arvore.header()
+                if header is not None:
+                    header.setStretchLastSection(False)
+                    header.resizeSection(0, 420)
+            except Exception:
+                pass
+        if dialog.exec() != QDialog.Accepted:
+            return
+        arquivos = dialog.selectedFiles()
+        pasta = arquivos[0] if arquivos else ""
         if pasta:
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))
             self._atualizar_lista_arquivos_existentes()
+
+    def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
+        mapa_botoes = {
+            "open": "Abrir",
+            "&open": "Abrir",
+            "choose": "Selecionar",
+            "&choose": "Selecionar",
+            "cancel": "Cancelar",
+            "&cancel": "Cancelar",
+        }
+        for botao in dialog.findChildren(QPushButton):
+            txt = botao.text().strip()
+            chave = txt.lower()
+            if chave in mapa_botoes:
+                botao.setText(mapa_botoes[chave])
+
+        colunas_pt = {
+            "name": "Nome",
+            "size": "Tamanho",
+            "type": "Tipo",
+            "date modified": "Data de modificação",
+        }
+        for arvore in dialog.findChildren(QTreeView):
+            modelo = arvore.model()
+            if modelo is None:
+                continue
+            try:
+                for col in range(min(8, modelo.columnCount())):
+                    atual = str(modelo.headerData(col, Qt.Horizontal) or "").strip()
+                    novo = colunas_pt.get(atual.lower())
+                    if novo:
+                        modelo.setHeaderData(col, Qt.Horizontal, novo)
+                self._traduzir_itens_modelo(modelo)
+            except Exception:
+                pass
+
+    def _traduzir_itens_modelo(self, modelo):
+        mapa = {
+            "my computer": "Este Computador",
+            "desktop": "Área de Trabalho",
+            "documents": "Documentos",
+            "downloads": "Downloads",
+            "network": "Rede",
+            "home": "Início",
+            "directories": "Diretórios",
+        }
+
+        def _visitar(indice_pai):
+            try:
+                linhas = modelo.rowCount(indice_pai)
+            except Exception:
+                return
+            for linha in range(linhas):
+                idx = modelo.index(linha, 0, indice_pai)
+                txt = str(modelo.data(idx) or "").strip()
+                traduzido = mapa.get(txt.lower())
+                if traduzido:
+                    try:
+                        modelo.setData(idx, traduzido)
+                    except Exception:
+                        pass
+                _visitar(idx)
+
+        _visitar(QModelIndex())
 
     def _atualizar_lista_arquivos_existentes(self):
         self.lst_arquivos_existentes.clear()
