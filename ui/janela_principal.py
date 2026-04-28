@@ -50,6 +50,7 @@ from config import EXTENSAO_PROJETO, ICONS_DIR
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.dxf_import import importar_dxf_para_elementos
+from formats.adsx_io import ADSXIO, ADSXImportError
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -859,6 +860,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
         )
         menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Audaces ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
         menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama"))
         menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plot"))
         menu.addAction("Lectra", lambda: self._importar_por_tipo("lectra"))
@@ -2282,6 +2284,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "investronica": "Investronica (*.vec *.pat *.zip)",
             "gerber": "Gerber (*.ger *.gbr *.zip)",
             "assyst": "Assyst (*.assyst *.ast *.zip)",
+            "adsx": "Audaces ADSX (*.adsx)",
         }
         caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
         if not caminho:
@@ -2299,6 +2302,46 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.update()
             self.backstage.hide()
             self.lbl_status.setText(f"Importado DXF: {len(elementos)} segmentos")
+            return
+
+        if tipo == "adsx":
+            try:
+                ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+            except ADSXImportError as exc:
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Warning)
+                caixa.setText(str(exc))
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText(str(exc))
+                return
+            except Exception:
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Importação ADSX")
+                caixa.setIcon(QMessageBox.Critical)
+                caixa.setText("Não foi possível abrir o pacote ADSX.")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
+                self.lbl_status.setText("Falha ao importar ADSX.")
+                return
+
+            self._arquivo_atual = None
+            self._atualizar_titulo()
+            self.backstage.hide()
+            self._agendar_salvar_estado_silencioso()
+            avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
+            msg = (
+                "Arquivo ADSX importado com sucesso. Os metadados foram carregados e o binário "
+                "Audaces original foi preservado dentro do projeto .gs."
+            )
+            if avisos:
+                msg += " Avisos: " + " | ".join(str(a) for a in avisos)
+            self.lbl_status.setText(msg)
             return
 
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
