@@ -1125,7 +1125,10 @@ class PropriedadesMoldesDialog(QDialog):
         moldes_alvo = self._moldes_alvo_graduacao()
         if not moldes_alvo:
             return
-        grade_nome = self.cmb_grade_tamanhos.currentText().strip()
+        combo_grade = getattr(self, "cmb_grade_tamanhos", None)
+        if not isinstance(combo_grade, QComboBox):
+            return
+        grade_nome = combo_grade.currentText().strip()
         linhas = [dict(l) for l in self._graduacao_linhas]
         ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
         for molde in moldes_alvo:

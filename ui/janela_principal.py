@@ -565,7 +565,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
             self._log_debug_propriedades(f"Falha ao abrir {tool_def.title!r}: {type(exc).__name__}: {exc}")
             try:
-                QMessageBox.critical(self, "Erro ao abrir ferramenta", f"{type(exc).__name__}: {exc}")
+                caixa = QMessageBox(self)
+                self._estilizar_message_box(caixa)
+                caixa.setWindowTitle("Erro ao abrir ferramenta")
+                caixa.setIcon(QMessageBox.Critical)
+                caixa.setText(f"{type(exc).__name__}: {exc}")
+                caixa.setStandardButtons(QMessageBox.Ok)
+                self._traduzir_botoes_padrao_message_box(caixa)
+                caixa.exec()
             except Exception as exc2:
                 self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
 
