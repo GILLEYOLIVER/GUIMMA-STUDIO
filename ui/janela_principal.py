@@ -86,6 +86,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
+        self._mostrar_cor_tecidos_global = bool(self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_global", False))
+        cores_cfg = self.projeto_atual.preferencias_usuario.get("cores_tecidos_global", {})
+        self._cores_tecidos_global: dict[str, str] = dict(cores_cfg) if isinstance(cores_cfg, dict) else {}
         self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
@@ -1144,7 +1147,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         linha_tecidos = QHBoxLayout()
         chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
-        chk_cor_tecidos.setChecked(bool(getattr(canvas, "_mostrar_cor_tecidos", False)))
+        chk_cor_tecidos.setChecked(bool(self._mostrar_cor_tecidos_global))
         linha_tecidos.addWidget(chk_cor_tecidos)
         btn_config = QPushButton("Configurar cor dos tecidos")
         linha_tecidos.addWidget(btn_config)
@@ -1193,14 +1196,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                 for el in canvas.cena.elementos
                 if el.get("molde") and str(el.get("tecido") or "").strip()
             })
-            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(getattr(canvas, "_cores_tecidos", {})), dialog)
+            dialog_tecidos = ConfigurarCoresTecidosDialog(tecidos, dict(self._cores_tecidos_global), dialog)
             if dialog_tecidos.exec() == QDialog.Accepted:
-                canvas._cores_tecidos = dialog_tecidos.cores_tecidos()
-                canvas.update()
+                self.aplicar_config_cores_tecidos_global(mapa_cores=dialog_tecidos.cores_tecidos())
 
         def aplicar_e_fechar():
-            canvas._mostrar_cor_tecidos = chk_cor_tecidos.isChecked()
-            canvas.update()
+            self.aplicar_config_cores_tecidos_global(mostrar=chk_cor_tecidos.isChecked())
             dialog.accept()
 
         btn_config.clicked.connect(abrir_config)
@@ -2987,6 +2988,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+        area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+        area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
         area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
@@ -3198,6 +3201,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
             area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
+            area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+            area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
             area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
@@ -3231,6 +3236,22 @@ class GuimmaStudioMainWindow(QMainWindow):
             },
             "snap_ativo": bool(area.canvas._snap_ativo),
         }
+
+    def aplicar_config_cores_tecidos_global(self, mostrar: bool | None = None, mapa_cores: dict[str, str] | None = None):
+        if mostrar is not None:
+            self._mostrar_cor_tecidos_global = bool(mostrar)
+            self.projeto_atual.preferencias_usuario["mostrar_cor_tecidos_global"] = self._mostrar_cor_tecidos_global
+        if mapa_cores is not None:
+            self._cores_tecidos_global = dict(mapa_cores)
+            self.projeto_atual.preferencias_usuario["cores_tecidos_global"] = dict(self._cores_tecidos_global)
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            area.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
+            area.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+            area.canvas.update()
+        self._salvar_preferencias_app()
 
     def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
         zoom = doc.get("zoom")

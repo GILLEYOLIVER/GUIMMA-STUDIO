@@ -1939,8 +1939,12 @@ class PropriedadesMoldesDialog(QDialog):
         return QColor()
 
     def _alternar_cor_tecidos_canvas(self, ativo: bool):
-        self.canvas._mostrar_cor_tecidos = bool(ativo)
-        self.canvas.update()
+        janela = self.parent()
+        if janela is not None and hasattr(janela, "aplicar_config_cores_tecidos_global"):
+            janela.aplicar_config_cores_tecidos_global(mostrar=bool(ativo))
+        else:
+            self.canvas._mostrar_cor_tecidos = bool(ativo)
+            self.canvas.update()
         self.preview.set_config_cores_tecidos(
             getattr(self.canvas, "_cores_tecidos", {}),
             bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
@@ -2053,7 +2057,12 @@ class PropriedadesMoldesDialog(QDialog):
         dialog = ConfigurarCoresTecidosDialog(tecidos, mapa, self)
         if dialog.exec() != QDialog.Accepted:
             return
-        self.canvas._cores_tecidos = dialog.cores_tecidos()
+        novo_mapa = dialog.cores_tecidos()
+        janela = self.parent()
+        if janela is not None and hasattr(janela, "aplicar_config_cores_tecidos_global"):
+            janela.aplicar_config_cores_tecidos_global(mapa_cores=novo_mapa)
+        else:
+            self.canvas._cores_tecidos = novo_mapa
         self._atualizar_opcoes_tecido()
         if hasattr(self.canvas, "update"):
             self.canvas.update()
