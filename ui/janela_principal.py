@@ -1270,6 +1270,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         widget.move(geo_widget.topLeft())
 
     def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
+        self._traduzir_rotulos_dialogo_arquivo(dialog)
         dialog.setStyleSheet(
             '''
             QFileDialog {
@@ -1329,6 +1330,60 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "background:#ffffff;color:#111111;selection-background-color:#cfe8ff;"
                 "selection-color:#111111;border:1px solid #c6ccd3;"
             )
+        self._traduzir_textos_internos_dialogo_arquivo(dialog)
+        self._melhorar_coluna_nome_dialogo_arquivo(dialog)
+
+    def _traduzir_rotulos_dialogo_arquivo(self, dialog: QFileDialog, *, texto_acao: str | None = None):
+        dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Local:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Nome do arquivo:")
+        dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo de arquivo:")
+        dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        dialog.setLabelText(QFileDialog.DialogLabel.Accept, texto_acao or "Abrir")
+
+    def _melhorar_coluna_nome_dialogo_arquivo(self, dialog: QFileDialog):
+        for arvore in dialog.findChildren(QTreeView):
+            try:
+                arvore.setColumnWidth(0, 420)
+                header = arvore.header()
+                if header is not None:
+                    header.setStretchLastSection(False)
+                    header.resizeSection(0, 420)
+            except Exception:
+                pass
+
+    def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
+        mapa_botoes = {
+            "open": "Abrir",
+            "&open": "Abrir",
+            "choose": "Selecionar",
+            "&choose": "Selecionar",
+            "cancel": "Cancelar",
+            "&cancel": "Cancelar",
+        }
+        for botao in dialog.findChildren(QPushButton):
+            txt = botao.text().strip()
+            chave = txt.lower()
+            if chave in mapa_botoes:
+                botao.setText(mapa_botoes[chave])
+
+        colunas_pt = {
+            "name": "Nome",
+            "size": "Tamanho",
+            "type": "Tipo",
+            "date modified": "Data de modificação",
+        }
+        for arvore in dialog.findChildren(QTreeView):
+            modelo = arvore.model()
+            if modelo is None:
+                continue
+            try:
+                for col in range(min(8, modelo.columnCount())):
+                    atual = str(modelo.headerData(col, Qt.Horizontal) or "").strip()
+                    novo = colunas_pt.get(atual.lower())
+                    if novo:
+                        modelo.setHeaderData(col, Qt.Horizontal, novo)
+            except Exception:
+                pass
 
     def _abrir_dialogo_arquivo_claro(
         self,
@@ -1344,9 +1399,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
             dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+            self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Salvar")
         else:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Abrir")
         self._forcar_dialogo_arquivo_claro(dialog)
         if com_preview_projeto and not modo_salvar:
             self._anexar_preview_dialogo_arquivo(dialog)
