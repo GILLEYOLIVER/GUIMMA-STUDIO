@@ -2340,12 +2340,16 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.backstage.hide()
             self._agendar_salvar_estado_silencioso()
 
+            info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
-            total_moldes = len(self.projeto_atual.preferencias_usuario.get("adsx_importacao", {}).get("moldes", []))
-            msg = (
-                f"Arquivo ADSX importado com sucesso. Moldes detectados: {total_moldes}. "
-                "Os metadados foram carregados e o binário Audaces original foi preservado dentro do projeto .gs."
-            )
+            if info_adsx.get("geometria_convertida"):
+                msg = "ADSX importado com geometria real decodificada a partir do file.ads."
+            else:
+                msg = (
+                    "Arquivo ADSX importado e preservado.\n"
+                    "Porém a geometria real está no file.ads e ainda não foi decodificada.\n"
+                    "Foi gerado um relatório técnico para avançar no conversor."
+                )
             if avisos:
                 msg += " Avisos: " + " | ".join(str(a) for a in avisos)
 
@@ -2369,12 +2373,11 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _atualizar_interface_pos_importacao_adsx(self, caminho_adsx: str):
         """
         Atualiza a interface depois da importação ADSX.
-        Como a geometria real do file.ads ainda não foi convertida, cria uma aba visual
-        com placeholders/textos dos moldes importados e garante que o projeto possa ser salvo em .gs.
+        Exibe a geometria real somente quando houver decodificação confiável do file.ads.
+        Caso contrário, mostra apenas informações textuais e diagnóstico.
         """
         self._limpar_abas_documentos()
-        nome_base = Path(caminho_adsx).stem or "ADSX Importado"
-        self._adicionar_aba_documento(nome_base, caminho_adsx)
+        self._adicionar_aba_documento("ADSX importado", caminho_adsx)
 
         area = self._area_documento_atual()
         if not area:
@@ -2384,80 +2387,54 @@ class GuimmaStudioMainWindow(QMainWindow):
         moldes = info.get("moldes", [])
         if not isinstance(moldes, list):
             moldes = []
-
+        elementos_reais = info.get("elementos_canvas", [])
+        geometria_convertida = bool(info.get("geometria_convertida")) and isinstance(elementos_reais, list) and bool(elementos_reais)
+        diagnostico = info.get("diagnostico_file_ads", {})
         elementos: list[dict] = []
-        x = 0.0
-        y = 0.0
-        largura = 24.0
-        altura = 14.0
-        espaco_x = 8.0
-        espaco_y = 8.0
-        colunas = 4
-
-        for i, molde in enumerate(moldes):
-            if not isinstance(molde, dict):
-                continue
-            col = i % colunas
-            lin = i // colunas
-            px = x + col * (largura + espaco_x)
-            py = y + lin * (altura + espaco_y)
-
-            nome = str(molde.get("nome") or f"Molde {i + 1}")
-            tamanho = str(molde.get("tamanho") or "")
-            quantidade = molde.get("quantidade")
-            area_molde = molde.get("area")
-            perimetro = molde.get("perimetro")
-
-            texto = nome
-            if tamanho:
-                texto += f" | Tam: {tamanho}"
-            if quantidade is not None:
-                texto += f" | Qtd: {quantidade}"
-
-            elementos.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [
-                        (px, py),
-                        (px + largura, py),
-                        (px + largura, py + altura),
-                        (px, py + altura),
-                        (px, py),
-                    ],
-                    "cor": "#ff8c00",
-                    "molde": True,
-                    "nome_molde": nome,
-                    "adsx_placeholder": True,
-                    "metadados_adsx": dict(molde),
-                }
-            )
-
+        if geometria_convertida:
+            elementos = [dict(el) for el in elementos_reais if isinstance(el, dict)]
+        else:
+            total_moldes = len([m for m in moldes if isinstance(m, dict)])
             elementos.append(
                 {
                     "tipo": "texto",
-                    "texto": texto,
-                    "pos": (px + 1.0, py + 2.0),
+                    "texto": (
+                        "Arquivo ADSX importado e preservado.\n"
+                        f"Moldes detectados em metadados: {total_moldes}.\n"
+                        "A geometria real está no file.ads e ainda não foi decodificada."
+                    ),
+                    "pos": (10.0, 10.0),
                     "cor": "#111111",
                     "tamanho": 1.0,
-                    "adsx_placeholder": True,
                 }
             )
-
-            detalhes = []
-            if area_molde is not None:
-                detalhes.append(f"Área: {area_molde}")
-            if perimetro is not None:
-                detalhes.append(f"Perímetro: {perimetro}")
-
-            if detalhes:
+            elementos.append(
+                {
+                    "tipo": "texto",
+                    "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')}",
+                    "pos": (10.0, 20.0),
+                    "cor": "#444444",
+                    "tamanho": 0.9,
+                }
+            )
+            for i, molde in enumerate(moldes, start=1):
+                if not isinstance(molde, dict):
+                    continue
+                nome = str(molde.get("nome") or f"Molde {i}")
+                tamanho = str(molde.get("tamanho") or "")
+                quantidade = molde.get("quantidade")
+                linha = f"- {nome}"
+                if tamanho:
+                    linha += f" — tamanho {tamanho}"
+                if quantidade is not None:
+                    linha += f" — quantidade {quantidade}"
                 elementos.append(
                     {
                         "tipo": "texto",
-                        "texto": " | ".join(detalhes),
-                        "pos": (px + 1.0, py + 5.0),
-                        "cor": "#444444",
-                        "tamanho": 0.8,
-                        "adsx_placeholder": True,
+                        "texto": linha,
+                        "pos": (10.0, 24.0 + (i * 3.0)),
+                        "cor": "#333333",
+                        "tamanho": 0.85,
                     }
                 )
 
@@ -2467,7 +2444,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
-        if elementos:
+        if geometria_convertida and elementos:
             self._centralizar_canvas_em_elementos(canvas, elementos)
         if hasattr(area, "_on_zoom_changed"):
             area._on_zoom_changed(canvas.zoom)

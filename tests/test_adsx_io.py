@@ -49,9 +49,11 @@ class ADSXIOTestCase(unittest.TestCase):
 
             self.assertIn("audaces_adsx_original", projeto.para_dict())
             self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.ads"))
-            placeholders_canvas = projeto.preferencias_usuario.get("adsx_placeholders_canvas", [])
-            self.assertTrue(placeholders_canvas)
-            self.assertEqual(placeholders_canvas[0].get("tipo"), "polyline")
+            adsx_info = projeto.preferencias_usuario.get("adsx_importacao", {})
+            self.assertIn("diagnostico_file_ads", adsx_info)
+            self.assertFalse(adsx_info.get("geometria_convertida", True))
+            self.assertFalse(adsx_info.get("elementos_canvas", []))
+            self.assertFalse(projeto.documentos[0].moldes)
 
             caminho_gs = pasta / "teste.gs"
             GSProjectIO.salvar(projeto, caminho_gs)

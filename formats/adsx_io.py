@@ -12,7 +12,8 @@ from typing import Any
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
-from core.projeto import Documento, Molde, Projeto
+from core.projeto import Documento, Molde, Parte, Ponto, Projeto, Segmento
+from formats.ads_decoder import ADSGeometryDecoder
 
 
 class ADSXImportError(Exception):
@@ -72,6 +73,7 @@ class ADSXIO:
 
         avisos: list[str] = []
         arquivos_preservados: dict[str, ADSXArquivoPreservado] = {}
+        diagnostico_file_ads: dict[str, Any] = {}
         try:
             with ZipFile(origem, mode="r") as pacote:
                 nomes_no_zip = set(pacote.namelist())
@@ -79,7 +81,9 @@ class ADSXIO:
                 index_json = cls._ler_index_json(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 data_xml_texto, data_xml_normalizado = cls._ler_data_xml(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 moldes = cls._extrair_moldes_do_xml(data_xml_normalizado.get("xml", {}))
-                cls._ler_file_ads(pacote, nomes_no_zip, avisos, arquivos_preservados, data_xml_normalizado)
+                diagnostico_file_ads = cls._ler_file_ads(
+                    pacote, nomes_no_zip, avisos, arquivos_preservados, data_xml_normalizado
+                )
                 cls._ler_preview_jpg(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 cls._ler_ids_json(pacote, nomes_no_zip, avisos, arquivos_preservados)
         except BadZipFile as exc:
@@ -91,6 +95,7 @@ class ADSXIO:
 
         if not moldes:
             avisos.append("O ADSX foi importado, mas a geometria binária Audaces ainda não foi convertida para edição direta.")
+        data_xml_normalizado["diagnostico_file_ads"] = diagnostico_file_ads
 
         return ADSXDocument(
             caminho_original=str(origem),
@@ -134,55 +139,39 @@ class ADSXIO:
             "tamanhos": tamanhos,
             "moldes": placeholders,
             "preview_disponivel": "file.jpg" in doc.arquivos_preservados,
+            "diagnostico_file_ads": dict(doc.data_xml_normalizado.get("diagnostico_file_ads", {})),
+            "geometria_convertida": bool(doc.data_xml_normalizado.get("diagnostico_file_ads", {}).get("geometria_convertida")),
+            "elementos_canvas": list(doc.data_xml_normalizado.get("diagnostico_file_ads", {}).get("elementos_canvas", [])),
         }
-        projeto.preferencias_usuario["adsx_placeholders_canvas"] = cls.gerar_elementos_canvas(placeholders)
+        geometria_convertida = bool(projeto.preferencias_usuario["adsx_importacao"]["geometria_convertida"])
+        elementos_canvas = projeto.preferencias_usuario["adsx_importacao"]["elementos_canvas"]
 
         if not projeto.documentos:
             projeto.documentos.append(Documento(nome="Documento 1"))
         documento = projeto.documentos[0]
-        documento.moldes = [Molde(id=item["id"], nome=item["nome"], partes=[]) for item in placeholders]
+        documento.moldes = cls._moldes_reais_de_elementos(elementos_canvas) if geometria_convertida else []
 
         cls._preservar_pacote_original(doc, projeto)
         return projeto
 
     @classmethod
-    def gerar_elementos_canvas(cls, moldes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        elementos: list[dict[str, Any]] = []
-        cursor_x = 0.0
-        gap = 14.0
-        for idx, molde in enumerate(moldes, start=1):
-            largura = float(molde.get("largura") or 120.0)
-            altura = float(molde.get("altura") or 80.0)
-            largura = max(largura, 20.0)
-            altura = max(altura, 20.0)
-            x0 = cursor_x
-            y0 = 0.0
-            x1 = x0 + largura
-            y1 = y0 + altura
-            cursor_x = x1 + gap
-            nome = str(molde.get("nome") or f"Molde {idx}")
-            elementos.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)],
-                    "molde": True,
-                    "nome_molde": nome,
-                    "origem": "adsx",
-                    "origem_adsx": True,
-                    "geometria_convertida": False,
-                    "geometria_adsx_nao_convertida": True,
-                    "tamanho": molde.get("tamanho"),
-                    "quantidade": molde.get("quantidade"),
-                    "area": molde.get("area"),
-                    "perimetro": molde.get("perimetro"),
-                    "largura": largura,
-                    "altura": altura,
-                    "metadados_adsx": dict(molde.get("metadados_adsx") or {}),
-                    "cor": "#7dcfff",
-                    "espessura": 1.3,
-                }
-            )
-        return elementos
+    def _moldes_reais_de_elementos(cls, elementos: list[dict[str, Any]]) -> list[Molde]:
+        moldes: list[Molde] = []
+        for idx, el in enumerate(elementos, start=1):
+            if not isinstance(el, dict) or el.get("tipo") != "polyline":
+                continue
+            pontos = [(float(x), float(y)) for x, y in el.get("pontos", []) if isinstance(x, (int, float)) and isinstance(y, (int, float))]
+            if len(pontos) < 3:
+                continue
+            parte = Parte(nome=f"Parte {idx}")
+            parte.pontos = [Ponto(x=p[0], y=p[1]) for p in pontos]
+            segmentos: list[Segmento] = []
+            for p0, p1 in zip(parte.pontos[:-1], parte.pontos[1:]):
+                segmentos.append(Segmento(inicio=Ponto(x=p0.x, y=p0.y), fim=Ponto(x=p1.x, y=p1.y)))
+            parte.segmentos = segmentos
+            molde = Molde(nome=str(el.get("nome_molde") or f"Molde ADSX {idx}"), partes=[parte])
+            moldes.append(molde)
+        return moldes
 
     @classmethod
     def _ler_index_json(
@@ -244,15 +233,38 @@ class ADSXIO:
         avisos: list[str],
         arquivos_preservados: dict[str, ADSXArquivoPreservado],
         data_xml_normalizado: dict[str, Any],
-    ):
+    ) -> dict[str, Any]:
         if "file.ads" not in nomes_no_zip:
             avisos.append("O arquivo file.ads não foi encontrado. A geometria Audaces original não poderá ser preservada.")
-            return
+            return {
+                "assinatura": None,
+                "tamanho_bytes": 0,
+                "blocos_comprimidos_detectados": 0,
+                "strings_encontradas": 0,
+                "possiveis_pontos_float32": 0,
+                "possiveis_pontos_float64": 0,
+                "contornos_candidatos": 0,
+                "geometria_convertida": False,
+                "motivo": "file.ads ausente",
+                "elementos_canvas": [],
+            }
         conteudo = pacote.read("file.ads")
         cls._preservar_bytes("file.ads", "audaces_binary_ads", conteudo, arquivos_preservados)
         primeiros_bytes = conteudo[:64]
         if b"CADZ" in primeiros_bytes:
             data_xml_normalizado["ads_signature"] = "CADZ"
+        diagnostico = cls._tentar_extrair_geometria_file_ads(conteudo)
+        if not diagnostico.get("geometria_convertida"):
+            avisos.append("O ADSX foi importado e preservado, mas a geometria file.ads ainda não pôde ser decodificada.")
+        return diagnostico
+
+    @classmethod
+    def _tentar_extrair_geometria_file_ads(cls, conteudo: bytes) -> dict[str, Any]:
+        decoder = ADSGeometryDecoder(conteudo)
+        relatorio = decoder.analisar()
+        relatorio.setdefault("geometria_convertida", False)
+        relatorio.setdefault("elementos_canvas", [])
+        return relatorio
 
     @classmethod
     def _ler_preview_jpg(
