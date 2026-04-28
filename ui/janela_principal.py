@@ -2512,10 +2512,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText("Recuperação concluída.")
 
     def _abrir_projeto(self):
+        self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir projeto",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO} *.gstudio);;Todos (*.*)",
-            com_preview_projeto=True,
+            com_preview_projeto=False,
         )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)
