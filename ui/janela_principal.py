@@ -52,6 +52,7 @@ from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.dxf_import import importar_dxf_para_elementos
 from formats.adsx_io import ADSXIO, ADSXImportError
+from formats.adsx_image_trace import vetorizar_preview_adsx
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -2308,8 +2309,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         if tipo == "adsx":
+            opcoes_adsx = self._dialogo_opcoes_importacao_adsx()
+            if opcoes_adsx is None:
+                return
             try:
                 self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+                self.projeto_atual.preferencias_usuario["adsx_modo_importacao"] = dict(opcoes_adsx)
                 self._arquivo_atual = None
                 self._atualizar_interface_pos_importacao_adsx(caminho)
             except ADSXImportError as exc:
@@ -2346,9 +2351,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
             msg = (
-                "ADSX importado como referência visual. "
-                "A geometria editável ainda depende do conversor file.ads."
+                "ADSX importado como referência visual. A geometria editável ainda depende de conversor vetorial "
+                "ou exportação DXF/AAMA/ASTM."
             )
+            if bool(info_adsx.get("trace_preview_gerado")):
+                msg += " Contornos experimentais foram gerados da imagem preview (revisão manual obrigatória)."
             if avisos:
                 msg += " Avisos: " + " | ".join(str(a) for a in avisos)
 
@@ -2368,6 +2375,44 @@ class GuimmaStudioMainWindow(QMainWindow):
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
+
+    def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Modo de importação ADSX")
+        layout = QVBoxLayout(dialog)
+        chk_preservar = QCheckBox("Preservar arquivo original no .gs")
+        chk_preservar.setChecked(True)
+        chk_preservar.setEnabled(False)
+        chk_preview = QCheckBox("Mostrar preview JPG como referência")
+        chk_preview.setChecked(True)
+        chk_tracar = QCheckBox("Tentar vetorização da imagem preview (experimental)")
+        chk_tracar.setChecked(False)
+        chk_ads = QCheckBox("Importar geometria real do file.ads, se decodificador confiável existir no futuro")
+        chk_ads.setChecked(False)
+        chk_ads.setEnabled(False)
+        opacidade = QDoubleSpinBox()
+        opacidade.setRange(0.10, 1.00)
+        opacidade.setSingleStep(0.05)
+        opacidade.setValue(0.72)
+        opacidade.setSuffix(" opacidade")
+        layout.addWidget(chk_preservar)
+        layout.addWidget(chk_preview)
+        layout.addWidget(chk_tracar)
+        layout.addWidget(chk_ads)
+        layout.addWidget(opacidade)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        layout.addWidget(botoes)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return {
+            "preservar_original": True,
+            "mostrar_preview_jpg": bool(chk_preview.isChecked()),
+            "tentar_vetorizacao_preview": bool(chk_tracar.isChecked()),
+            "importar_geometria_file_ads": False,
+            "opacidade_preview": float(opacidade.value()),
+        }
 
     def _acao_converter_manual_tracado_adsx(self):
         caixa = QMessageBox(self)
@@ -2396,6 +2441,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         canvas = area.canvas
         info = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
+        modo_adsx = self.projeto_atual.preferencias_usuario.get("adsx_modo_importacao", {})
         moldes = info.get("moldes", [])
         if not isinstance(moldes, list):
             moldes = []
@@ -2411,7 +2457,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if isinstance(preview_info, dict):
             preview_b64 = str(preview_info.get("conteudo_base64") or "").strip()
         preview_ok = False
-        if preview_b64:
+        mostrar_preview = bool(modo_adsx.get("mostrar_preview_jpg", True))
+        if preview_b64 and mostrar_preview:
             pix = QPixmap()
             try:
                 pix.loadFromData(base64.b64decode(preview_b64))
@@ -2425,10 +2472,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 elementos.append(
                     {
                         "tipo": "imagem",
-                        "nome": "Preview ADSX",
+                        "nome": "Preview ADSX - imagem de referência",
                         "imagem_base64": preview_b64,
                         "pos": (0.0, 0.0),
                         "escala": float(escala),
+                        "opacidade": float(modo_adsx.get("opacidade_preview", 0.72)),
                         "bloqueado": True,
                         "adsx_preview": True,
                     }
@@ -2439,6 +2487,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         if geometria_convertida:
             elementos.extend([dict(el) for el in elementos_reais if isinstance(el, dict)])
         else:
+            trace_msg = None
+            if preview_ok and bool(modo_adsx.get("tentar_vetorizacao_preview", False)):
+                trace = vetorizar_preview_adsx(preview_b64)
+                info["trace_preview_gerado"] = bool(trace.get("sucesso"))
+                info["trace_preview_relatorio"] = dict(trace)
+                self.projeto_atual.preferencias_usuario["adsx_importacao"] = info
+                if trace.get("sucesso"):
+                    elementos.extend([dict(el) for el in trace.get("elementos", []) if isinstance(el, dict)])
+                    trace_msg = "Contornos gerados a partir de imagem de baixa resolução. Revise antes de usar."
+                else:
+                    trace_msg = "Vetorização experimental não gerou contornos confiáveis; mantendo somente referência visual."
             total_moldes = len([m for m in moldes if isinstance(m, dict)])
             elementos.append(
                 {
@@ -2482,6 +2541,26 @@ class GuimmaStudioMainWindow(QMainWindow):
                         "pos": (10.0, (i * 3.0) + (4.0 if preview_ok else 24.0)),
                         "cor": "#333333",
                         "tamanho": 0.85,
+                    }
+                )
+            if trace_msg:
+                elementos.append(
+                    {
+                        "tipo": "texto",
+                        "texto": trace_msg,
+                        "pos": (10.0, (len(moldes) * 3.0) + (10.0 if preview_ok else 32.0)),
+                        "cor": "#ffd166",
+                        "tamanho": 0.9,
+                    }
+                )
+            if preview_ok:
+                elementos.append(
+                    {
+                        "tipo": "texto",
+                        "texto": "Pré-visualização ADSX. Não é molde editável.",
+                        "pos": (10.0, -28.0),
+                        "cor": "#ffb703",
+                        "tamanho": 1.0,
                     }
                 )
 

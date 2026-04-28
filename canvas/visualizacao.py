@@ -1192,7 +1192,7 @@ class VisualizacaoCanvas(QWidget):
         x = centro_tela.x() - (largura_tela / 2.0)
         y = centro_tela.y() - (altura_tela / 2.0)
         painter.save()
-        painter.setOpacity(0.92)
+        painter.setOpacity(max(0.05, min(float(elemento.get("opacidade", 0.72)), 1.0)))
         painter.drawPixmap(int(x), int(y), int(largura_tela), int(altura_tela), pixmap)
         painter.restore()
 
