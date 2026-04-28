@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 from importlib import import_module
 from math import atan2, cos, degrees, log10, radians, sin, sqrt
@@ -7,7 +8,7 @@ from time import monotonic
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QMouseEvent, QPainter, QPainterPath, QPen, QPolygon, QWheelEvent
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
@@ -1131,6 +1132,9 @@ class VisualizacaoCanvas(QWidget):
             painter.drawLine(p1_tela, p2_tela)
 
         for idx, elemento in enumerate(self.cena.elementos):
+            if elemento.get("tipo") == "imagem":
+                self._desenhar_imagem_referencia(painter, elemento)
+                continue
             cor_base = elemento.get("cor", "#d0d0d0")
             if elemento.get("molde") and self._mostrar_cor_tecidos:
                 tecido = str(elemento.get("tecido") or "").strip()
@@ -1160,6 +1164,37 @@ class VisualizacaoCanvas(QWidget):
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
         self._desenhar_overlay_snap_ativo(painter)
+
+    def _desenhar_imagem_referencia(self, painter: QPainter, elemento: dict):
+        imagem_b64 = str(elemento.get("imagem_base64") or "").strip()
+        if not imagem_b64:
+            return
+        pixmap = elemento.get("_pixmap_cache")
+        if not isinstance(pixmap, QPixmap) or pixmap.isNull():
+            try:
+                bruto = base64.b64decode(imagem_b64)
+                img = QImage.fromData(bruto)
+                if img.isNull():
+                    return
+                pixmap = QPixmap.fromImage(img)
+                elemento["_pixmap_cache"] = pixmap
+            except Exception:
+                return
+        if pixmap.isNull():
+            return
+        pos = elemento.get("pos") or (0.0, 0.0)
+        if not (isinstance(pos, (tuple, list)) and len(pos) == 2):
+            pos = (0.0, 0.0)
+        escala = max(0.01, float(elemento.get("escala", 1.0)))
+        centro_tela = self._cena_para_tela(QPointF(float(pos[0]), float(pos[1])))
+        largura_tela = max(1.0, pixmap.width() * escala * self.zoom)
+        altura_tela = max(1.0, pixmap.height() * escala * self.zoom)
+        x = centro_tela.x() - (largura_tela / 2.0)
+        y = centro_tela.y() - (altura_tela / 2.0)
+        painter.save()
+        painter.setOpacity(0.92)
+        painter.drawPixmap(int(x), int(y), int(largura_tela), int(altura_tela), pixmap)
+        painter.restore()
 
     def _desenhar_overlay_snap_ativo(self, painter: QPainter):
         if not self._snap_ativo or not self._snap_resultado:

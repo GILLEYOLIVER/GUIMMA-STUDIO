@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from datetime import datetime
@@ -867,6 +868,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Investronica", lambda: self._importar_por_tipo("investronica"))
         menu.addAction("Gerber", lambda: self._importar_por_tipo("gerber"))
         menu.addAction("Assyst", lambda: self._importar_por_tipo("assyst"))
+        menu.addSeparator()
+        menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
 
@@ -2343,8 +2346,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             info_adsx = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
             msg = (
-                "ADSX importado e preservado dentro do projeto .gs.\n"
-                "A geometria Audaces do file.ads ainda não pôde ser convertida com segurança."
+                "ADSX importado como referência visual. "
+                "A geometria editável ainda depende do conversor file.ads."
             )
             if avisos:
                 msg += " Avisos: " + " | ".join(str(a) for a in avisos)
@@ -2365,6 +2368,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
+
+    def _acao_converter_manual_tracado_adsx(self):
+        caixa = QMessageBox(self)
+        self._estilizar_message_box(caixa)
+        caixa.setWindowTitle("Conversão manual por traçado")
+        caixa.setIcon(QMessageBox.Information)
+        caixa.setText(
+            "Conversão manual por traçado será disponibilizada em uma próxima etapa.\n"
+            "Use a camada 'Preview ADSX' como referência visual para redesenho."
+        )
+        caixa.setStandardButtons(QMessageBox.Ok)
+        self._traduzir_botoes_padrao_message_box(caixa)
+        caixa.exec()
 
     def _atualizar_interface_pos_importacao_adsx(self, caminho_adsx: str):
         """
@@ -2390,8 +2406,38 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         diagnostico = info.get("diagnostico_file_ads", {})
         elementos: list[dict] = []
+        preview_info = self.projeto_atual.audaces_adsx_original.get("arquivos_preservados", {}).get("file.jpg", {})
+        preview_b64 = ""
+        if isinstance(preview_info, dict):
+            preview_b64 = str(preview_info.get("conteudo_base64") or "").strip()
+        preview_ok = False
+        if preview_b64:
+            pix = QPixmap()
+            try:
+                pix.loadFromData(base64.b64decode(preview_b64))
+            except Exception:
+                pix = QPixmap()
+            if not pix.isNull():
+                largura_visivel = max(canvas.width() / max(canvas.zoom, 0.001), 1.0)
+                altura_visivel = max(canvas.height() / max(canvas.zoom, 0.001), 1.0)
+                escala = min((largura_visivel * 0.82) / max(float(pix.width()), 1.0), (altura_visivel * 0.82) / max(float(pix.height()), 1.0))
+                escala = max(0.01, min(escala, 8.0))
+                elementos.append(
+                    {
+                        "tipo": "imagem",
+                        "nome": "Preview ADSX",
+                        "imagem_base64": preview_b64,
+                        "pos": (0.0, 0.0),
+                        "escala": float(escala),
+                        "bloqueado": True,
+                        "adsx_preview": True,
+                    }
+                )
+                preview_ok = True
+                canvas.origem_cena.setX(-(canvas.width() / (2 * max(canvas.zoom, 0.001))))
+                canvas.origem_cena.setY(-(canvas.height() / (2 * max(canvas.zoom, 0.001))))
         if geometria_convertida:
-            elementos = [dict(el) for el in elementos_reais if isinstance(el, dict)]
+            elementos.extend([dict(el) for el in elementos_reais if isinstance(el, dict)])
         else:
             total_moldes = len([m for m in moldes if isinstance(m, dict)])
             elementos.append(
@@ -2400,10 +2446,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "texto": (
                         "Arquivo ADSX reconhecido.\n"
                         f"Moldes detectados no XML: {total_moldes}.\n"
+                        f"Preview visual: {'disponível' if preview_ok else 'não encontrado'}.\n"
                         "Binário file.ads preservado.\n"
                         "Conversão geométrica ainda pendente."
                     ),
-                    "pos": (10.0, 10.0),
+                    "pos": (10.0, -18.0 if preview_ok else 10.0),
                     "cor": "#111111",
                     "tamanho": 1.0,
                 }
@@ -2412,7 +2459,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 {
                     "tipo": "texto",
                     "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')} (confiança: {confianca})",
-                    "pos": (10.0, 20.0),
+                    "pos": (10.0, -8.0 if preview_ok else 20.0),
                     "cor": "#444444",
                     "tamanho": 0.9,
                 }
@@ -2432,7 +2479,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                     {
                         "tipo": "texto",
                         "texto": linha,
-                        "pos": (10.0, 24.0 + (i * 3.0)),
+                        "pos": (10.0, (i * 3.0) + (4.0 if preview_ok else 24.0)),
                         "cor": "#333333",
                         "tamanho": 0.85,
                     }

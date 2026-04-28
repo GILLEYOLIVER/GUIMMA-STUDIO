@@ -43,15 +43,17 @@ class ADSXIOTestCase(unittest.TestCase):
     def test_importar_e_persistir_em_gs(self):
         with tempfile.TemporaryDirectory() as tmp:
             pasta = Path(tmp)
-            adsx = self._criar_adsx(pasta, incluir_jpg=False, incluir_ids=False)
+            adsx = self._criar_adsx(pasta, incluir_jpg=True, incluir_ids=False)
             projeto = Projeto()
             ADSXIO.importar_para_projeto(adsx, projeto)
 
             self.assertIn("audaces_adsx_original", projeto.para_dict())
             self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.ads"))
+            self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.jpg"))
             adsx_info = projeto.preferencias_usuario.get("adsx_importacao", {})
             self.assertIn("diagnostico_file_ads", adsx_info)
             self.assertIn(adsx_info.get("geometry_confidence"), {"none", "low", "medium", "high"})
+            self.assertTrue(adsx_info.get("preview_disponivel"))
             self.assertFalse(adsx_info.get("geometria_convertida", True))
             self.assertFalse(adsx_info.get("elementos_canvas", []))
             self.assertFalse(projeto.documentos[0].moldes)
