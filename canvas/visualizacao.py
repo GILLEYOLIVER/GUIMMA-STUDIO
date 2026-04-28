@@ -347,6 +347,14 @@ class VisualizacaoCanvas(QWidget):
             return
         if self.cena.elementos:
             self._buffer_copia = deepcopy(self.cena.elementos[-1])
+    
+    def obter_buffer_copia(self) -> dict | None:
+        if not self._buffer_copia:
+            return None
+        return deepcopy(self._buffer_copia)
+
+    def definir_buffer_copia(self, buffer_copia: dict | None):
+        self._buffer_copia = deepcopy(buffer_copia) if isinstance(buffer_copia, dict) else None
 
     def colar(self):
         if not self._buffer_copia:
@@ -514,6 +522,7 @@ class VisualizacaoCanvas(QWidget):
     # ========== Métodos internos ==========
 
     def _registrar_historico(self):
+        self._aplicar_padrao_grade_primeiro_molde()
         snapshot = deepcopy(self.cena.elementos)
         if self._indice_historico < len(self._historico_elementos) - 1:
             self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
@@ -521,6 +530,25 @@ class VisualizacaoCanvas(QWidget):
         if len(self._historico_elementos) > 200:
             self._historico_elementos.pop(0)
         self._indice_historico = len(self._historico_elementos) - 1
+
+    def _aplicar_padrao_grade_primeiro_molde(self):
+        moldes = [el for el in self.cena.elementos if isinstance(el, dict) and el.get("molde")]
+        if len(moldes) < 2:
+            return
+        molde_base = moldes[0]
+        linhas_base = molde_base.get("graduacao_tamanhos")
+        if not isinstance(linhas_base, list) or not linhas_base:
+            return
+        linhas_normalizadas = [dict(l) for l in linhas_base if isinstance(l, dict)]
+        if not linhas_normalizadas:
+            return
+        grade_base = str(molde_base.get("graduacao_grade_nome") or "").strip()
+        for molde in moldes[1:]:
+            linhas = molde.get("graduacao_tamanhos")
+            if not isinstance(linhas, list) or not linhas:
+                molde["graduacao_tamanhos"] = deepcopy(linhas_normalizadas)
+                if grade_base:
+                    molde["graduacao_grade_nome"] = grade_base
 
     def _resetar_estado_curva(self):
         self._curva_estado = "parada"
