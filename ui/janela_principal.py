@@ -2306,7 +2306,9 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         if tipo == "adsx":
             try:
-                ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+                self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+                self._arquivo_atual = None
+                self._atualizar_interface_pos_importacao_adsx(caminho)
             except ADSXImportError as exc:
                 caixa = QMessageBox(self)
                 self._estilizar_message_box(caixa)
@@ -2318,12 +2320,15 @@ class GuimmaStudioMainWindow(QMainWindow):
                 caixa.exec()
                 self.lbl_status.setText(str(exc))
                 return
-            except Exception:
+            except Exception as exc:
+                import traceback
+
+                traceback.print_exc()
                 caixa = QMessageBox(self)
                 self._estilizar_message_box(caixa)
                 caixa.setWindowTitle("Importação ADSX")
                 caixa.setIcon(QMessageBox.Critical)
-                caixa.setText("Não foi possível abrir o pacote ADSX.")
+                caixa.setText(f"Não foi possível importar o arquivo ADSX.\n\n{type(exc).__name__}: {exc}")
                 caixa.setStandardButtons(QMessageBox.Ok)
                 self._traduzir_botoes_padrao_message_box(caixa)
                 caixa.exec()
@@ -2332,31 +2337,142 @@ class GuimmaStudioMainWindow(QMainWindow):
 
             self._arquivo_atual = None
             self._atualizar_titulo()
-            if area:
-                placeholders = self.projeto_atual.preferencias_usuario.get("adsx_placeholders_canvas", [])
-                if isinstance(placeholders, list):
-                    area.canvas.cena.elementos = [dict(el) for el in placeholders if isinstance(el, dict)]
-                    if area.canvas.cena.elementos:
-                        area.canvas._registrar_historico()
-                        self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
-                        area._on_zoom_changed(area.canvas.zoom)
-                        area.canvas.update()
             self.backstage.hide()
             self._agendar_salvar_estado_silencioso()
+
             avisos = self.projeto_atual.audaces_adsx_original.get("avisos", [])
+            total_moldes = len(self.projeto_atual.preferencias_usuario.get("adsx_importacao", {}).get("moldes", []))
             msg = (
-                "Arquivo ADSX importado com sucesso. Os metadados foram carregados e o binário "
-                "Audaces original foi preservado dentro do projeto .gs."
+                f"Arquivo ADSX importado com sucesso. Moldes detectados: {total_moldes}. "
+                "Os metadados foram carregados e o binário Audaces original foi preservado dentro do projeto .gs."
             )
             if avisos:
                 msg += " Avisos: " + " | ".join(str(a) for a in avisos)
+
             self.lbl_status.setText(msg)
+
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("Importação ADSX")
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText(msg)
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
             return
 
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
+
+    def _atualizar_interface_pos_importacao_adsx(self, caminho_adsx: str):
+        """
+        Atualiza a interface depois da importação ADSX.
+        Como a geometria real do file.ads ainda não foi convertida, cria uma aba visual
+        com placeholders/textos dos moldes importados e garante que o projeto possa ser salvo em .gs.
+        """
+        self._limpar_abas_documentos()
+        nome_base = Path(caminho_adsx).stem or "ADSX Importado"
+        self._adicionar_aba_documento(nome_base, caminho_adsx)
+
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        info = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
+        moldes = info.get("moldes", [])
+        if not isinstance(moldes, list):
+            moldes = []
+
+        elementos: list[dict] = []
+        x = 0.0
+        y = 0.0
+        largura = 24.0
+        altura = 14.0
+        espaco_x = 8.0
+        espaco_y = 8.0
+        colunas = 4
+
+        for i, molde in enumerate(moldes):
+            if not isinstance(molde, dict):
+                continue
+            col = i % colunas
+            lin = i // colunas
+            px = x + col * (largura + espaco_x)
+            py = y + lin * (altura + espaco_y)
+
+            nome = str(molde.get("nome") or f"Molde {i + 1}")
+            tamanho = str(molde.get("tamanho") or "")
+            quantidade = molde.get("quantidade")
+            area_molde = molde.get("area")
+            perimetro = molde.get("perimetro")
+
+            texto = nome
+            if tamanho:
+                texto += f" | Tam: {tamanho}"
+            if quantidade is not None:
+                texto += f" | Qtd: {quantidade}"
+
+            elementos.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [
+                        (px, py),
+                        (px + largura, py),
+                        (px + largura, py + altura),
+                        (px, py + altura),
+                        (px, py),
+                    ],
+                    "cor": "#ff8c00",
+                    "molde": True,
+                    "nome_molde": nome,
+                    "adsx_placeholder": True,
+                    "metadados_adsx": dict(molde),
+                }
+            )
+
+            elementos.append(
+                {
+                    "tipo": "texto",
+                    "texto": texto,
+                    "pos": (px + 1.0, py + 2.0),
+                    "cor": "#111111",
+                    "tamanho": 1.0,
+                    "adsx_placeholder": True,
+                }
+            )
+
+            detalhes = []
+            if area_molde is not None:
+                detalhes.append(f"Área: {area_molde}")
+            if perimetro is not None:
+                detalhes.append(f"Perímetro: {perimetro}")
+
+            if detalhes:
+                elementos.append(
+                    {
+                        "tipo": "texto",
+                        "texto": " | ".join(detalhes),
+                        "pos": (px + 1.0, py + 5.0),
+                        "cor": "#444444",
+                        "tamanho": 0.8,
+                        "adsx_placeholder": True,
+                    }
+                )
+
+        if hasattr(canvas, "cena") and hasattr(canvas.cena, "elementos"):
+            canvas.cena.elementos = []
+            canvas.cena.elementos.extend(elementos)
+
+        if hasattr(canvas, "_registrar_historico"):
+            canvas._registrar_historico()
+        if elementos:
+            self._centralizar_canvas_em_elementos(canvas, elementos)
+        if hasattr(area, "_on_zoom_changed"):
+            area._on_zoom_changed(canvas.zoom)
+        canvas.update()
+        self._agendar_salvar_estado_silencioso()
 
     def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
         pontos: list[tuple[float, float]] = []
