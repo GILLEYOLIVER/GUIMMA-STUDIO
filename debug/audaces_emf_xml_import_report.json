@@ -1,5 +1,5 @@
 {
-  "arquivo_emf": "C:/Users/User/Desktop/GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG/01.emf",
+  "arquivo_emf": "01.emf",
   "records_emf_total": 12567,
   "records_emf_tipos": {
     "1": 1,
@@ -17,17 +17,17 @@
   "quantidade_polygon": 0,
   "quantidade_polybezier": 0,
   "quantidade_textos": 0,
-  "elementos_vetoriais_convertidos": 274,
-  "contornos_fechados": 0,
-  "moldes_reais_criados": 0,
+  "elementos_vetoriais_convertidos": 561,
+  "contornos_fechados": 22,
+  "moldes_reais_criados": 22,
   "pecas_xml_lidas": 23,
-  "pecas_xml_associadas": 0,
-  "pecas_xml_sem_associacao": 23,
+  "pecas_xml_associadas": 22,
+  "pecas_xml_sem_associacao": 1,
   "bounds_emf": [
-    -52.80082730479535,
-    -52.80082730479535,
-    14326.624475367806,
-    11299.377043226204
+    -42.520975065779396,
+    -42.520975065779396,
+    11537.357901181476,
+    9099.48866407679
   ],
   "escala_usada": {
     "sx": 1.0,
@@ -39,7 +39,11 @@
       17.75
     ]
   },
-  "escala_xml_aplicada": 17.600275768265117,
+  "escala_manual_aplicada": 14.1736583552598,
+  "medida_guimma_referencia_mm": 544.28,
+  "medida_audaces_referencia_mm": 400.17,
+  "fator_escala_final": 14.1736583552598,
+  "unidade_resultado": "cm_calibrado_por_referencia_mm",
   "records_nao_suportados": {
     "14": 1,
     "18": 1753,
@@ -49,6 +53,27 @@
   },
   "avisos": [
     "Alguns contornos EMF não puderam ser associados automaticamente às peças do XML.",
-    "Escala real aproximada aplicada usando dimensões do XML: fator 17.6003."
-  ]
+    "Escala calibrada manualmente aplicada ao EMF: fator 14.17365836."
+  ],
+  "diagnostico_antes": {
+    "elementos_emf": 561,
+    "segmentos_soltos": 561,
+    "contorno": 0,
+    "costura": 0,
+    "linha_interna": 561
+  },
+  "diagnostico_depois": {
+    "segmentos_unidos": 449,
+    "contornos_fechados_encontrados": 50,
+    "contornos_classificados_como_contorno": 22,
+    "contornos_classificados_como_costura": 12,
+    "contornos_classificados_como_linha_interna": 62,
+    "contornos_ignorados": 16,
+    "contornos_abertos_restantes": 62,
+    "curvas_reconstruidas": 34,
+    "elementos_canvas_final": 112,
+    "moldes_reais_criados": 22
+  },
+  "mensagem_final": null,
+  "mensagem_diagnostico": null
 }
