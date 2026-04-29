@@ -406,6 +406,10 @@ class AudacesEMFImport:
     def _reconstruir_curvas_do_contorno(self, contorno: EMFVectorElement) -> EMFVectorElement:
         antes = self._comprimento_polyline(contorno.pontos)
         novo = self._reconstruir_curvas_por_trechos(contorno)
+        if isinstance(novo, list):
+            contorno_novo = self._mk_element(contorno.tipo, novo, contorno.fechado, contorno.raw_record_type)
+            contorno_novo.metadados.update(contorno.metadados)
+            novo = contorno_novo
         depois = self._comprimento_polyline(novo.pontos)
         if antes > 0 and abs(depois - antes) / antes > 0.005:
             return contorno
