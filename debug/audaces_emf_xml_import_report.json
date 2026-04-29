@@ -1,6 +1,6 @@
 {
-  "arquivo_emf": "C:/Users/User/Área de Trabalho/GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG/GIL 132 3.emf",
-  "records_emf_total": 9751,
+  "arquivo_emf": "01.emf",
+  "records_emf_total": 12567,
   "records_emf_tipos": {
     "1": 1,
     "14": 1,
@@ -17,16 +17,16 @@
   "quantidade_polygon": 0,
   "quantidade_polybezier": 0,
   "quantidade_textos": 0,
-  "elementos_vetoriais_convertidos": 481,
-  "contornos_fechados": 20,
-  "moldes_reais_criados": 20,
-  "pecas_xml_lidas": 20,
-  "pecas_xml_associadas": 20,
-  "pecas_xml_sem_associacao": 0,
+  "elementos_vetoriais_convertidos": 561,
+  "contornos_fechados": 22,
+  "moldes_reais_criados": 22,
+  "pecas_xml_lidas": 23,
+  "pecas_xml_associadas": 22,
+  "pecas_xml_sem_associacao": 1,
   "bounds_emf": [
     -42.520975065779396,
     -42.520975065779396,
-    13337.412512299472,
+    11537.357901181476,
     9099.48866407679
   ],
   "escala_usada": {
@@ -52,30 +52,31 @@
     "95": 704
   },
   "avisos": [
+    "Alguns contornos EMF não puderam ser associados automaticamente às peças do XML.",
     "Escala calibrada manualmente aplicada ao EMF: fator 14.17365836."
   ],
   "diagnostico_antes": {
-    "elementos_emf": 481,
-    "segmentos_soltos": 481,
+    "elementos_emf": 561,
+    "segmentos_soltos": 561,
     "contorno": 0,
     "costura": 0,
-    "linha_interna": 481
+    "linha_interna": 561
   },
   "diagnostico_depois": {
-    "segmentos_unidos": 366,
-    "contornos_fechados_encontrados": 48,
-    "contornos_classificados_como_contorno": 20,
+    "segmentos_unidos": 449,
+    "contornos_fechados_encontrados": 50,
+    "contornos_classificados_como_contorno": 22,
     "contornos_classificados_como_costura": 12,
-    "contornos_classificados_como_linha_interna": 70,
-    "contornos_ignorados": 13,
-    "contornos_abertos_restantes": 67,
-    "curvas_reconstruidas": 32,
-    "elementos_canvas_final": 115,
-    "moldes_reais_criados": 20
+    "contornos_classificados_como_linha_interna": 62,
+    "contornos_ignorados": 16,
+    "contornos_abertos_restantes": 62,
+    "curvas_reconstruidas": 34,
+    "elementos_canvas_final": 112,
+    "moldes_reais_criados": 22
   },
-  "mensagem_final": "Audaces EMF + XML importado: 20 moldes reais criados, 366 contornos unidos, 32 curvas reconstruídas.",
+  "mensagem_final": "Audaces EMF + XML importado: 22 moldes reais criados, 449 contornos unidos, 34 curvas reconstruídas.",
   "mensagem_diagnostico": null,
   "canvas_origem": "moldes_reais",
-  "canvas_moldes_renderizados": 20,
+  "canvas_moldes_renderizados": 22,
   "canvas_elementos_emf_renderizados": 0
 }

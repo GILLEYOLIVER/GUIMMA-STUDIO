@@ -861,10 +861,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
         )
-        menu.addAction("Audaces ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
-        menu.addAction("Audaces Metafile EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
-        menu.addAction("Audaces Arquivo de dados XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
-        menu.addAction("Audaces EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
+        menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
+        sub_adv = menu.addMenu("Audaces Avançado")
+        sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
+        sub_adv.addAction("XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
+        sub_adv.addAction("ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
+        sub_adv.addAction("EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
         menu.addSeparator()
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
@@ -2277,10 +2279,62 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _importar_por_tipo(self, tipo: str):
         filtros = {
+            "audaces": "Audaces (*.emf *.xml *.adsx)",
             "adsx": "Audaces ADSX (*.adsx)",
             "audaces_emf": "Metafile EMF (*.emf)",
             "audaces_xml": "Arquivo de dados XML (*.xml)",
         }
+        if tipo == "audaces":
+            caminho, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces", filtros["audaces"])
+            if not caminho:
+                return
+            p = Path(caminho)
+            ext = p.suffix.lower()
+            if ext == ".adsx":
+                return self._importar_por_tipo("adsx")
+            if ext not in {".emf", ".xml"}:
+                return
+            pasta = p.parent
+            emfs = sorted(pasta.glob("*.emf"))
+            xmls = sorted(pasta.glob("*.xml"))
+            emf_path = str(p) if ext == ".emf" else None
+            xml_path = str(p) if ext == ".xml" else None
+            stem = p.stem.lower()
+            if not emf_path:
+                candidatos = [x for x in emfs if stem in x.stem.lower() or x.stem.lower() in stem]
+                if len(candidatos) == 1:
+                    emf_path = str(candidatos[0])
+                elif len(emfs) == 1:
+                    emf_path = str(emfs[0])
+            if not xml_path:
+                candidatos = [x for x in xmls if stem in x.stem.lower() or x.stem.lower() in stem]
+                if len(candidatos) == 1:
+                    xml_path = str(candidatos[0])
+                elif len(xmls) == 1:
+                    xml_path = str(xmls[0])
+            if not emf_path and xml_path:
+                emf_path, _ = self._abrir_dialogo_arquivo_claro("Deseja selecionar o arquivo EMF do Audaces?", filtros["audaces_emf"])
+            if not xml_path and emf_path:
+                xml_path, _ = self._abrir_dialogo_arquivo_claro("Deseja selecionar o arquivo XML de dados do Audaces?", filtros["audaces_xml"])
+            if emf_path and xml_path:
+                self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
+                info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
+                self._arquivo_atual = None
+                self._limpar_abas_documentos()
+                self._adicionar_aba_documento("Audaces", emf_path)
+                area = self._area_documento_atual()
+                moldes = self.projeto_atual.documentos[0].moldes if self.projeto_atual.documentos else []
+                if area and moldes:
+                    self._carregar_moldes_reais_no_canvas(area, moldes)
+                else:
+                    self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces", emf_path)
+                self.lbl_status.setText(f"Audaces importado com sucesso: {len(moldes)} moldes criados.")
+                return
+            if emf_path:
+                return self._importar_por_tipo("audaces_emf")
+            if xml_path:
+                return self._importar_por_tipo("audaces_xml")
+            return
 
         if tipo == "audaces_emf_xml":
             emf_path, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces EMF + XML (EMF)", filtros["audaces_emf"])
@@ -2470,13 +2524,6 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "nome_molde": getattr(molde, "nome", "Molde"),
                     "cor": "#ff7b00",
                     "bloqueado": False,
-                    "render_smooth": True,
-                    "metadados": {
-                        "origem": "audaces_emf_xml",
-                        "importado_como_molde_real": True,
-                        "subtipo_audaces": "contorno",
-                        "render_smooth": True,
-                    },
                 })
         area.canvas.cena.elementos = elementos
         area.canvas.update()

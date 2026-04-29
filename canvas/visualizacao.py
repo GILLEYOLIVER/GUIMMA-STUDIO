@@ -1197,19 +1197,10 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
-                if bool(elemento.get("render_smooth")) and len(pontos) >= 4:
-                    self._desenhar_polilinha_suavizada(
-                        painter,
-                        pontos,
-                        cor=cor,
-                        espessura=esp,
-                        estilo=estilo,
-                    )
-                else:
-                    self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
-                                             estilo=estilo,
-                                             amplitude=float(elemento.get("amplitude", 1.0)),
-                                             fase_inicial=float(elemento.get("fase_inicio", 0.0)))
+                self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
+                                         estilo=estilo,
+                                         amplitude=float(elemento.get("amplitude", 1.0)),
+                                         fase_inicial=float(elemento.get("fase_inicio", 0.0)))
             elif elemento.get("tipo") == "bezier_quadratica":
                 self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]),
                                                  QPointF(*elemento["p2"]),
