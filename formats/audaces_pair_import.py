@@ -72,9 +72,10 @@ class AudacesPairImport:
                     "origem": "audaces_emf_xml_molde_real",
                     "subtipo_audaces": "contorno",
                     "molde": True,
-                    "metadados": {"origem": "audaces_emf_xml", "importado_como_molde_real": True, "subtipo_audaces": "contorno"},
+                    "metadados": {"origem": "audaces_emf_xml", "importado_como_molde_real": True, "subtipo_audaces": "contorno", "render_smooth": True},
                     "cor": "#ff7b00",
                     "bloqueado": False,
+                    "render_smooth": True,
                 })
         return elementos
 

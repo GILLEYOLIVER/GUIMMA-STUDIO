@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from copy import deepcopy
 from importlib import import_module
-from math import atan2, cos, degrees, log10, radians, sin, sqrt
+from math import acos, atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
 from uuid import uuid4
 
@@ -1197,10 +1197,19 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
-                self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
-                                         estilo=estilo,
-                                         amplitude=float(elemento.get("amplitude", 1.0)),
-                                         fase_inicial=float(elemento.get("fase_inicio", 0.0)))
+                if bool(elemento.get("render_smooth")) and len(pontos) >= 4:
+                    self._desenhar_polilinha_suavizada(
+                        painter,
+                        pontos,
+                        cor=cor,
+                        espessura=esp,
+                        estilo=estilo,
+                    )
+                else:
+                    self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
+                                             estilo=estilo,
+                                             amplitude=float(elemento.get("amplitude", 1.0)),
+                                             fase_inicial=float(elemento.get("fase_inicio", 0.0)))
             elif elemento.get("tipo") == "bezier_quadratica":
                 self._desenhar_bezier_quadratica(painter, QPointF(*elemento["p0"]), QPointF(*elemento["p1"]),
                                                  QPointF(*elemento["p2"]),
@@ -1564,6 +1573,74 @@ class VisualizacaoCanvas(QWidget):
         if not cor.isValid():
             cor = QColor("#d0d0d0")
         return cor.lighter(135).name()
+
+    def _desenhar_polilinha_suavizada(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00",
+                                      espessura: float = 1.0, estilo: str = "solid"):
+        """Desenha contornos importados do Audaces com curva visual suave.
+
+        A geometria original continua salva como pontos do molde. Este método melhora
+        apenas a renderização do contorno/costura no canvas, evitando a aparência
+        facetada das polylines vindas do EMF. Cantos fortes continuam retos.
+        """
+        if len(pontos) < 3:
+            self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo)
+            return
+
+        pts = list(pontos)
+        fechado = len(pts) > 3 and self._dist_qpoint(pts[0], pts[-1]) <= 1e-6
+        if fechado:
+            pts = pts[:-1]
+        if len(pts) < 3:
+            self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo)
+            return
+
+        path = QPainterPath(self._cena_para_tela(pts[0]))
+        total = len(pts)
+        for i in range(total if fechado else total - 1):
+            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
+
+            # Preserva quinas/cantos. Em linhas quase retas ou curvas suaves, usa cubicTo.
+            ang1 = self._angulo_suavizacao(p0, p1, p2)
+            ang2 = self._angulo_suavizacao(p1, p2, p3)
+            if ang1 < 132.0 or ang2 < 132.0:
+                path.lineTo(self._cena_para_tela(p2))
+                continue
+
+            tensao = 0.55
+            c1 = QPointF(p1.x() + ((p2.x() - p0.x()) * tensao / 6.0), p1.y() + ((p2.y() - p0.y()) * tensao / 6.0))
+            c2 = QPointF(p2.x() - ((p3.x() - p1.x()) * tensao / 6.0), p2.y() - ((p3.y() - p1.y()) * tensao / 6.0))
+            path.cubicTo(self._cena_para_tela(c1), self._cena_para_tela(c2), self._cena_para_tela(p2))
+        if fechado:
+            path.closeSubpath()
+
+        pen = QPen(QColor(cor), espessura)
+        self._aplicar_estilo_caneta(pen, estilo)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
+    @staticmethod
+    def _dist_qpoint(a: QPointF, b: QPointF) -> float:
+        dx = a.x() - b.x()
+        dy = a.y() - b.y()
+        return sqrt((dx * dx) + (dy * dy))
+
+    @staticmethod
+    def _angulo_suavizacao(a: QPointF, b: QPointF, c: QPointF) -> float:
+        v1x = a.x() - b.x()
+        v1y = a.y() - b.y()
+        v2x = c.x() - b.x()
+        v2y = c.y() - b.y()
+        n1 = sqrt((v1x * v1x) + (v1y * v1y))
+        n2 = sqrt((v2x * v2x) + (v2y * v2y))
+        if n1 <= 1e-9 or n2 <= 1e-9:
+            return 180.0
+        cosv = max(-1.0, min(1.0, ((v1x * v2x) + (v1y * v2y)) / (n1 * n2)))
+        return degrees(acos(cosv))
 
     def _desenhar_polilinha(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00",
                             espessura: float = 1.0, estilo: str = "solid", amplitude: float = 1.0,

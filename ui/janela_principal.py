@@ -2470,6 +2470,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "nome_molde": getattr(molde, "nome", "Molde"),
                     "cor": "#ff7b00",
                     "bloqueado": False,
+                    "render_smooth": True,
+                    "metadados": {
+                        "origem": "audaces_emf_xml",
+                        "importado_como_molde_real": True,
+                        "subtipo_audaces": "contorno",
+                        "render_smooth": True,
+                    },
                 })
         area.canvas.cena.elementos = elementos
         area.canvas.update()
