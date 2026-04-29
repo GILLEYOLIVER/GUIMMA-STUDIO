@@ -44,6 +44,8 @@ class SnapManager:
         segmentos: list[tuple[int, QPointF, QPointF]] = []
         for idx, elemento in enumerate(cena.elementos):
             tipo = elemento.get("tipo")
+            if not self._participa_snap(elemento):
+                continue
             if tipo == "polyline":
                 self._candidatos_polyline(idx, elemento, cursor, tolerancia_cena, candidatos)
                 segmentos.extend(self._segmentos_polyline(idx, elemento))
@@ -185,11 +187,21 @@ class SnapManager:
         subtipo = str(cena.elementos[idx].get("subtipo_audaces") or "")
         if subtipo == "contorno":
             return 0
+        if subtipo == "linha_interna":
+            return 1
         if subtipo == "costura":
             return 2
-        if subtipo == "linha_interna":
-            return 3
-        return 1
+        if subtipo in {"texto", "anotacao"}:
+            return 9
+        return 3
+
+    def _participa_snap(self, elemento: dict) -> bool:
+        subtipo = str(elemento.get("subtipo_audaces") or elemento.get("metadados", {}).get("subtipo_audaces") or "").strip()
+        if subtipo in {"texto", "anotacao"}:
+            return False
+        if elemento.get("tipo") == "texto":
+            return False
+        return True
 
     def _prioridade(self, tipo: str) -> int:
         if tipo == "interseção":

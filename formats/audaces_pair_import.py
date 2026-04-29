@@ -28,15 +28,38 @@ class AudacesPairImport:
         fator_escala_final = cls._fator_escala_calibrado(xml_doc, emf_doc)
         cls._aplicar_escala_emf_doc(emf_doc, fator_escala_final)
 
-        elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
-
         projeto.nome = xml_doc.nome_modelo or projeto.nome
         if not projeto.documentos:
             projeto.documentos.append(Documento(nome="Documento 1"))
         doc = projeto.documentos[0]
         doc.moldes = []
 
-        contornos = [el for el in emf_doc.elementos if el.fechado and len(el.pontos) >= 4]
+        parser_ops = AudacesEMFImport(b"", emf_path)
+        antes = {
+            "elementos_emf": len(emf_doc.elementos),
+            "segmentos_soltos": sum(1 for e in emf_doc.elementos if not e.fechado),
+            "contorno": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "contorno"),
+            "costura": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "costura"),
+            "linha_interna": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "linha_interna"),
+        }
+        unidos = parser_ops._unir_segmentos_em_contornos(emf_doc.elementos)
+        reconstruidos: list = []
+        for el in unidos:
+            subtipo = str(el.metadados.get("subtipo_audaces") or "")
+            if subtipo in {"contorno", "costura"} and len(el.pontos) >= 5:
+                reconstruidos.append(parser_ops._reconstruir_curvas_do_contorno(el))
+            else:
+                reconstruidos.append(el)
+        emf_doc.elementos = reconstruidos
+        elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
+        depois = {
+            "segmentos_unidos": parser_ops._join_stats.get("segmentos_unidos", 0),
+            "contornos_fechados_encontrados": sum(1 for e in emf_doc.elementos if e.fechado),
+            "contornos_abertos_restantes": sum(1 for e in emf_doc.elementos if not e.fechado),
+            "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "elementos_canvas_final": len(elementos_canvas),
+        }
+        contornos = [el for el in emf_doc.elementos if el.fechado and len(el.pontos) >= 4 and el.metadados.get("subtipo_audaces") == "contorno"]
         avisos: list[str] = []
         aplicados = 0
         total_assoc = min(len(contornos), len(xml_doc.pecas))
@@ -49,9 +72,30 @@ class AudacesPairImport:
                 pontos=[Ponto(x=float(x), y=float(y)) for x, y in contorno.pontos],
                 marcacoes=["origem:audaces_emf_xml"],
             )
+            parte.marcacoes.append("contorno")
+            for extra in emf_doc.elementos:
+                if extra is contorno:
+                    continue
+                subtipo = str(extra.metadados.get("subtipo_audaces") or "")
+                if subtipo not in {"costura", "linha_interna", "fio", "pique"}:
+                    continue
+                if extra.pontos and contorno.pontos and AudacesEMFImport._ponto_em_poligono(extra.pontos[0], contorno.pontos):
+                    parte.marcacoes.append(subtipo)
             molde = Molde(nome=nome, partes=[parte])
             doc.moldes.append(molde)
             aplicados += 1 if peca else 0
+            if peca:
+                tamanho = peca.tamanhos[0] if peca.tamanhos else None
+                meta = {
+                    "tecido": peca.tecido,
+                    "quantidade": peca.quantidade,
+                    "tamanho": tamanho.tamanho if tamanho else None,
+                    "area": tamanho.area if tamanho else None,
+                    "perimetro": tamanho.perimetro if tamanho else None,
+                    "largura": tamanho.largura if tamanho else None,
+                    "altura": tamanho.altura if tamanho else None,
+                }
+                parte.marcacoes.append(f"xml_meta:{json.dumps(meta, ensure_ascii=False)}")
 
         if len(contornos) != len(xml_doc.pecas):
             avisos.append("Alguns contornos EMF não puderam ser associados automaticamente às peças do XML.")
@@ -61,6 +105,7 @@ class AudacesPairImport:
             "emf_path": str(emf_path),
             "xml_path": str(xml_path),
             "vetores": len([el for el in elementos_canvas if el.get("tipo") == "polyline"]),
+            "elementos_canvas_antes_uniao": antes["elementos_emf"],
             "moldes_detectados": len(contornos),
             "metadados_xml_aplicados": aplicados,
             "avisos": avisos,
@@ -72,6 +117,10 @@ class AudacesPairImport:
             "pecas_xml_sem_associacao": max(0, len(xml_doc.pecas) - total_assoc),
             "contornos_fechados": len(contornos),
             "moldes_reais": len(doc.moldes),
+            "segmentos_originais_lidos_emf": parser_ops._join_stats.get("segmentos_originais", 0),
+            "segmentos_unidos": parser_ops._join_stats.get("segmentos_unidos", 0),
+            "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "contornos_abertos_restantes": depois["contornos_abertos_restantes"],
             "bounds_emf": emf_doc.bounds,
             "escala": dict(emf_doc.relatorio.get("escala", {})),
             "escala_manual_aplicada": fator_escala_final,
@@ -79,6 +128,11 @@ class AudacesPairImport:
             "medida_audaces_referencia_mm": 400.17,
             "fator_escala_final": fator_escala_final,
             "unidade_resultado": "cm_calibrado_por_referencia_mm",
+        }
+        projeto.preferencias_usuario["audaces_emf_xml_importacao"]["diagnostico_antes"] = antes
+        projeto.preferencias_usuario["audaces_emf_xml_importacao"]["diagnostico_depois"] = {
+            **depois,
+            "moldes_reais_criados": len(doc.moldes),
         }
 
         projeto.preferencias_usuario["audaces_importados_originais"] = {
@@ -94,6 +148,26 @@ class AudacesPairImport:
         relatorio = cls._gerar_relatorio_importacao(xml_doc, emf_doc, projeto.preferencias_usuario["audaces_emf_xml_importacao"])
         report_path = cls._salvar_relatorio_debug(relatorio)
         projeto.preferencias_usuario["audaces_emf_xml_importacao"]["debug_report_path"] = str(report_path)
+
+        if doc.moldes:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
+                f"Audaces EMF + XML importado: {len(doc.moldes)} moldes reais criados, "
+                f"{parser_ops._join_stats.get('segmentos_unidos', 0)} contornos unidos, "
+                f"{parser_ops._join_stats.get('curvas_reconstruidas', 0)} curvas reconstruídas."
+            )
+        else:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
+                "Nenhum contorno fechado confiável foi encontrado. O arquivo foi importado como linhas técnicas, mas não como moldes."
+            )
+
+        elementos_crus_ignorados = max(0, antes["elementos_emf"] - len(emf_doc.elementos))
+        alterou_geometria = len(unidos) != len(emf_doc.elementos) or parser_ops._join_stats.get("curvas_reconstruidas", 0) > 0
+        if not alterou_geometria:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_diagnostico"] = "Pós-processamento não alterou geometria."
+        print(f"[AUDACES_IMPORT] usando elementos processados no canvas: SIM")
+        print(f"[AUDACES_IMPORT] moldes reais criados: {len(doc.moldes)}")
+        print(f"[AUDACES_IMPORT] contornos fechados encontrados: {depois['contornos_fechados_encontrados']}")
+        print(f"[AUDACES_IMPORT] elementos crus ignorados: {elementos_crus_ignorados}")
 
         return projeto
 
@@ -210,6 +284,10 @@ class AudacesPairImport:
             "unidade_resultado": info.get("unidade_resultado"),
             "records_nao_suportados": rel.get("records_nao_suportados", {}),
             "avisos": list(info.get("avisos", [])) + list(rel.get("avisos", [])),
+            "diagnostico_antes": info.get("diagnostico_antes", {}),
+            "diagnostico_depois": info.get("diagnostico_depois", {}),
+            "mensagem_final": info.get("mensagem_final"),
+            "mensagem_diagnostico": info.get("mensagem_diagnostico"),
         }
 
     @staticmethod
