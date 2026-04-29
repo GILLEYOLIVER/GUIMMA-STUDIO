@@ -335,6 +335,7 @@ class AudacesEMFImport:
                     "subtipo_audaces": el.metadados.get("subtipo_audaces", "linha_interna"),
                     "molde": bool(el.fechado and el.metadados.get("subtipo_audaces") == "contorno"),
                     "bloqueado": False,
+                    "render_smooth": bool(el.metadados.get("subtipo_audaces") in {"contorno", "costura"}),
                 }
             )
         for tx in doc.textos:

@@ -248,6 +248,26 @@ class AudacesPairImport:
         report_path = cls._salvar_relatorio_debug(relatorio)
         projeto.preferencias_usuario["audaces_emf_xml_importacao"]["debug_report_path"] = str(report_path)
 
+        if doc.moldes:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
+                f"Audaces EMF + XML importado: {len(doc.moldes)} moldes reais criados, "
+                f"{parser_ops._join_stats.get('segmentos_unidos', 0)} contornos unidos, "
+                f"{parser_ops._join_stats.get('curvas_reconstruidas', 0)} curvas reconstruídas."
+            )
+        else:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
+                "Nenhum contorno fechado confiável foi encontrado. O arquivo foi importado como linhas técnicas, mas não como moldes."
+            )
+
+        elementos_crus_ignorados = max(0, antes["elementos_emf"] - len(emf_doc.elementos))
+        alterou_geometria = len(unidos) != len(emf_doc.elementos) or parser_ops._join_stats.get("curvas_reconstruidas", 0) > 0
+        if not alterou_geometria:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_diagnostico"] = "Pós-processamento não alterou geometria."
+        print(f"[AUDACES_IMPORT] usando elementos processados no canvas: SIM")
+        print(f"[AUDACES_IMPORT] moldes reais criados: {len(doc.moldes)}")
+        print(f"[AUDACES_IMPORT] contornos fechados encontrados: {depois['contornos_fechados_encontrados']}")
+        print(f"[AUDACES_IMPORT] elementos crus ignorados: {elementos_crus_ignorados}")
+
         return projeto
 
     @classmethod

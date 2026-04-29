@@ -4,16 +4,16 @@
   "records_emf_tipos": {
     "1": 1,
     "14": 1,
-    "18": 1753,
-    "25": 987,
-    "37": 3566,
-    "39": 987,
-    "40": 1921,
-    "43": 879,
-    "87": 1538,
-    "95": 934
+    "18": 1310,
+    "25": 706,
+    "37": 2669,
+    "39": 706,
+    "40": 1410,
+    "43": 655,
+    "87": 1589,
+    "95": 704
   },
-  "quantidade_polyline": 1538,
+  "quantidade_polyline": 1589,
   "quantidade_polygon": 0,
   "quantidade_polybezier": 0,
   "quantidade_textos": 0,
@@ -35,7 +35,7 @@
     "frame_cm": [
       0.0,
       0.0,
-      22.386,
+      25.892,
       17.75
     ]
   },
@@ -46,10 +46,10 @@
   "unidade_resultado": "cm_calibrado_por_referencia_mm",
   "records_nao_suportados": {
     "14": 1,
-    "18": 1753,
-    "25": 987,
-    "39": 987,
-    "95": 934
+    "18": 1310,
+    "25": 706,
+    "39": 706,
+    "95": 704
   },
   "avisos": [
     "Alguns contornos EMF não puderam ser associados automaticamente às peças do XML.",
