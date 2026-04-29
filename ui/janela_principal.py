@@ -2302,7 +2302,33 @@ class GuimmaStudioMainWindow(QMainWindow):
                     return
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
                 info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
-                self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF + XML", emf_path)
+                self._arquivo_atual = None
+                self._limpar_abas_documentos()
+                self._adicionar_aba_documento("Audaces EMF + XML", emf_path)
+                area = self._area_documento_atual()
+                moldes_doc = []
+                if self.projeto_atual.documentos:
+                    moldes_doc = self.projeto_atual.documentos[0].moldes
+                print(f"[AUDACES_IMPORT] len(self.projeto_atual.documentos[0].moldes)={len(moldes_doc)}")
+                if area and len(moldes_doc) > 0:
+                    carregados = self._carregar_moldes_reais_no_canvas(area, moldes_doc)
+                    info["canvas_origem"] = "moldes_reais"
+                    info["canvas_moldes_renderizados"] = carregados
+                    info["canvas_elementos_emf_renderizados"] = 0
+                    print("[AUDACES_IMPORT] area.canvas.cena.elementos recebe moldes convertidos de projeto.documentos[0].moldes")
+                else:
+                    elementos_canvas = info.get("elementos_canvas", [])
+                    if area:
+                        area.canvas.cena.elementos = [dict(el) for el in elementos_canvas if isinstance(el, dict)]
+                        area.canvas.update()
+                    info["canvas_origem"] = "elementos_emf_fallback"
+                    info["canvas_moldes_renderizados"] = 0
+                    info["canvas_elementos_emf_renderizados"] = len(elementos_canvas)
+                    print("[AUDACES_IMPORT] area.canvas.cena.elementos recebe preferencias_usuario['audaces_emf_xml_importacao']['elementos_canvas']")
+                if area:
+                    print(f"[AUDACES_IMPORT] len(area.canvas.cena.elementos)={len(area.canvas.cena.elementos)}")
+                print(f"[AUDACES_IMPORT] canvas_origem={info.get('canvas_origem')}")
+                print(f"[AUDACES_IMPORT] moldes_carregados_no_canvas={info.get('canvas_moldes_renderizados', 0)}")
                 moldes_reais = int(info.get("moldes_reais", 0))
                 msg = (
                     f"EMF+XML importado. Vetores: {int(info.get('vetores', 0))}. "
@@ -2423,6 +2449,31 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._atualizar_titulo()
         self.backstage.hide()
         self._agendar_salvar_estado_silencioso()
+
+    def _carregar_moldes_reais_no_canvas(self, area, moldes):
+        if not area:
+            return 0
+        elementos: list[dict] = []
+        for molde in moldes or []:
+            for parte in getattr(molde, "partes", []) or []:
+                pts = [(float(p.x), float(p.y)) for p in getattr(parte, "pontos", [])]
+                if len(pts) < 2:
+                    continue
+                if pts[0] != pts[-1]:
+                    pts.append(pts[0])
+                elementos.append({
+                    "tipo": "polyline",
+                    "pontos": pts,
+                    "molde": True,
+                    "origem": "molde_real_audaces",
+                    "subtipo_audaces": "contorno",
+                    "nome_molde": getattr(molde, "nome", "Molde"),
+                    "cor": "#ff7b00",
+                    "bloqueado": False,
+                })
+        area.canvas.cena.elementos = elementos
+        area.canvas.update()
+        return len(elementos)
 
     def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
         dialog = QDialog(self)
