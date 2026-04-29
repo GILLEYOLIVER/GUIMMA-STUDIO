@@ -103,6 +103,8 @@ class AudacesEMFImport:
             "trechos_reconstruidos": 0,
             "trechos_rejeitados_perimetro": 0,
         }
+        self.tolerancia_uniao_mm = 1.5
+        self._join_stats: dict[str, int] = {"segmentos_originais": 0, "segmentos_unidos": 0, "contornos_fechados": 0, "curvas_reconstruidas": 0}
 
     @classmethod
     def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
@@ -348,6 +350,72 @@ class AudacesEMFImport:
             })
         return out
 
+    def _unir_segmentos_em_contornos(self, elementos: list[EMFVectorElement]) -> list[EMFVectorElement]:
+        tolerancia_cm = max(0.1, min(0.2, float(self.tolerancia_uniao_mm) / 10.0))
+        self._join_stats["segmentos_originais"] = len(elementos)
+        agrupados: dict[str, list[EMFVectorElement]] = {}
+        for el in elementos:
+            subtipo = str(el.metadados.get("subtipo_audaces") or "")
+            if subtipo in {"texto", "anotacao", "fio", "pique"}:
+                continue
+            if len(el.pontos) < 2:
+                continue
+            agrupados.setdefault(subtipo, []).append(el)
+        saida: list[EMFVectorElement] = []
+        unidos = 0
+        for subtipo, grupo in agrupados.items():
+            pendentes = [EMFVectorElement(**asdict(el)) for el in grupo]
+            while pendentes:
+                base = pendentes.pop(0)
+                pts = list(base.pontos)
+                alterou = True
+                while alterou:
+                    alterou = False
+                    for i, cand in enumerate(pendentes):
+                        a0, a1 = pts[0], pts[-1]
+                        b0, b1 = cand.pontos[0], cand.pontos[-1]
+                        if self._dist(a1, b0) <= tolerancia_cm:
+                            pts.extend(cand.pontos[1:])
+                        elif self._dist(a1, b1) <= tolerancia_cm:
+                            pts.extend(reversed(cand.pontos[:-1]))
+                        elif self._dist(a0, b1) <= tolerancia_cm:
+                            pts = list(cand.pontos[:-1]) + pts
+                        elif self._dist(a0, b0) <= tolerancia_cm:
+                            pts = list(reversed(cand.pontos[1:])) + pts
+                        else:
+                            continue
+                        pendentes.pop(i)
+                        unidos += 1
+                        alterou = True
+                        break
+                fechado = self._dist(pts[0], pts[-1]) <= tolerancia_cm
+                if fechado and pts[0] != pts[-1]:
+                    pts.append(pts[0])
+                novo = self._mk_element(base.tipo, pts, fechado, base.raw_record_type)
+                novo.metadados.update(base.metadados)
+                novo.metadados["subtipo_audaces"] = subtipo
+                saida.append(novo)
+        self._join_stats["segmentos_unidos"] = unidos
+        self._join_stats["contornos_fechados"] = sum(1 for e in saida if e.fechado and e.metadados.get("subtipo_audaces") == "contorno")
+        return saida
+
+    @staticmethod
+    def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+    def _reconstruir_curvas_do_contorno(self, contorno: EMFVectorElement) -> EMFVectorElement:
+        antes = self._comprimento_polyline(contorno.pontos)
+        novo = self._reconstruir_curvas_por_trechos(contorno)
+        depois = self._comprimento_polyline(novo.pontos)
+        if antes > 0 and abs(depois - antes) / antes > 0.005:
+            return contorno
+        novo.metadados["curva_reconstruida"] = True
+        novo.metadados["metodo_curva"] = "catmull_rom_centripeto"
+        novo.metadados["perimetro_antes"] = antes
+        novo.metadados["perimetro_depois"] = depois
+        self._join_stats["curvas_reconstruidas"] += 1
+        return novo
+
     def gerar_relatorio(self, elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]) -> dict[str, Any]:
         return {
             "tamanho_arquivo": len(self.raw),
@@ -380,6 +448,10 @@ class AudacesEMFImport:
             "suavizados_costura": int(self._smooth_stats.get("suavizados_costura", 0)),
             "trechos_reconstruidos": int(self._smooth_stats.get("trechos_reconstruidos", 0)),
             "trechos_rejeitados_perimetro": int(self._smooth_stats.get("trechos_rejeitados_perimetro", 0)),
+            "segmentos_originais_lidos_emf": int(self._join_stats.get("segmentos_originais", 0)),
+            "segmentos_unidos": int(self._join_stats.get("segmentos_unidos", 0)),
+            "contornos_fechados_encontrados": int(self._join_stats.get("contornos_fechados", 0)),
+            "curvas_reconstruidas": int(self._join_stats.get("curvas_reconstruidas", 0)),
             "map_mode": self._map_mode,
             "window_org": self._window_org,
             "window_ext": self._window_ext,
