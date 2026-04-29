@@ -5,6 +5,15 @@
       "title": "Início",
       "groups": [
         {
+          "title": "Ações rápidas",
+          "tools": [
+            "desfazer",
+            "refazer",
+            "salvar",
+            "salvar_como"
+          ]
+        },
+        {
           "title": "Desenho",
           "tools": [
             "cor",
@@ -35,6 +44,13 @@
             "ponto_restauracao",
             "restaurar",
             "restaurar_copia"
+          ]
+        },
+        {
+          "title": "Configuração",
+          "tools": [
+            "cores",
+            "unidade_medidas"
           ]
         },
         {
@@ -867,6 +883,42 @@
       "module": "tools/plotar_tool.py",
       "class": "Ferramenta",
       "icon": "plotar.svg"
+    },
+    "desfazer": {
+      "title": "Desfazer",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "restaurar.svg"
+    },
+    "refazer": {
+      "title": "Refazer",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "restaurar_copia.svg"
+    },
+    "salvar": {
+      "title": "Salvar",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "copiar.svg"
+    },
+    "salvar_como": {
+      "title": "Salvar como",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "copiar.svg"
+    },
+    "cores": {
+      "title": "Cores",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "cor.svg"
+    },
+    "unidade_medidas": {
+      "title": "Unidade",
+      "module": "tools/acao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "distancia.svg"
     }
   }
 }
