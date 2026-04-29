@@ -74,6 +74,9 @@
     "elementos_canvas_final": 112,
     "moldes_reais_criados": 22
   },
-  "mensagem_final": null,
-  "mensagem_diagnostico": null
+  "mensagem_final": "Audaces EMF + XML importado: 22 moldes reais criados, 449 contornos unidos, 34 curvas reconstruídas.",
+  "mensagem_diagnostico": null,
+  "canvas_origem": "moldes_reais",
+  "canvas_moldes_renderizados": 22,
+  "canvas_elementos_emf_renderizados": 0
 }

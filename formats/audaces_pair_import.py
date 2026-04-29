@@ -56,6 +56,28 @@ class AudacesPairImport:
             e.metadados["subtipo_audaces"] = "linha_interna"
         return elementos, len(principais), costuras, internas + len(abertos), ignorados
 
+    @staticmethod
+    def _converter_moldes_para_canvas(moldes: list[Molde]) -> list[dict]:
+        elementos: list[dict] = []
+        for molde in moldes:
+            for parte in molde.partes:
+                pts = [(p.x, p.y) for p in parte.pontos]
+                if len(pts) < 2:
+                    continue
+                if pts[0] != pts[-1]:
+                    pts.append(pts[0])
+                elementos.append({
+                    "tipo": "polyline",
+                    "pontos": pts,
+                    "origem": "audaces_emf_xml_molde_real",
+                    "subtipo_audaces": "contorno",
+                    "molde": True,
+                    "metadados": {"origem": "audaces_emf_xml", "importado_como_molde_real": True, "subtipo_audaces": "contorno"},
+                    "cor": "#ff7b00",
+                    "bloqueado": False,
+                })
+        return elementos
+
     @classmethod
     def importar(cls, emf_path: str | Path, xml_path: str | Path, projeto: Projeto) -> Projeto:
         xml_doc = AudacesXMLImport.abrir(xml_path)
@@ -186,17 +208,21 @@ class AudacesPairImport:
                 "conteudo_base64": base64.b64encode(Path(xml_path).read_bytes()).decode("ascii"),
             },
         }
-        relatorio = cls._gerar_relatorio_importacao(xml_doc, emf_doc, projeto.preferencias_usuario["audaces_emf_xml_importacao"])
-        report_path = cls._salvar_relatorio_debug(relatorio)
-        projeto.preferencias_usuario["audaces_emf_xml_importacao"]["debug_report_path"] = str(report_path)
-
         if doc.moldes:
+            elementos_moldes_canvas = cls._converter_moldes_para_canvas(doc.moldes)
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["elementos_canvas"] = elementos_moldes_canvas
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_origem"] = "moldes_reais"
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_moldes_renderizados"] = len(doc.moldes)
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_elementos_emf_renderizados"] = 0
             projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
                 f"Audaces EMF + XML importado: {len(doc.moldes)} moldes reais criados, "
                 f"{parser_ops._join_stats.get('segmentos_unidos', 0)} contornos unidos, "
                 f"{parser_ops._join_stats.get('curvas_reconstruidas', 0)} curvas reconstruídas."
             )
         else:
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_origem"] = "elementos_emf"
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_moldes_renderizados"] = 0
+            projeto.preferencias_usuario["audaces_emf_xml_importacao"]["canvas_elementos_emf_renderizados"] = len(elementos_canvas)
             if depois["contornos_fechados_encontrados"] > 0:
                 projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_final"] = (
                     "Foram encontrados contornos fechados, mas nenhum foi classificado como molde principal. Verifique regras de classificação."
@@ -212,8 +238,15 @@ class AudacesPairImport:
             projeto.preferencias_usuario["audaces_emf_xml_importacao"]["mensagem_diagnostico"] = "Pós-processamento não alterou geometria."
         print(f"[AUDACES_IMPORT] usando elementos processados no canvas: SIM")
         print(f"[AUDACES_IMPORT] moldes reais criados: {len(doc.moldes)}")
+        print(f"[AUDACES_IMPORT] moldes no projeto.documentos[0].moldes: {len(doc.moldes)}")
+        print(f"[AUDACES_IMPORT] canvas renderizando moldes reais: {'SIM' if len(doc.moldes) > 0 else 'NAO'}")
+        print(f"[AUDACES_IMPORT] canvas renderizando elementos EMF crus: {'NAO' if len(doc.moldes) > 0 else 'SIM'}")
         print(f"[AUDACES_IMPORT] contornos fechados encontrados: {depois['contornos_fechados_encontrados']}")
         print(f"[AUDACES_IMPORT] elementos crus ignorados: {elementos_crus_ignorados}")
+
+        relatorio = cls._gerar_relatorio_importacao(xml_doc, emf_doc, projeto.preferencias_usuario["audaces_emf_xml_importacao"])
+        report_path = cls._salvar_relatorio_debug(relatorio)
+        projeto.preferencias_usuario["audaces_emf_xml_importacao"]["debug_report_path"] = str(report_path)
 
         return projeto
 
@@ -334,6 +367,9 @@ class AudacesPairImport:
             "diagnostico_depois": info.get("diagnostico_depois", {}),
             "mensagem_final": info.get("mensagem_final"),
             "mensagem_diagnostico": info.get("mensagem_diagnostico"),
+            "canvas_origem": info.get("canvas_origem"),
+            "canvas_moldes_renderizados": info.get("canvas_moldes_renderizados"),
+            "canvas_elementos_emf_renderizados": info.get("canvas_elementos_emf_renderizados"),
         }
 
     @staticmethod
