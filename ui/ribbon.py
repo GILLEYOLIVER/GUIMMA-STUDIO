@@ -658,6 +658,16 @@ def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:
 
 
 def _normalizar_grupos_inicio(groups: list[dict]) -> list[dict]:
+    grupos_unicos: list[dict] = []
+    titulos_vistos: set[str] = set()
+    for g in groups:
+        titulo = str(g.get("title", ""))
+        if not titulo or titulo in titulos_vistos:
+            continue
+        titulos_vistos.add(titulo)
+        grupos_unicos.append(g)
+
+    groups = grupos_unicos
     grupos_por_titulo = {g.get("title"): list(g.get("tools", [])) for g in groups}
     desenho = [tid for tid in grupos_por_titulo.get("Desenho", []) if tid != "colar"]
     if not desenho:
