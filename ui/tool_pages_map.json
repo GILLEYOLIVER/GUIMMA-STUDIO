@@ -350,7 +350,7 @@
       "title": "Excluir",
       "module": "tools/excluir_tool.py",
       "class": "Ferramenta",
-      "icon": "excluir.svg"
+      "icon": "excluir_rapido.svg"
     },
     "inverter_selecao": {
       "title": "Inverter Selecao",
@@ -866,7 +866,7 @@
       "title": "Ponto de Restauração",
       "module": "tools/ponto_restauracao_tool.py",
       "class": "Ferramenta",
-      "icon": "ponto_restauracao.svg"
+      "icon": "ponto_restauracao_rapido.svg"
     },
     "restaurar": {
       "title": "Restaurar",
@@ -884,13 +884,13 @@
       "title": "Imprimir",
       "module": "tools/imprimir_tool.py",
       "class": "Ferramenta",
-      "icon": "imprimir.svg"
+      "icon": "imprimir_rapido.svg"
     },
     "plotar": {
       "title": "Plotar",
       "module": "tools/plotar_tool.py",
       "class": "Ferramenta",
-      "icon": "plotar.svg"
+      "icon": "plotar_rapido.svg"
     },
     "desfazer": {
       "title": "Desfazer",
@@ -920,13 +920,13 @@
       "title": "Cores",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "cor.svg"
+      "icon": "cores_rapido.svg"
     },
     "unidade_medidas": {
       "title": "Unidade",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "distancia.svg"
+      "icon": "unidade_rapido.svg"
     }
   }
 }
