@@ -613,6 +613,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tool_id in {"plotar", "plotagem", "plot"}:
             self._abrir_dialogo_plotagem()
             return True
+        if tool_id == "desfazer":
+            self._desfazer_canvas_atual()
+            return True
+        if tool_id == "refazer":
+            self._refazer_canvas_atual()
+            return True
+        if tool_id == "salvar":
+            self._acao_salvar_pelo_backstage()
+            return True
+        if tool_id == "salvar_como":
+            self._salvar_projeto_como()
+            return True
+        if tool_id == "cores":
+            self._abrir_dialogo_cores()
+            return True
+        if tool_id == "unidade_medidas":
+            self._abrir_dialogo_unidade_medida()
+            return True
 
         area = self._area_documento_atual()
         if not area:
