@@ -42,7 +42,6 @@
           "title": "Restauração",
           "tools": [
             "ponto_restauracao",
-            "restaurar",
             "restaurar_copia"
           ]
         },
@@ -51,6 +50,15 @@
           "tools": [
             "cores",
             "unidade_medidas"
+          ]
+        },
+        {
+          "title": "Ações rápidas",
+          "tools": [
+            "desfazer",
+            "refazer",
+            "salvar",
+            "salvar_como"
           ]
         },
         {
