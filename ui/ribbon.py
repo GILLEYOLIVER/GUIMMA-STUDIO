@@ -686,7 +686,12 @@ def _normalizar_grupos_inicio(groups: list[dict]) -> list[dict]:
             saida.append({"title": "Editar", "tools": editar})
         else:
             saida.append(g)
-    return saida
+
+    prioridade = ["Desenho", "Editar", "Selecionar", "Restauração", "Configuração", "Ações rápidas", "Saída"]
+    por_titulo = {str(g.get("title", "")): g for g in saida}
+    ordenados: list[dict] = [por_titulo[t] for t in prioridade if t in por_titulo]
+    restantes = [g for g in saida if str(g.get("title", "")) not in prioridade]
+    return ordenados + restantes
 
 
 def groups_tools_flat(groups: list[dict]) -> set[str]:
