@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from config import ICONS_DIR
+
 from PySide6.QtCore import Qt, Signal, QSettings
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -63,8 +65,24 @@ class BackstageArquivoPanel(QFrame):
             "Configurações ▸",
             "Ajuda",
         ]
+        icones_menu = {
+            "Novo": "novo.svg",
+            "Abrir": "abrir.svg",
+            "Salvar": "salvar.svg",
+            "Salvar como": "salvar.svg",
+            "Plotar": "plotar_rapido.svg",
+            "Imprimir": "imprimir_rapido.svg",
+            "Configurações ▸": "cores_rapido.svg",
+        }
+
         for item in itens:
             botao = QPushButton(item)
+            icone = icones_menu.get(item)
+            if icone:
+                caminho_icone = ICONS_DIR / icone
+                if caminho_icone.exists():
+                    botao.setIcon(QIcon(str(caminho_icone)))
+                    botao.setIconSize(botao.iconSize())
             botao.setCursor(Qt.PointingHandCursor)
             botao.setMinimumHeight(30)
             botao.setMaximumHeight(30)
@@ -72,7 +90,8 @@ class BackstageArquivoPanel(QFrame):
                 """
                 QPushButton {
                     text-align: left;
-                    padding-left: 16px;
+                    padding-left: 12px;
+                    qproperty-iconSize: 16px 16px;
                     color: #1d1d1d;
                     border: none;
                     background: transparent;

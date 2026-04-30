@@ -613,6 +613,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tool_id in {"plotar", "plotagem", "plot"}:
             self._abrir_dialogo_plotagem()
             return True
+        if tool_id == "desfazer":
+            self._desfazer_canvas_atual()
+            return True
+        if tool_id == "refazer":
+            self._refazer_canvas_atual()
+            return True
+        if tool_id == "salvar":
+            self._acao_salvar_pelo_backstage()
+            return True
+        if tool_id == "salvar_como":
+            self._salvar_projeto_como()
+            return True
+        if tool_id == "cores":
+            self._abrir_dialogo_cores()
+            return True
+        if tool_id == "unidade_medidas":
+            self._abrir_dialogo_unidade_medida()
+            return True
 
         area = self._area_documento_atual()
         if not area:
@@ -882,13 +900,20 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QMenu::item { padding: 6px 18px; }"
             "QMenu::item:selected { background: #e6f2ff; }"
         )
+        def _add_menu_acao(texto: str, callback, icon_name: str | None = None):
+            acao = menu.addAction(texto, callback)
+            if icon_name:
+                caminho = ICONS_DIR / icon_name
+                if caminho.exists():
+                    acao.setIcon(QIcon(str(caminho)))
+            return acao
         menu.addAction("Opções", self._abrir_dialogo_opcoes)
         menu.addAction("Unidade de medida\tCtrl+U", self._abrir_dialogo_unidade_medida)
         menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
         menu_regras = menu.addMenu("Regras de graduação")
         menu_regras.addAction("Regras de Graduação - Nomes...", lambda: self.lbl_status.setText("Regras de Graduação - Nomes (em breve)"))
         menu_regras.addAction("Regras de Graduação - Valores...", lambda: self.lbl_status.setText("Regras de Graduação - Valores (em breve)"))
-        menu.addAction("Cores", self._abrir_dialogo_cores)
+        _add_menu_acao("Cores", self._abrir_dialogo_cores, "cores_rapido.svg")
         menu.addAction("Grade", lambda: self.lbl_status.setText("Grade (em breve)"))
         menu_snap = menu.addMenu("Snap")
         menu_snap_classico = menu_snap.addMenu("Clássico")
@@ -901,8 +926,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Paleta de usuário", lambda: self.lbl_status.setText("Paleta de usuário (em breve)"))
         menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
         menu.addAction("Teclas de atalho", lambda: self.lbl_status.setText("Teclas de atalho (em breve)"))
-        menu.addAction("Impressão...	Ctrl+P", self._abrir_dialogo_impressao)
-        menu.addAction("Plotagem...	Ctrl+Shift+P", self._abrir_dialogo_plotagem)
+        _add_menu_acao("Impressão...	Ctrl+P", self._abrir_dialogo_impressao, "imprimir_rapido.svg")
+        _add_menu_acao("Plotagem...	Ctrl+Shift+P", self._abrir_dialogo_plotagem, "plotar_rapido.svg")
         menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
