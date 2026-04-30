@@ -5,6 +5,15 @@
       "title": "Início",
       "groups": [
         {
+          "title": "Ações rápidas",
+          "tools": [
+            "desfazer",
+            "refazer",
+            "salvar",
+            "salvar_como"
+          ]
+        },
+        {
           "title": "Desenho",
           "tools": [
             "cor",
@@ -33,7 +42,6 @@
           "title": "Restauração",
           "tools": [
             "ponto_restauracao",
-            "restaurar",
             "restaurar_copia"
           ]
         },
