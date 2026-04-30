@@ -93,7 +93,7 @@ class RibbonButton(QToolButton):
                     border: none;
                     color: #1e1e1e;
                     font-size: 13px;
-                    font-weight: 500;
+                    font-weight: 400;
                     padding: 0 4px;
                     border-radius: 4px;
                 }
@@ -110,7 +110,7 @@ class RibbonButton(QToolButton):
                         border: 2px solid #86b8ea;
                         background: #eef6ff;
                         font-size: 13px;
-                        font-weight: 700;
+                        font-weight: 400;
                     }
                     QToolButton:hover { background: #e5f1ff; border: 2px solid #64a2df; }
                     """
@@ -146,7 +146,7 @@ class RibbonButton(QToolButton):
                 QToolButton {
                     border: none;
                     border-radius: 4px;
-                    font-weight: 600;
+                    font-weight: 400;
                     font-size: 12px;
                     padding: 1px;
                     background: #ffffff;
@@ -563,7 +563,7 @@ class RibbonGroup(QFrame):
         rodape.setAlignment(Qt.AlignCenter)
         rodape.setFixedHeight(16)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 600; border-top: 1px solid #d9d9d9;")
+        rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 400; border-top: 1px solid #d9d9d9;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
@@ -630,7 +630,7 @@ class RibbonWidget(QWidget):
                 color: #0d2746;
                 border: 1px solid #cfd8e2;
                 font-size: 13px;
-                font-weight: 500;
+                font-weight: 400;
                 padding: 6px 16px;
             }
             QTabBar::tab:selected {
