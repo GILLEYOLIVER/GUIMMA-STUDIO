@@ -896,25 +896,25 @@
       "title": "Desfazer",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "restaurar.svg"
+      "icon": "desfazer.svg"
     },
     "refazer": {
       "title": "Refazer",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "restaurar_copia.svg"
+      "icon": "refazer.svg"
     },
     "salvar": {
       "title": "Salvar",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "copiar.svg"
+      "icon": "salvar.svg"
     },
     "salvar_como": {
       "title": "Salvar como",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "copiar.svg"
+      "icon": "salvar.svg"
     },
     "cores": {
       "title": "Cores",
