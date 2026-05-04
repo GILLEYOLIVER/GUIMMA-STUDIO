@@ -4949,6 +4949,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_grid.setChecked(True)
         self.btn_grid.setFixedHeight(20)
         self.btn_grid.setStyleSheet(estilo_botao_icone)
+        icone_grid = ICONS_DIR / "grade-diferente-modelo.svg"
+        if icone_grid.exists():
+            self.btn_grid.setIcon(QIcon(str(icone_grid)))
+            self.btn_grid.setText("")
         self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
         row.addWidget(self.btn_grid)
 
