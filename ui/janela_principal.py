@@ -11,7 +11,7 @@ from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -58,6 +58,7 @@ from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
+from shiboken6 import isValid as _qt_objeto_valido
 
 
 class _DelegateTraducaoArquivo(QStyledItemDelegate):
@@ -135,6 +136,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._timer_recovery = QTimer(self)
         self._timer_recovery.timeout.connect(self._salvar_snapshot_recuperacao)
         self._aplicar_intervalo_recovery()
+        self._menu_backstage_hover_aberto: QMenu | None = None
+        self._menu_backstage_hover_origem: str | None = None
+        self._menu_backstage_hover_botao: QWidget | None = None
+        self._menus_backstage_hover: list[QMenu] = []
+        self._timer_fechar_submenu_backstage = QTimer(self)
+        self._timer_fechar_submenu_backstage.setSingleShot(True)
+        self._timer_fechar_submenu_backstage.timeout.connect(self._fechar_submenu_backstage_se_cursor_fora)
+        self._timer_vigiar_submenu_backstage = QTimer(self)
+        self._timer_vigiar_submenu_backstage.setInterval(50)  # 50ms para resposta rápida
+        self._timer_vigiar_submenu_backstage.timeout.connect(self._processar_hover_backstage_global)
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
@@ -441,14 +452,22 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(self.ribbon)
 
         self.backstage = BackstageArquivoPanel(self)
+        self._aplicar_estilo_hover_backstage_arquivo()
         self.backstage.botoes["Novo"].clicked.connect(self._novo_projeto)
         self.backstage.botoes["Abrir"].clicked.connect(self._abrir_projeto)
         self.backstage.botoes["Salvar"].clicked.connect(self._acao_salvar_pelo_backstage)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
+        if "Modelo ▸" in self.backstage.botoes:
+            self.backstage.botoes["Modelo ▸"].clicked.connect(self._abrir_menu_modelo)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
+        if "Exportar ▸" in self.backstage.botoes:
+            self.backstage.botoes["Exportar ▸"].clicked.connect(self._abrir_menu_exportar)
         self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
+        if "Ajuda ▸" in self.backstage.botoes:
+            self.backstage.botoes["Ajuda ▸"].clicked.connect(self._abrir_menu_ajuda)
         self.backstage.submenu_hover.connect(self._abrir_submenu_backstage_hover)
         self.backstage.submenu_leave.connect(self._fechar_submenu_backstage_hover)
+        self._instalar_hover_backstage_arquivo()
         if "Plotar" in self.backstage.botoes:
             self.backstage.botoes["Plotar"].clicked.connect(self._abrir_dialogo_plotagem)
         if "Imprimir" in self.backstage.botoes:
@@ -470,20 +489,52 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.setVisible(not self.backstage.isVisible())
         if self.backstage.isVisible():
             self.backstage.raise_()
+            self._instalar_hover_backstage_arquivo()
+            self._timer_vigiar_submenu_backstage.start()
+            QTimer.singleShot(0, self._processar_hover_backstage_global)
+        else:
+            self._fechar_submenu_backstage_hover(forcar=True)
+            self._timer_vigiar_submenu_backstage.stop()
 
     def mousePressEvent(self, event):  # noqa: N802
         super().mousePressEvent(event)
         if self.backstage.isVisible() and event.position().x() > self.backstage.width():
+            self._fechar_submenu_backstage_hover(forcar=True)
             self.backstage.hide()
+            self._timer_vigiar_submenu_backstage.stop()
 
     def eventFilter(self, watched, event):  # noqa: N802
-        if isinstance(watched, QMenu) and event.type() == QEvent.Leave and getattr(watched, "_fechar_no_leave", False):
-            QTimer.singleShot(0, lambda m=watched: self._fechar_cascata_menu_hover(m))
-            return True
+        tipo_evento = event.type()
+
         if (
             hasattr(self, "backstage")
             and self.backstage.isVisible()
-            and event.type() == QEvent.MouseButtonPress
+            and tipo_evento in (QEvent.Enter, QEvent.MouseMove, QEvent.Leave)
+        ):
+            self._processar_hover_backstage_global()
+
+        if isinstance(watched, QMenu) and getattr(watched, "_menu_hover_backstage", False):
+            if tipo_evento in (QEvent.Enter, QEvent.MouseMove):
+                self._cancelar_fechamento_submenu_backstage()
+            elif tipo_evento == QEvent.Leave:
+                self._agendar_fechamento_submenu_backstage(70)
+            elif tipo_evento in (QEvent.Hide, QEvent.Close):
+                self._limpar_menu_backstage_hover_se_necessario(watched)
+
+        if getattr(watched, "_backstage_hover_monitor", False):
+            if tipo_evento in (QEvent.Enter, QEvent.MouseMove):
+                texto = getattr(watched, "_backstage_item_texto", None)
+                if texto and self._item_backstage_tem_submenu(texto):
+                    self._abrir_submenu_backstage_hover(texto)
+                elif getattr(self, "_menu_backstage_hover_aberto", None) is not None:
+                    self._agendar_fechamento_submenu_backstage(70)
+            elif tipo_evento == QEvent.Leave and getattr(self, "_menu_backstage_hover_aberto", None) is not None:
+                self._agendar_fechamento_submenu_backstage(70)
+
+        if (
+            hasattr(self, "backstage")
+            and self.backstage.isVisible()
+            and tipo_evento == QEvent.MouseButtonPress
             and hasattr(event, "globalPosition")
         ):
             pos = event.globalPosition().toPoint()
@@ -492,8 +543,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             botao_topo = self.botao_arquivo.mapToGlobal(QPoint(0, 0))
             botao_rect = self.botao_arquivo.rect().translated(botao_topo)
             if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
+                self._fechar_submenu_backstage_hover(forcar=True)
                 self.backstage.hide()
-        if isinstance(watched, QDialog) and event.type() in (QEvent.Close, QEvent.Hide):
+        if isinstance(watched, QDialog) and tipo_evento in (QEvent.Close, QEvent.Hide):
             self._garantir_selecionar_apos_fechar_janela()
         return super().eventFilter(watched, event)
 
@@ -875,15 +927,391 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["posicoes_caixas_aux"] = dict(self._posicoes_caixas_aux)
         self._salvar_preferencias_app()
 
+    # ========== FUNÇÕES CORRIGIDAS PARA HOVER DO BACKSTAGE ==========
+
+    def _estilo_botao_backstage_arquivo(self, ativo: bool = False) -> str:
+        """Retorna o estilo do botão da coluna ARQUIVO.
+
+        O hover é controlado manualmente para não ficar travado quando um QMenu
+        abre por cima da janela e captura os eventos do mouse.
+        """
+        fundo = "#d9edf9" if ativo else "transparent"
+        return f"""
+            QPushButton {{
+                background: {fundo};
+                color: #111111;
+                border: none;
+                border-radius: 0px;
+                text-align: left;
+                padding: 0px 8px 0px 8px;
+                font-size: 12px;
+                font-weight: 400;
+            }}
+            QPushButton:pressed {{
+                background: #c6e2f4;
+                color: #000000;
+            }}
+            QPushButton:disabled {{
+                background: transparent;
+                color: #777777;
+            }}
+        """
+
+    def _definir_hover_botao_backstage(self, botao: QWidget | None, ativo: bool):
+        """Aplica ou remove o destaque visual de um botão do backstage."""
+        if not self._qt_widget_vivo(botao):
+            return
+        try:
+            estado_atual = bool(getattr(botao, "_backstage_hover_ativo", False))
+            if estado_atual == bool(ativo):
+                return
+            botao._backstage_hover_ativo = bool(ativo)  # type: ignore[attr-defined]
+            botao.setStyleSheet(self._estilo_botao_backstage_arquivo(bool(ativo)))
+        except RuntimeError:
+            return
+        except Exception:
+            return
+
+    def _limpar_hover_botoes_backstage(self, manter: QWidget | None = None):
+        """Remove hover manual de todos os botões, exceto o informado."""
+        if not hasattr(self, "backstage") or self.backstage is None:
+            return
+        for botao in getattr(self.backstage, "botoes", {}).values():
+            if botao is manter:
+                self._definir_hover_botao_backstage(botao, True)
+            else:
+                self._definir_hover_botao_backstage(botao, False)
+
+    def _aplicar_estilo_hover_backstage_arquivo(self):
+        """Aplica a cor de hover na coluna ARQUIVO do backstage."""
+        if not hasattr(self, "backstage") or self.backstage is None:
+            return
+
+        for texto, botao in getattr(self.backstage, "botoes", {}).items():
+            try:
+                botao.setCursor(Qt.PointingHandCursor)
+                botao.setMouseTracking(True)
+                botao._backstage_item_texto = texto  # type: ignore[attr-defined]
+                botao._backstage_hover_monitor = True  # type: ignore[attr-defined]
+                botao._backstage_hover_ativo = False  # type: ignore[attr-defined]
+                botao.setStyleSheet(self._estilo_botao_backstage_arquivo(False))
+            except RuntimeError:
+                continue
+            except Exception:
+                continue
+
+    def _instalar_hover_backstage_arquivo(self):
+        """Configura monitoramento de hover nos botões do backstage."""
+        if not hasattr(self, "backstage") or self.backstage is None:
+            return
+        self.backstage.setMouseTracking(True)
+        for texto, botao in getattr(self.backstage, "botoes", {}).items():
+            try:
+                botao.setMouseTracking(True)
+                botao._backstage_item_texto = texto  # type: ignore[attr-defined]
+                botao._backstage_hover_monitor = True  # type: ignore[attr-defined]
+                try:
+                    botao.removeEventFilter(self)
+                except Exception:
+                    pass
+                botao.installEventFilter(self)
+            except RuntimeError:
+                continue
+            except Exception:
+                continue
+
+    def _processar_hover_backstage_global(self):
+        """Verifica posição do cursor e abre/fecha submenus automaticamente."""
+        if not hasattr(self, "backstage") or not self._qt_widget_visivel(self.backstage):
+            self._limpar_hover_botoes_backstage()
+            return
+
+        self._limpar_referencias_menus_backstage_invalidos()
+        cursor_pos = QCursor.pos()
+        botao_texto, botao = self._botao_backstage_sob_cursor(cursor_pos)
+        menu_atual = getattr(self, "_menu_backstage_hover_aberto", None)
+        origem_atual = getattr(self, "_menu_backstage_hover_origem", None)
+        botao_atual = getattr(self, "_menu_backstage_hover_botao", None)
+
+        # Se o cursor está em um botão comum, destaque somente ele e feche submenu.
+        if botao_texto and botao and not self._item_backstage_tem_submenu(botao_texto):
+            self._limpar_hover_botoes_backstage(botao)
+            if self._qt_widget_visivel(menu_atual):
+                self._fechar_submenu_backstage_hover(forcar=True)
+            return
+
+        # Se o cursor está em um botão com submenu, abre imediatamente no hover.
+        if botao_texto and botao and self._item_backstage_tem_submenu(botao_texto):
+            self._limpar_hover_botoes_backstage(botao)
+            if self._qt_widget_visivel(menu_atual) and botao_atual is botao and origem_atual == botao_texto:
+                self._cancelar_fechamento_submenu_backstage()
+                return
+            self._abrir_submenu_backstage_hover(botao_texto, botao)
+            return
+
+        # Cursor fora dos botões: se está dentro do menu/corredor, mantém só o botão de origem destacado.
+        if self._cursor_sobre_algum_menu_backstage(cursor_pos) or self._cursor_sobre_corredor_entre_botao_e_menu(cursor_pos):
+            self._limpar_hover_botoes_backstage(botao_atual if self._qt_widget_vivo(botao_atual) else None)
+            self._cancelar_fechamento_submenu_backstage()
+            return
+
+        # Cursor saiu da área útil: remove destaque e fecha.
+        self._limpar_hover_botoes_backstage()
+        if self._qt_widget_visivel(menu_atual):
+            self._agendar_fechamento_submenu_backstage(40)
+        else:
+            self._cancelar_fechamento_submenu_backstage()
+
+    def _abrir_submenu_backstage_hover(self, item_texto: str, botao: QWidget = None):
+        """Abre o submenu referente ao botão (hover)."""
+        if not hasattr(self, "backstage") or not self._qt_widget_visivel(self.backstage):
+            return
+
+        self._limpar_referencias_menus_backstage_invalidos()
+        menu_atual = getattr(self, "_menu_backstage_hover_aberto", None)
+        if (
+            self._qt_widget_visivel(menu_atual)
+            and getattr(self, "_menu_backstage_hover_origem", None) == item_texto
+        ):
+            self._cancelar_fechamento_submenu_backstage()
+            return
+
+        self._fechar_submenu_backstage_hover(forcar=True)
+
+        if botao is None:
+            _, botao = self._botao_submenu_backstage_sob_cursor(QCursor.pos())
+            if not self._qt_widget_vivo(botao):
+                return
+
+        menu = None
+        if item_texto == "Modelo ▸":
+            menu = self._criar_menu_modelo()
+        elif item_texto == "Importar ▸":
+            menu = self._criar_menu_importar()
+        elif item_texto == "Exportar ▸":
+            menu = self._criar_menu_exportar()
+        elif item_texto == "Configurações ▸":
+            menu = self._criar_menu_configuracoes()
+        elif item_texto == "Ajuda ▸":
+            menu = self._criar_menu_ajuda()
+
+        if not self._qt_widget_vivo(menu):
+            return
+
+        self._preparar_menu_backstage_hover(menu, item_texto)
+        self._menu_backstage_hover_aberto = menu
+        self._menu_backstage_hover_origem = item_texto
+        self._menu_backstage_hover_botao = botao
+        self._limpar_hover_botoes_backstage(botao)
+
+        try:
+            pos = self._posicao_submenu_backstage(botao)
+            menu.popup(pos)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+
+    def _fechar_submenu_backstage_hover(self, _item_texto: str = None, forcar: bool = False):
+        """Fecha o submenu atualmente aberto sem acessar QMenu já destruído."""
+        self._cancelar_fechamento_submenu_backstage()
+        self._limpar_referencias_menus_backstage_invalidos()
+
+        if not forcar and self._cursor_sobre_area_backstage_ou_menus():
+            return
+
+        for menu in list(getattr(self, "_menus_backstage_hover", [])):
+            if self._qt_widget_visivel(menu):
+                try:
+                    menu.close()
+                except RuntimeError:
+                    pass
+                except Exception:
+                    pass
+
+        menu = getattr(self, "_menu_backstage_hover_aberto", None)
+        if self._qt_widget_visivel(menu):
+            try:
+                menu.close()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+
+        self._menu_backstage_hover_aberto = None
+        self._menu_backstage_hover_origem = None
+        self._menu_backstage_hover_botao = None
+        self._menus_backstage_hover = []
+        self._limpar_hover_botoes_backstage()
+
+    def _cancelar_fechamento_submenu_backstage(self):
+        """Cancela qualquer timer de fechamento pendente."""
+        if hasattr(self, "_timer_fechar_submenu_backstage"):
+            self._timer_fechar_submenu_backstage.stop()
+
+    def _agendar_fechamento_submenu_backstage(self, atraso_ms: int = 120):
+        """Agenda o fechamento do submenu após um pequeno atraso."""
+        if hasattr(self, "_timer_fechar_submenu_backstage"):
+            self._timer_fechar_submenu_backstage.start(max(1, atraso_ms))
+
+    def _cursor_sobre_widget_global(self, widget: QWidget, pos: QPoint, margem: int = 2) -> bool:
+        """Verifica se o cursor global está sobre o widget (com margem)."""
+        if not self._qt_widget_visivel(widget):
+            return False
+        try:
+            rect = widget.rect().translated(widget.mapToGlobal(QPoint(0, 0)))
+            return rect.adjusted(-margem, -margem, margem, margem).contains(pos)
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+
+    def _cursor_sobre_algum_menu_backstage(self, pos: QPoint) -> bool:
+        """Verifica se o cursor está sobre qualquer um dos menus abertos."""
+        self._limpar_referencias_menus_backstage_invalidos()
+        for menu in list(getattr(self, "_menus_backstage_hover", [])):
+            if self._cursor_sobre_widget_global(menu, pos, margem=1):
+                return True
+        return False
+
+    def _cursor_sobre_corredor_entre_botao_e_menu(self, pos: QPoint) -> bool:
+        """Verifica se o cursor está na região entre o botão e o menu aberto."""
+        botao = getattr(self, "_menu_backstage_hover_botao", None)
+        menu = getattr(self, "_menu_backstage_hover_aberto", None)
+        if not self._qt_widget_visivel(botao) or not self._qt_widget_visivel(menu):
+            return False
+        try:
+            rect_botao = botao.rect().translated(botao.mapToGlobal(QPoint(0, 0)))
+            rect_menu = menu.rect().translated(menu.mapToGlobal(QPoint(0, 0)))
+            left = min(rect_botao.right(), rect_menu.left())
+            right = max(rect_botao.right(), rect_menu.left())
+            top = min(rect_botao.top(), rect_menu.top())
+            bottom = max(rect_botao.bottom(), rect_menu.bottom())
+            connector = QRectF(left, top, max(1, right - left), max(1, bottom - top))
+            return connector.contains(pos)
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+
+    def _botao_backstage_sob_cursor(self, pos: QPoint) -> tuple[str | None, QWidget | None]:
+        """Retorna qualquer botão do backstage sob o cursor."""
+        if not hasattr(self, "backstage") or not self._qt_widget_visivel(self.backstage):
+            return None, None
+        for texto, botao in getattr(self.backstage, "botoes", {}).items():
+            if self._cursor_sobre_widget_global(botao, pos, margem=1):
+                return texto, botao
+        return None, None
+
+    def _botao_submenu_backstage_sob_cursor(self, pos: QPoint) -> tuple[str | None, QWidget | None]:
+        """Retorna o texto e o widget do botão (com submenu) sob o cursor."""
+        texto, botao = self._botao_backstage_sob_cursor(pos)
+        if texto and self._item_backstage_tem_submenu(texto):
+            return texto, botao
+        return None, None
+
+    def _item_backstage_tem_submenu(self, texto: str) -> bool:
+        """Verifica se o botão do backstage possui um submenu."""
+        return texto in {"Modelo ▸", "Importar ▸", "Exportar ▸", "Configurações ▸", "Ajuda ▸"}
+
+    def _mostrar_menu_backstage(self, menu: QMenu, botao: QWidget, origem: str, modo_hover: bool):
+        """Exibe o menu (usado tanto para clique quanto hover)."""
+        if modo_hover:
+            self._abrir_submenu_backstage_hover(origem, botao)
+        else:
+            self._fechar_submenu_backstage_hover(forcar=True)
+            if self._qt_widget_vivo(menu) and self._qt_widget_vivo(botao):
+                try:
+                    menu.exec(self._posicao_submenu_backstage(botao))
+                except RuntimeError:
+                    pass
+
+    def _preparar_menu_backstage_hover(self, menu: QMenu, origem: str):
+        """Prepara o menu para funcionar com hover (eventos e rastreamento)."""
+        if not self._qt_widget_vivo(menu):
+            return
+        menu._menu_hover_backstage = True  # type: ignore[attr-defined]
+        menu._origem_backstage = origem  # type: ignore[attr-defined]
+        self._registrar_menus_hover_backstage(menu)
+        try:
+            menu.aboutToHide.connect(lambda m=menu: self._limpar_menu_backstage_hover_se_necessario(m))
+        except RuntimeError:
+            pass
+        except Exception:
+            pass
+
+    def _registrar_menus_hover_backstage(self, menu: QMenu):
+        """Registra o menu e seus submenus para monitoramento de hover."""
+        if not self._qt_widget_vivo(menu):
+            return
+        if menu not in self._menus_backstage_hover:
+            self._menus_backstage_hover.append(menu)
+        try:
+            menu.installEventFilter(self)
+            menu.setMouseTracking(True)
+            for acao in menu.actions():
+                sub = acao.menu()
+                if sub:
+                    self._registrar_menus_hover_backstage(sub)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+        except Exception:
+            pass
+
+    def _limpar_menu_backstage_hover_se_necessario(self, menu: QMenu):
+        """Remove referência do menu quando ele for fechado/destruído."""
+        if not self._qt_widget_vivo(menu):
+            self._limpar_referencias_menus_backstage_invalidos()
+            return
+        try:
+            if menu is getattr(self, "_menu_backstage_hover_aberto", None) and not menu.isVisible():
+                self._menu_backstage_hover_aberto = None
+                self._menu_backstage_hover_origem = None
+                self._menu_backstage_hover_botao = None
+                self._menus_backstage_hover = []
+                self._limpar_hover_botoes_backstage()
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+
+    def _fechar_submenu_backstage_se_cursor_fora(self):
+        """Fechamento agendado, verifica se cursor ainda está fora antes de fechar."""
+        if not self._cursor_sobre_area_backstage_ou_menus():
+            self._fechar_submenu_backstage_hover(forcar=True)
+
+    def _cursor_sobre_area_backstage_ou_menus(self) -> bool:
+        """Verifica se o cursor está sobre backstage, botões ou qualquer menu aberto."""
+        pos = QCursor.pos()
+        texto, _ = self._botao_backstage_sob_cursor(pos)
+        if texto:
+            return True
+        return self._cursor_sobre_algum_menu_backstage(pos) or self._cursor_sobre_corredor_entre_botao_e_menu(pos)
+
+    # ========== FIM DAS CORREÇÕES DE HOVER ==========
+
+    def _abrir_menu_modelo(self, modo_hover: bool = False):
+        botao = self.backstage.botoes.get("Modelo ▸")
+        if botao is None:
+            return
+        self._mostrar_menu_backstage(self._criar_menu_modelo(), botao, "Modelo ▸", modo_hover)
+
+    def _criar_menu_modelo(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setStyleSheet(self._estilo_menu_backstage())
+        menu.addAction("Novo modelo", lambda: self.lbl_status.setText("Novo modelo (em breve)"))
+        menu.addAction("Abrir modelo", lambda: self.lbl_status.setText("Abrir modelo (em breve)"))
+        menu.addAction("Salvar modelo", lambda: self.lbl_status.setText("Salvar modelo (em breve)"))
+        menu.addSeparator()
+        menu.addAction("Tabela de medidas", lambda: self.lbl_status.setText("Tabela de medidas (em breve)"))
+        menu.addAction("Propriedades do modelo", lambda: self.lbl_status.setText("Propriedades do modelo (em breve)"))
+        return menu
+
     def _abrir_menu_importar(self, modo_hover: bool = False):
         botao = self.backstage.botoes.get("Importar ▸")
         if not botao:
             return
+        self._mostrar_menu_backstage(self._criar_menu_importar(), botao, "Importar ▸", modo_hover)
+
+    def _criar_menu_importar(self) -> QMenu:
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
-            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
-        )
+        menu.setStyleSheet(self._estilo_menu_backstage())
         menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
         sub_adv = menu.addMenu("Audaces Avançado")
         sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
@@ -892,40 +1320,36 @@ class GuimmaStudioMainWindow(QMainWindow):
         sub_adv.addAction("EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
         menu.addSeparator()
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
-        pos = botao.mapToGlobal(botao.rect().bottomRight())
-        if modo_hover:
-            self._configurar_menu_hover(menu)
-            self._menu_backstage_hover_aberto = menu
-            menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
-            menu.popup(pos)
-            return
-        menu.exec(pos)
+        return menu
 
-    def _abrir_submenu_backstage_hover(self, item_texto: str):
-        if not self.backstage.isVisible():
+    def _abrir_menu_exportar(self, modo_hover: bool = False):
+        botao = self.backstage.botoes.get("Exportar ▸")
+        if botao is None:
             return
-        self._fechar_submenu_backstage_hover(item_texto)
-        if item_texto == "Importar ▸":
-            self._abrir_menu_importar(modo_hover=True)
-            return
-        if item_texto == "Configurações ▸":
-            self._abrir_menu_configuracoes(modo_hover=True)
+        self._mostrar_menu_backstage(self._criar_menu_exportar(), botao, "Exportar ▸", modo_hover)
 
-    def _fechar_submenu_backstage_hover(self, _item_texto: str | None = None):
-        menu = getattr(self, "_menu_backstage_hover_aberto", None)
-        if menu is not None and menu.isVisible():
-            self._fechar_cascata_menu_hover(menu)
+    def _criar_menu_exportar(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setStyleSheet(self._estilo_menu_backstage())
+        menu.addAction("Exportar projeto...", lambda: self.lbl_status.setText("Exportar projeto (em breve)"))
+        menu.addAction("Exportar para PDF...", self._abrir_dialogo_impressao)
+        menu.addAction("Exportar para plotagem...", self._abrir_dialogo_plotagem)
+        menu.addSeparator()
+        menu.addAction("DXF/AAMA...", lambda: self.lbl_status.setText("Exportar DXF/AAMA (em breve)"))
+        menu.addAction("ASTM...", lambda: self.lbl_status.setText("Exportar ASTM (em breve)"))
+        menu.addAction("SVG/Imagem...", lambda: self.lbl_status.setText("Exportar SVG/Imagem (em breve)"))
+        return menu
 
     def _abrir_menu_configuracoes(self, modo_hover: bool = False):
         botao = self.backstage.botoes.get("Configurações ▸")
         if botao is None:
             return
+        self._mostrar_menu_backstage(self._criar_menu_configuracoes(), botao, "Configurações ▸", modo_hover)
+
+    def _criar_menu_configuracoes(self) -> QMenu:
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background: #ffffff; border: 1px solid #c8d0d8; }"
-            "QMenu::item { padding: 6px 18px; }"
-            "QMenu::item:selected { background: #e6f2ff; }"
-        )
+        menu.setStyleSheet(self._estilo_menu_backstage())
+
         def _add_menu_acao(texto: str, callback, icon_name: str | None = None):
             acao = menu.addAction(texto, callback)
             if icon_name:
@@ -933,6 +1357,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if caminho.exists():
                     acao.setIcon(QIcon(str(caminho)))
             return acao
+
         menu.addAction("Opções", self._abrir_dialogo_opcoes)
         menu.addAction("Unidade de medida\tCtrl+U", self._abrir_dialogo_unidade_medida)
         menu.addAction("Mesa digitalizadora", lambda: self.lbl_status.setText("Mesa digitalizadora (em breve)"))
@@ -952,33 +1377,67 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Paleta de usuário", lambda: self.lbl_status.setText("Paleta de usuário (em breve)"))
         menu.addAction("Tecidos", lambda: self._ativar_ferramenta_global("tecidos"))
         menu.addAction("Teclas de atalho", lambda: self.lbl_status.setText("Teclas de atalho (em breve)"))
-        _add_menu_acao("Impressão...	Ctrl+P", self._abrir_dialogo_impressao, "imprimir_rapido.svg")
-        _add_menu_acao("Plotagem...	Ctrl+Shift+P", self._abrir_dialogo_plotagem, "plotar_rapido.svg")
+        _add_menu_acao("Impressão...\tCtrl+P", self._abrir_dialogo_impressao, "imprimir_rapido.svg")
+        _add_menu_acao("Plotagem...\tCtrl+Shift+P", self._abrir_dialogo_plotagem, "plotar_rapido.svg")
         menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
-        pos = botao.mapToGlobal(botao.rect().bottomRight())
-        if modo_hover:
-            self._configurar_menu_hover(menu)
-            self._menu_backstage_hover_aberto = menu
-            menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
-            menu.popup(pos)
+        return menu
+
+    def _abrir_menu_ajuda(self, modo_hover: bool = False):
+        botao = self.backstage.botoes.get("Ajuda ▸") or self.backstage.botoes.get("Ajuda")
+        if botao is None:
             return
-        menu.exec(pos)
+        origem = "Ajuda ▸" if "Ajuda ▸" in self.backstage.botoes else "Ajuda"
+        self._mostrar_menu_backstage(self._criar_menu_ajuda(), botao, origem, modo_hover)
 
-    def _configurar_menu_hover(self, menu: QMenu):
-        menu._fechar_no_leave = True  # type: ignore[attr-defined]
-        menu.setMouseTracking(True)
-        menu.installEventFilter(self)
-        for action in menu.actions():
-            sub = action.menu()
-            if sub is not None:
-                self._configurar_menu_hover(sub)
+    def _criar_menu_ajuda(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setStyleSheet(self._estilo_menu_backstage())
+        menu.addAction("Ajuda do GUIMMA STUDIO", lambda: self.lbl_status.setText("Ajuda (em breve)"))
+        menu.addAction("Tutoriais", lambda: self.lbl_status.setText("Tutoriais (em breve)"))
+        menu.addAction("Sobre", lambda: self.lbl_status.setText("Sobre (em breve)"))
+        return menu
 
-    def _fechar_cascata_menu_hover(self, menu: QMenu):
-        for sub in menu.findChildren(QMenu):
-            if sub.isVisible():
-                sub.close()
-        if menu.isVisible():
-            menu.close()
+    def _estilo_menu_backstage(self) -> str:
+        return (
+            "QMenu { background:#ffffff; color:#111111; border:1px solid #c8d0d8; padding:3px; }"
+            "QMenu::item { color:#111111; padding:7px 22px 7px 18px; min-width:220px; }"
+            "QMenu::item:selected { background:#e6f2ff; color:#0b4f82; }"
+            "QMenu::separator { height:1px; background:#d8dee6; margin:4px 8px; }"
+            "QMenu::right-arrow { width:10px; height:10px; }"
+        )
+
+    def _posicao_submenu_backstage(self, botao: QWidget) -> QPoint:
+        return botao.mapToGlobal(QPoint(max(0, botao.width() - 1), 0))
+
+
+
+    def _qt_widget_vivo(self, widget) -> bool:
+        try:
+            return widget is not None and _qt_objeto_valido(widget)
+        except Exception:
+            return False
+
+    def _qt_widget_visivel(self, widget) -> bool:
+        try:
+            return self._qt_widget_vivo(widget) and widget.isVisible()
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+
+    def _limpar_referencias_menus_backstage_invalidos(self):
+        menus_validos = []
+        for menu in list(getattr(self, "_menus_backstage_hover", [])):
+            if self._qt_widget_vivo(menu):
+                menus_validos.append(menu)
+        self._menus_backstage_hover = menus_validos
+        atual = getattr(self, "_menu_backstage_hover_aberto", None)
+        if atual is not None and not self._qt_widget_vivo(atual):
+            self._menu_backstage_hover_aberto = None
+            self._menu_backstage_hover_origem = None
+            self._menus_backstage_hover = []
+
+
 
     def _abrir_dialogo_opcoes(self):
         dialog = QDialog(self)
@@ -4139,49 +4598,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         payload = self._capturar_estado_documento_canvas(area)
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-    def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
     def _tem_alteracoes_area(self, area: AreaDocumentoWidget) -> bool:
         assinatura_salva = area.property("assinatura_salva_conteudo")
