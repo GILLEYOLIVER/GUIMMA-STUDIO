@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 class BackstageArquivoPanel(QFrame):
     arquivo_recente_clicado = Signal(str)
     submenu_hover = Signal(str)
+    submenu_leave = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -209,4 +210,10 @@ class BackstageArquivoPanel(QFrame):
             and "▸" in watched.text()
         ):
             self.submenu_hover.emit(watched.text())
+        if (
+            isinstance(watched, QPushButton)
+            and event.type() == QEvent.Leave
+            and "▸" in watched.text()
+        ):
+            self.submenu_leave.emit(watched.text())
         return super().eventFilter(watched, event)
