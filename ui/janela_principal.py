@@ -447,6 +447,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
         self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
+        self.backstage.submenu_hover.connect(self._abrir_submenu_backstage_hover)
         if "Plotar" in self.backstage.botoes:
             self.backstage.botoes["Plotar"].clicked.connect(self._abrir_dialogo_plotagem)
         if "Imprimir" in self.backstage.botoes:
@@ -889,6 +890,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         menu.exec(pos)
+
+    def _abrir_submenu_backstage_hover(self, item_texto: str):
+        if not self.backstage.isVisible():
+            return
+        if item_texto == "Importar ▸":
+            self._abrir_menu_importar()
+            return
+        if item_texto == "Configurações ▸":
+            self._abrir_menu_configuracoes()
 
     def _abrir_menu_configuracoes(self):
         botao = self.backstage.botoes.get("Configurações ▸")
