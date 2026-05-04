@@ -140,7 +140,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
-        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", False))
+        self._barra_usuarios_habilitada = True
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
@@ -247,7 +247,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_unidade_medida = float(cfg.get("passo_unidade_medida", self._passo_unidade_medida))
         self._unidade_area = str(cfg.get("unidade_area", self._unidade_area))
         self._precisao_medida = str(cfg.get("precisao_medida", self._precisao_medida))
-        self._barra_usuarios_habilitada = bool(cfg.get("barra_usuarios_habilitada", self._barra_usuarios_habilitada))
+        self._barra_usuarios_habilitada = True
         self._barra_usuarios_posicao = str(cfg.get("barra_usuarios_posicao", self._barra_usuarios_posicao))
         estilo = cfg.get("estilo_desenho")
         if isinstance(estilo, dict):
@@ -412,7 +412,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_barra_usuarios = self.menu_visao.addMenu("Barra de usuários")
         self.action_barra_usuarios_habilitada = QAction("Exibir barra de usuários", self)
         self.action_barra_usuarios_habilitada.setCheckable(True)
-        self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+        self.action_barra_usuarios_habilitada.setChecked(True)
+        self.action_barra_usuarios_habilitada.setEnabled(False)
         self.action_barra_usuarios_habilitada.toggled.connect(self._alternar_barra_usuarios_habilitada)
         menu_barra_usuarios.addAction(self.action_barra_usuarios_habilitada)
         grupo_posicao_barra = QActionGroup(self)
@@ -1334,6 +1335,10 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _criar_menu_importar(self) -> QMenu:
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
+        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
+        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
+        menu.addSeparator()
         menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
         menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
         menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
@@ -3901,8 +3906,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.painel_controles_usuario.setVisible(tab_id == "usuarios")
 
     def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
-        self._barra_usuarios_habilitada = habilitada
-        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
+        self._barra_usuarios_habilitada = True
+        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = True
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
         self._salvar_preferencias_app()
 
