@@ -61,6 +61,8 @@ class Ferramenta(FerramentaBase):
         self._pontos_preview: list[QPointF] = []
         self._segmentos_ativos: list[tuple[QPointF, QPointF]] = []
         self._inicio_dist: float | None = None
+        self._ultimo_dist: float | None = None
+        self._progresso_assinado = 0.0
         self._marcando = False
 
     def _obter_dialog(self, canvas) -> PontosNoPerimetroDialog:
@@ -79,6 +81,8 @@ class Ferramenta(FerramentaBase):
         self._pontos_preview = []
         self._segmentos_ativos = []
         self._inicio_dist = None
+        self._ultimo_dist = None
+        self._progresso_assinado = 0.0
         self._marcando = False
         dialog = self._obter_dialog(canvas)
         dialog.show()
@@ -116,31 +120,37 @@ class Ferramenta(FerramentaBase):
             acumulado += seg_len
         return None if melhor is None else float(melhor[1])
 
-    def _pontos_entre_distancias(self, inicio: float, fim: float, passo: float) -> list[QPointF]:
-        if not self._segmentos_ativos or passo <= 1e-9:
-            return []
-        if fim < inicio:
-            inicio, fim = fim, inicio
-        alvos = []
-        d = inicio + passo
-        while d < fim - 1e-9:
-            alvos.append(d)
-            d += passo
-        if not alvos:
-            return []
+    def _perimetro_total(self) -> float:
+        return sum(self._dist(a, b) for a, b in self._segmentos_ativos)
 
-        pts: list[QPointF] = []
+    def _ponto_por_distancia(self, distancia: float) -> QPointF | None:
+        total = self._perimetro_total()
+        if total <= 1e-9:
+            return None
+        d = distancia % total
         acumulado = 0.0
-        i = 0
         for a, b in self._segmentos_ativos:
             seg_len = self._dist(a, b)
             if seg_len <= 1e-9:
                 continue
-            while i < len(alvos) and acumulado + seg_len >= alvos[i] - 1e-9:
-                t = (alvos[i] - acumulado) / seg_len
-                pts.append(QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t)))
-                i += 1
+            if acumulado + seg_len >= d - 1e-9:
+                t = (d - acumulado) / seg_len
+                return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
             acumulado += seg_len
+        return QPointF(self._segmentos_ativos[-1][1]) if self._segmentos_ativos else None
+
+    def _pontos_por_progresso(self, inicio: float, progresso: float, passo: float) -> list[QPointF]:
+        if passo <= 1e-9:
+            return []
+        qtd = int(abs(progresso) // passo)
+        if qtd <= 0:
+            return []
+        direcao = 1.0 if progresso >= 0 else -1.0
+        pts: list[QPointF] = []
+        for i in range(1, qtd + 1):
+            p = self._ponto_por_distancia(inicio + (direcao * passo * i))
+            if p is not None:
+                pts.append(p)
         return pts
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -156,6 +166,8 @@ class Ferramenta(FerramentaBase):
             self._idx_destaque = idx
             self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
             self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
+            self._ultimo_dist = self._inicio_dist
+            self._progresso_assinado = 0.0
             self._pontos_preview = []
             self._marcando = self._inicio_dist is not None
             texto = "Início marcado. Percorra o perímetro com o mouse e clique para confirmar."
@@ -179,9 +191,21 @@ class Ferramenta(FerramentaBase):
         atual = self._dist_ao_longo_do_perimetro(pos)
         if atual is None:
             return False
+        total = self._perimetro_total()
+        if total <= 1e-9:
+            return False
+        if self._ultimo_dist is not None:
+            delta = atual - self._ultimo_dist
+            if delta > (total / 2.0):
+                delta -= total
+            elif delta < -(total / 2.0):
+                delta += total
+            self._progresso_assinado += delta
+        self._ultimo_dist = atual
+
         dialog = self._obter_dialog(canvas)
         passo = dialog.passo_unidade() * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
-        self._pontos_preview = self._pontos_entre_distancias(self._inicio_dist, atual, passo)
+        self._pontos_preview = self._pontos_por_progresso(self._inicio_dist, self._progresso_assinado, passo)
         canvas.update()
         return True
 
@@ -196,6 +220,8 @@ class Ferramenta(FerramentaBase):
 
         self._marcando = False
         self._inicio_dist = None
+        self._ultimo_dist = None
+        self._progresso_assinado = 0.0
         txt = f"Marcação confirmada: {len(self._pontos_preview)} pontos."
         self.set_status(txt)
         mensagem_status(canvas, txt)
