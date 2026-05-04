@@ -4784,7 +4784,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_visualizar_tudo = _BotaoRodapeHover("⤢", "Visualiza toda a área de moldes")
         self.btn_visualizar_tudo.setFixedHeight(20)
         self.btn_visualizar_tudo.setStyleSheet(estilo_botao_icone)
-        self.btn_visualizar_tudo.clicked.connect(lambda: self.lbl_status.setText("Visualiza toda a área de moldes"))
+        self.btn_visualizar_tudo.clicked.connect(self._visualizar_todos_os_moldes)
         row.addWidget(self.btn_visualizar_tudo)
 
         self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
@@ -4804,9 +4804,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_aumenta_indicado = _BotaoRodapeHover("⌕", "Aumenta o nível de visualização de um elemento ou molde indicado")
         self.btn_aumenta_indicado.setFixedHeight(20)
         self.btn_aumenta_indicado.setStyleSheet(estilo_botao_icone)
-        self.btn_aumenta_indicado.clicked.connect(
-            lambda: self.lbl_status.setText("Aumenta o nível de visualização de um elemento ou molde indicado")
-        )
+        self.btn_aumenta_indicado.clicked.connect(self._centralizar_molde_ou_elemento_indicado)
         row.addWidget(self.btn_aumenta_indicado)
 
         self.btn_desfazer_visao = _BotaoRodapeHover("⟲", "Desfaz o último comando de visualização")
@@ -4886,6 +4884,51 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         area.canvas.set_zoom(area.canvas.zoom * fator)
+
+    def _visualizar_todos_os_moldes(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        moldes = [el for el in canvas.cena.elementos if isinstance(el, dict) and el.get("molde")]
+        elementos_alvo = moldes if moldes else [el for el in canvas.cena.elementos if isinstance(el, dict)]
+        if not elementos_alvo:
+            self.lbl_status.setText("Nenhum molde/elemento para visualizar.")
+            return
+        self._centralizar_canvas_em_elementos(canvas, elementos_alvo)
+        self.lbl_status.setText("Visualiza toda a área de moldes.")
+
+    def _centralizar_molde_ou_elemento_indicado(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        selecionados = sorted(getattr(canvas, "_selecionados", set()))
+        alvo = None
+        if selecionados:
+            idx = selecionados[0]
+            if 0 <= idx < len(canvas.cena.elementos):
+                alvo = canvas.cena.elementos[idx]
+        if alvo is None:
+            moldes = [el for el in canvas.cena.elementos if isinstance(el, dict) and el.get("molde")]
+            if moldes:
+                alvo = moldes[0]
+        if alvo is None and canvas.cena.elementos:
+            alvo = canvas.cena.elementos[0]
+        if alvo is None:
+            self.lbl_status.setText("Nenhum molde/elemento para centralizar.")
+            return
+        bbox = self._bbox_elemento(alvo)
+        if bbox is None:
+            return
+        min_x, min_y, max_x, max_y = bbox
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        canvas.set_zoom(min(20.0, max(0.1, canvas.zoom * 1.35)))
+        canvas.origem_cena.setX(cx - (canvas.width() / (2 * canvas.zoom)))
+        canvas.origem_cena.setY(cy - (canvas.height() / (2 * canvas.zoom)))
+        canvas.update()
+        self.lbl_status.setText("Molde/elemento indicado centralizado.")
 
     def _texto_escala(self, zoom: float) -> str:
         base = max(self.ZOOM_INICIAL_CANVAS, 1e-9)
