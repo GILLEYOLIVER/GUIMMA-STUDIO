@@ -3539,6 +3539,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             centros = [(x - media_x, y - media_y) for x, y in centros]
 
         movidos: set[int] = set()
+        bbox_por_idx: dict[int, tuple[float, float, float, float]] = {}
+        for idx, el in enumerate(canvas.cena.elementos):
+            if isinstance(el, dict):
+                bb = self._bbox_elemento(el)
+                if bb is not None:
+                    bbox_por_idx[idx] = bb
         for info, (target_x, target_y) in zip(moldes, centros):
             dx = target_x - info["cx"]
             dy = target_y - info["cy"]
@@ -3565,6 +3571,27 @@ class GuimmaStudioMainWindow(QMainWindow):
                 }
                 chaves_el.discard("")
                 if chaves_rel.intersection(chaves_el):
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
+
+            # Fallback espacial: move elementos auxiliares próximos ao molde
+            # (ex.: pontos/controles sem metadado explícito de vínculo).
+            min_x, min_y, max_x, max_y = info["bbox"]
+            margem_x = max(6.0, (max_x - min_x) * 0.35)
+            margem_y = max(6.0, (max_y - min_y) * 0.35)
+            area_min_x = min_x - margem_x
+            area_min_y = min_y - margem_y
+            area_max_x = max_x + margem_x
+            area_max_y = max_y + margem_y
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict) or el.get("molde"):
+                    continue
+                bb = bbox_por_idx.get(idx)
+                if bb is None:
+                    continue
+                cx = (bb[0] + bb[2]) / 2.0
+                cy = (bb[1] + bb[3]) / 2.0
+                if area_min_x <= cx <= area_max_x and area_min_y <= cy <= area_max_y:
                     self._transladar_elemento(el, dx, dy)
                     movidos.add(idx)
         if registrar_historico:
