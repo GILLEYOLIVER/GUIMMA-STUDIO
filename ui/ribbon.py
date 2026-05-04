@@ -75,6 +75,7 @@ class RibbonButton(QToolButton):
         self.setText(texto)
         self.setIcon(_carregar_icone(ferramenta.icon))
         self.setProperty("tool_id", ferramenta.tool_id)
+        self.setToolTip(ferramenta.title)
         self._somente_icone = ferramenta.tool_id in {"desfazer", "refazer"}
         self.clicked.connect(lambda: self.acionada.emit(self.ferramenta.tool_id))
         self.setContextMenuPolicy(Qt.CustomContextMenu)
