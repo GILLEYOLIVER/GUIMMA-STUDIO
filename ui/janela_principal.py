@@ -277,6 +277,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 background: #ffffff;
                 color: #111111;
             }
+            QToolTip {
+                background-color: #f7f7f7;
+                color: #111111;
+                border: 1px solid #bfc6ce;
+            }
             QTabBar::tab {
                 background: #f6f7f9;
                 color: #101010;
@@ -4730,16 +4735,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.setSpacing(0)
 
         atalhos = QFrame()
-        atalhos.setFixedHeight(30)
-        atalhos.setStyleSheet("background:#f1f3f5; border-top:1px solid #c8d1da; border-bottom:1px solid #dce2e8;")
+        atalhos.setFixedHeight(24)
+        atalhos.setStyleSheet("background:#f4f6f8; border-top:1px solid #c8d1da; border-bottom:1px solid #dce2e8;")
         row = QHBoxLayout(atalhos)
         row.setContentsMargins(8, 2, 8, 2)
         row.setSpacing(4)
 
         estilo_botao_icone = (
-            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:2px 8px; min-width:28px; }"
-            "QPushButton:hover { background:#e9f6ff; border-color:#3ca4df; }"
-            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
+            "QPushButton { color:#1f1f1f; background:transparent; border:none; padding:1px 6px; min-width:22px; }"
+            "QPushButton:hover { background:#d9edf9; border:none; }"
+            "QPushButton:checked { background:#c5e4f6; border:none; color:#0a4f82; font-weight:700; }"
         )
 
         self.btn_snap = _BotaoRodapeHover("🧲", "Ativa ou desativa o snap")
@@ -4757,7 +4762,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_mao = _BotaoRodapeHover("🖐", "Movimenta a posição de visualização")
         self.btn_mao.setCheckable(True)
-        self.btn_mao.setFixedHeight(24)
+        self.btn_mao.setFixedHeight(20)
         self.btn_mao.setToolTip("Mão (navegação)")
         self.btn_mao.setStyleSheet(estilo_botao_icone)
         self.btn_mao.clicked.connect(lambda: self._set_modo_navegacao("mao"))
@@ -4765,21 +4770,21 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_lupa = _BotaoRodapeHover("🔍", "Define a visão da área selecionada")
         self.btn_lupa.setCheckable(True)
-        self.btn_lupa.setFixedHeight(24)
+        self.btn_lupa.setFixedHeight(20)
         self.btn_lupa.setToolTip("Lupa")
         self.btn_lupa.setStyleSheet(estilo_botao_icone)
         self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
         row.addWidget(self.btn_lupa)
 
         self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
-        self.btn_zoom_menos.setFixedHeight(24)
+        self.btn_zoom_menos.setFixedHeight(20)
         self.btn_zoom_menos.setToolTip("Zoom -")
         self.btn_zoom_menos.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_menos.clicked.connect(lambda: self._aplicar_zoom_incremental(1 / 1.1))
         row.addWidget(self.btn_zoom_menos)
 
         self.btn_zoom_mais = _BotaoRodapeHover("+", "Aumenta o nível de visualização")
-        self.btn_zoom_mais.setFixedHeight(24)
+        self.btn_zoom_mais.setFixedHeight(20)
         self.btn_zoom_mais.setToolTip("Zoom +")
         self.btn_zoom_mais.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
@@ -4788,13 +4793,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
         self.btn_grid.setCheckable(True)
         self.btn_grid.setChecked(True)
-        self.btn_grid.setFixedHeight(24)
+        self.btn_grid.setFixedHeight(20)
         self.btn_grid.setStyleSheet(estilo_botao_icone)
         self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
         row.addWidget(self.btn_grid)
 
         self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
-        self.btn_organizar_moldes.setFixedHeight(24)
+        self.btn_organizar_moldes.setFixedHeight(20)
         self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
         self.btn_organizar_moldes.setStyleSheet(estilo_botao_icone)
         self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
@@ -4804,7 +4809,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(atalhos)
 
         barra = QFrame()
-        barra.setFixedHeight(28)
+        barra.setFixedHeight(22)
         barra.setStyleSheet("background: #0b88b6; border-top: 1px solid #0a7aa2; color: white;")
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
