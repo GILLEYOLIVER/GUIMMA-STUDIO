@@ -88,6 +88,7 @@ class _BotaoRodapeHover(QPushButton):
         self._mensagem_hover = mensagem_hover
         self._status_label: QLabel | None = None
         self.setMouseTracking(True)
+        self.setToolTip(mensagem_hover)
 
     def vincular_status(self, lbl_status: QLabel):
         self._status_label = lbl_status
@@ -4949,7 +4950,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_grid.setChecked(True)
         self.btn_grid.setFixedHeight(20)
         self.btn_grid.setStyleSheet(estilo_botao_icone)
-        icone_grid = ICONS_DIR / "grade-diferente-modelo.svg"
+        icone_grid = ICONS_DIR / "grid.svg"
         if icone_grid.exists():
             self.btn_grid.setIcon(QIcon(str(icone_grid)))
             self.btn_grid.setText("")
