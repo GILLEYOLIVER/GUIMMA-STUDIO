@@ -112,6 +112,12 @@ class Ferramenta(FerramentaBase):
 
         return pontos
 
+    def _cor_preview(self, canvas) -> str:
+        cor = str(getattr(canvas, "_linha_cor", self.COR_PREVIEW))
+        if QColor(cor).isValid():
+            return cor
+        return self.COR_PREVIEW
+
     def _espessura(self, canvas) -> float:
         try:
             return max(1.0, float(getattr(canvas, "_linha_espessura", 1.0)))
@@ -556,7 +562,7 @@ class Ferramenta(FerramentaBase):
             canvas,
             painter,
             curva_preview,
-            self.COR_PREVIEW,
+            self._cor_preview(canvas),
             self._espessura(canvas),
         )
 
