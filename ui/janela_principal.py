@@ -447,6 +447,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
         self.backstage.botoes["Configurações ▸"].clicked.connect(self._abrir_menu_configuracoes)
+        self.backstage.submenu_hover.connect(self._abrir_submenu_backstage_hover)
+        self.backstage.submenu_leave.connect(self._fechar_submenu_backstage_hover)
         if "Plotar" in self.backstage.botoes:
             self.backstage.botoes["Plotar"].clicked.connect(self._abrir_dialogo_plotagem)
         if "Imprimir" in self.backstage.botoes:
@@ -870,7 +872,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["posicoes_caixas_aux"] = dict(self._posicoes_caixas_aux)
         self._salvar_preferencias_app()
 
-    def _abrir_menu_importar(self):
+    def _abrir_menu_importar(self, modo_hover: bool = False):
         botao = self.backstage.botoes.get("Importar ▸")
         if not botao:
             return
@@ -888,9 +890,29 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
+        if modo_hover:
+            self._menu_backstage_hover_aberto = menu
+            menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
+            menu.popup(pos)
+            return
         menu.exec(pos)
 
-    def _abrir_menu_configuracoes(self):
+    def _abrir_submenu_backstage_hover(self, item_texto: str):
+        if not self.backstage.isVisible():
+            return
+        self._fechar_submenu_backstage_hover(item_texto)
+        if item_texto == "Importar ▸":
+            self._abrir_menu_importar(modo_hover=True)
+            return
+        if item_texto == "Configurações ▸":
+            self._abrir_menu_configuracoes(modo_hover=True)
+
+    def _fechar_submenu_backstage_hover(self, _item_texto: str | None = None):
+        menu = getattr(self, "_menu_backstage_hover_aberto", None)
+        if menu is not None and menu.isVisible():
+            menu.close()
+
+    def _abrir_menu_configuracoes(self, modo_hover: bool = False):
         botao = self.backstage.botoes.get("Configurações ▸")
         if botao is None:
             return
@@ -930,6 +952,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         _add_menu_acao("Plotagem...	Ctrl+Shift+P", self._abrir_dialogo_plotagem, "plotar_rapido.svg")
         menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
+        if modo_hover:
+            self._menu_backstage_hover_aberto = menu
+            menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
+            menu.popup(pos)
+            return
         menu.exec(pos)
 
     def _abrir_dialogo_opcoes(self):

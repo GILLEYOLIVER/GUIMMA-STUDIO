@@ -914,7 +914,7 @@
       "title": "Salvar como",
       "module": "tools/acao_rapida_tool.py",
       "class": "Ferramenta",
-      "icon": "salvar.svg"
+      "icon": "salvar_como.svg"
     },
     "cores": {
       "title": "Cores",
