@@ -1,5 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-label="Grade diferente do modelo">
-  <rect x="3" y="3" width="18" height="18" rx="2" fill="#FFFFFF" stroke="#6D8FB3" stroke-width="1.2"/>
-  <path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="#6D8FB3" stroke-width="1"/>
-  <path d="M7 7l10 10M17 7L7 17" stroke="#C0392B" stroke-width="2.2" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Grid</title>
+  <path d="M68 13h376c30.4 0 55 24.6 55 55v376c0 30.4-24.6 55-55 55H68c-30.4 0-55-24.6-55-55V68c0-30.4 24.6-55 55-55zm0 36c-10.5 0-19 8.5-19 19v376c0 10.5 8.5 19 19 19h376c10.5 0 19-8.5 19-19V68c0-10.5-8.5-19-19-19H68z" fill="#000"/>
+  <rect x="163" y="31" width="36" height="450" fill="#000"/>
+  <rect x="313" y="31" width="36" height="450" fill="#000"/>
+  <rect x="31" y="163" width="450" height="36" fill="#000"/>
+  <rect x="31" y="313" width="450" height="36" fill="#000"/>
 </svg>

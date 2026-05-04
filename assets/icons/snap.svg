@@ -1,12 +1,45 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Ícone de ímã snap">
   <defs>
-    <linearGradient id="gBody" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7a7a7a"/>
-      <stop offset="1" stop-color="#616161"/>
-    </linearGradient>
+    <clipPath id="leftLegClip">
+      <path d="M36 36 Q36 14 58 14 H139 Q160 14 160 36 V282 Q160 381 256 381 Q352 381 352 282 V36 Q352 14 374 14 H455 Q476 14 476 36 V282 Q476 489 256 489 Q36 489 36 282 Z"/>
+    </clipPath>
+    <clipPath id="rightLegClip">
+      <path d="M36 36 Q36 14 58 14 H139 Q160 14 160 36 V282 Q160 381 256 381 Q352 381 352 282 V36 Q352 14 374 14 H455 Q476 14 476 36 V282 Q476 489 256 489 Q36 489 36 282 Z"/>
+    </clipPath>
   </defs>
-  <path d="M16 10h10v24c0 7 5 12 12 12s12-5 12-12V10h10v24c0 12-10 22-22 22S16 46 16 34V10z" fill="url(#gBody)" stroke="#1f1f1f" stroke-width="2"/>
-  <rect x="16" y="8" width="10" height="10" rx="2" fill="#5a8fe6"/>
-  <rect x="50" y="8" width="10" height="10" rx="2" fill="#ff4a4a"/>
-  <path d="M25 41c3 5 7 8 13 8" fill="none" stroke="#252525" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Corpo principal do ímã -->
+  <path d="M36 36 Q36 14 58 14 H139 Q160 14 160 36 V282 Q160 381 256 381 Q352 381 352 282 V36 Q352 14 374 14 H455 Q476 14 476 36 V282 Q476 489 256 489 Q36 489 36 282 Z"
+        fill="#696968"/>
+
+  <!-- Sombra lateral direita do corpo -->
+  <path d="M431 107 V282 Q431 447 256 447 Q116 447 116 282 V107 H160 V282 Q160 381 256 381 Q352 381 352 282 V107 Z"
+        fill="#5a5a59" opacity="0.75"/>
+
+  <!-- Área interna preta do U -->
+  <path d="M160 36 V282 Q160 381 256 381 Q352 381 352 282 V36 H330 V280 Q330 351 256 351 Q182 351 182 280 V36 Z"
+        fill="#000000"/>
+
+  <!-- Bobina/onda superior -->
+  <path d="M185 68 L209 40 L233 68 L257 40 L281 68 L305 40 L329 68"
+        fill="none" stroke="#050505" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Ponteiras coloridas -->
+  <path d="M36 36 Q36 14 58 14 H139 Q160 14 160 36 V97 H36 Z" fill="#6595f3"/>
+  <path d="M352 36 Q352 14 374 14 H455 Q476 14 476 36 V97 H352 Z" fill="#ff454d"/>
+
+  <!-- Luzes nas ponteiras -->
+  <path d="M58 14 H94 Q115 14 115 36 V97 H36 V36 Q36 14 58 14 Z" fill="#6d9cf5" opacity="0.62"/>
+  <path d="M374 14 H410 Q431 14 431 36 V97 H352 V36 Q352 14 374 14 Z" fill="#ff5960" opacity="0.58"/>
+
+  <!-- Linhas de separação das ponteiras -->
+  <path d="M36 102 H160 M352 102 H476" fill="none" stroke="#050505" stroke-width="10" stroke-linecap="butt"/>
+
+  <!-- Realce curvo inferior esquerdo -->
+  <path d="M97 374 Q139 456 256 464" fill="none" stroke="#050505" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Contorno externo -->
+  <path d="M36 36 Q36 14 58 14 H139 Q160 14 160 36 V282 Q160 381 256 381 Q352 381 352 282 V36 Q352 14 374 14 H455 Q476 14 476 36 V282 Q476 489 256 489 Q36 489 36 282 Z"
+        fill="none" stroke="#050505" stroke-width="12" stroke-linejoin="round"/>
 </svg>
