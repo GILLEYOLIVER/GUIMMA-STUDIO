@@ -478,7 +478,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):  # noqa: N802
         if isinstance(watched, QMenu) and event.type() == QEvent.Leave and getattr(watched, "_fechar_no_leave", False):
-            watched.close()
+            QTimer.singleShot(0, watched.close)
             return True
         if (
             hasattr(self, "backstage")
