@@ -478,7 +478,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):  # noqa: N802
         if isinstance(watched, QMenu) and event.type() == QEvent.Leave and getattr(watched, "_fechar_no_leave", False):
-            QTimer.singleShot(0, watched.close)
+            QTimer.singleShot(0, lambda m=watched: self._fechar_cascata_menu_hover(m))
             return True
         if (
             hasattr(self, "backstage")
@@ -894,8 +894,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         if modo_hover:
-            menu._fechar_no_leave = True  # type: ignore[attr-defined]
-            menu.installEventFilter(self)
+            self._configurar_menu_hover(menu)
             self._menu_backstage_hover_aberto = menu
             menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
             menu.popup(pos)
@@ -915,7 +914,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _fechar_submenu_backstage_hover(self, _item_texto: str | None = None):
         menu = getattr(self, "_menu_backstage_hover_aberto", None)
         if menu is not None and menu.isVisible():
-            menu.close()
+            self._fechar_cascata_menu_hover(menu)
 
     def _abrir_menu_configuracoes(self, modo_hover: bool = False):
         botao = self.backstage.botoes.get("Configurações ▸")
@@ -958,13 +957,28 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         if modo_hover:
-            menu._fechar_no_leave = True  # type: ignore[attr-defined]
-            menu.installEventFilter(self)
+            self._configurar_menu_hover(menu)
             self._menu_backstage_hover_aberto = menu
             menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
             menu.popup(pos)
             return
         menu.exec(pos)
+
+    def _configurar_menu_hover(self, menu: QMenu):
+        menu._fechar_no_leave = True  # type: ignore[attr-defined]
+        menu.setMouseTracking(True)
+        menu.installEventFilter(self)
+        for action in menu.actions():
+            sub = action.menu()
+            if sub is not None:
+                self._configurar_menu_hover(sub)
+
+    def _fechar_cascata_menu_hover(self, menu: QMenu):
+        for sub in menu.findChildren(QMenu):
+            if sub.isVisible():
+                sub.close()
+        if menu.isVisible():
+            menu.close()
 
     def _abrir_dialogo_opcoes(self):
         dialog = QDialog(self)
