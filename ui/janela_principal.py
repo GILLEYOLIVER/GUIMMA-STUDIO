@@ -4781,6 +4781,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
         row.addWidget(self.btn_lupa)
 
+        self.btn_visualizar_tudo = _BotaoRodapeHover("⤢", "Visualiza toda a área de moldes")
+        self.btn_visualizar_tudo.setFixedHeight(20)
+        self.btn_visualizar_tudo.setStyleSheet(estilo_botao_icone)
+        self.btn_visualizar_tudo.clicked.connect(lambda: self.lbl_status.setText("Visualiza toda a área de moldes"))
+        row.addWidget(self.btn_visualizar_tudo)
+
         self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
         self.btn_zoom_menos.setFixedHeight(20)
         self.btn_zoom_menos.setToolTip("Zoom -")
@@ -4795,6 +4801,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
         row.addWidget(self.btn_zoom_mais)
 
+        self.btn_aumenta_indicado = _BotaoRodapeHover("⌕", "Aumenta o nível de visualização de um elemento ou molde indicado")
+        self.btn_aumenta_indicado.setFixedHeight(20)
+        self.btn_aumenta_indicado.setStyleSheet(estilo_botao_icone)
+        self.btn_aumenta_indicado.clicked.connect(
+            lambda: self.lbl_status.setText("Aumenta o nível de visualização de um elemento ou molde indicado")
+        )
+        row.addWidget(self.btn_aumenta_indicado)
+
+        self.btn_desfazer_visao = _BotaoRodapeHover("⟲", "Desfaz o último comando de visualização")
+        self.btn_desfazer_visao.setFixedHeight(20)
+        self.btn_desfazer_visao.setStyleSheet(estilo_botao_icone)
+        self.btn_desfazer_visao.clicked.connect(lambda: self.lbl_status.setText("Desfaz o último comando de visualização"))
+        row.addWidget(self.btn_desfazer_visao)
+
         self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
         self.btn_grid.setCheckable(True)
         self.btn_grid.setChecked(True)
@@ -4802,6 +4822,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_grid.setStyleSheet(estilo_botao_icone)
         self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
         row.addWidget(self.btn_grid)
+
+        self.btn_graduacao = _BotaoRodapeHover("⇅", "Mostra ou esconde graduação")
+        self.btn_graduacao.setCheckable(True)
+        self.btn_graduacao.setChecked(True)
+        self.btn_graduacao.setFixedHeight(20)
+        self.btn_graduacao.setStyleSheet(estilo_botao_icone)
+        self.btn_graduacao.clicked.connect(lambda: self.lbl_status.setText("Mostra ou esconde graduação"))
+        row.addWidget(self.btn_graduacao)
 
         self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
         self.btn_organizar_moldes.setFixedHeight(20)
@@ -4820,7 +4848,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")
         l.addWidget(self.lbl_status)
-        for b in (self.btn_snap, self.btn_mao, self.btn_lupa, self.btn_zoom_menos, self.btn_zoom_mais, self.btn_grid, self.btn_organizar_moldes):
+        for b in (
+            self.btn_snap,
+            self.btn_mao,
+            self.btn_lupa,
+            self.btn_visualizar_tudo,
+            self.btn_zoom_menos,
+            self.btn_zoom_mais,
+            self.btn_aumenta_indicado,
+            self.btn_desfazer_visao,
+            self.btn_grid,
+            self.btn_graduacao,
+            self.btn_organizar_moldes,
+        ):
             if isinstance(b, _BotaoRodapeHover):
                 b.vincular_status(self.lbl_status)
         l.addStretch(1)
