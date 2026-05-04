@@ -1,8 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <rect x="20" y="20" width="56" height="56" rx="14" stroke="#4a4a4a" stroke-width="3.2" fill="none" /><text x="48" y="54" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#69c7c3" text-anchor="middle">AR</text>
-    </svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 105 58" width="105" height="58" fill="none">
+  <defs>
+    <linearGradient id="wedge" x1="48" y1="23" x2="70" y2="39" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8D7A96"/>
+      <stop offset="1" stop-color="#CDA8C3"/>
+    </linearGradient>
+    <style>
+      .s{stroke:#171217;stroke-width:2.15;stroke-linecap:round;stroke-linejoin:round;fill:none}
+      .dot{fill:#766C74;stroke:#171217;stroke-width:2}
+      .sq{fill:#D7D0D8;stroke:#171217;stroke-width:2}
+    </style>
+  </defs>
+
+  <!-- Top handle line -->
+  <line class="s" x1="15" y1="12" x2="81" y2="12"/>
+  <circle class="dot" cx="15" cy="12" r="2.8"/>
+  <circle class="dot" cx="81" cy="12" r="2.8"/>
+  <rect class="sq" x="46.5" y="8.5" width="7" height="7" rx="0.4"/>
+
+  <!-- Bottom guide points -->
+  <rect class="sq" x="15.5" y="37.5" width="7" height="7" rx="0.4"/>
+  <rect class="sq" x="76.5" y="37.5" width="7" height="7" rx="0.4"/>
+
+  <!-- Curves -->
+  <path class="s" d="M19 40 C22 28, 34 21, 50 16"/>
+  <path class="s" d="M50 16 C64 19, 73 27, 80 40"/>
+
+  <!-- Center short stem -->
+  <line class="s" x1="50" y1="15.5" x2="50" y2="22"/>
+
+  <!-- Filled wedge -->
+  <path d="M50 22 L50 44 A22 22 0 0 0 71 31 Z" fill="url(#wedge)" stroke="#171217" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>
