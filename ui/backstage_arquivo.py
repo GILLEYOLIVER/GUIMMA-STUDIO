@@ -71,7 +71,7 @@ class BackstageArquivoPanel(QFrame):
             "Novo": "criar.svg",
             "Abrir": "abrir.svg",
             "Salvar": "salvar.svg",
-            "Salvar como": "salvar.svg",
+            "Salvar como": "salvar_como.svg",
             "Modelo ▸": "molde-pronto.svg",
             "Importar ▸": "abrir.svg",
             "Exportar ▸": "plotar_rapido.svg",
