@@ -277,6 +277,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 background: #ffffff;
                 color: #111111;
             }
+            QToolTip {
+                background-color: #f7f7f7;
+                color: #111111;
+                border: 1px solid #bfc6ce;
+            }
             QTabBar::tab {
                 background: #f6f7f9;
                 color: #101010;
