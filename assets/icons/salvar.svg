@@ -1,6 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <path d="M8 20H24L29 15H56V49C56 52.314 53.314 55 50 55H14C10.686 55 8 52.314 8 49V20Z" fill="#4CA2E8"/>
-  <path d="M8 21C8 17.686 10.686 15 14 15H29L34 20H50C53.314 20 56 22.686 56 26V28H8V21Z" fill="#68B7F6"/>
-  <path d="M8 28H56V49C56 52.314 53.314 55 50 55H14C10.686 55 8 52.314 8 49V28Z" fill="#3A91DB"/>
-  <path d="M13 21H24L28 17H48" stroke="#9ED5FF" stroke-width="2" stroke-linecap="round"/>
+  <path d="M10 4H52L60 12V56C60 59.314 57.314 62 54 62H10C6.686 62 4 59.314 4 56V10C4 6.686 6.686 4 10 4Z" fill="#8D9CAA"/>
+  <path d="M16 4H44V20H16V4Z" fill="#B7C9DB"/>
+  <rect x="36" y="7" width="7" height="10" rx="1" fill="#82919E"/>
+  <path d="M4 10C4 6.686 6.686 4 10 4H52L60 12V56C60 59.314 57.314 62 54 62H10C6.686 62 4 59.314 4 56V10Z" stroke="#0B0B0B" stroke-width="1.5"/>
+  <rect x="14" y="31" width="36" height="22" rx="3" fill="#CFE0F1" stroke="#0B0B0B" stroke-width="1.5"/>
+  <path d="M14 35C14 32.791 15.791 31 18 31H46C48.209 31 50 32.791 50 35V39H14V35Z" fill="#F76473"/>
+  <rect x="19" y="42" width="26" height="3" rx="1.5" fill="#5E6C78"/>
+  <rect x="19" y="47" width="26" height="3" rx="1.5" fill="#5E6C78"/>
 </svg>

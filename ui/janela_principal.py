@@ -477,6 +477,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.backstage.hide()
 
     def eventFilter(self, watched, event):  # noqa: N802
+        if isinstance(watched, QMenu) and event.type() == QEvent.Leave and getattr(watched, "_fechar_no_leave", False):
+            watched.close()
+            return True
         if (
             hasattr(self, "backstage")
             and self.backstage.isVisible()
@@ -891,6 +894,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         if modo_hover:
+            menu._fechar_no_leave = True  # type: ignore[attr-defined]
+            menu.installEventFilter(self)
             self._menu_backstage_hover_aberto = menu
             menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
             menu.popup(pos)
@@ -953,6 +958,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Níveis de impressão", self._abrir_dialogo_impressao)
         pos = botao.mapToGlobal(botao.rect().bottomRight())
         if modo_hover:
+            menu._fechar_no_leave = True  # type: ignore[attr-defined]
+            menu.installEventFilter(self)
             self._menu_backstage_hover_aberto = menu
             menu.aboutToHide.connect(lambda: setattr(self, "_menu_backstage_hover_aberto", None))
             menu.popup(pos)
