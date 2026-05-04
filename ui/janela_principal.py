@@ -145,6 +145,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._indice_layout_organizacao_moldes = 0
+        self._pendente_centralizar_indicado = False
         self._inicializar_perfis_usuarios()
         self._opcoes_app = self._carregar_opcoes_app()
         self._timer_salvar_estado = QTimer(self)
@@ -528,6 +529,23 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):  # noqa: N802
         tipo_evento = event.type()
+
+        if (
+            self._pendente_centralizar_indicado
+            and tipo_evento == QEvent.MouseButtonPress
+            and hasattr(watched, "_indices_elementos_em_ponto")
+            and hasattr(event, "button")
+            and event.button() == Qt.LeftButton
+        ):
+            pos = watched._ponto_com_snap(event.position())
+            indices = watched._indices_elementos_em_ponto(pos)
+            if indices:
+                self._centralizar_molde_ou_elemento_indicado(idx_indicado=indices[0])
+            else:
+                self.lbl_status.setText("Nenhum molde/elemento indicado no clique.")
+            self._pendente_centralizar_indicado = False
+            event.accept()
+            return True
 
         if (
             hasattr(self, "backstage")
@@ -3520,10 +3538,35 @@ class GuimmaStudioMainWindow(QMainWindow):
             media_y = sum(y for _, y in centros) / len(centros)
             centros = [(x - media_x, y - media_y) for x, y in centros]
 
+        movidos: set[int] = set()
         for info, (target_x, target_y) in zip(moldes, centros):
             dx = target_x - info["cx"]
             dy = target_y - info["cy"]
-            self._transladar_elemento(canvas.cena.elementos[info["idx"]], dx, dy)
+            idx_molde = int(info["idx"])
+            el_molde = canvas.cena.elementos[idx_molde]
+            self._transladar_elemento(el_molde, dx, dy)
+            movidos.add(idx_molde)
+
+            chaves_rel = {
+                str(el_molde.get("nome_molde") or "").strip(),
+                str(el_molde.get("molde_id") or "").strip(),
+                str(el_molde.get("id_molde") or "").strip(),
+            }
+            chaves_rel.discard("")
+            if not chaves_rel:
+                continue
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict):
+                    continue
+                chaves_el = {
+                    str(el.get("nome_molde") or "").strip(),
+                    str(el.get("molde_id") or "").strip(),
+                    str(el.get("id_molde") or "").strip(),
+                }
+                chaves_el.discard("")
+                if chaves_rel.intersection(chaves_el):
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
         if registrar_historico:
             canvas._registrar_historico()
         canvas.update()
@@ -4139,6 +4182,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
         area_doc.canvas.set_precisao_medida(self._precisao_medida)
+        area_doc.canvas.installEventFilter(self)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         self._marcar_area_como_salva(area_doc)
         area_doc.setProperty("arquivo_origem", caminho_origem)
@@ -4804,7 +4848,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_aumenta_indicado = _BotaoRodapeHover("⌕", "Aumenta o nível de visualização de um elemento ou molde indicado")
         self.btn_aumenta_indicado.setFixedHeight(20)
         self.btn_aumenta_indicado.setStyleSheet(estilo_botao_icone)
-        self.btn_aumenta_indicado.clicked.connect(self._centralizar_molde_ou_elemento_indicado)
+        self.btn_aumenta_indicado.clicked.connect(self._armar_centralizacao_indicada)
         row.addWidget(self.btn_aumenta_indicado)
 
         self.btn_desfazer_visao = _BotaoRodapeHover("⟲", "Desfaz o último comando de visualização")
@@ -4898,14 +4942,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._centralizar_canvas_em_elementos(canvas, elementos_alvo)
         self.lbl_status.setText("Visualiza toda a área de moldes.")
 
-    def _centralizar_molde_ou_elemento_indicado(self):
+    def _armar_centralizacao_indicada(self):
+        self._pendente_centralizar_indicado = True
+        self.lbl_status.setText("Indique o molde ou elemento.")
+
+    def _centralizar_molde_ou_elemento_indicado(self, idx_indicado: int | None = None):
         area = self._area_documento_atual()
         if not area:
             return
         canvas = area.canvas
         selecionados = sorted(getattr(canvas, "_selecionados", set()))
         alvo = None
-        if selecionados:
+        if idx_indicado is not None and 0 <= int(idx_indicado) < len(canvas.cena.elementos):
+            alvo = canvas.cena.elementos[int(idx_indicado)]
+        elif selecionados:
             idx = selecionados[0]
             if 0 <= idx < len(canvas.cena.elementos):
                 alvo = canvas.cena.elementos[idx]
