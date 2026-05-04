@@ -3594,6 +3594,28 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if area_min_x <= cx <= area_max_x and area_min_y <= cy <= area_max_y:
                     self._transladar_elemento(el, dx, dy)
                     movidos.add(idx)
+
+            # Fallback determinístico: associa cada elemento remanescente
+            # ao molde mais próximo (pelo centro do bbox original).
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict) or el.get("molde"):
+                    continue
+                bb = bbox_por_idx.get(idx)
+                if bb is None:
+                    continue
+                ecx = (bb[0] + bb[2]) / 2.0
+                ecy = (bb[1] + bb[3]) / 2.0
+                melhor_idx_molde = None
+                melhor_d2 = None
+                for m in moldes:
+                    mcx, mcy = float(m["cx"]), float(m["cy"])
+                    d2 = ((ecx - mcx) ** 2) + ((ecy - mcy) ** 2)
+                    if melhor_d2 is None or d2 < melhor_d2:
+                        melhor_d2 = d2
+                        melhor_idx_molde = int(m["idx"])
+                if melhor_idx_molde == idx_molde:
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
         if registrar_historico:
             canvas._registrar_historico()
         canvas.update()
