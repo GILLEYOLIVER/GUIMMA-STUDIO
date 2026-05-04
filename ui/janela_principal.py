@@ -82,6 +82,22 @@ class _DelegateTraducaoArquivo(QStyledItemDelegate):
         return self._mapa.get(txt.lower(), txt)
 
 
+class _BotaoRodapeHover(QPushButton):
+    def __init__(self, texto: str, mensagem_hover: str, parent=None):
+        super().__init__(texto, parent)
+        self._mensagem_hover = mensagem_hover
+        self._status_label: QLabel | None = None
+        self.setMouseTracking(True)
+
+    def vincular_status(self, lbl_status: QLabel):
+        self._status_label = lbl_status
+
+    def enterEvent(self, event):  # noqa: N802
+        super().enterEvent(event)
+        if self._status_label is not None and self._mensagem_hover:
+            self._status_label.setText(self._mensagem_hover)
+
+
 class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
@@ -4720,7 +4736,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         row.setContentsMargins(8, 2, 8, 2)
         row.setSpacing(4)
 
-        self.btn_snap = QPushButton("Snap")
+        estilo_botao_icone = (
+            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:2px 8px; min-width:28px; }"
+            "QPushButton:hover { background:#e9f6ff; border-color:#3ca4df; }"
+            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
+        )
+
+        self.btn_snap = _BotaoRodapeHover("🧲", "Ativa ou desativa o snap")
         self.btn_snap.setCheckable(True)
         self.btn_snap.setChecked(self._snap_ativo_global)
         self.btn_snap.setCursor(Qt.PointingHandCursor)
@@ -4728,42 +4750,53 @@ class GuimmaStudioMainWindow(QMainWindow):
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
             self.btn_snap.setIcon(QIcon(str(icone_snap)))
+            self.btn_snap.setText("")
         self.btn_snap.toggled.connect(self._alternar_snap_canvas_atual)
-        self.btn_snap.setStyleSheet(
-            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:3px 10px; }"
-            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
-        )
+        self.btn_snap.setStyleSheet(estilo_botao_icone)
         row.addWidget(self.btn_snap)
 
-        self.btn_mao = QPushButton("🖐")
+        self.btn_mao = _BotaoRodapeHover("🖐", "Movimenta a posição de visualização")
         self.btn_mao.setCheckable(True)
         self.btn_mao.setFixedHeight(24)
         self.btn_mao.setToolTip("Mão (navegação)")
+        self.btn_mao.setStyleSheet(estilo_botao_icone)
         self.btn_mao.clicked.connect(lambda: self._set_modo_navegacao("mao"))
         row.addWidget(self.btn_mao)
 
-        self.btn_lupa = QPushButton("🔍")
+        self.btn_lupa = _BotaoRodapeHover("🔍", "Define a visão da área selecionada")
         self.btn_lupa.setCheckable(True)
         self.btn_lupa.setFixedHeight(24)
         self.btn_lupa.setToolTip("Lupa")
+        self.btn_lupa.setStyleSheet(estilo_botao_icone)
         self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
         row.addWidget(self.btn_lupa)
 
-        self.btn_zoom_menos = QPushButton("−")
+        self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
         self.btn_zoom_menos.setFixedHeight(24)
         self.btn_zoom_menos.setToolTip("Zoom -")
+        self.btn_zoom_menos.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_menos.clicked.connect(lambda: self._aplicar_zoom_incremental(1 / 1.1))
         row.addWidget(self.btn_zoom_menos)
 
-        self.btn_zoom_mais = QPushButton("+")
+        self.btn_zoom_mais = _BotaoRodapeHover("+", "Aumenta o nível de visualização")
         self.btn_zoom_mais.setFixedHeight(24)
         self.btn_zoom_mais.setToolTip("Zoom +")
+        self.btn_zoom_mais.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
         row.addWidget(self.btn_zoom_mais)
 
-        self.btn_organizar_moldes = QPushButton("Organizar moldes")
+        self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setChecked(True)
+        self.btn_grid.setFixedHeight(24)
+        self.btn_grid.setStyleSheet(estilo_botao_icone)
+        self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
+        row.addWidget(self.btn_grid)
+
+        self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
         self.btn_organizar_moldes.setFixedHeight(24)
         self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
+        self.btn_organizar_moldes.setStyleSheet(estilo_botao_icone)
         self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
         row.addWidget(self.btn_organizar_moldes)
 
@@ -4777,6 +4810,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")
         l.addWidget(self.lbl_status)
+        for b in (self.btn_snap, self.btn_mao, self.btn_lupa, self.btn_zoom_menos, self.btn_zoom_mais, self.btn_grid, self.btn_organizar_moldes):
+            if isinstance(b, _BotaoRodapeHover):
+                b.vincular_status(self.lbl_status)
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
         l.addWidget(self.lbl_escala)
