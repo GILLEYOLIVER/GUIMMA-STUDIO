@@ -3450,6 +3450,23 @@ class GuimmaStudioMainWindow(QMainWindow):
             if isinstance(centro, (tuple, list)) and len(centro) == 2:
                 cx, cy = float(centro[0]), float(centro[1])
                 pontos.extend([(cx - raio, cy - raio), (cx + raio, cy + raio)])
+        for chave in (
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_principais",
+            "pontos_auxiliares",
+            "pontos_controle",
+            "curva_pontos",
+        ):
+            arr = el.get(chave)
+            if isinstance(arr, list):
+                for pt in arr:
+                    if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                        pontos.append((float(pt[0]), float(pt[1])))
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            pt = el.get(chave)
+            if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                pontos.append((float(pt[0]), float(pt[1])))
         if not pontos:
             return None
         xs = [p[0] for p in pontos]
@@ -3471,6 +3488,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             centro = el.get("centro")
             if isinstance(centro, (tuple, list)) and len(centro) == 2:
                 el["centro"] = (float(centro[0]) + dx, float(centro[1]) + dy)
+
+        def _shift_pt(pt):
+            if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                return (float(pt[0]) + dx, float(pt[1]) + dy)
+            return pt
+
+        for chave in (
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_principais",
+            "pontos_auxiliares",
+            "pontos_controle",
+            "curva_pontos",
+        ):
+            arr = el.get(chave)
+            if isinstance(arr, list):
+                el[chave] = [_shift_pt(p) for p in arr]
+
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            if chave in el:
+                el[chave] = _shift_pt(el.get(chave))
 
     def _organizar_moldes_no_canvas(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
         moldes: list[dict] = []
