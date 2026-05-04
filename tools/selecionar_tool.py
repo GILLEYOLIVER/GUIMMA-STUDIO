@@ -11,6 +11,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "selecionar"
     nome = "Selecionar"
+    usa_painel_auxiliar = False
     descricao_painel = "Selecione elementos com clique, caixa de seleção e ciclo com botão direito."
 
     def __init__(self):
