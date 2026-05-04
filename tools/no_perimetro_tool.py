@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QVBoxLayout
 
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
@@ -41,12 +41,6 @@ class PontosNoPerimetroDialog(QDialog):
         self.chk_manter.setChecked(True)
         lay.addWidget(self.chk_manter)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        self.btn_aplicar = QPushButton("Aplicar")
-        btn_row.addWidget(self.btn_aplicar)
-        lay.addLayout(btn_row)
-
     def passo_unidade(self) -> float:
         try:
             return max(0.001, float(self.ed_passo.text().replace(",", ".").strip()))
@@ -57,70 +51,97 @@ class PontosNoPerimetroDialog(QDialog):
 class Ferramenta(FerramentaBase):
     id_ferramenta = "no_perimetro"
     nome = "No Perimetro"
-    descricao_painel = "Clique no contorno para marcar pontos por distância no perímetro."
+    descricao_painel = "Clique no contorno para marcar início; mova o mouse e clique novamente para confirmar."
+
+    _dialog_global: PontosNoPerimetroDialog | None = None
 
     def __init__(self):
         super().__init__()
         self._idx_destaque: int | None = None
         self._pontos_preview: list[QPointF] = []
-        self._dialog_por_canvas: dict[int, PontosNoPerimetroDialog] = {}
+        self._segmentos_ativos: list[tuple[QPointF, QPointF]] = []
+        self._inicio_dist: float | None = None
+        self._marcando = False
 
     def _obter_dialog(self, canvas) -> PontosNoPerimetroDialog:
-        chave = id(canvas)
-        dialog = self._dialog_por_canvas.get(chave)
         parent = canvas.window() if hasattr(canvas, "window") else canvas
+        dialog = Ferramenta._dialog_global
         if dialog is None or dialog.parentWidget() is not parent:
+            if dialog is not None:
+                dialog.close()
             dialog = PontosNoPerimetroDialog(parent)
-            self._dialog_por_canvas[chave] = dialog
-        if not hasattr(dialog, "_callbacks_ligados"):
-            dialog._callbacks_ligados = set()  # type: ignore[attr-defined]
-        if chave not in dialog._callbacks_ligados:  # type: ignore[attr-defined]
-            dialog.btn_aplicar.clicked.connect(lambda _=False, c=canvas: self._aplicar_ultimo(c))
-            dialog._callbacks_ligados.add(chave)  # type: ignore[attr-defined]
+            Ferramenta._dialog_global = dialog
         return dialog
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._idx_destaque = None
         self._pontos_preview = []
+        self._segmentos_ativos = []
+        self._inicio_dist = None
+        self._marcando = False
         dialog = self._obter_dialog(canvas)
         dialog.show()
         dialog.raise_()
-        texto = "No perímetro: clique em uma linha/curva para distribuir pontos por distância."
+        texto = "No perímetro: 1º clique define início, mova no perímetro e 2º clique confirma."
         self.set_status(texto)
         mensagem_status(canvas, texto)
 
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
-    def _pontos_por_distancia(self, segmentos: list[tuple[QPointF, QPointF]], passo: float) -> list[QPointF]:
-        if passo <= 1e-9:
+    def _dist_ao_longo_do_perimetro(self, pos: QPointF) -> float | None:
+        if not self._segmentos_ativos:
+            return None
+        melhor = None
+        acumulado = 0.0
+        for a, b in self._segmentos_ativos:
+            abx = b.x() - a.x()
+            aby = b.y() - a.y()
+            denom = (abx * abx) + (aby * aby)
+            seg_len = self._dist(a, b)
+            if seg_len <= 1e-9:
+                continue
+            if denom <= 1e-9:
+                t = 0.0
+            else:
+                apx = pos.x() - a.x()
+                apy = pos.y() - a.y()
+                t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
+            proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+            d = self._dist(proj, pos)
+            val = acumulado + (seg_len * t)
+            if melhor is None or d < melhor[0]:
+                melhor = (d, val)
+            acumulado += seg_len
+        return None if melhor is None else float(melhor[1])
+
+    def _pontos_entre_distancias(self, inicio: float, fim: float, passo: float) -> list[QPointF]:
+        if not self._segmentos_ativos or passo <= 1e-9:
             return []
-        total = sum(self._dist(a, b) for a, b in segmentos)
-        if total <= passo:
-            return []
+        if fim < inicio:
+            inicio, fim = fim, inicio
         alvos = []
-        d = passo
-        while d < total - 1e-9:
+        d = inicio + passo
+        while d < fim - 1e-9:
             alvos.append(d)
             d += passo
         if not alvos:
             return []
 
-        pontos: list[QPointF] = []
+        pts: list[QPointF] = []
         acumulado = 0.0
-        cursor_alvo = 0
-        for a, b in segmentos:
+        i = 0
+        for a, b in self._segmentos_ativos:
             seg_len = self._dist(a, b)
             if seg_len <= 1e-9:
                 continue
-            while cursor_alvo < len(alvos) and acumulado + seg_len >= alvos[cursor_alvo] - 1e-9:
-                t = (alvos[cursor_alvo] - acumulado) / seg_len
-                t = max(0.0, min(1.0, t))
-                pontos.append(QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t)))
-                cursor_alvo += 1
+            while i < len(alvos) and acumulado + seg_len >= alvos[i] - 1e-9:
+                t = (alvos[i] - acumulado) / seg_len
+                pts.append(QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t)))
+                i += 1
             acumulado += seg_len
-        return pontos
+        return pts
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -128,41 +149,54 @@ class Ferramenta(FerramentaBase):
         pos = canvas._ponto_com_snap(event.position())
         info = selecionar_segmento_mais_proximo(canvas, pos)
         if info is None:
-            self._idx_destaque = None
+            return False
+
+        idx = int(info["elemento_idx"])
+        if not self._marcando:
+            self._idx_destaque = idx
+            self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
+            self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
             self._pontos_preview = []
-            texto = "Nenhum contorno encontrado para perímetro."
+            self._marcando = self._inicio_dist is not None
+            texto = "Início marcado. Percorra o perímetro com o mouse e clique para confirmar."
             self.set_status(texto)
             mensagem_status(canvas, texto)
             canvas.update()
             event.accept()
             return True
 
-        self._idx_destaque = int(info["elemento_idx"])
-        el = canvas.cena.elementos[self._idx_destaque]
-        dialog = self._obter_dialog(canvas)
-        passo_cena = dialog.passo_unidade() * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
-        self._pontos_preview = self._pontos_por_distancia(segmentos_de_elemento(el), passo_cena)
-        self._aplicar_ultimo(canvas)
+        if idx != self._idx_destaque:
+            return True
+
+        self._confirmar_marcacoes(canvas)
         event.accept()
         return True
 
-    def _aplicar_ultimo(self, canvas):
-        if self._idx_destaque is None or not (0 <= self._idx_destaque < len(canvas.cena.elementos)):
+    def on_mouse_move(self, canvas, event) -> bool:
+        if not self._marcando or self._inicio_dist is None or self._idx_destaque is None:
+            return False
+        pos = canvas._ponto_com_snap(event.position())
+        atual = self._dist_ao_longo_do_perimetro(pos)
+        if atual is None:
+            return False
+        dialog = self._obter_dialog(canvas)
+        passo = dialog.passo_unidade() * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
+        self._pontos_preview = self._pontos_entre_distancias(self._inicio_dist, atual, passo)
+        canvas.update()
+        return True
+
+    def _confirmar_marcacoes(self, canvas):
+        if self._idx_destaque is None:
             return
         dialog = self._obter_dialog(canvas)
         el = canvas.cena.elementos[self._idx_destaque]
-        passo_cena = dialog.passo_unidade() * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
-        self._pontos_preview = self._pontos_por_distancia(segmentos_de_elemento(el), passo_cena)
-
-        if dialog.chk_dividir.isChecked() and el.get("tipo") == "polyline" and dialog.chk_colocar.isChecked():
+        if dialog.chk_dividir.isChecked() and dialog.chk_colocar.isChecked() and el.get("tipo") == "polyline":
             orig = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            novos = self._inserir_pontos_em_polyline(orig, self._pontos_preview)
-            el["pontos"] = [(p.x(), p.y()) for p in novos]
+            el["pontos"] = [(p.x(), p.y()) for p in self._inserir_pontos_em_polyline(orig, self._pontos_preview)]
 
-        qtd = len(self._pontos_preview)
-        per = canvas.formatar_valor_unidade(sum(self._dist(a, b) for a, b in segmentos_de_elemento(el)))
-        unidade = getattr(canvas, "_unidade_sigla", "cm")
-        txt = f"Perímetro P: {per} ({unidade}) | pontos: {qtd}"
+        self._marcando = False
+        self._inicio_dist = None
+        txt = f"Marcação confirmada: {len(self._pontos_preview)} pontos."
         self.set_status(txt)
         mensagem_status(canvas, txt)
         canvas.update()
@@ -171,24 +205,22 @@ class Ferramenta(FerramentaBase):
         if len(pontos_orig) < 2 or not inserir:
             return pontos_orig
         restantes = list(inserir)
-        saida: list[QPointF] = [QPointF(pontos_orig[0])]
+        saida = [QPointF(pontos_orig[0])]
         for a, b in zip(pontos_orig, pontos_orig[1:]):
             seg_len = self._dist(a, b)
             if seg_len <= 1e-9:
-                if self._dist(saida[-1], b) > 1e-9:
-                    saida.append(QPointF(b))
                 continue
             dentro = []
-            novos_restantes = []
+            sobrou = []
             for p in restantes:
                 d1 = self._dist(a, p)
                 d2 = self._dist(p, b)
                 if abs((d1 + d2) - seg_len) <= 1e-3:
                     dentro.append((d1, p))
                 else:
-                    novos_restantes.append(p)
-            restantes = novos_restantes
-            for _, p in sorted(dentro, key=lambda item: item[0]):
+                    sobrou.append(p)
+            restantes = sobrou
+            for _, p in sorted(dentro, key=lambda x: x[0]):
                 if self._dist(saida[-1], p) > 1e-6:
                     saida.append(QPointF(p))
             if self._dist(saida[-1], b) > 1e-9:
@@ -196,25 +228,12 @@ class Ferramenta(FerramentaBase):
         return saida
 
     def on_paint_overlay(self, canvas, painter):
-        idx = self._idx_destaque
-        if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
+        if self._idx_destaque is None or not (0 <= self._idx_destaque < len(canvas.cena.elementos)):
             return
-        el = canvas.cena.elementos[idx]
+        el = canvas.cena.elementos[self._idx_destaque]
         if el.get("tipo") == "polyline":
             pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             for a, b in zip(pts, pts[1:]):
                 canvas._desenhar_segmento(painter, a, b, cor="#2f8bff", espessura=2.0)
-        elif el.get("tipo") == "bezier_quadratica":
-            canvas._desenhar_bezier_quadratica(
-                painter,
-                QPointF(*el.get("p0", (0.0, 0.0))),
-                QPointF(*el.get("p1", (0.0, 0.0))),
-                QPointF(*el.get("p2", (0.0, 0.0))),
-                cor="#2f8bff",
-                espessura=2.0,
-                estilo="solid",
-                amplitude=1.0,
-                destacar_controles=False,
-            )
         for p in self._pontos_preview:
             canvas._desenhar_marca_x(painter, p, cor="#ff2f2f", tamanho_px=5)
