@@ -4947,22 +4947,24 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
         self.btn_grid.setCheckable(True)
-        self.btn_grid.setChecked(True)
+        self.btn_grid.setChecked(False)
         self.btn_grid.setFixedHeight(20)
         self.btn_grid.setStyleSheet(estilo_botao_icone)
         icone_grid = ICONS_DIR / "grid.svg"
         if icone_grid.exists():
             self.btn_grid.setIcon(QIcon(str(icone_grid)))
             self.btn_grid.setText("")
-        self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
+        self.btn_grid.toggled.connect(lambda ativo: self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado"))
         row.addWidget(self.btn_grid)
 
         self.btn_graduacao = _BotaoRodapeHover("⇅", "Mostra ou esconde graduação")
         self.btn_graduacao.setCheckable(True)
-        self.btn_graduacao.setChecked(True)
+        self.btn_graduacao.setChecked(False)
         self.btn_graduacao.setFixedHeight(20)
         self.btn_graduacao.setStyleSheet(estilo_botao_icone)
-        self.btn_graduacao.clicked.connect(lambda: self.lbl_status.setText("Mostra ou esconde graduação"))
+        self.btn_graduacao.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
+        )
         row.addWidget(self.btn_graduacao)
 
         self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
@@ -4973,6 +4975,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         row.addWidget(self.btn_organizar_moldes)
 
         row.addStretch(1)
+        for btn in atalhos.findChildren(QPushButton):
+            if not btn.toolTip():
+                dica = btn.statusTip().strip() if btn.statusTip() else ""
+                if not dica:
+                    dica = btn.text().strip()
+                if dica:
+                    btn.setToolTip(dica)
         layout.addWidget(atalhos)
 
         barra = QFrame()
