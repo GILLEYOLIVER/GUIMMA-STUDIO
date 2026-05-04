@@ -53,6 +53,7 @@ from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
+from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -79,6 +80,22 @@ class _DelegateTraducaoArquivo(QStyledItemDelegate):
     def displayText(self, value, locale):
         txt = str(value or "").strip()
         return self._mapa.get(txt.lower(), txt)
+
+
+class _BotaoRodapeHover(QPushButton):
+    def __init__(self, texto: str, mensagem_hover: str, parent=None):
+        super().__init__(texto, parent)
+        self._mensagem_hover = mensagem_hover
+        self._status_label: QLabel | None = None
+        self.setMouseTracking(True)
+
+    def vincular_status(self, lbl_status: QLabel):
+        self._status_label = lbl_status
+
+    def enterEvent(self, event):  # noqa: N802
+        super().enterEvent(event)
+        if self._status_label is not None and self._mensagem_hover:
+            self._status_label.setText(self._mensagem_hover)
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -1313,6 +1330,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
         menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
+        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
+        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
         sub_adv = menu.addMenu("Audaces Avançado")
         sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
         sub_adv.addAction("XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
@@ -2815,6 +2835,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             "adsx": "Audaces ADSX (*.adsx)",
             "audaces_emf": "Metafile EMF (*.emf)",
             "audaces_xml": "Arquivo de dados XML (*.xml)",
+            "dxf": "Arquivo DXF (*.dxf)",
+            "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
+            "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
         if tipo == "audaces":
             caminho, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces", filtros["audaces"])
@@ -3014,6 +3037,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
             return
 
+        if tipo in {"dxf", "aama_astm"}:
+            elementos = importar_dxf_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Nenhum elemento vetorial encontrado no arquivo.")
+                return
+            nome_doc = "DXF" if tipo == "dxf" else "AAMA/ASTM"
+            self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho)
+            self.lbl_status.setText(f"{nome_doc} importado com sucesso: {len(elementos)} segmentos.")
+            return
+
+        if tipo == "plotagem":
+            elementos = self._importar_hpgl_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Arquivo de plotagem sem vetores reconhecidos.")
+                return
+            self._aplicar_elementos_importados_canvas(elementos, "Plotagem", caminho)
+            self.lbl_status.setText(f"Arquivo de plotagem importado: {len(elementos)} segmentos.")
+            return
+
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
@@ -3060,6 +3102,54 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.cena.elementos = elementos
         area.canvas.update()
         return len(elementos)
+
+    def _importar_hpgl_para_elementos(self, caminho: str) -> list[dict]:
+        try:
+            bruto = Path(caminho).read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return []
+        comandos = [c.strip() for c in bruto.replace("\n", "").split(";") if c.strip()]
+        elementos: list[dict] = []
+        atual = None
+        caneta_baixada = False
+        for cmd in comandos:
+            op = cmd[:2].upper()
+            payload = cmd[2:].strip()
+            if op == "PU":
+                caneta_baixada = False
+                pts = self._hpgl_parse_pontos(payload)
+                if pts:
+                    atual = pts[-1]
+            elif op == "PD":
+                pts = self._hpgl_parse_pontos(payload)
+                if atual is None and pts:
+                    atual = pts.pop(0)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+                caneta_baixada = True
+            elif op == "PA" and caneta_baixada:
+                pts = self._hpgl_parse_pontos(payload)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+        return elementos
+
+    def _hpgl_parse_pontos(self, payload: str) -> list[tuple[float, float]]:
+        nums = [n.strip() for n in payload.split(",") if n.strip()]
+        if len(nums) < 2:
+            return []
+        pontos: list[tuple[float, float]] = []
+        for i in range(0, len(nums) - 1, 2):
+            try:
+                x = float(nums[i]) / 40.0
+                y = float(nums[i + 1]) / 40.0
+            except ValueError:
+                continue
+            pontos.append((x, y))
+        return pontos
 
     def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
         dialog = QDialog(self)
@@ -4646,7 +4736,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         row.setContentsMargins(8, 2, 8, 2)
         row.setSpacing(4)
 
-        self.btn_snap = QPushButton("Snap")
+        estilo_botao_icone = (
+            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:2px 8px; min-width:28px; }"
+            "QPushButton:hover { background:#e9f6ff; border-color:#3ca4df; }"
+            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
+        )
+
+        self.btn_snap = _BotaoRodapeHover("🧲", "Ativa ou desativa o snap")
         self.btn_snap.setCheckable(True)
         self.btn_snap.setChecked(self._snap_ativo_global)
         self.btn_snap.setCursor(Qt.PointingHandCursor)
@@ -4654,42 +4750,53 @@ class GuimmaStudioMainWindow(QMainWindow):
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
             self.btn_snap.setIcon(QIcon(str(icone_snap)))
+            self.btn_snap.setText("")
         self.btn_snap.toggled.connect(self._alternar_snap_canvas_atual)
-        self.btn_snap.setStyleSheet(
-            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:3px 10px; }"
-            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
-        )
+        self.btn_snap.setStyleSheet(estilo_botao_icone)
         row.addWidget(self.btn_snap)
 
-        self.btn_mao = QPushButton("🖐")
+        self.btn_mao = _BotaoRodapeHover("🖐", "Movimenta a posição de visualização")
         self.btn_mao.setCheckable(True)
         self.btn_mao.setFixedHeight(24)
         self.btn_mao.setToolTip("Mão (navegação)")
+        self.btn_mao.setStyleSheet(estilo_botao_icone)
         self.btn_mao.clicked.connect(lambda: self._set_modo_navegacao("mao"))
         row.addWidget(self.btn_mao)
 
-        self.btn_lupa = QPushButton("🔍")
+        self.btn_lupa = _BotaoRodapeHover("🔍", "Define a visão da área selecionada")
         self.btn_lupa.setCheckable(True)
         self.btn_lupa.setFixedHeight(24)
         self.btn_lupa.setToolTip("Lupa")
+        self.btn_lupa.setStyleSheet(estilo_botao_icone)
         self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
         row.addWidget(self.btn_lupa)
 
-        self.btn_zoom_menos = QPushButton("−")
+        self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
         self.btn_zoom_menos.setFixedHeight(24)
         self.btn_zoom_menos.setToolTip("Zoom -")
+        self.btn_zoom_menos.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_menos.clicked.connect(lambda: self._aplicar_zoom_incremental(1 / 1.1))
         row.addWidget(self.btn_zoom_menos)
 
-        self.btn_zoom_mais = QPushButton("+")
+        self.btn_zoom_mais = _BotaoRodapeHover("+", "Aumenta o nível de visualização")
         self.btn_zoom_mais.setFixedHeight(24)
         self.btn_zoom_mais.setToolTip("Zoom +")
+        self.btn_zoom_mais.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
         row.addWidget(self.btn_zoom_mais)
 
-        self.btn_organizar_moldes = QPushButton("Organizar moldes")
+        self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setChecked(True)
+        self.btn_grid.setFixedHeight(24)
+        self.btn_grid.setStyleSheet(estilo_botao_icone)
+        self.btn_grid.clicked.connect(lambda: self.lbl_status.setText("Habilita ou desabilita o grid"))
+        row.addWidget(self.btn_grid)
+
+        self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
         self.btn_organizar_moldes.setFixedHeight(24)
         self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
+        self.btn_organizar_moldes.setStyleSheet(estilo_botao_icone)
         self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
         row.addWidget(self.btn_organizar_moldes)
 
@@ -4703,6 +4810,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")
         l.addWidget(self.lbl_status)
+        for b in (self.btn_snap, self.btn_mao, self.btn_lupa, self.btn_zoom_menos, self.btn_zoom_mais, self.btn_grid, self.btn_organizar_moldes):
+            if isinstance(b, _BotaoRodapeHover):
+                b.vincular_status(self.lbl_status)
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
         l.addWidget(self.lbl_escala)
