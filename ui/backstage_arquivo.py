@@ -4,7 +4,7 @@ from pathlib import Path
 
 from config import ICONS_DIR
 
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import QEvent, Qt, Signal, QSettings
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QFrame,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 class BackstageArquivoPanel(QFrame):
     arquivo_recente_clicado = Signal(str)
+    submenu_hover = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -52,6 +53,7 @@ class BackstageArquivoPanel(QFrame):
         menu_layout.addWidget(titulo)
 
         self.botoes: dict[str, QPushButton] = {}
+        self.itens_sem_icone: list[str] = []
         itens = [
             "Novo",
             "Abrir",
@@ -66,13 +68,17 @@ class BackstageArquivoPanel(QFrame):
             "Ajuda",
         ]
         icones_menu = {
-            "Novo": "novo.svg",
+            "Novo": "criar.svg",
             "Abrir": "abrir.svg",
             "Salvar": "salvar.svg",
             "Salvar como": "salvar.svg",
+            "Modelo ▸": "molde-pronto.svg",
+            "Importar ▸": "abrir.svg",
+            "Exportar ▸": "plotar_rapido.svg",
             "Plotar": "plotar_rapido.svg",
             "Imprimir": "imprimir_rapido.svg",
             "Configurações ▸": "cores_rapido.svg",
+            "Ajuda": "informacoes.svg",
         }
 
         for item in itens:
@@ -83,7 +89,12 @@ class BackstageArquivoPanel(QFrame):
                 if caminho_icone.exists():
                     botao.setIcon(QIcon(str(caminho_icone)))
                     botao.setIconSize(botao.iconSize())
+                else:
+                    self.itens_sem_icone.append(item)
+            else:
+                self.itens_sem_icone.append(item)
             botao.setCursor(Qt.PointingHandCursor)
+            botao.installEventFilter(self)
             botao.setMinimumHeight(30)
             botao.setMaximumHeight(30)
             botao.setStyleSheet(
@@ -190,3 +201,12 @@ class BackstageArquivoPanel(QFrame):
 
     def _persistir_recentes(self):
         self._settings.setValue("recent_files", self._recentes[:12])
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        if (
+            isinstance(watched, QPushButton)
+            and event.type() == QEvent.Enter
+            and "▸" in watched.text()
+        ):
+            self.submenu_hover.emit(watched.text())
+        return super().eventFilter(watched, event)
