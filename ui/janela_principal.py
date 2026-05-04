@@ -53,6 +53,7 @@ from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
+from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -1313,6 +1314,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
         menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
+        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
+        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
         sub_adv = menu.addMenu("Audaces Avançado")
         sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
         sub_adv.addAction("XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
@@ -2815,6 +2819,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             "adsx": "Audaces ADSX (*.adsx)",
             "audaces_emf": "Metafile EMF (*.emf)",
             "audaces_xml": "Arquivo de dados XML (*.xml)",
+            "dxf": "Arquivo DXF (*.dxf)",
+            "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
+            "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
         if tipo == "audaces":
             caminho, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces", filtros["audaces"])
@@ -3014,6 +3021,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
             return
 
+        if tipo in {"dxf", "aama_astm"}:
+            elementos = importar_dxf_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Nenhum elemento vetorial encontrado no arquivo.")
+                return
+            nome_doc = "DXF" if tipo == "dxf" else "AAMA/ASTM"
+            self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho)
+            self.lbl_status.setText(f"{nome_doc} importado com sucesso: {len(elementos)} segmentos.")
+            return
+
+        if tipo == "plotagem":
+            elementos = self._importar_hpgl_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Arquivo de plotagem sem vetores reconhecidos.")
+                return
+            self._aplicar_elementos_importados_canvas(elementos, "Plotagem", caminho)
+            self.lbl_status.setText(f"Arquivo de plotagem importado: {len(elementos)} segmentos.")
+            return
+
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
@@ -3060,6 +3086,54 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.cena.elementos = elementos
         area.canvas.update()
         return len(elementos)
+
+    def _importar_hpgl_para_elementos(self, caminho: str) -> list[dict]:
+        try:
+            bruto = Path(caminho).read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return []
+        comandos = [c.strip() for c in bruto.replace("\n", "").split(";") if c.strip()]
+        elementos: list[dict] = []
+        atual = None
+        caneta_baixada = False
+        for cmd in comandos:
+            op = cmd[:2].upper()
+            payload = cmd[2:].strip()
+            if op == "PU":
+                caneta_baixada = False
+                pts = self._hpgl_parse_pontos(payload)
+                if pts:
+                    atual = pts[-1]
+            elif op == "PD":
+                pts = self._hpgl_parse_pontos(payload)
+                if atual is None and pts:
+                    atual = pts.pop(0)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+                caneta_baixada = True
+            elif op == "PA" and caneta_baixada:
+                pts = self._hpgl_parse_pontos(payload)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+        return elementos
+
+    def _hpgl_parse_pontos(self, payload: str) -> list[tuple[float, float]]:
+        nums = [n.strip() for n in payload.split(",") if n.strip()]
+        if len(nums) < 2:
+            return []
+        pontos: list[tuple[float, float]] = []
+        for i in range(0, len(nums) - 1, 2):
+            try:
+                x = float(nums[i]) / 40.0
+                y = float(nums[i + 1]) / 40.0
+            except ValueError:
+                continue
+            pontos.append((x, y))
+        return pontos
 
     def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
         dialog = QDialog(self)
