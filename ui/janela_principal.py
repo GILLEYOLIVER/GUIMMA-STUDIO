@@ -53,6 +53,7 @@ from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
+from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
@@ -79,6 +80,23 @@ class _DelegateTraducaoArquivo(QStyledItemDelegate):
     def displayText(self, value, locale):
         txt = str(value or "").strip()
         return self._mapa.get(txt.lower(), txt)
+
+
+class _BotaoRodapeHover(QPushButton):
+    def __init__(self, texto: str, mensagem_hover: str, parent=None):
+        super().__init__(texto, parent)
+        self._mensagem_hover = mensagem_hover
+        self._status_label: QLabel | None = None
+        self.setMouseTracking(True)
+        self.setToolTip(mensagem_hover)
+
+    def vincular_status(self, lbl_status: QLabel):
+        self._status_label = lbl_status
+
+    def enterEvent(self, event):  # noqa: N802
+        super().enterEvent(event)
+        if self._status_label is not None and self._mensagem_hover:
+            self._status_label.setText(self._mensagem_hover)
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -123,11 +141,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
-        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", False))
+        self._barra_usuarios_habilitada = True
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = "Usuário 1"
         self._indice_layout_organizacao_moldes = 0
+        self._pendente_centralizar_indicado = False
         self._inicializar_perfis_usuarios()
         self._opcoes_app = self._carregar_opcoes_app()
         self._timer_salvar_estado = QTimer(self)
@@ -230,7 +249,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_unidade_medida = float(cfg.get("passo_unidade_medida", self._passo_unidade_medida))
         self._unidade_area = str(cfg.get("unidade_area", self._unidade_area))
         self._precisao_medida = str(cfg.get("precisao_medida", self._precisao_medida))
-        self._barra_usuarios_habilitada = bool(cfg.get("barra_usuarios_habilitada", self._barra_usuarios_habilitada))
+        self._barra_usuarios_habilitada = True
         self._barra_usuarios_posicao = str(cfg.get("barra_usuarios_posicao", self._barra_usuarios_posicao))
         estilo = cfg.get("estilo_desenho")
         if isinstance(estilo, dict):
@@ -259,6 +278,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {
                 background: #ffffff;
                 color: #111111;
+            }
+            QToolTip {
+                background-color: #f7f7f7;
+                color: #111111;
+                border: 1px solid #bfc6ce;
             }
             QTabBar::tab {
                 background: #f6f7f9;
@@ -390,7 +414,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_barra_usuarios = self.menu_visao.addMenu("Barra de usuários")
         self.action_barra_usuarios_habilitada = QAction("Exibir barra de usuários", self)
         self.action_barra_usuarios_habilitada.setCheckable(True)
-        self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
+        self.action_barra_usuarios_habilitada.setChecked(True)
+        self.action_barra_usuarios_habilitada.setEnabled(False)
         self.action_barra_usuarios_habilitada.toggled.connect(self._alternar_barra_usuarios_habilitada)
         menu_barra_usuarios.addAction(self.action_barra_usuarios_habilitada)
         grupo_posicao_barra = QActionGroup(self)
@@ -505,6 +530,23 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):  # noqa: N802
         tipo_evento = event.type()
+
+        if (
+            self._pendente_centralizar_indicado
+            and tipo_evento == QEvent.MouseButtonPress
+            and hasattr(watched, "_indices_elementos_em_ponto")
+            and hasattr(event, "button")
+            and event.button() == Qt.LeftButton
+        ):
+            pos = watched._ponto_com_snap(event.position())
+            indices = watched._indices_elementos_em_ponto(pos)
+            if indices:
+                self._centralizar_molde_ou_elemento_indicado(idx_indicado=indices[0])
+            else:
+                self.lbl_status.setText("Nenhum molde/elemento indicado no clique.")
+            self._pendente_centralizar_indicado = False
+            event.accept()
+            return True
 
         if (
             hasattr(self, "backstage")
@@ -1312,6 +1354,10 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _criar_menu_importar(self) -> QMenu:
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
+        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
+        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
+        menu.addSeparator()
         menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
         sub_adv = menu.addMenu("Audaces Avançado")
         sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
@@ -2815,6 +2861,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             "adsx": "Audaces ADSX (*.adsx)",
             "audaces_emf": "Metafile EMF (*.emf)",
             "audaces_xml": "Arquivo de dados XML (*.xml)",
+            "dxf": "Arquivo DXF (*.dxf)",
+            "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
+            "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
         if tipo == "audaces":
             caminho, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces", filtros["audaces"])
@@ -3014,6 +3063,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
             return
 
+        if tipo in {"dxf", "aama_astm"}:
+            elementos = importar_dxf_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Nenhum elemento vetorial encontrado no arquivo.")
+                return
+            nome_doc = "DXF" if tipo == "dxf" else "AAMA/ASTM"
+            self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho)
+            self.lbl_status.setText(f"{nome_doc} importado com sucesso: {len(elementos)} segmentos.")
+            return
+
+        if tipo == "plotagem":
+            elementos = self._importar_hpgl_para_elementos(caminho)
+            if not elementos:
+                self.lbl_status.setText("Arquivo de plotagem sem vetores reconhecidos.")
+                return
+            self._aplicar_elementos_importados_canvas(elementos, "Plotagem", caminho)
+            self.lbl_status.setText(f"Arquivo de plotagem importado: {len(elementos)} segmentos.")
+            return
+
         imports = self.projeto_atual.preferencias_usuario.setdefault("imports", [])
         imports.append({"tipo": tipo, "caminho": caminho})
         self.backstage.hide()
@@ -3060,6 +3128,54 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.canvas.cena.elementos = elementos
         area.canvas.update()
         return len(elementos)
+
+    def _importar_hpgl_para_elementos(self, caminho: str) -> list[dict]:
+        try:
+            bruto = Path(caminho).read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return []
+        comandos = [c.strip() for c in bruto.replace("\n", "").split(";") if c.strip()]
+        elementos: list[dict] = []
+        atual = None
+        caneta_baixada = False
+        for cmd in comandos:
+            op = cmd[:2].upper()
+            payload = cmd[2:].strip()
+            if op == "PU":
+                caneta_baixada = False
+                pts = self._hpgl_parse_pontos(payload)
+                if pts:
+                    atual = pts[-1]
+            elif op == "PD":
+                pts = self._hpgl_parse_pontos(payload)
+                if atual is None and pts:
+                    atual = pts.pop(0)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+                caneta_baixada = True
+            elif op == "PA" and caneta_baixada:
+                pts = self._hpgl_parse_pontos(payload)
+                for pt in pts:
+                    if atual is not None:
+                        elementos.append({"tipo": "polyline", "pontos": [atual, pt], "cor": "#ff5a00"})
+                    atual = pt
+        return elementos
+
+    def _hpgl_parse_pontos(self, payload: str) -> list[tuple[float, float]]:
+        nums = [n.strip() for n in payload.split(",") if n.strip()]
+        if len(nums) < 2:
+            return []
+        pontos: list[tuple[float, float]] = []
+        for i in range(0, len(nums) - 1, 2):
+            try:
+                x = float(nums[i]) / 40.0
+                y = float(nums[i + 1]) / 40.0
+            except ValueError:
+                continue
+            pontos.append((x, y))
+        return pontos
 
     def _dialogo_opcoes_importacao_adsx(self) -> dict | None:
         dialog = QDialog(self)
@@ -3332,6 +3448,23 @@ class GuimmaStudioMainWindow(QMainWindow):
             if isinstance(centro, (tuple, list)) and len(centro) == 2:
                 cx, cy = float(centro[0]), float(centro[1])
                 pontos.extend([(cx - raio, cy - raio), (cx + raio, cy + raio)])
+        for chave in (
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_principais",
+            "pontos_auxiliares",
+            "pontos_controle",
+            "curva_pontos",
+        ):
+            arr = el.get(chave)
+            if isinstance(arr, list):
+                for pt in arr:
+                    if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                        pontos.append((float(pt[0]), float(pt[1])))
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            pt = el.get(chave)
+            if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                pontos.append((float(pt[0]), float(pt[1])))
         if not pontos:
             return None
         xs = [p[0] for p in pontos]
@@ -3353,6 +3486,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             centro = el.get("centro")
             if isinstance(centro, (tuple, list)) and len(centro) == 2:
                 el["centro"] = (float(centro[0]) + dx, float(centro[1]) + dy)
+
+        def _shift_pt(pt):
+            if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                return (float(pt[0]) + dx, float(pt[1]) + dy)
+            return pt
+
+        for chave in (
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_principais",
+            "pontos_auxiliares",
+            "pontos_controle",
+            "curva_pontos",
+        ):
+            arr = el.get(chave)
+            if isinstance(arr, list):
+                el[chave] = [_shift_pt(p) for p in arr]
+
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            if chave in el:
+                el[chave] = _shift_pt(el.get(chave))
 
     def _organizar_moldes_no_canvas(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
         moldes: list[dict] = []
@@ -3420,10 +3574,84 @@ class GuimmaStudioMainWindow(QMainWindow):
             media_y = sum(y for _, y in centros) / len(centros)
             centros = [(x - media_x, y - media_y) for x, y in centros]
 
+        movidos: set[int] = set()
+        bbox_por_idx: dict[int, tuple[float, float, float, float]] = {}
+        for idx, el in enumerate(canvas.cena.elementos):
+            if isinstance(el, dict):
+                bb = self._bbox_elemento(el)
+                if bb is not None:
+                    bbox_por_idx[idx] = bb
         for info, (target_x, target_y) in zip(moldes, centros):
             dx = target_x - info["cx"]
             dy = target_y - info["cy"]
-            self._transladar_elemento(canvas.cena.elementos[info["idx"]], dx, dy)
+            idx_molde = int(info["idx"])
+            el_molde = canvas.cena.elementos[idx_molde]
+            self._transladar_elemento(el_molde, dx, dy)
+            movidos.add(idx_molde)
+
+            chaves_rel = {
+                str(el_molde.get("nome_molde") or "").strip(),
+                str(el_molde.get("molde_id") or "").strip(),
+                str(el_molde.get("id_molde") or "").strip(),
+            }
+            chaves_rel.discard("")
+            if not chaves_rel:
+                continue
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict):
+                    continue
+                chaves_el = {
+                    str(el.get("nome_molde") or "").strip(),
+                    str(el.get("molde_id") or "").strip(),
+                    str(el.get("id_molde") or "").strip(),
+                }
+                chaves_el.discard("")
+                if chaves_rel.intersection(chaves_el):
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
+
+            # Fallback espacial: move elementos auxiliares próximos ao molde
+            # (ex.: pontos/controles sem metadado explícito de vínculo).
+            min_x, min_y, max_x, max_y = info["bbox"]
+            margem_x = max(6.0, (max_x - min_x) * 0.35)
+            margem_y = max(6.0, (max_y - min_y) * 0.35)
+            area_min_x = min_x - margem_x
+            area_min_y = min_y - margem_y
+            area_max_x = max_x + margem_x
+            area_max_y = max_y + margem_y
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict) or el.get("molde"):
+                    continue
+                bb = bbox_por_idx.get(idx)
+                if bb is None:
+                    continue
+                cx = (bb[0] + bb[2]) / 2.0
+                cy = (bb[1] + bb[3]) / 2.0
+                if area_min_x <= cx <= area_max_x and area_min_y <= cy <= area_max_y:
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
+
+            # Fallback determinístico: associa cada elemento remanescente
+            # ao molde mais próximo (pelo centro do bbox original).
+            for idx, el in enumerate(canvas.cena.elementos):
+                if idx in movidos or not isinstance(el, dict) or el.get("molde"):
+                    continue
+                bb = bbox_por_idx.get(idx)
+                if bb is None:
+                    continue
+                ecx = (bb[0] + bb[2]) / 2.0
+                ecy = (bb[1] + bb[3]) / 2.0
+                melhor_idx_molde = None
+                melhor_d2 = None
+                for m in moldes:
+                    mcx, mcy = float(m["cx"]), float(m["cy"])
+                    d2 = ((ecx - mcx) ** 2) + ((ecy - mcy) ** 2)
+                    if melhor_d2 is None or d2 < melhor_d2:
+                        melhor_d2 = d2
+                        melhor_idx_molde = int(m["idx"])
+                if melhor_idx_molde == idx_molde:
+                    self._transladar_elemento(el, dx, dy)
+                    movidos.add(idx)
         if registrar_historico:
             canvas._registrar_historico()
         canvas.update()
@@ -3806,8 +4034,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.painel_controles_usuario.setVisible(tab_id == "usuarios")
 
     def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
-        self._barra_usuarios_habilitada = habilitada
-        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = habilitada
+        self._barra_usuarios_habilitada = True
+        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = True
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
         self._salvar_preferencias_app()
 
@@ -4039,6 +4267,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
         area_doc.canvas.set_precisao_medida(self._precisao_medida)
+        area_doc.canvas.installEventFilter(self)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         self._marcar_area_como_salva(area_doc)
         area_doc.setProperty("arquivo_origem", caminho_origem)
@@ -4640,13 +4869,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.setSpacing(0)
 
         atalhos = QFrame()
-        atalhos.setFixedHeight(30)
-        atalhos.setStyleSheet("background:#f1f3f5; border-top:1px solid #c8d1da; border-bottom:1px solid #dce2e8;")
+        atalhos.setFixedHeight(24)
+        atalhos.setStyleSheet("background:#f4f6f8; border-top:1px solid #c8d1da; border-bottom:1px solid #dce2e8;")
         row = QHBoxLayout(atalhos)
         row.setContentsMargins(8, 2, 8, 2)
         row.setSpacing(4)
 
-        self.btn_snap = QPushButton("Snap")
+        estilo_botao_icone = (
+            "QPushButton { color:#1f1f1f; background:transparent; border:none; padding:1px 6px; min-width:22px; }"
+            "QPushButton:hover { background:#d9edf9; border:none; }"
+            "QPushButton:checked { background:#c5e4f6; border:none; color:#0a4f82; font-weight:700; }"
+        )
+
+        self.btn_snap = _BotaoRodapeHover("🧲", "Ativa ou desativa o snap")
         self.btn_snap.setCheckable(True)
         self.btn_snap.setChecked(self._snap_ativo_global)
         self.btn_snap.setCursor(Qt.PointingHandCursor)
@@ -4654,55 +4889,120 @@ class GuimmaStudioMainWindow(QMainWindow):
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
             self.btn_snap.setIcon(QIcon(str(icone_snap)))
+            self.btn_snap.setText("")
         self.btn_snap.toggled.connect(self._alternar_snap_canvas_atual)
-        self.btn_snap.setStyleSheet(
-            "QPushButton { color:#1f1f1f; background:#ffffff; border:1px solid #b6c0cb; padding:3px 10px; }"
-            "QPushButton:checked { background:#d2ebff; border-color:#4396d6; color:#0a4f82; font-weight:700; }"
-        )
+        self.btn_snap.setStyleSheet(estilo_botao_icone)
         row.addWidget(self.btn_snap)
 
-        self.btn_mao = QPushButton("🖐")
+        self.btn_mao = _BotaoRodapeHover("🖐", "Movimenta a posição de visualização")
         self.btn_mao.setCheckable(True)
-        self.btn_mao.setFixedHeight(24)
+        self.btn_mao.setFixedHeight(20)
         self.btn_mao.setToolTip("Mão (navegação)")
+        self.btn_mao.setStyleSheet(estilo_botao_icone)
         self.btn_mao.clicked.connect(lambda: self._set_modo_navegacao("mao"))
         row.addWidget(self.btn_mao)
 
-        self.btn_lupa = QPushButton("🔍")
+        self.btn_lupa = _BotaoRodapeHover("🔍", "Define a visão da área selecionada")
         self.btn_lupa.setCheckable(True)
-        self.btn_lupa.setFixedHeight(24)
+        self.btn_lupa.setFixedHeight(20)
         self.btn_lupa.setToolTip("Lupa")
+        self.btn_lupa.setStyleSheet(estilo_botao_icone)
         self.btn_lupa.clicked.connect(lambda: self._set_modo_navegacao("lupa"))
         row.addWidget(self.btn_lupa)
 
-        self.btn_zoom_menos = QPushButton("−")
-        self.btn_zoom_menos.setFixedHeight(24)
+        self.btn_visualizar_tudo = _BotaoRodapeHover("⤢", "Visualiza toda a área de moldes")
+        self.btn_visualizar_tudo.setFixedHeight(20)
+        self.btn_visualizar_tudo.setStyleSheet(estilo_botao_icone)
+        self.btn_visualizar_tudo.clicked.connect(self._visualizar_todos_os_moldes)
+        row.addWidget(self.btn_visualizar_tudo)
+
+        self.btn_zoom_menos = _BotaoRodapeHover("−", "Afasta a visão a cada clique")
+        self.btn_zoom_menos.setFixedHeight(20)
         self.btn_zoom_menos.setToolTip("Zoom -")
+        self.btn_zoom_menos.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_menos.clicked.connect(lambda: self._aplicar_zoom_incremental(1 / 1.1))
         row.addWidget(self.btn_zoom_menos)
 
-        self.btn_zoom_mais = QPushButton("+")
-        self.btn_zoom_mais.setFixedHeight(24)
+        self.btn_zoom_mais = _BotaoRodapeHover("+", "Aumenta o nível de visualização")
+        self.btn_zoom_mais.setFixedHeight(20)
         self.btn_zoom_mais.setToolTip("Zoom +")
+        self.btn_zoom_mais.setStyleSheet(estilo_botao_icone)
         self.btn_zoom_mais.clicked.connect(lambda: self._aplicar_zoom_incremental(1.1))
         row.addWidget(self.btn_zoom_mais)
 
-        self.btn_organizar_moldes = QPushButton("Organizar moldes")
-        self.btn_organizar_moldes.setFixedHeight(24)
+        self.btn_aumenta_indicado = _BotaoRodapeHover("⌕", "Aumenta o nível de visualização de um elemento ou molde indicado")
+        self.btn_aumenta_indicado.setFixedHeight(20)
+        self.btn_aumenta_indicado.setStyleSheet(estilo_botao_icone)
+        self.btn_aumenta_indicado.clicked.connect(self._armar_centralizacao_indicada)
+        row.addWidget(self.btn_aumenta_indicado)
+
+        self.btn_desfazer_visao = _BotaoRodapeHover("⟲", "Desfaz o último comando de visualização")
+        self.btn_desfazer_visao.setFixedHeight(20)
+        self.btn_desfazer_visao.setStyleSheet(estilo_botao_icone)
+        self.btn_desfazer_visao.clicked.connect(lambda: self.lbl_status.setText("Desfaz o último comando de visualização"))
+        row.addWidget(self.btn_desfazer_visao)
+
+        self.btn_grid = _BotaoRodapeHover("⋮⋮", "Habilita ou desabilita o grid")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setChecked(False)
+        self.btn_grid.setFixedHeight(20)
+        self.btn_grid.setStyleSheet(estilo_botao_icone)
+        icone_grid = ICONS_DIR / "grid.svg"
+        if icone_grid.exists():
+            self.btn_grid.setIcon(QIcon(str(icone_grid)))
+            self.btn_grid.setText("")
+        self.btn_grid.toggled.connect(lambda ativo: self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado"))
+        row.addWidget(self.btn_grid)
+
+        self.btn_graduacao = _BotaoRodapeHover("⇅", "Mostra ou esconde graduação")
+        self.btn_graduacao.setCheckable(True)
+        self.btn_graduacao.setChecked(False)
+        self.btn_graduacao.setFixedHeight(20)
+        self.btn_graduacao.setStyleSheet(estilo_botao_icone)
+        self.btn_graduacao.toggled.connect(
+            lambda ativo: self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
+        )
+        row.addWidget(self.btn_graduacao)
+
+        self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
+        self.btn_organizar_moldes.setFixedHeight(20)
         self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
+        self.btn_organizar_moldes.setStyleSheet(estilo_botao_icone)
         self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
         row.addWidget(self.btn_organizar_moldes)
 
         row.addStretch(1)
+        for btn in atalhos.findChildren(QPushButton):
+            if not btn.toolTip():
+                dica = btn.statusTip().strip() if btn.statusTip() else ""
+                if not dica:
+                    dica = btn.text().strip()
+                if dica:
+                    btn.setToolTip(dica)
         layout.addWidget(atalhos)
 
         barra = QFrame()
-        barra.setFixedHeight(28)
+        barra.setFixedHeight(22)
         barra.setStyleSheet("background: #0b88b6; border-top: 1px solid #0a7aa2; color: white;")
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")
         l.addWidget(self.lbl_status)
+        for b in (
+            self.btn_snap,
+            self.btn_mao,
+            self.btn_lupa,
+            self.btn_visualizar_tudo,
+            self.btn_zoom_menos,
+            self.btn_zoom_mais,
+            self.btn_aumenta_indicado,
+            self.btn_desfazer_visao,
+            self.btn_grid,
+            self.btn_graduacao,
+            self.btn_organizar_moldes,
+        ):
+            if isinstance(b, _BotaoRodapeHover):
+                b.vincular_status(self.lbl_status)
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
         l.addWidget(self.lbl_escala)
@@ -4726,6 +5026,57 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         area.canvas.set_zoom(area.canvas.zoom * fator)
+
+    def _visualizar_todos_os_moldes(self):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        moldes = [el for el in canvas.cena.elementos if isinstance(el, dict) and el.get("molde")]
+        elementos_alvo = moldes if moldes else [el for el in canvas.cena.elementos if isinstance(el, dict)]
+        if not elementos_alvo:
+            self.lbl_status.setText("Nenhum molde/elemento para visualizar.")
+            return
+        self._centralizar_canvas_em_elementos(canvas, elementos_alvo)
+        self.lbl_status.setText("Visualiza toda a área de moldes.")
+
+    def _armar_centralizacao_indicada(self):
+        self._pendente_centralizar_indicado = True
+        self.lbl_status.setText("Indique o molde ou elemento.")
+
+    def _centralizar_molde_ou_elemento_indicado(self, idx_indicado: int | None = None):
+        area = self._area_documento_atual()
+        if not area:
+            return
+        canvas = area.canvas
+        selecionados = sorted(getattr(canvas, "_selecionados", set()))
+        alvo = None
+        if idx_indicado is not None and 0 <= int(idx_indicado) < len(canvas.cena.elementos):
+            alvo = canvas.cena.elementos[int(idx_indicado)]
+        elif selecionados:
+            idx = selecionados[0]
+            if 0 <= idx < len(canvas.cena.elementos):
+                alvo = canvas.cena.elementos[idx]
+        if alvo is None:
+            moldes = [el for el in canvas.cena.elementos if isinstance(el, dict) and el.get("molde")]
+            if moldes:
+                alvo = moldes[0]
+        if alvo is None and canvas.cena.elementos:
+            alvo = canvas.cena.elementos[0]
+        if alvo is None:
+            self.lbl_status.setText("Nenhum molde/elemento para centralizar.")
+            return
+        bbox = self._bbox_elemento(alvo)
+        if bbox is None:
+            return
+        min_x, min_y, max_x, max_y = bbox
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        canvas.set_zoom(min(20.0, max(0.1, canvas.zoom * 1.35)))
+        canvas.origem_cena.setX(cx - (canvas.width() / (2 * canvas.zoom)))
+        canvas.origem_cena.setY(cy - (canvas.height() / (2 * canvas.zoom)))
+        canvas.update()
+        self.lbl_status.setText("Molde/elemento indicado centralizado.")
 
     def _texto_escala(self, zoom: float) -> str:
         base = max(self.ZOOM_INICIAL_CANVAS, 1e-9)
