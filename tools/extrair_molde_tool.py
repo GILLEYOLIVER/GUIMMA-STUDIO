@@ -210,9 +210,17 @@ class Ferramenta(FerramentaBase):
             return False
 
         if event.button() == Qt.LeftButton:
-            candidatos = self._detectar_candidatos_contorno(canvas, pos_clique)
+            if self._cfg.get("modo") == "Manual":
+                candidatos = self._detectar_candidatos_linha_manual(canvas, pos_clique)
+            else:
+                candidatos = self._detectar_candidatos_contorno(canvas, pos_clique)
             if not candidatos:
-                self._mostrar_aviso_sem_molde(canvas, pos_clique)
+                if self._cfg.get("modo") == "Manual":
+                    self.set_status("Manual: clique sobre uma linha do contorno do molde.")
+                    self._ultimo_clique_falho = QPointF(pos_clique)
+                    canvas.update()
+                else:
+                    self._mostrar_aviso_sem_molde(canvas, pos_clique)
                 event.accept()
                 return True
             self._contornos_candidatos = candidatos
@@ -422,7 +430,10 @@ class Ferramenta(FerramentaBase):
             pos_cena = canvas._tela_para_cena(pos_tela_exata)
             self._ultima_pos_cena = QPointF(pos_cena)
             if self._deve_recalcular_hover(pos_cena):
-                candidatos = self._detectar_candidatos_contorno(canvas, pos_cena, leve=True)
+                if self._cfg.get("modo") == "Manual":
+                    candidatos = self._detectar_candidatos_linha_manual(canvas, pos_cena, leve=True)
+                else:
+                    candidatos = self._detectar_candidatos_contorno(canvas, pos_cena, leve=True)
                 self._contorno_hover_preview = self._preview_de_contorno(candidatos[0]) if candidatos else []
                 self._ultimo_hover_tempo = monotonic()
                 self._ultimo_hover_pos = QPointF(pos_cena)
@@ -1121,27 +1132,81 @@ class Ferramenta(FerramentaBase):
     def _perimetro_contorno(self, contorno: list[tuple[float, float]]) -> float:
         return polyline_perimeter(contorno)
 
-    def _detectar_candidatos_contorno(self, canvas, pos: QPointF) -> list[list[tuple[float, float]]]:
+    def _detectar_candidatos_contorno(
+        self,
+        canvas,
+        pos: QPointF,
+        leve: bool = False,
+    ) -> list[list[tuple[float, float]]]:
         ponto = (pos.x(), pos.y())
         candidatos: list[list[tuple[float, float]]] = []
-        elementos = list(canvas.cena.elementos)
-        for fn in (extract_local_enclosing_contour, extract_smallest_enclosing_contour):
+        raio = max(12.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * (0.25 if leve else 0.45))
+        elementos = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio * 1.8)
+        if not elementos:
+            elementos = list(canvas.cena.elementos)
+        tentativas = [
+            lambda: extract_local_enclosing_contour(elementos, ponto, search_radius=raio, tol=0.01),
+            lambda: extract_smallest_enclosing_contour(elementos, ponto, search_radius=raio, tol=0.01),
+        ]
+        if not leve:
+            tentativas.append(lambda: self._detectar_contorno_fechado(canvas, pos))
+        for tentativa in tentativas:
             try:
-                cont = fn(elementos, ponto)
+                cont = tentativa()
             except Exception:
                 cont = None
             if cont:
-                candidatos.append(cont)
-        if not candidatos:
-            cont = self._detectar_contorno_fechado(canvas, pos)
-            if cont:
-                candidatos.append(cont)
-        unicos=[]
-        for c in candidatos:
-            if not any(self._contornos_equivalentes(c, u) for u in unicos):
-                unicos.append(c)
-        unicos.sort(key=lambda c: abs(self._area_poligono([QPointF(float(x), float(y)) for x,y in c])))
-        return unicos
+                self._adicionar_candidato_contorno(candidatos, ponto, cont)
+        for idx in self._indices_polylines_contem_ponto(canvas, pos):
+            if 0 <= idx < len(canvas.cena.elementos):
+                cont = self._normalizar_pontos_contorno(canvas.cena.elementos[idx].get("pontos", []))
+                self._adicionar_candidato_contorno(candidatos, ponto, cont)
+        candidatos.sort(key=lambda c: (abs(self._area_contorno(c)), self._perimetro_contorno(c)))
+        return candidatos
+
+    def _detectar_candidatos_linha_manual(
+        self,
+        canvas,
+        pos: QPointF,
+        leve: bool = False,
+    ) -> list[list[tuple[float, float]]]:
+        candidatos = self._detectar_candidatos_contorno(canvas, pos, leve=leve)
+        ponto = (pos.x(), pos.y())
+        tolerancia = self._tolerancia_clique_linha(canvas)
+        filtrados = [
+            cont
+            for cont in candidatos
+            if self._distancia_ponto_contorno(ponto, cont) <= tolerancia
+        ]
+        if filtrados:
+            return filtrados
+
+        for cont in self._contornos_fechados_proximos_da_linha(canvas, ponto, tolerancia):
+            self._adicionar_candidato_contorno(filtrados, ponto, cont)
+        filtrados.sort(key=lambda c: (self._distancia_ponto_contorno(ponto, c), abs(self._area_contorno(c))))
+        return filtrados
+
+    def _tolerancia_clique_linha(self, canvas) -> float:
+        return max(0.12, 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 1e-6))
+
+    def _contornos_fechados_proximos_da_linha(
+        self,
+        canvas,
+        ponto: tuple[float, float],
+        tolerancia: float,
+    ) -> list[list[tuple[float, float]]]:
+        saida: list[list[tuple[float, float]]] = []
+        for el in canvas.cena.elementos:
+            if el.get("tipo") != "polyline":
+                continue
+            cont = self._normalizar_pontos_contorno(el.get("pontos", []))
+            if len(cont) < 4:
+                continue
+            if self._dist_tuple(cont[0], cont[-1]) > 1e-6:
+                continue
+            if self._distancia_ponto_contorno(ponto, cont) <= tolerancia:
+                saida.append(cont)
+        return saida
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
