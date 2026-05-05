@@ -116,6 +116,8 @@ class Ferramenta(FerramentaBase):
         cfg_mem = self.carregar_preferencias_ferramenta(canvas, type(self)._cfg_global)
         type(self)._cfg_global = dict(cfg_mem)
         self._cfg = dict(cfg_mem)
+        self._cfg["modo"] = "Automático"
+        type(self)._cfg_global["modo"] = "Automático"
         self._idx_selecionado = None
         self._selecoes_manuais.clear()
         self._contornos_extraidos_preview = []
