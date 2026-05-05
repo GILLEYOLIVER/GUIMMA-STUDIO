@@ -34,6 +34,7 @@ class Ferramenta(FerramentaBase):
         self.set_status("Clique para selecionar. Arraste para seleção por área. RMB cicla sobrepostos.")
 
     def on_mouse_press(self, canvas, event) -> bool:
+        pos_sem_snap = canvas._tela_para_cena(event.position())
         pos = canvas._ponto_com_snap(event.position())
         if event.button() == Qt.RightButton:
             if canvas._selecionar_proximo_em_ponto(pos):
@@ -71,7 +72,7 @@ class Ferramenta(FerramentaBase):
                 # Inicia arraste já no primeiro clique pressionado sobre o elemento
                 # para evitar exigir um segundo clique para mover.
                 self._arrastando_selecao = True
-                self._ultimo_ponto_arrasto = pos
+                self._ultimo_ponto_arrasto = pos_sem_snap
                 self._movido = False
             self._inicio_caixa = None
             self._fim_caixa = None
@@ -82,22 +83,23 @@ class Ferramenta(FerramentaBase):
 
         if not (event.modifiers() & Qt.ShiftModifier):
             canvas._selecionados.clear()
-        self._inicio_caixa = pos
-        self._fim_caixa = pos
+        self._inicio_caixa = pos_sem_snap
+        self._fim_caixa = pos_sem_snap
         self.set_status("Arraste para selecionar por área.")
         canvas.update()
         event.accept()
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
+        pos_sem_snap = canvas._tela_para_cena(event.position())
         pos = canvas._ponto_com_snap(event.position())
         self._hover_idx = (canvas._indices_elementos_em_ponto(pos) or [None])[0]
         if self._arrastando_selecao and self._ultimo_ponto_arrasto is not None:
-            dx = pos.x() - self._ultimo_ponto_arrasto.x()
-            dy = pos.y() - self._ultimo_ponto_arrasto.y()
+            dx = pos_sem_snap.x() - self._ultimo_ponto_arrasto.x()
+            dy = pos_sem_snap.y() - self._ultimo_ponto_arrasto.y()
             if abs(dx) > 1e-9 or abs(dy) > 1e-9:
                 self._mover_selecionados(canvas, dx, dy)
-                self._ultimo_ponto_arrasto = pos
+                self._ultimo_ponto_arrasto = pos_sem_snap
                 self._movido = True
             snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
             self.set_status(f"Movendo seleção ({len(canvas._selecionados)} elemento(s)){snap_info}")
@@ -111,7 +113,7 @@ class Ferramenta(FerramentaBase):
                 self.set_status(f"Cursor X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
             canvas.update()
             return True
-        self._fim_caixa = pos
+        self._fim_caixa = pos_sem_snap
         canvas.update()
         event.accept()
         return True
