@@ -430,6 +430,12 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def on_mouse_double_click(self, canvas, event) -> bool:
+        if event.button() in (Qt.LeftButton, Qt.RightButton):
+            event.accept()
+            return True
+        return False
+
     def on_key_press(self, canvas, event) -> bool:
         key = event.key()
         if key == Qt.Key_Escape:
