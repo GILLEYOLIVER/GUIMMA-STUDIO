@@ -128,6 +128,13 @@ class Ferramenta(FerramentaBase):
         self.set_status(texto)
         mensagem_status(canvas, texto)
 
+
+    def on_deactivate(self, canvas):
+        super().on_deactivate(canvas)
+        dialog = Ferramenta._dialog_global
+        if dialog is not None:
+            dialog.hide()
+
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
@@ -263,24 +270,26 @@ class Ferramenta(FerramentaBase):
             el["pontos"] = [(p.x(), p.y()) for p in self._inserir_pontos_em_polyline(orig, self._pontos_preview)]
         el["marcacoes_no_perimetro"] = [(p.x(), p.y()) for p in self._pontos_preview]
         if dialog.chk_colocar.isChecked():
-            if "controle_cantos" in el:
-                atual = list(el.get("controle_cantos", []))
-                atual.extend([(p.x(), p.y()) for p in self._pontos_preview])
-                el["controle_cantos"] = atual
-            if "pontos_controle_principais" in el:
-                base = (el.get("pontos_controle_principais") or [{}])[0]
-                novos = list(el.get("pontos_controle_principais", []))
-                for i, p in enumerate(self._pontos_preview, start=len(novos)+1):
-                    d = dict(base)
-                    d["x"] = float(p.x()); d["y"] = float(p.y())
-                    if "indice" in d: d["indice"] = i
-                    novos.append(d)
-                el["pontos_controle_principais"] = novos
+            atuais_cantos = list(el.get("controle_cantos", []))
+            atuais_cantos.extend([(p.x(), p.y()) for p in self._pontos_preview])
+            el["controle_cantos"] = atuais_cantos
+
+            principais = list(el.get("pontos_controle_principais", []))
+            base = dict(principais[0]) if principais else {"x": 0.0, "y": 0.0}
+            for i, p in enumerate(self._pontos_preview, start=len(principais) + 1):
+                d = dict(base)
+                d["x"] = float(p.x())
+                d["y"] = float(p.y())
+                if "indice" in d:
+                    d["indice"] = i
+                principais.append(d)
+            el["pontos_controle_principais"] = principais
 
         self._marcando = False
         self._inicio_dist = None
         self._ultimo_dist = None
         self._progresso_assinado = 0.0
+        canvas._registrar_historico()
         txt = f"Marcação confirmada: {len(self._pontos_preview)} pontos."
         self.set_status(txt)
         mensagem_status(canvas, txt)

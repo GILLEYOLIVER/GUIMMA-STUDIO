@@ -1210,6 +1210,9 @@ class VisualizacaoCanvas(QWidget):
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
+            for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
+                self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
+
         self._desenhar_overlays_moldes(painter)
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
