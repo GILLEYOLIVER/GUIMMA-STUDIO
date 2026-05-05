@@ -221,8 +221,7 @@ class Ferramenta(FerramentaBase):
             self._progresso_assinado += delta
         self._ultimo_dist = atual
 
-        dialog = self._obter_dialog(canvas)
-        passo = dialog.passo_unidade() * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
+        passo = 2.0 * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
         self._pontos_preview = self._pontos_por_progresso(self._inicio_dist, self._progresso_assinado, passo)
         canvas.update()
         return True
@@ -230,9 +229,8 @@ class Ferramenta(FerramentaBase):
     def _confirmar_marcacoes(self, canvas):
         if self._idx_destaque is None:
             return
-        dialog = self._obter_dialog(canvas)
         el = canvas.cena.elementos[self._idx_destaque]
-        if dialog.chk_dividir.isChecked() and dialog.chk_colocar.isChecked() and el.get("tipo") == "polyline":
+        if el.get("tipo") == "polyline":
             orig = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             el["pontos"] = [(p.x(), p.y()) for p in self._inserir_pontos_em_polyline(orig, self._pontos_preview)]
         el["marcacoes_no_perimetro"] = [(p.x(), p.y()) for p in self._pontos_preview]
