@@ -257,7 +257,6 @@ class Ferramenta(FerramentaBase):
     def _confirmar_marcacoes(self, canvas):
         if self._idx_destaque is None:
             return
-        dialog = self._obter_dialog(canvas)
         el = canvas.cena.elementos[self._idx_destaque]
         if dialog.chk_dividir.isChecked() and el.get("tipo") == "polyline":
             orig = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
