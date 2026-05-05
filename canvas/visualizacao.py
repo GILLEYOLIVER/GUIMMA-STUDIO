@@ -1210,6 +1210,9 @@ class VisualizacaoCanvas(QWidget):
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
+            for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
+                self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
+
         self._desenhar_overlays_moldes(painter)
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
@@ -1796,12 +1799,13 @@ class VisualizacaoCanvas(QWidget):
         if padrao:
             pen.setDashPattern(padrao)
 
-    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00"):
+    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00", tamanho_px: int = 5):
         pt = self._cena_para_tela(ponto)
+        tamanho = max(1, int(tamanho_px))
         pen = QPen(QColor(cor), 1)
         painter.setPen(pen)
-        painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
-        painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
+        painter.drawLine(int(pt.x() - tamanho), int(pt.y() - tamanho), int(pt.x() + tamanho), int(pt.y() + tamanho))
+        painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
