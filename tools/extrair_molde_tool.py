@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from core.geometry.engine import internal_angle
+from core.geometry.engine import internal_angle, point_segment_distance, polyline_perimeter
 from core.geometry_bridge import (
     compose_closed_contour,
     create_mold_payload,
@@ -108,6 +108,7 @@ class Ferramenta(FerramentaBase):
         self._snapshot_cancelamento: dict[int, dict] = {}
         self._indices_molde_em_arraste: set[int] = set()
         self._cfg = dict(type(self)._cfg_global)
+        self._ultimo_clique_falho: QPointF | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -126,6 +127,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        self._ultimo_clique_falho = None
         self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
         self.set_status("Defina modo. LMB seleciona contorno(s), RMB pega molde, LMB solta, RMB cancela.")
@@ -146,6 +148,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
 
     def on_canvas_resize(self, canvas) -> None:
         self._reposicionar_dialog_config(canvas)
@@ -157,7 +161,7 @@ class Ferramenta(FerramentaBase):
 
         if self._arrastando_molde:
             if event.button() == Qt.LeftButton:
-                self._finalizar_posicionamento(canvas, "Molde solto com sucesso.")
+                self._finalizar_posicionamento(canvas, "Molde finalizado. Clique direito para encerrar a ferramenta.")
                 event.accept()
                 return True
             if event.button() == Qt.RightButton:
@@ -168,26 +172,59 @@ class Ferramenta(FerramentaBase):
             return False
 
         if event.button() == Qt.LeftButton:
+            pos_clique = canvas._tela_para_cena(pos_tela_exata)
+            if self._cfg.get("modo") == "Manual":
+                contorno = self._detectar_contorno_fechado(canvas, pos_clique)
+                if not contorno or self._perimetro_contorno(contorno) < self.TOLERANCIA_FECHAMENTO_CM:
+                    self.set_status("Manual: clique dentro de uma área fechada para detectar o contorno.")
+                    event.accept()
+                    return True
+
+                ja_selecionado = any(self._contornos_equivalentes(contorno, c) for c in self._contornos_auto_coords)
+                if not ja_selecionado:
+                    self._contornos_auto_coords = [contorno]
+                    self._contornos_extraidos_preview = [[QPointF(float(x), float(y)) for x, y in contorno]]
+                    self._selecoes_manuais.clear()
+                    self._contornos_preparados = {}
+                    self._idx_selecionado = None
+                    canvas._selecionados = set()
+                    self._molde_criado = False
+                    self._molde_posicionado = False
+                    self.set_status("Manual: contorno detectado em azul. Clique esquerdo novamente para extrair.")
+                    canvas.update()
+                    event.accept()
+                    return True
+
+                ok = self._criar_molde(canvas)
+                if not ok:
+                    self._mostrar_aviso_sem_molde(canvas, pos_clique)
+                    return False
+                self._ultimo_clique_falho = None
+                self._iniciar_arraste_molde(canvas, pos)
+                self.set_status("Molde em mãos: mova o mouse. LMB finaliza, RMB cancela.")
+                canvas.update()
+                event.accept()
+                return True
+
             # Para extrair molde por área, usar o ponto real do clique (sem snap),
             # evitando capturar regiões distantes por aproximação de snap.
-            pos_clique = canvas._tela_para_cena(pos_tela_exata)
             contorno = self._detectar_contorno_fechado(canvas, pos_clique)
             if not contorno:
-                self._mostrar_aviso_sem_molde(canvas)
+                self._mostrar_aviso_sem_molde(canvas, pos_clique)
                 return True
             if self._perimetro_contorno(contorno) < self.TOLERANCIA_FECHAMENTO_CM:
-                self._mostrar_aviso_sem_molde(canvas)
+                self._mostrar_aviso_sem_molde(canvas, pos_clique)
                 return True
-            if not any(self._contornos_equivalentes(contorno, c) for c in self._contornos_auto_coords):
-                self._contornos_auto_coords.append(contorno)
-                self._contornos_extraidos_preview.append([QPointF(float(x), float(y)) for x, y in contorno])
+            self._contornos_auto_coords = [contorno]
+            self._contornos_extraidos_preview = [[QPointF(float(x), float(y)) for x, y in contorno]]
             self._selecoes_manuais.clear()
             self._contornos_preparados = {}
             self._idx_selecionado = None
             canvas._selecionados = set()
             self._molde_criado = False
             self._molde_posicionado = False
-            self.set_status(f"{len(self._contornos_auto_coords)} fechamento(s) selecionado(s). RMB para extrair.")
+            self._ultimo_clique_falho = None
+            self.set_status("Automático: contorno rastreado. Clique direito para extrair o molde.")
             canvas.update()
             event.accept()
             return True
@@ -196,13 +233,22 @@ class Ferramenta(FerramentaBase):
             return False
 
         if self._molde_posicionado:
-            self._limpar_estado_extracao(canvas, "Extração reiniciada.")
+            self._limpar_estado_extracao(canvas, "Ferramenta finalizada. Voltando para Selecionar.")
+            canvas.set_ferramenta_ativa("selecionar")
             canvas.update()
             event.accept()
             return True
 
-        if not self._contornos_auto_coords:
-            self.set_status("Selecione primeiro uma área fechada com clique esquerdo.")
+        if self._cfg.get("modo") == "Manual" and self._contornos_auto_coords and not self._molde_criado:
+            self._contornos_auto_coords = []
+            self._contornos_extraidos_preview = []
+            self.set_status("Manual: contorno removido. Clique esquerdo para detectar novamente.")
+            canvas.update()
+            event.accept()
+            return True
+
+        if not self._contornos_auto_coords and not self._selecoes_manuais:
+            self.set_status("Selecione primeiro uma área/contorno com clique esquerdo.")
             event.accept()
             return True
 
@@ -211,7 +257,7 @@ class Ferramenta(FerramentaBase):
             self._mostrar_aviso_sem_molde(canvas)
             return False
         self._iniciar_arraste_molde(canvas, pos)
-        self.set_status("Molde em mãos: mova o mouse. LMB confirma/solta, RMB cancela.")
+        self.set_status("Molde em mãos: mova o mouse. LMB finaliza, RMB cancela.")
         canvas.update()
         event.accept()
         return True
@@ -259,6 +305,23 @@ class Ferramenta(FerramentaBase):
             self._desenhar_contorno(canvas, painter, cont, QColor("#33a6ff"), 2.2)
         if self._molde_criado and self._idx_selecionado is not None and 0 <= self._idx_selecionado < len(canvas.cena.elementos):
             self._desenhar_controles_molde(canvas, painter, canvas.cena.elementos[self._idx_selecionado])
+        if self._ultimo_clique_falho is not None:
+            pt = self._ultimo_clique_falho
+            r = 1.8
+            canvas._desenhar_segmento(
+                painter,
+                QPointF(pt.x() - r, pt.y() - r),
+                QPointF(pt.x() + r, pt.y() + r),
+                cor="#ff7a00",
+                espessura=1.5,
+            )
+            canvas._desenhar_segmento(
+                painter,
+                QPointF(pt.x() - r, pt.y() + r),
+                QPointF(pt.x() + r, pt.y() - r),
+                cor="#ff7a00",
+                espessura=1.5,
+            )
 
     def _desenhar_contorno(self, canvas, painter, pontos: list[QPointF], cor: QColor, esp: float):
         if len(pontos) < 2:
@@ -641,6 +704,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         self._molde_posicionado = True
         canvas._registrar_historico()
         self.set_status(msg)
@@ -657,6 +722,8 @@ class Ferramenta(FerramentaBase):
             if 0 <= idx < len(canvas.cena.elementos):
                 canvas.cena.elementos.pop(idx)
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
@@ -682,22 +749,19 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         canvas._selecionados = set()
         self.set_status(msg)
 
-    def _mostrar_aviso_sem_molde(self, canvas):
+    def _mostrar_aviso_sem_molde(self, canvas, pos_clique: QPointF | None = None):
         self._limpar_estado_extracao(canvas, "Não foi possível encontrar molde!")
+        self._ultimo_clique_falho = QPointF(pos_clique) if pos_clique is not None else None
         QMessageBox.warning(canvas, "Atenção", "Não foi possível encontrar molde!")
+        canvas.update()
 
     def _perimetro_contorno(self, contorno: list[tuple[float, float]]) -> float:
-        if len(contorno) < 2:
-            return 0.0
-        total = 0.0
-        for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
-            dx = bx - ax
-            dy = by - ay
-            total += sqrt((dx * dx) + (dy * dy))
-        return total
+        return polyline_perimeter(contorno)
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
@@ -974,16 +1038,7 @@ class Ferramenta(FerramentaBase):
         px, py = ponto
         menor = float("inf")
         for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
-            abx = bx - ax
-            aby = by - ay
-            denom = (abx * abx) + (aby * aby)
-            if denom <= 1e-12:
-                dist = sqrt(((px - ax) ** 2) + ((py - ay) ** 2))
-            else:
-                t = max(0.0, min(1.0, (((px - ax) * abx) + ((py - ay) * aby)) / denom))
-                qx = ax + (abx * t)
-                qy = ay + (aby * t)
-                dist = sqrt(((px - qx) ** 2) + ((py - qy) ** 2))
+            dist = point_segment_distance((px, py), (ax, ay), (bx, by))
             if dist < menor:
                 menor = dist
         return menor
@@ -1233,6 +1288,7 @@ class Ferramenta(FerramentaBase):
     def _sincronizar_cfg_da_ui(self):
         type(self)._salvar_cfg_global()
         self._cfg = dict(type(self)._cfg_global)
+        self._ultimo_clique_falho: QPointF | None = None
 
     def _normalizar_pontos_contorno(self, pontos: list[tuple[float, float]] | list) -> list[tuple[float, float]]:
         coords: list[tuple[float, float]] = []
