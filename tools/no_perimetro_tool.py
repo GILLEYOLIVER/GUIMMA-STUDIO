@@ -200,35 +200,31 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
+
+        # Segundo clique esquerdo sempre finaliza a operação atual.
+        if self._marcando and self._idx_destaque is not None:
+            self._confirmar_marcacoes(canvas)
+            event.accept()
+            return True
+
         pos = canvas._ponto_com_snap(event.position())
         info = selecionar_segmento_mais_proximo(canvas, pos)
         if info is None:
             return False
 
         idx = int(info["elemento_idx"])
-        if not self._marcando:
-            self._idx_destaque = idx
-            canvas._selecionados = {idx}
-            self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
-            self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
-            self._ultimo_dist = self._inicio_dist
-            self._progresso_assinado = 0.0
-            self._pontos_preview = []
-            self._marcando = self._inicio_dist is not None
-            texto = "Início marcado. Percorra o perímetro com o mouse e clique para confirmar."
-            self.set_status(texto)
-            mensagem_status(canvas, texto)
-            canvas.update()
-            event.accept()
-            return True
-
-        if idx != self._idx_destaque:
-            txt = "Confirme no mesmo elemento onde o início foi marcado."
-            self.set_status(txt)
-            mensagem_status(canvas, txt)
-            return True
-
-        self._confirmar_marcacoes(canvas)
+        self._idx_destaque = idx
+        canvas._selecionados = {idx}
+        self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
+        self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
+        self._ultimo_dist = self._inicio_dist
+        self._progresso_assinado = 0.0
+        self._pontos_preview = []
+        self._marcando = self._inicio_dist is not None
+        texto = "Início marcado. Percorra o perímetro com o mouse e clique para confirmar."
+        self.set_status(texto)
+        mensagem_status(canvas, texto)
+        canvas.update()
         event.accept()
         return True
 
