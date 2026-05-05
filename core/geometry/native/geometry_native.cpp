@@ -52,9 +52,49 @@ static bool point_in_polygon(
     return inside;
 }
 
+
+static double point_segment_distance(
+    const std::pair<double, double>& p,
+    const std::pair<double, double>& a,
+    const std::pair<double, double>& b) {
+    const double px = p.first;
+    const double py = p.second;
+    const double ax = a.first;
+    const double ay = a.second;
+    const double bx = b.first;
+    const double by = b.second;
+    const double abx = bx - ax;
+    const double aby = by - ay;
+    const double denom = (abx * abx) + (aby * aby);
+    if (denom <= 1e-12) {
+        return std::sqrt(((px - ax) * (px - ax)) + ((py - ay) * (py - ay)));
+    }
+    double t = (((px - ax) * abx) + ((py - ay) * aby)) / denom;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    const double qx = ax + (abx * t);
+    const double qy = ay + (aby * t);
+    return std::sqrt(((px - qx) * (px - qx)) + ((py - qy) * (py - qy)));
+}
+
+static double polyline_perimeter(const std::vector<std::pair<double, double>>& points) {
+    if (points.size() < 2) {
+        return 0.0;
+    }
+    double acc = 0.0;
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        const double dx = points[i].first - points[i - 1].first;
+        const double dy = points[i].second - points[i - 1].second;
+        acc += std::sqrt((dx * dx) + (dy * dy));
+    }
+    return acc;
+}
+
 PYBIND11_MODULE(geometry_native, m) {
     m.doc() = "Operações geométricas nativas para GUIMMA Studio";
     m.def("internal_angle", &internal_angle, "Ângulo interno entre três pontos");
     m.def("point_in_polygon", &point_in_polygon, "Teste ponto em polígono");
+    m.def("point_segment_distance", &point_segment_distance, "Distância mínima entre ponto e segmento");
+    m.def("polyline_perimeter", &polyline_perimeter, "Perímetro de polyline");
 }
 
