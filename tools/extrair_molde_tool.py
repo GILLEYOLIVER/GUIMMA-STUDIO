@@ -36,7 +36,7 @@ class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
     usa_painel_auxiliar = False
-    descricao_painel = "LMB seleciona/valida contorno. RMB pega molde. LMB solta, RMB cancela/volta Selecionar."
+    descricao_painel = "LMB rastreia/fixa contorno. Tab alterna candidatos. Shift+LMB compoe. RMB/Enter extrai. LMB solta. RMB apos soltar encerra."
     TOLERANCIA_FECHAMENTO_CM = 0.10
 
     _dialog_global: QDialog | None = None
@@ -109,6 +109,12 @@ class Ferramenta(FerramentaBase):
         self._indices_molde_em_arraste: set[int] = set()
         self._cfg = dict(type(self)._cfg_global)
         self._ultimo_clique_falho = None
+        self._contorno_hover_preview: list[QPointF] = []
+        self._contornos_candidatos: list[list[tuple[float, float]]] = []
+        self._indice_candidato_atual: int = 0
+        self._ultimo_hover_tempo: float = 0.0
+        self._ultimo_hover_pos: QPointF | None = None
+        self._ultima_pos_cena: QPointF | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -130,9 +136,15 @@ class Ferramenta(FerramentaBase):
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
         self._ultimo_clique_falho = None
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
+        self._ultimo_hover_tempo = 0.0
+        self._ultimo_hover_pos = None
+        self._ultima_pos_cena = None
         self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
-        self.set_status("Defina modo. LMB seleciona contorno(s), RMB pega molde, LMB solta, RMB cancela.")
+        self.set_status("LMB rastreia/fixa contorno. Tab alterna candidatos. Shift+LMB compoe. RMB/Enter extrai.")
 
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
@@ -150,6 +162,12 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
+        self._ultimo_hover_tempo = 0.0
+        self._ultimo_hover_pos = None
+        self._ultima_pos_cena = None
         if self._dialog is not None and isValid(self._dialog):
             self._dialog.hide()
 
@@ -160,6 +178,74 @@ class Ferramenta(FerramentaBase):
         pos_tela_exata = self._posicao_tela_exata_no_canvas(canvas, event.position())
         pos = canvas._ponto_com_snap(pos_tela_exata)
         self._sincronizar_cfg_da_ui()
+        pos_clique = canvas._tela_para_cena(pos_tela_exata)
+        self._ultima_pos_cena = QPointF(pos_clique)
+
+        if self._arrastando_molde:
+            if event.button() == Qt.LeftButton:
+                self._finalizar_posicionamento(
+                    canvas,
+                    "Molde finalizado. Clique direito no canvas para encerrar ou clique esquerdo em outra area para extrair outro molde.",
+                )
+                event.accept()
+                return True
+            if event.button() == Qt.RightButton:
+                self._cancelar_arraste_molde(canvas)
+                canvas.update()
+                event.accept()
+                return True
+            return False
+
+        if event.button() == Qt.LeftButton:
+            candidatos = self._detectar_candidatos_contorno(canvas, pos_clique)
+            if not candidatos:
+                self._mostrar_aviso_sem_molde(canvas, pos_clique)
+                event.accept()
+                return True
+            self._contornos_candidatos = candidatos
+            self._indice_candidato_atual = 0
+            contorno = candidatos[0]
+            if self._perimetro_contorno(contorno) < self.TOLERANCIA_FECHAMENTO_CM:
+                self._mostrar_aviso_sem_molde(canvas, pos_clique)
+                event.accept()
+                return True
+            adicionar = bool(event.modifiers() & Qt.ShiftModifier)
+            self._fixar_contorno(canvas, contorno, adicionar=adicionar)
+            self._selecoes_manuais.clear()
+            self._idx_selecionado = None
+            canvas._selecionados = set()
+            self._molde_criado = False
+            self._molde_posicionado = False
+            self._ultimo_clique_falho = None
+            total = len(self._contornos_candidatos)
+            if adicionar:
+                self.set_status("Area adicionada a composicao. Direito/Enter extrai o conjunto.")
+            elif total > 1:
+                self.set_status(f"Candidato 1/{total}. Tab alterna, Direito/Enter extrai.")
+            else:
+                self.set_status("Contorno selecionado. Clique direito ou Enter para extrair.")
+            canvas.update()
+            event.accept()
+            return True
+
+        if event.button() == Qt.RightButton:
+            if self._molde_posicionado:
+                self._limpar_estado_extracao(canvas, "Ferramenta finalizada. Voltando para Selecionar.")
+                canvas.set_ferramenta_ativa("selecionar")
+                canvas.update()
+                event.accept()
+                return True
+            if not self._contornos_auto_coords and not self._selecoes_manuais:
+                self.set_status("Selecione primeiro uma area/contorno com clique esquerdo.")
+                event.accept()
+                return True
+            if self._extrair_e_iniciar_arraste(canvas, pos):
+                event.accept()
+                return True
+            self._mostrar_aviso_sem_molde(canvas)
+            return False
+
+        return False
 
         if self._arrastando_molde:
             if event.button() == Qt.LeftButton:
@@ -266,8 +352,19 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         if not self._arrastando_molde:
-            return False
+            pos_tela_exata = self._posicao_tela_exata_no_canvas(canvas, event.position())
+            pos_cena = canvas._tela_para_cena(pos_tela_exata)
+            self._ultima_pos_cena = QPointF(pos_cena)
+            if self._deve_recalcular_hover(pos_cena):
+                candidatos = self._detectar_candidatos_contorno(canvas, pos_cena, leve=True)
+                self._contorno_hover_preview = self._preview_de_contorno(candidatos[0]) if candidatos else []
+                self._ultimo_hover_tempo = monotonic()
+                self._ultimo_hover_pos = QPointF(pos_cena)
+                canvas.update()
+            event.accept()
+            return True
         pos = canvas._ponto_com_snap(self._posicao_tela_exata_no_canvas(canvas, event.position()))
+        self._ultima_pos_cena = QPointF(pos)
         if self._ultimo_pos_arrasto is None:
             self._ultimo_pos_arrasto = pos
             return True
@@ -279,6 +376,44 @@ class Ferramenta(FerramentaBase):
             canvas.update()
         event.accept()
         return True
+
+    def on_key_press(self, canvas, event) -> bool:
+        key = event.key()
+        if key == Qt.Key_Escape:
+            if self._arrastando_molde:
+                self._cancelar_arraste_molde(canvas)
+            elif self._contornos_auto_coords or self._contornos_extraidos_preview or self._contorno_hover_preview:
+                self._limpar_previews(canvas, "Preview limpo. Clique esquerdo para selecionar novamente.")
+            else:
+                self._limpar_estado_extracao(canvas, "Ferramenta finalizada. Voltando para Selecionar.")
+                canvas.set_ferramenta_ativa("selecionar")
+            canvas.update()
+            event.accept()
+            return True
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            if self._contornos_auto_coords and not self._arrastando_molde:
+                pos = self._posicao_arraste_inicial(canvas)
+                if self._extrair_e_iniciar_arraste(canvas, pos):
+                    event.accept()
+                    return True
+            event.accept()
+            return True
+        if key == Qt.Key_Tab:
+            if self._contornos_candidatos:
+                self._alternar_candidato(canvas)
+                event.accept()
+                return True
+            return False
+        if key == Qt.Key_Backspace:
+            if len(self._contornos_auto_coords) > 1:
+                self._contornos_auto_coords.pop()
+                self._contornos_extraidos_preview = [self._preview_de_contorno(c) for c in self._contornos_auto_coords]
+                self.set_status("Ultima area removida da composicao. Direito/Enter extrai o conjunto.")
+                canvas.update()
+                event.accept()
+                return True
+            return False
+        return False
 
     def _posicao_tela_exata_no_canvas(self, canvas, pos_evento: QPointF) -> QPointF:
         """
@@ -297,14 +432,18 @@ class Ferramenta(FerramentaBase):
         return QPointF(x, y)
 
     def on_paint_overlay(self, canvas, painter: QPainter):
+        if self._contorno_hover_preview and not self._arrastando_molde:
+            self._desenhar_contorno(canvas, painter, self._contorno_hover_preview, QColor("#8ed8ff"), 1.2)
         for idx in self._selecoes_manuais:
             if 0 <= idx < len(canvas.cena.elementos):
                 el = canvas.cena.elementos[idx]
                 if el.get("tipo") == "polyline":
                     pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                     self._desenhar_contorno(canvas, painter, pts, QColor("#ff2fff"), 2.0)
-        for cont in self._contornos_extraidos_preview:
-            self._desenhar_contorno(canvas, painter, cont, QColor("#33a6ff"), 2.2)
+        total_fixados = len(self._contornos_extraidos_preview)
+        for idx, cont in enumerate(self._contornos_extraidos_preview):
+            cor = QColor("#745cff") if total_fixados > 1 and idx % 2 else QColor("#0078ff")
+            self._desenhar_contorno(canvas, painter, cont, cor, 2.4)
         if self._molde_criado and self._idx_selecionado is not None and 0 <= self._idx_selecionado < len(canvas.cena.elementos):
             self._desenhar_controles_molde(canvas, painter, canvas.cena.elementos[self._idx_selecionado])
         if self._ultimo_clique_falho is not None:
@@ -330,6 +469,127 @@ class Ferramenta(FerramentaBase):
             return
         for a, b in zip(pontos, pontos[1:]):
             canvas._desenhar_segmento(painter, a, b, cor=cor.name(), espessura=esp)
+
+    def _preview_de_contorno(self, contorno: list[tuple[float, float]]) -> list[QPointF]:
+        return [QPointF(float(x), float(y)) for x, y in contorno]
+
+    def _fixar_contorno(self, canvas, contorno: list[tuple[float, float]], adicionar: bool) -> None:
+        contorno = self._normalizar_pontos_contorno(contorno)
+        if adicionar:
+            self._contornos_auto_coords.append(contorno)
+        else:
+            self._contornos_auto_coords = [contorno]
+        self._contornos_extraidos_preview = [self._preview_de_contorno(c) for c in self._contornos_auto_coords]
+        self._contorno_hover_preview = []
+        self._contornos_preparados = {}
+
+    def _limpar_previews(self, canvas, msg: str) -> None:
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
+        self._contornos_auto_coords = []
+        self._contornos_extraidos_preview = []
+        self._contornos_preparados = {}
+        self._molde_criado = False
+        self._molde_posicionado = False
+        self._idx_selecionado = None
+        self._selecoes_manuais.clear()
+        canvas._selecionados = set()
+        self.set_status(msg)
+
+    def _posicao_arraste_inicial(self, canvas) -> QPointF:
+        if self._ultima_pos_cena is not None:
+            return QPointF(self._ultima_pos_cena)
+        pontos = [pt for cont in self._contornos_auto_coords for pt in cont[:-1]]
+        if pontos:
+            x = sum(float(px) for px, _ in pontos) / len(pontos)
+            y = sum(float(py) for _, py in pontos) / len(pontos)
+            return QPointF(x, y)
+        return QPointF(0.0, 0.0)
+
+    def _extrair_e_iniciar_arraste(self, canvas, pos: QPointF) -> bool:
+        ok = self._criar_molde(canvas)
+        if not ok:
+            return False
+        self._ultimo_clique_falho = None
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
+        self._iniciar_arraste_molde(canvas, pos)
+        self.set_status("Molde em maos: mova o mouse. Clique esquerdo solta, clique direito cancela.")
+        canvas.update()
+        return True
+
+    def _alternar_candidato(self, canvas) -> None:
+        total = len(self._contornos_candidatos)
+        if total <= 0:
+            return
+        self._indice_candidato_atual = (self._indice_candidato_atual + 1) % total
+        contorno = self._contornos_candidatos[self._indice_candidato_atual]
+        self._fixar_contorno(canvas, contorno, adicionar=False)
+        self.set_status(f"Candidato {self._indice_candidato_atual + 1}/{total}. Tab alterna, Direito/Enter extrai.")
+        canvas.update()
+
+    def _deve_recalcular_hover(self, pos: QPointF) -> bool:
+        if self._arrastando_molde or self._contornos_auto_coords:
+            return False
+        agora = monotonic()
+        if self._ultimo_hover_pos is None:
+            return True
+        if (agora - self._ultimo_hover_tempo) < 0.08:
+            return False
+        dx = pos.x() - self._ultimo_hover_pos.x()
+        dy = pos.y() - self._ultimo_hover_pos.y()
+        return sqrt((dx * dx) + (dy * dy)) >= 0.15
+
+    def _detectar_candidatos_contorno(
+        self,
+        canvas,
+        pos: QPointF,
+        leve: bool = False,
+    ) -> list[list[tuple[float, float]]]:
+        ponto = (pos.x(), pos.y())
+        candidatos: list[list[tuple[float, float]]] = []
+        raio = max(12.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * (0.25 if leve else 0.45))
+        elementos_locais = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio * 1.8)
+        if not elementos_locais:
+            elementos_locais = list(canvas.cena.elementos)
+        tentativas = [
+            lambda: extract_local_enclosing_contour(elementos_locais, ponto, search_radius=raio, tol=0.01),
+            lambda: extract_smallest_enclosing_contour(elementos_locais, ponto, search_radius=raio, tol=0.01),
+        ]
+        if not leve:
+            tentativas.append(lambda: self._detectar_contorno_fechado(canvas, pos))
+        for tentativa in tentativas:
+            try:
+                contorno = tentativa()
+            except Exception:
+                contorno = None
+            if contorno:
+                self._adicionar_candidato_contorno(candidatos, ponto, contorno)
+        for idx in self._indices_polylines_contem_ponto(canvas, pos):
+            if 0 <= idx < len(canvas.cena.elementos):
+                contorno = self._normalizar_pontos_contorno(canvas.cena.elementos[idx].get("pontos", []))
+                self._adicionar_candidato_contorno(candidatos, ponto, contorno)
+        candidatos.sort(key=lambda c: (abs(self._area_contorno(c)), self._perimetro_contorno(c)))
+        return candidatos
+
+    def _adicionar_candidato_contorno(
+        self,
+        candidatos: list[list[tuple[float, float]]],
+        ponto: tuple[float, float],
+        contorno: list[tuple[float, float]],
+    ) -> None:
+        contorno = self._normalizar_pontos_contorno(contorno)
+        if len(contorno) < 4:
+            return
+        if not self._ponto_dentro_poligono_coords(ponto, contorno):
+            return
+        if abs(self._area_contorno(contorno)) <= 1e-8:
+            return
+        if any(self._contornos_equivalentes(contorno, existente, tol=1e-4) for existente in candidatos):
+            return
+        candidatos.append(contorno)
 
     def _indices_polylines_contem_ponto(self, canvas, pos: QPointF) -> list[int]:
         candidatos: list[int] = []
@@ -736,6 +996,9 @@ class Ferramenta(FerramentaBase):
         self._contornos_extraidos_preview = []
         self._contornos_auto_coords = []
         self._contornos_preparados = {}
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
         canvas._selecionados = set()
         self.set_status("Extração cancelada. Clique esquerdo para selecionar novamente.")
 
@@ -745,6 +1008,10 @@ class Ferramenta(FerramentaBase):
         self._contornos_extraidos_preview = []
         self._contornos_auto_coords = []
         self._contornos_preparados = {}
+        self._contorno_hover_preview = []
+        self._contornos_candidatos = []
+        self._indice_candidato_atual = 0
+        self._ultimo_hover_pos = None
         self._molde_criado = False
         self._molde_posicionado = False
         self._arrastando_molde = False
@@ -1053,23 +1320,42 @@ class Ferramenta(FerramentaBase):
             if el.get("tipo") == "polyline":
                 el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
                 if "controle_cantos" in el:
-                    el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
+                    el["controle_cantos"] = self._mover_pontos_controle(el.get("controle_cantos", []), dx, dy)
                 if "controle_auxiliares" in el:
-                    el["controle_auxiliares"] = [(x + dx, y + dy) for x, y in el.get("controle_auxiliares", [])]
+                    el["controle_auxiliares"] = self._mover_pontos_controle(el.get("controle_auxiliares", []), dx, dy)
                 if "pontos_controle_principais" in el:
-                    for p in el["pontos_controle_principais"]:
-                        p["x"] = float(p.get("x", 0.0)) + dx
-                        p["y"] = float(p.get("y", 0.0)) + dy
+                    el["pontos_controle_principais"] = self._mover_pontos_controle(el.get("pontos_controle_principais", []), dx, dy)
                 if "pontos_auxiliares" in el:
-                    for p in el["pontos_auxiliares"]:
-                        p["x"] = float(p.get("x", 0.0)) + dx
-                        p["y"] = float(p.get("y", 0.0)) + dy
+                    el["pontos_auxiliares"] = self._mover_pontos_controle(el.get("pontos_auxiliares", []), dx, dy)
                 if "fio_origem" in el:
                     fx, fy = el.get("fio_origem", (0.0, 0.0))
                     el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
                 if "fio_fim" in el:
                     fx, fy = el.get("fio_fim", (0.0, 0.0))
                     el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
+
+    def _mover_pontos_controle(self, valor, dx: float, dy: float):
+        if isinstance(valor, dict):
+            movido = {}
+            for chave, ponto in valor.items():
+                movido[chave] = self._mover_ponto_controle(ponto, dx, dy)
+            return movido
+        if isinstance(valor, list):
+            return [self._mover_ponto_controle(p, dx, dy) for p in valor]
+        return valor
+
+    def _mover_ponto_controle(self, ponto, dx: float, dy: float):
+        if isinstance(ponto, dict):
+            novo = dict(ponto)
+            novo["x"] = float(novo.get("x", 0.0)) + dx
+            novo["y"] = float(novo.get("y", 0.0)) + dy
+            return novo
+        if isinstance(ponto, (list, tuple)) and len(ponto) >= 2:
+            movido = (float(ponto[0]) + dx, float(ponto[1]) + dy)
+            if isinstance(ponto, list):
+                return [*movido, *ponto[2:]]
+            return (*movido, *ponto[2:])
+        return ponto
 
     def _restaurar_snapshot(self, canvas):
         for idx, el in self._snapshot_cancelamento.items():
@@ -1290,7 +1576,6 @@ class Ferramenta(FerramentaBase):
     def _sincronizar_cfg_da_ui(self):
         type(self)._salvar_cfg_global()
         self._cfg = dict(type(self)._cfg_global)
-        self._ultimo_clique_falho = None
 
     def _normalizar_pontos_contorno(self, pontos: list[tuple[float, float]] | list) -> list[tuple[float, float]]:
         coords: list[tuple[float, float]] = []
