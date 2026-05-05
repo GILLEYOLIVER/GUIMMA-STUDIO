@@ -77,17 +77,34 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
             return bool(_geometry_native.point_in_polygon(point, polygon))
         except Exception:
             pass
+
     poly = ensure_closed_polyline(polygon)
+    if len(poly) < 4:
+        return False
+
+    x, y = point
+
+    for a, b in zip(poly, poly[1:]):
+        if point_segment_distance((x, y), a, b) <= 1e-9:
+            return True
+
     inside = False
     j = len(poly) - 1
-    x, y = point
+
     for i in range(len(poly)):
         xi, yi = poly[i]
         xj, yj = poly[j]
-        intersect = ((yi > y) != (yj > y)) and (x < ((xj - xi) * (y - yi) / max((yj - yi), 1e-12)) + xi)
-        if intersect:
-            inside = not inside
+
+        cruza = (yi > y) != (yj > y)
+        if cruza:
+            dy = yj - yi
+            if abs(dy) > 1e-12:
+                x_intersect = ((xj - xi) * (y - yi) / dy) + xi
+                if x <= x_intersect:
+                    inside = not inside
+
         j = i
+
     return inside
 
 

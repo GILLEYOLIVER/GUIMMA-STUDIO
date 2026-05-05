@@ -1057,6 +1057,9 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
+        if self.ferramenta_ativa == "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+            if self._runtime_tool.on_key_press(self, event):
+                return
         if event.modifiers() & Qt.ControlModifier:
             if event.key() in (Qt.Key_Return, Qt.Key_Enter):
                 self._ativar_ferramenta_janela_principal("propriedades")
@@ -1066,7 +1069,7 @@ class VisualizacaoCanvas(QWidget):
                 self._ativar_ferramenta_janela_principal("informacoes_moldes")
                 event.accept()
                 return
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+        if self.ferramenta_ativa != "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
             if self._runtime_tool.on_key_press(self, event):
                 return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
@@ -1098,6 +1101,9 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if self.ferramenta_ativa == "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+            if self._runtime_tool.on_mouse_press(self, event):
+                return
         if event.button() == Qt.RightButton:
             agora = monotonic()
             if (agora - self._ultimo_clique_direito_ts) <= 0.45:
@@ -1125,7 +1131,7 @@ class VisualizacaoCanvas(QWidget):
                     return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+        if self.ferramenta_ativa != "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
