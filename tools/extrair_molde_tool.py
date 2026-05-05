@@ -126,6 +126,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
         self.set_status("Defina modo. LMB seleciona contorno(s), RMB pega molde, LMB solta, RMB cancela.")
@@ -146,6 +148,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
 
     def on_canvas_resize(self, canvas) -> None:
         self._reposicionar_dialog_config(canvas)
@@ -170,20 +174,33 @@ class Ferramenta(FerramentaBase):
         if event.button() == Qt.LeftButton:
             pos_clique = canvas._tela_para_cena(pos_tela_exata)
             if self._cfg.get("modo") == "Manual":
-                candidatos = self._indices_polylines_contem_ponto(canvas, pos_clique)
-                if not candidatos:
-                    self.set_status("Manual: clique dentro de um contorno fechado para selecionar.")
+                contorno = self._detectar_contorno_fechado(canvas, pos_clique)
+                if not contorno or self._perimetro_contorno(contorno) < self.TOLERANCIA_FECHAMENTO_CM:
+                    self.set_status("Manual: clique dentro de uma área fechada para detectar o contorno.")
                     event.accept()
                     return True
-                idx = self._escolher_melhor_candidato(canvas, candidatos)
-                if idx not in self._selecoes_manuais:
-                    self._selecoes_manuais.add(idx)
-                    self._extrair_indice(canvas, idx)
-                self._idx_selecionado = idx
-                canvas._selecionados = set(self._selecoes_manuais)
-                self._molde_criado = False
-                self._molde_posicionado = False
-                self.set_status(f"Manual: {len(self._selecoes_manuais)} contorno(s) selecionado(s). RMB desfaz, novo RMB extrai.")
+
+                ja_selecionado = any(self._contornos_equivalentes(contorno, c) for c in self._contornos_auto_coords)
+                if not ja_selecionado:
+                    self._contornos_auto_coords = [contorno]
+                    self._contornos_extraidos_preview = [[QPointF(float(x), float(y)) for x, y in contorno]]
+                    self._selecoes_manuais.clear()
+                    self._contornos_preparados = {}
+                    self._idx_selecionado = None
+                    canvas._selecionados = set()
+                    self._molde_criado = False
+                    self._molde_posicionado = False
+                    self.set_status("Manual: contorno detectado em azul. Clique esquerdo novamente para extrair.")
+                    canvas.update()
+                    event.accept()
+                    return True
+
+                ok = self._criar_molde(canvas)
+                if not ok:
+                    self._mostrar_aviso_sem_molde(canvas)
+                    return False
+                self._iniciar_arraste_molde(canvas, pos)
+                self.set_status("Molde em mãos: mova o mouse. LMB confirma/solta, RMB cancela.")
                 canvas.update()
                 event.accept()
                 return True
@@ -220,16 +237,10 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        if self._cfg.get("modo") == "Manual" and self._selecoes_manuais and not self._contornos_auto_coords and not self._molde_criado:
-            idx_removido = sorted(self._selecoes_manuais)[-1]
-            self._selecoes_manuais.discard(idx_removido)
-            self._contornos_preparados.pop(idx_removido, None)
+        if self._cfg.get("modo") == "Manual" and self._contornos_auto_coords and not self._molde_criado:
+            self._contornos_auto_coords = []
             self._contornos_extraidos_preview = []
-            canvas._selecionados = set(self._selecoes_manuais)
-            if self._selecoes_manuais:
-                self.set_status(f"Manual: seleção desfeita. Restam {len(self._selecoes_manuais)} contorno(s). RMB novamente para extrair.")
-            else:
-                self.set_status("Manual: seleção limpa. Clique esquerdo para selecionar contornos.")
+            self.set_status("Manual: contorno removido. Clique esquerdo para detectar novamente.")
             canvas.update()
             event.accept()
             return True
@@ -674,6 +685,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         self._molde_posicionado = True
         canvas._registrar_historico()
         self.set_status(msg)
@@ -690,6 +703,8 @@ class Ferramenta(FerramentaBase):
             if 0 <= idx < len(canvas.cena.elementos):
                 canvas.cena.elementos.pop(idx)
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
@@ -715,6 +730,8 @@ class Ferramenta(FerramentaBase):
         self._ultimo_pos_arrasto = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
+        if self._dialog is not None and isValid(self._dialog):
+            self._dialog.hide()
         canvas._selecionados = set()
         self.set_status(msg)
 
