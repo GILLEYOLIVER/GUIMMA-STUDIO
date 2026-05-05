@@ -3,9 +3,52 @@ from __future__ import annotations
 from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QPushButton, QVBoxLayout
 
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
+
+
+class PontosNoPerimetroDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pontos no elemento")
+        self.setWindowFlag(Qt.Tool, True)
+        self.setModal(False)
+        self.setFixedWidth(270)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(4)
+
+        grid = QGridLayout()
+        self.cmb_modo = QComboBox()
+        self.cmb_modo.addItems(["Perímetro (cm)"])
+        self.ed_passo = QLineEdit("2")
+        grid.addWidget(self.cmb_modo, 0, 0)
+        grid.addWidget(self.ed_passo, 0, 1)
+        lay.addLayout(grid)
+
+        self.chk_dividir = QCheckBox("Dividir elemento")
+        self.chk_dividir.setChecked(False)
+        lay.addWidget(self.chk_dividir)
+
+        self.chk_colocar = QCheckBox("Colocar ponto")
+        self.chk_colocar.setChecked(False)
+        lay.addWidget(self.chk_colocar)
+
+        self.chk_manter = QCheckBox("Manter distâncias nos moldes")
+        self.chk_manter.setChecked(False)
+        lay.addWidget(self.chk_manter)
+
+        self.btn_remover_marcacoes = QPushButton("Remover marcações")
+        lay.addWidget(self.btn_remover_marcacoes)
+
+    def passo_unidade(self) -> float:
+        try:
+            return max(0.001, float(self.ed_passo.text().replace(",", ".").strip()))
+        except Exception:
+            return 2.0
 
 
 class Ferramenta(FerramentaBase):
@@ -13,6 +56,8 @@ class Ferramenta(FerramentaBase):
     nome = "No Perimetro"
     descricao_painel = ""
     usa_painel_auxiliar = False
+
+    _dialog_global: PontosNoPerimetroDialog | None = None
 
     def __init__(self):
         super().__init__()
@@ -24,6 +69,30 @@ class Ferramenta(FerramentaBase):
         self._progresso_assinado = 0.0
         self._marcando = False
 
+    def _obter_dialog(self, canvas) -> PontosNoPerimetroDialog:
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        dialog = Ferramenta._dialog_global
+        if dialog is None or dialog.parentWidget() is not parent:
+            if dialog is not None:
+                dialog.close()
+            dialog = PontosNoPerimetroDialog(parent)
+            dialog.btn_remover_marcacoes.clicked.connect(lambda: self._remover_marcacoes(canvas))
+            Ferramenta._dialog_global = dialog
+        return dialog
+
+    def _remover_marcacoes(self, canvas):
+        removidos = 0
+        for el in canvas.cena.elementos:
+            if "marcacoes_no_perimetro" in el:
+                el.pop("marcacoes_no_perimetro", None)
+                removidos += 1
+        self._pontos_preview = []
+        self._marcando = False
+        canvas.update()
+        txt = f"Marcações removidas de {removidos} elemento(s)."
+        self.set_status(txt)
+        mensagem_status(canvas, txt)
+
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._idx_destaque = None
@@ -33,6 +102,9 @@ class Ferramenta(FerramentaBase):
         self._ultimo_dist = None
         self._progresso_assinado = 0.0
         self._marcando = False
+        dialog = self._obter_dialog(canvas)
+        dialog.show()
+        dialog.raise_()
         texto = "No perímetro: 1º clique define início; mova no perímetro e 2º clique confirma."
         self.set_status(texto)
         mensagem_status(canvas, texto)
