@@ -185,13 +185,26 @@ class Ferramenta(FerramentaBase):
             if event.button() == Qt.LeftButton:
                 self._finalizar_posicionamento(
                     canvas,
-                    "Molde finalizado. Clique direito no canvas para encerrar ou clique esquerdo em outra area para extrair outro molde.",
+                    "Molde finalizado. Clique esquerdo novamente para encerrar a ferramenta.",
                 )
                 event.accept()
                 return True
             if event.button() == Qt.RightButton:
                 self._cancelar_arraste_molde(canvas)
                 canvas.update()
+                event.accept()
+                return True
+            return False
+
+        if self._molde_posicionado:
+            if event.button() == Qt.LeftButton:
+                self._limpar_estado_extracao(canvas, "Ferramenta finalizada. Voltando para Selecionar.")
+                canvas.set_ferramenta_ativa("selecionar")
+                canvas.update()
+                event.accept()
+                return True
+            if event.button() == Qt.RightButton:
+                self.set_status("Molde finalizado. Clique esquerdo para encerrar a ferramenta.")
                 event.accept()
                 return True
             return False
