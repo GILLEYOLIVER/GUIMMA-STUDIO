@@ -202,7 +202,8 @@ class Ferramenta(FerramentaBase):
             return False
 
         # Segundo clique esquerdo sempre finaliza a operação atual.
-        if self._marcando and self._idx_destaque is not None:
+        # Também finaliza se já existe prévia válida mesmo que _marcando tenha sido perdido por foco/evento.
+        if self._idx_destaque is not None and (self._marcando or bool(self._pontos_preview)):
             self._confirmar_marcacoes(canvas)
             event.accept()
             return True
