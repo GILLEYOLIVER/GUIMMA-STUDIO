@@ -1796,12 +1796,13 @@ class VisualizacaoCanvas(QWidget):
         if padrao:
             pen.setDashPattern(padrao)
 
-    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00"):
+    def _desenhar_marca_x(self, painter: QPainter, ponto: QPointF, cor: str = "#ff5a00", tamanho_px: int = 5):
         pt = self._cena_para_tela(ponto)
+        tamanho = max(1, int(tamanho_px))
         pen = QPen(QColor(cor), 1)
         painter.setPen(pen)
-        painter.drawLine(int(pt.x() - 5), int(pt.y() - 5), int(pt.x() + 5), int(pt.y() + 5))
-        painter.drawLine(int(pt.x() - 5), int(pt.y() + 5), int(pt.x() + 5), int(pt.y() - 5))
+        painter.drawLine(int(pt.x() - tamanho), int(pt.y() - tamanho), int(pt.x() + tamanho), int(pt.y() + tamanho))
+        painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
