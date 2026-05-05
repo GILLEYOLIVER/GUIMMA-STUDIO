@@ -83,18 +83,15 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
         return False
 
     x, y = point
-
     for a, b in zip(poly, poly[1:]):
         if point_segment_distance((x, y), a, b) <= 1e-9:
             return True
 
     inside = False
     j = len(poly) - 1
-
     for i in range(len(poly)):
         xi, yi = poly[i]
         xj, yj = poly[j]
-
         cruza = (yi > y) != (yj > y)
         if cruza:
             dy = yj - yi
@@ -102,7 +99,6 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
                 x_intersect = ((xj - xi) * (y - yi) / dy) + xi
                 if x <= x_intersect:
                     inside = not inside
-
         j = i
 
     return inside

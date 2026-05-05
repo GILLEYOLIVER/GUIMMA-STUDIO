@@ -1057,7 +1057,11 @@ class VisualizacaoCanvas(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
-        if self.ferramenta_ativa == "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+        if (
+            self.ferramenta_ativa == "extrair_molde"
+            and self._runtime_tool
+            and hasattr(self._runtime_tool, "on_key_press")
+        ):
             if self._runtime_tool.on_key_press(self, event):
                 return
         if event.modifiers() & Qt.ControlModifier:
@@ -1101,7 +1105,11 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self.ferramenta_ativa == "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+        if (
+            self.ferramenta_ativa == "extrair_molde"
+            and self._runtime_tool
+            and hasattr(self._runtime_tool, "on_mouse_press")
+        ):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if event.button() == Qt.RightButton:
