@@ -77,6 +77,7 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
             return bool(_geometry_native.point_in_polygon(point, polygon))
         except Exception:
             pass
+
     poly = ensure_closed_polyline(polygon)
     if len(poly) < 4:
         return False
@@ -99,6 +100,7 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
                 if x <= x_intersect:
                     inside = not inside
         j = i
+
     return inside
 
 

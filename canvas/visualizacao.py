@@ -1073,7 +1073,7 @@ class VisualizacaoCanvas(QWidget):
                 self._ativar_ferramenta_janela_principal("informacoes_moldes")
                 event.accept()
                 return
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
+        if self.ferramenta_ativa != "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_key_press"):
             if self._runtime_tool.on_key_press(self, event):
                 return
         if event.key() == Qt.Key_W and not event.isAutoRepeat():
@@ -1139,7 +1139,7 @@ class VisualizacaoCanvas(QWidget):
                     return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+        if self.ferramenta_ativa != "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
