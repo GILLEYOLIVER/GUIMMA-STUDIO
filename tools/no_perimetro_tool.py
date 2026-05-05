@@ -23,8 +23,8 @@ class PontosNoPerimetroDialog(QDialog):
 
         grid = QGridLayout()
         self.cmb_modo = QComboBox()
-        self.cmb_modo.addItems(["Perímetro (cm)"])
-        self.ed_passo = QLineEdit("2")
+        self.cmb_modo.addItems(["Perímetro"])
+        self.ed_passo = QLineEdit("2")  # Distância (cm)
         grid.addWidget(self.cmb_modo, 0, 0)
         grid.addWidget(self.ed_passo, 0, 1)
         lay.addLayout(grid)
@@ -81,15 +81,34 @@ class Ferramenta(FerramentaBase):
         return dialog
 
     def _remover_marcacoes(self, canvas):
-        removidos = 0
-        for el in canvas.cena.elementos:
-            if "marcacoes_no_perimetro" in el:
-                el.pop("marcacoes_no_perimetro", None)
-                removidos += 1
+        idxs = sorted(getattr(canvas, "_selecionados", set()) or [])
+        if not idxs:
+            txt = "Indique o molde: selecione o molde antes de remover as marcações."
+            self.set_status(txt)
+            mensagem_status(canvas, txt)
+            return
+        idx = idxs[0]
+        if idx < 0 or idx >= len(canvas.cena.elementos):
+            return
+        el = canvas.cena.elementos[idx]
+        chaves = [
+            "marcacoes_no_perimetro", "marcacoes_no_perimetro_config", "no_perimetro_marcacoes",
+            "no_perimetro_config", "distancias_no_perimetro", "distancias_perimetro", "marcacoes_perimetro",
+        ]
+        tinha = any(ch in el for ch in chaves)
+        if not tinha:
+            txt = "O molde selecionado não possui marcações para remover."
+            self.set_status(txt)
+            mensagem_status(canvas, txt)
+            return
+        for ch in chaves:
+            el.pop(ch, None)
+        canvas._registrar_historico()
         self._pontos_preview = []
         self._marcando = False
+        canvas._registrar_historico()
         canvas.update()
-        txt = f"Marcações removidas de {removidos} elemento(s)."
+        txt = "Marcações removidas do molde selecionado."
         self.set_status(txt)
         mensagem_status(canvas, txt)
 
@@ -182,6 +201,7 @@ class Ferramenta(FerramentaBase):
         idx = int(info["elemento_idx"])
         if not self._marcando:
             self._idx_destaque = idx
+            canvas._selecionados = {idx}
             self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
             self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
             self._ultimo_dist = self._inicio_dist
@@ -196,6 +216,9 @@ class Ferramenta(FerramentaBase):
             return True
 
         if idx != self._idx_destaque:
+            txt = "Confirme no mesmo elemento onde o início foi marcado."
+            self.set_status(txt)
+            mensagem_status(canvas, txt)
             return True
 
         self._confirmar_marcacoes(canvas)
@@ -208,7 +231,10 @@ class Ferramenta(FerramentaBase):
         pos = canvas._ponto_com_snap(event.position())
         atual = self._dist_ao_longo_do_perimetro(pos)
         if atual is None:
-            return False
+            txt = "Mantenha o cursor sobre o perímetro do molde."
+            self.set_status(txt)
+            mensagem_status(canvas, txt)
+            return True
         total = self._perimetro_total()
         if total <= 1e-9:
             return False
@@ -221,7 +247,9 @@ class Ferramenta(FerramentaBase):
             self._progresso_assinado += delta
         self._ultimo_dist = atual
 
-        passo = 2.0 * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
+        dialog = self._obter_dialog(canvas)
+        passo_u = dialog.passo_unidade()
+        passo = canvas.converter_para_cena(passo_u) if hasattr(canvas, "converter_para_cena") else passo_u * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
         self._pontos_preview = self._pontos_por_progresso(self._inicio_dist, self._progresso_assinado, passo)
         canvas.update()
         return True
@@ -230,10 +258,24 @@ class Ferramenta(FerramentaBase):
         if self._idx_destaque is None:
             return
         el = canvas.cena.elementos[self._idx_destaque]
-        if el.get("tipo") == "polyline":
+        if dialog.chk_dividir.isChecked() and el.get("tipo") == "polyline":
             orig = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             el["pontos"] = [(p.x(), p.y()) for p in self._inserir_pontos_em_polyline(orig, self._pontos_preview)]
         el["marcacoes_no_perimetro"] = [(p.x(), p.y()) for p in self._pontos_preview]
+        if dialog.chk_colocar.isChecked():
+            if "controle_cantos" in el:
+                atual = list(el.get("controle_cantos", []))
+                atual.extend([(p.x(), p.y()) for p in self._pontos_preview])
+                el["controle_cantos"] = atual
+            if "pontos_controle_principais" in el:
+                base = (el.get("pontos_controle_principais") or [{}])[0]
+                novos = list(el.get("pontos_controle_principais", []))
+                for i, p in enumerate(self._pontos_preview, start=len(novos)+1):
+                    d = dict(base)
+                    d["x"] = float(p.x()); d["y"] = float(p.y())
+                    if "indice" in d: d["indice"] = i
+                    novos.append(d)
+                el["pontos_controle_principais"] = novos
 
         self._marcando = False
         self._inicio_dist = None

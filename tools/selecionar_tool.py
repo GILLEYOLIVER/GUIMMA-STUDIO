@@ -223,6 +223,18 @@ class Ferramenta(FerramentaBase):
                 if "fio_fim" in el:
                     fx, fy = el.get("fio_fim", (0.0, 0.0))
                     el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
+                if "marcacoes_no_perimetro" in el:
+                    el["marcacoes_no_perimetro"] = [(x + dx, y + dy) for x, y in el.get("marcacoes_no_perimetro", [])]
+                if "pontos_controle_principais" in el:
+                    for pt in el.get("pontos_controle_principais", []):
+                        if isinstance(pt, dict) and "x" in pt and "y" in pt:
+                            pt["x"] = float(pt["x"]) + dx
+                            pt["y"] = float(pt["y"]) + dy
+                if "pontos_auxiliares" in el:
+                    for pt in el.get("pontos_auxiliares", []):
+                        if isinstance(pt, dict) and "x" in pt and "y" in pt:
+                            pt["x"] = float(pt["x"]) + dx
+                            pt["y"] = float(pt["y"]) + dy
             elif el.get("tipo") == "bezier_quadratica":
                 for chave in ("p0", "p1", "p2"):
                     x, y = el[chave]
