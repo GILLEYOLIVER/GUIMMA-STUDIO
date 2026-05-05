@@ -108,7 +108,7 @@ class Ferramenta(FerramentaBase):
         self._snapshot_cancelamento: dict[int, dict] = {}
         self._indices_molde_em_arraste: set[int] = set()
         self._cfg = dict(type(self)._cfg_global)
-        self._ultimo_clique_falho: QPointF | None = None
+        self._ultimo_clique_falho = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -203,11 +203,7 @@ class Ferramenta(FerramentaBase):
                     return False
                 self._ultimo_clique_falho = None
                 self._iniciar_arraste_molde(canvas, pos)
-<<<<<<< codex/fix-manual-selection-functionality-v2vizj
                 self.set_status("Molde em mãos: mova o mouse. LMB finaliza, RMB cancela.")
-=======
-                self.set_status("Molde em mãos: mova o mouse. LMB confirma/solta, RMB cancela.")
->>>>>>> main
                 canvas.update()
                 event.accept()
                 return True
@@ -229,18 +225,8 @@ class Ferramenta(FerramentaBase):
             canvas._selecionados = set()
             self._molde_criado = False
             self._molde_posicionado = False
-<<<<<<< codex/fix-manual-selection-functionality-v2vizj
             self._ultimo_clique_falho = None
             self.set_status("Automático: contorno rastreado. Clique direito para extrair o molde.")
-=======
-            ok = self._criar_molde(canvas)
-            if not ok:
-                self._mostrar_aviso_sem_molde(canvas, pos_clique)
-                return False
-            self._ultimo_clique_falho = None
-            self._iniciar_arraste_molde(canvas, pos)
-            self.set_status("Automático: molde extraído. Mova o mouse e solte com LMB.")
->>>>>>> main
             canvas.update()
             event.accept()
             return True
@@ -263,17 +249,6 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-<<<<<<< codex/fix-manual-selection-functionality-v2vizj
-=======
-        if self._cfg.get("modo") == "Manual" and self._contornos_auto_coords and not self._molde_criado:
-            self._contornos_auto_coords = []
-            self._contornos_extraidos_preview = []
-            self.set_status("Manual: contorno removido. Clique esquerdo para detectar novamente.")
-            canvas.update()
-            event.accept()
-            return True
-
->>>>>>> main
         if not self._contornos_auto_coords and not self._selecoes_manuais:
             self.set_status("Selecione primeiro uma área/contorno com clique esquerdo.")
             event.accept()
@@ -1315,7 +1290,7 @@ class Ferramenta(FerramentaBase):
     def _sincronizar_cfg_da_ui(self):
         type(self)._salvar_cfg_global()
         self._cfg = dict(type(self)._cfg_global)
-        self._ultimo_clique_falho: QPointF | None = None
+        self._ultimo_clique_falho = None
 
     def _normalizar_pontos_contorno(self, pontos: list[tuple[float, float]] | list) -> list[tuple[float, float]]:
         coords: list[tuple[float, float]] = []
