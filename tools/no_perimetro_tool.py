@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QPushButton, QVBoxLayout
 
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
@@ -30,16 +30,19 @@ class PontosNoPerimetroDialog(QDialog):
         lay.addLayout(grid)
 
         self.chk_dividir = QCheckBox("Dividir elemento")
-        self.chk_dividir.setChecked(True)
+        self.chk_dividir.setChecked(False)
         lay.addWidget(self.chk_dividir)
 
         self.chk_colocar = QCheckBox("Colocar ponto")
-        self.chk_colocar.setChecked(True)
+        self.chk_colocar.setChecked(False)
         lay.addWidget(self.chk_colocar)
 
         self.chk_manter = QCheckBox("Manter distâncias nos moldes")
-        self.chk_manter.setChecked(True)
+        self.chk_manter.setChecked(False)
         lay.addWidget(self.chk_manter)
+
+        self.btn_remover_marcacoes = QPushButton("Remover marcações")
+        lay.addWidget(self.btn_remover_marcacoes)
 
     def passo_unidade(self) -> float:
         try:
@@ -51,7 +54,8 @@ class PontosNoPerimetroDialog(QDialog):
 class Ferramenta(FerramentaBase):
     id_ferramenta = "no_perimetro"
     nome = "No Perimetro"
-    descricao_painel = "Clique no contorno para marcar início; mova o mouse e clique novamente para confirmar."
+    descricao_painel = ""
+    usa_painel_auxiliar = False
 
     _dialog_global: PontosNoPerimetroDialog | None = None
 
@@ -72,8 +76,22 @@ class Ferramenta(FerramentaBase):
             if dialog is not None:
                 dialog.close()
             dialog = PontosNoPerimetroDialog(parent)
+            dialog.btn_remover_marcacoes.clicked.connect(lambda: self._remover_marcacoes(canvas))
             Ferramenta._dialog_global = dialog
         return dialog
+
+    def _remover_marcacoes(self, canvas):
+        removidos = 0
+        for el in canvas.cena.elementos:
+            if "marcacoes_no_perimetro" in el:
+                el.pop("marcacoes_no_perimetro", None)
+                removidos += 1
+        self._pontos_preview = []
+        self._marcando = False
+        canvas.update()
+        txt = f"Marcações removidas de {removidos} elemento(s)."
+        self.set_status(txt)
+        mensagem_status(canvas, txt)
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -87,7 +105,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         dialog.show()
         dialog.raise_()
-        texto = "No perímetro: 1º clique define início, mova no perímetro e 2º clique confirma."
+        texto = "No perímetro: 1º clique define início; mova no perímetro e 2º clique confirma."
         self.set_status(texto)
         mensagem_status(canvas, texto)
 
@@ -217,6 +235,7 @@ class Ferramenta(FerramentaBase):
         if dialog.chk_dividir.isChecked() and dialog.chk_colocar.isChecked() and el.get("tipo") == "polyline":
             orig = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             el["pontos"] = [(p.x(), p.y()) for p in self._inserir_pontos_em_polyline(orig, self._pontos_preview)]
+        el["marcacoes_no_perimetro"] = [(p.x(), p.y()) for p in self._pontos_preview]
 
         self._marcando = False
         self._inicio_dist = None
@@ -261,5 +280,9 @@ class Ferramenta(FerramentaBase):
             pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             for a, b in zip(pts, pts[1:]):
                 canvas._desenhar_segmento(painter, a, b, cor="#2f8bff", espessura=2.0)
-        for p in self._pontos_preview:
+
+        pontos_persistidos = [QPointF(float(x), float(y)) for x, y in el.get("marcacoes_no_perimetro", []) or []]
+        for p in pontos_persistidos:
             canvas._desenhar_marca_x(painter, p, cor="#ff2f2f", tamanho_px=5)
+        for p in self._pontos_preview:
+            canvas._desenhar_marca_x(painter, p, cor="#ffd100", tamanho_px=6)
