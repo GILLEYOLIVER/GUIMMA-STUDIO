@@ -168,9 +168,28 @@ class Ferramenta(FerramentaBase):
             return False
 
         if event.button() == Qt.LeftButton:
+            pos_clique = canvas._tela_para_cena(pos_tela_exata)
+            if self._cfg.get("modo") == "Manual":
+                candidatos = self._indices_polylines_contem_ponto(canvas, pos_clique)
+                if not candidatos:
+                    self.set_status("Manual: clique dentro de um contorno fechado para selecionar.")
+                    event.accept()
+                    return True
+                idx = self._escolher_melhor_candidato(canvas, candidatos)
+                if idx not in self._selecoes_manuais:
+                    self._selecoes_manuais.add(idx)
+                    self._extrair_indice(canvas, idx)
+                self._idx_selecionado = idx
+                canvas._selecionados = set(self._selecoes_manuais)
+                self._molde_criado = False
+                self._molde_posicionado = False
+                self.set_status(f"Manual: {len(self._selecoes_manuais)} contorno(s) selecionado(s). RMB desfaz, novo RMB extrai.")
+                canvas.update()
+                event.accept()
+                return True
+
             # Para extrair molde por área, usar o ponto real do clique (sem snap),
             # evitando capturar regiões distantes por aproximação de snap.
-            pos_clique = canvas._tela_para_cena(pos_tela_exata)
             contorno = self._detectar_contorno_fechado(canvas, pos_clique)
             if not contorno:
                 self._mostrar_aviso_sem_molde(canvas)
@@ -201,8 +220,22 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        if not self._contornos_auto_coords:
-            self.set_status("Selecione primeiro uma área fechada com clique esquerdo.")
+        if self._cfg.get("modo") == "Manual" and self._selecoes_manuais and not self._contornos_auto_coords and not self._molde_criado:
+            idx_removido = sorted(self._selecoes_manuais)[-1]
+            self._selecoes_manuais.discard(idx_removido)
+            self._contornos_preparados.pop(idx_removido, None)
+            self._contornos_extraidos_preview = []
+            canvas._selecionados = set(self._selecoes_manuais)
+            if self._selecoes_manuais:
+                self.set_status(f"Manual: seleção desfeita. Restam {len(self._selecoes_manuais)} contorno(s). RMB novamente para extrair.")
+            else:
+                self.set_status("Manual: seleção limpa. Clique esquerdo para selecionar contornos.")
+            canvas.update()
+            event.accept()
+            return True
+
+        if not self._contornos_auto_coords and not self._selecoes_manuais:
+            self.set_status("Selecione primeiro uma área/contorno com clique esquerdo.")
             event.accept()
             return True
 
