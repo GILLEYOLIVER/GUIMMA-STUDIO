@@ -32,6 +32,37 @@ def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
     return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
 
+def point_segment_distance(point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+    if _geometry_native is not None:
+        try:
+            return float(_geometry_native.point_segment_distance(point, a, b))
+        except Exception:
+            pass
+    px, py = point
+    ax, ay = a
+    bx, by = b
+    abx = bx - ax
+    aby = by - ay
+    denom = (abx * abx) + (aby * aby)
+    if denom <= 1e-12:
+        return sqrt(((px - ax) ** 2) + ((py - ay) ** 2))
+    t = max(0.0, min(1.0, (((px - ax) * abx) + ((py - ay) * aby)) / denom))
+    qx = ax + (abx * t)
+    qy = ay + (aby * t)
+    return sqrt(((px - qx) ** 2) + ((py - qy) ** 2))
+
+
+def polyline_perimeter(points: list[tuple[float, float]]) -> float:
+    if _geometry_native is not None:
+        try:
+            return float(_geometry_native.polyline_perimeter(points))
+        except Exception:
+            pass
+    if len(points) < 2:
+        return 0.0
+    return sum(dist(a, b) for a, b in zip(points, points[1:]))
+
+
 def ensure_closed_polyline(points: list[tuple[float, float]], eps: float = 0.001) -> list[tuple[float, float]]:
     if len(points) < 2:
         return points
