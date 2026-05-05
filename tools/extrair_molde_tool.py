@@ -1042,9 +1042,14 @@ class Ferramenta(FerramentaBase):
         self._contornos_candidatos = []
         self._indice_candidato_atual = 0
         self._ultimo_hover_pos = None
-        if self._dialog is not None and isValid(self._dialog):
-            self._dialog.hide()
         self._molde_posicionado = True
+        if self._dialog is None or not isValid(self._dialog):
+            self._abrir_config(canvas)
+        else:
+            if not self._dialog.isVisible():
+                self._dialog.show()
+            self._reposicionar_dialog_config(canvas)
+            self._dialog.raise_()
         canvas._registrar_historico()
         self.set_status(msg)
         canvas.update()
