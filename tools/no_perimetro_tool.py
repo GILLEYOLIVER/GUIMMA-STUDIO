@@ -210,14 +210,26 @@ class Ferramenta(FerramentaBase):
 
         pos = canvas._ponto_com_snap(event.position())
         info = selecionar_segmento_mais_proximo(canvas, pos)
-        if info is None:
+        idx = None
+        if info is not None:
+            idx = int(info["elemento_idx"])
+        else:
+            selecionados = sorted(getattr(canvas, "_selecionados", set()) or [])
+            if selecionados:
+                cand = int(selecionados[0])
+                if 0 <= cand < len(canvas.cena.elementos):
+                    idx = cand
+        if idx is None:
+            txt = "Clique no perímetro ou selecione o elemento antes de iniciar."
+            self.set_status(txt)
+            mensagem_status(canvas, txt)
             return False
-
-        idx = int(info["elemento_idx"])
         self._idx_destaque = idx
         canvas._selecionados = {idx}
         self._segmentos_ativos = segmentos_de_elemento(canvas.cena.elementos[idx])
         self._inicio_dist = self._dist_ao_longo_do_perimetro(pos)
+        if self._inicio_dist is None:
+            self._inicio_dist = 0.0
         self._ultimo_dist = self._inicio_dist
         self._progresso_assinado = 0.0
         self._pontos_preview = []
