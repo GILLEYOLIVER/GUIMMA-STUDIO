@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from core.geometry.engine import internal_angle
+from core.geometry.engine import internal_angle, point_segment_distance, polyline_perimeter
 from core.geometry_bridge import (
     compose_closed_contour,
     create_mold_payload,
@@ -723,14 +723,7 @@ class Ferramenta(FerramentaBase):
         QMessageBox.warning(canvas, "Atenção", "Não foi possível encontrar molde!")
 
     def _perimetro_contorno(self, contorno: list[tuple[float, float]]) -> float:
-        if len(contorno) < 2:
-            return 0.0
-        total = 0.0
-        for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
-            dx = bx - ax
-            dy = by - ay
-            total += sqrt((dx * dx) + (dy * dy))
-        return total
+        return polyline_perimeter(contorno)
 
     def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
@@ -1007,16 +1000,7 @@ class Ferramenta(FerramentaBase):
         px, py = ponto
         menor = float("inf")
         for (ax, ay), (bx, by) in zip(contorno, contorno[1:]):
-            abx = bx - ax
-            aby = by - ay
-            denom = (abx * abx) + (aby * aby)
-            if denom <= 1e-12:
-                dist = sqrt(((px - ax) ** 2) + ((py - ay) ** 2))
-            else:
-                t = max(0.0, min(1.0, (((px - ax) * abx) + ((py - ay) * aby)) / denom))
-                qx = ax + (abx * t)
-                qy = ay + (aby * t)
-                dist = sqrt(((px - qx) ** 2) + ((py - qy) ** 2))
+            dist = point_segment_distance((px, py), (ax, ay), (bx, by))
             if dist < menor:
                 menor = dist
         return menor
