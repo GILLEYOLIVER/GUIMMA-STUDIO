@@ -523,9 +523,18 @@ class Ferramenta(FerramentaBase):
         linha_atual: tuple[QPointF, QPointF],
         distancia: float,
     ) -> list[QPointF]:
-        del vertice_original
+        angulo = self._angulo_entre_segmentos(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
+        if angulo < 0.35:
+            return [self._media_pontos(linha_anterior[1], linha_atual[0])]
+
         inter = self._intersecao_linhas(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
         if inter is not None:
+            tamanho_ref = max(
+                distancia * 4.0,
+                min(self._dist(linha_anterior[0], linha_anterior[1]), self._dist(linha_atual[0], linha_atual[1])) * 1.6,
+            )
+            if self._dist(inter, linha_anterior[1]) > tamanho_ref or self._dist(inter, linha_atual[0]) > tamanho_ref:
+                return [self._media_pontos(linha_anterior[1], linha_atual[0])]
             return [inter]
 
         # Linhas paralelas nao possuem ponto unico de encontro; nesse caso, a
@@ -607,6 +616,23 @@ class Ferramenta(FerramentaBase):
     def _normalizar(x: float, y: float) -> tuple[float, float]:
         d = sqrt(x * x + y * y) or 1.0
         return x / d, y / d
+
+    @staticmethod
+    def _media_pontos(a: QPointF, b: QPointF) -> QPointF:
+        return QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+
+    @staticmethod
+    def _angulo_entre_segmentos(a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> float:
+        from math import acos
+
+        ax, ay = a2.x() - a1.x(), a2.y() - a1.y()
+        bx, by = b2.x() - b1.x(), b2.y() - b1.y()
+        da = sqrt(ax * ax + ay * ay)
+        db = sqrt(bx * bx + by * by)
+        if da <= 1e-9 or db <= 1e-9:
+            return 0.0
+        cosv = max(-1.0, min(1.0, ((ax * bx) + (ay * by)) / (da * db)))
+        return acos(cosv)
 
     @staticmethod
     def _dist(a: QPointF, b: QPointF) -> float:
