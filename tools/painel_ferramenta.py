@@ -4,17 +4,20 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
+
 
 class PainelFerramentaBasico(QFrame):
     """Painel auxiliar padrão para ferramentas sem UI própria."""
 
-    def __init__(self, titulo: str, descricao: str, parent: QWidget | None = None):
+    def __init__(self, titulo: str, descricao: str, parent: QWidget | None = None, chave_posicao: str | None = None):
         super().__init__(parent)
         self.setObjectName("PainelFerramentaBasico")
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setFixedWidth(280)
         self._margem_canvas = 12
         self._drag_offset_local: QPoint | None = None
+        self._chave_posicao = chave_posicao or f"painel:{titulo}"
 
         self.setStyleSheet(
             """
@@ -108,9 +111,11 @@ class PainelFerramentaBasico(QFrame):
         parent = self.parentWidget()
         if parent is not None and hasattr(parent, "calcular_posicao_painel_auxiliar"):
             destino = parent.calcular_posicao_painel_auxiliar(self.width(), self.height(), abaixo_coordenadas=True)
-            self.move(self._ajustar_para_canvas(destino))
+            if not restaurar_posicao(self, self._chave_posicao, fallback=self._ajustar_para_canvas(destino)):
+                salvar_posicao(self, self._chave_posicao)
             return
-        self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
+        if not restaurar_posicao(self, self._chave_posicao, fallback=self._ajustar_para_canvas(QPoint(10_000, 0))):
+            salvar_posicao(self, self._chave_posicao)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and event.position().y() <= 56:
@@ -130,6 +135,15 @@ class PainelFerramentaBasico(QFrame):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and self._drag_offset_local is not None:
             self._drag_offset_local = None
+            salvar_posicao(self, self._chave_posicao)
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def hideEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().closeEvent(event)

@@ -21,11 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
 class CosturaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:costura"
         self.setWindowTitle("Costura")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -155,6 +157,18 @@ class CosturaDialog(QDialog):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.tabela.setItem(i, col, item)
 
+    def moveEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().moveEvent(event)
+
+    def hideEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().closeEvent(event)
+
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "costura"
@@ -178,9 +192,16 @@ class Ferramenta(FerramentaBase):
         self._segmento_inicio: int | None = None
         self._segmentos_selecionados: set[int] = set()
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
+        self._preview_conectores: list[tuple[QPointF, QPointF]] = []
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
+        dialog.adjustSize()
+        fallback = None
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
+            fallback = canvas.mapToGlobal(pos_local)
+        restaurar_posicao(dialog, "dialog:costura", fallback=fallback)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -274,20 +295,31 @@ class Ferramenta(FerramentaBase):
         return False
 
     def on_paint_overlay(self, canvas, painter):
-        if len(self._preview) < 2:
+        if len(self._preview) < 2 and not self._realce_segmentos:
             return
         painter.save()
-        pen = QPen(QColor("#69c6ff"), 1.2, Qt.DashLine)
-        pen.setDashPattern([5.0, 3.0])
-        painter.setPen(pen)
-        for a, b in zip(self._preview, self._preview[1:]):
-            painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+        modo_offset = self._tipo_operacao(canvas) == "Offset"
         if self._realce_segmentos:
-            pen_realce = QPen(QColor("#ffe000"), 2.0, Qt.DotLine)
+            pen_realce = QPen(QColor("#ffd400"), 2.4, Qt.SolidLine)
             pen_realce.setCapStyle(Qt.RoundCap)
             painter.setPen(pen_realce)
             for a, b in self._realce_segmentos:
                 painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+        if len(self._preview) >= 2:
+            cor_preview = self._cor_preview_alvo(canvas)
+            pen = QPen(cor_preview if modo_offset else QColor("#ff2d2d"), 2.0, Qt.SolidLine if modo_offset else Qt.DashLine)
+            if not modo_offset:
+                pen.setDashPattern([4.0, 3.0])
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            for a, b in zip(self._preview, self._preview[1:]):
+                painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+            if not modo_offset:
+                pen_conector = QPen(QColor("#ff2d2d"), 1.2, Qt.DotLine)
+                painter.setPen(pen_conector)
+                for a, b in self._preview_conectores:
+                    painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
 
     def set_status(self, texto: str):
@@ -382,6 +414,15 @@ class Ferramenta(FerramentaBase):
     def _modo(self, canvas) -> str:
         return self._obter_dialog(canvas).cmb_posicao.currentText()
 
+    def _tipo_operacao(self, canvas) -> str:
+        return self._obter_dialog(canvas).cmb_tipo.currentText()
+
+    def _cor_preview_alvo(self, canvas) -> QColor:
+        idx = self._alvo_idx if self._alvo_idx is not None else self._preview_idx
+        if idx is not None and 0 <= idx < len(canvas.cena.elementos):
+            return QColor(str(canvas.cena.elementos[idx].get("cor") or "#ffffff"))
+        return QColor("#ffffff")
+
     def _atualizar_hover_segmento(self, canvas, pos: QPointF) -> None:
         melhor = None
         tolerancia = 9.0 / max(float(getattr(canvas, "zoom", 1.0)), 1e-6)
@@ -404,6 +445,7 @@ class Ferramenta(FerramentaBase):
 
     def _atualizar_preview_segmento(self, canvas) -> None:
         self._preview = []
+        self._preview_conectores = []
         self._preview_idx = None
         if self._hover_segmento is None:
             return
@@ -416,6 +458,7 @@ class Ferramenta(FerramentaBase):
             {seg_idx},
             self._margem_cm,
         )]
+        self._preview_conectores = self._gerar_conectores_preview_segmentos(canvas, idx, {seg_idx})
         self._obter_dialog(canvas).atualizar_tabela_segmentos(self._total_segmentos(canvas, idx), {seg_idx})
 
     def _atualizar_composicao_por_hover(self, canvas) -> None:
@@ -437,6 +480,7 @@ class Ferramenta(FerramentaBase):
 
     def _atualizar_preview_segmentos(self, canvas) -> None:
         self._preview = []
+        self._preview_conectores = []
         self._realce_segmentos = []
         idx = self._alvo_idx
         if idx is None or not self._elemento_valido(canvas, idx):
@@ -452,6 +496,7 @@ class Ferramenta(FerramentaBase):
         for seg_idx in sorted(self._segmentos_selecionados):
             if 0 <= seg_idx < total:
                 self._realce_segmentos.append((base[seg_idx], base[(seg_idx + 1) % total]))
+        self._preview_conectores = self._gerar_conectores_preview_segmentos(canvas, idx, self._segmentos_selecionados)
         self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(self._segmentos_selecionados))
 
     def _finalizar_costura_segmentos(self, canvas) -> bool:
@@ -472,6 +517,8 @@ class Ferramenta(FerramentaBase):
     def _aplicar_segmentos(self, canvas, idx: int, segmentos: set[int]) -> bool:
         if not self._elemento_valido(canvas, idx):
             return False
+        if self._tipo_operacao(canvas) == "Offset":
+            return self._aplicar_offset_segmentos(canvas, idx, segmentos)
         alvo = canvas.cena.elementos[idx]
         pontos = self._pontos_fechados(alvo)
         costura = self._gerar_costura_segmentos(pontos, segmentos, self._margem_cm)
@@ -490,6 +537,15 @@ class Ferramenta(FerramentaBase):
         return True
 
     def _aplicar_em_indices(self, canvas, indices: list[int]) -> bool:
+        if self._tipo_operacao(canvas) == "Offset":
+            alterou_offset = False
+            for idx in indices:
+                if self._aplicar_offset_total(canvas, idx):
+                    alterou_offset = True
+            if alterou_offset:
+                canvas._registrar_historico()
+                canvas.update()
+            return alterou_offset
         alterou = False
         alvos = []
         for idx in indices:
@@ -512,6 +568,65 @@ class Ferramenta(FerramentaBase):
             canvas._registrar_historico()
             canvas.update()
         return alterou
+
+    def _aplicar_offset_total(self, canvas, idx: int) -> bool:
+        if not self._elemento_valido(canvas, idx):
+            return False
+        alvo = canvas.cena.elementos[idx]
+        pontos = self._pontos_fechados(alvo)
+        novos = self._gerar_costura(pontos, self._margem_cm)
+        if len(novos) < 4:
+            return False
+        self._atualizar_geometria_molde(alvo, novos)
+        self._remover_costuras_do_alvo(canvas, str(alvo.get("molde_id") or alvo.get("id") or ""))
+        return True
+
+    def _aplicar_offset_segmentos(self, canvas, idx: int, segmentos: set[int]) -> bool:
+        if not self._elemento_valido(canvas, idx):
+            return False
+        alvo = canvas.cena.elementos[idx]
+        pontos = self._pontos_fechados(alvo)
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        total = len(base)
+        if total < 3 or not segmentos:
+            return False
+        segmentos = {s % total for s in segmentos}
+        if len(segmentos) >= total:
+            return self._aplicar_offset_total(canvas, idx)
+        costura_total = self._gerar_costura(base + [base[0]], self._margem_cm)
+        if len(costura_total) < total + 1:
+            return False
+        novos: list[tuple[float, float]] = []
+        for vert_idx, ponto in enumerate(base):
+            seg_anterior = (vert_idx - 1) % total
+            seg_atual = vert_idx % total
+            if seg_anterior in segmentos or seg_atual in segmentos:
+                novos.append(costura_total[vert_idx])
+            else:
+                novos.append(ponto)
+        if novos and self._dist(novos[0], novos[-1]) > 1e-6:
+            novos.append(novos[0])
+        self._atualizar_geometria_molde(alvo, novos)
+        self._remover_costuras_do_alvo(canvas, str(alvo.get("molde_id") or alvo.get("id") or ""))
+        canvas._registrar_historico()
+        canvas.update()
+        return True
+
+    def _atualizar_geometria_molde(self, alvo: dict, pontos: list[tuple[float, float]]) -> None:
+        pontos_fechados = list(pontos)
+        if pontos_fechados and self._dist(pontos_fechados[0], pontos_fechados[-1]) > 1e-6:
+            pontos_fechados.append(pontos_fechados[0])
+        alvo["pontos"] = [(float(x), float(y)) for x, y in pontos_fechados]
+        cantos = [(float(x), float(y)) for x, y in pontos_fechados[:-1]]
+        if "controle_cantos" in alvo:
+            alvo["controle_cantos"] = cantos
+        if "controle_auxiliares" in alvo:
+            alvo["controle_auxiliares"] = []
+        if "pontos_controle_principais" in alvo:
+            alvo["pontos_controle_principais"] = [{"x": x, "y": y} for x, y in cantos]
+        if "pontos_auxiliares" in alvo:
+            alvo["pontos_auxiliares"] = []
+        alvo.setdefault("metadados", {})["offset_costura_cm"] = float(self._margem_cm)
 
     def _elemento_costura(self, canvas, pontos: list[tuple[float, float]], alvo: dict, molde_id: str) -> dict:
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -588,6 +703,7 @@ class Ferramenta(FerramentaBase):
 
     def _limpar_estado(self) -> None:
         self._preview = []
+        self._preview_conectores = []
         self._preview_idx = None
         self._hover_segmento = None
         self._costura_em_andamento = False
@@ -649,6 +765,33 @@ class Ferramenta(FerramentaBase):
             if len(grupos) > 1:
                 saida.append(saida[-1])
         return saida
+
+    def _gerar_conectores_preview_segmentos(
+        self,
+        canvas,
+        idx: int,
+        segmentos: set[int],
+    ) -> list[tuple[QPointF, QPointF]]:
+        if not segmentos or not self._elemento_valido(canvas, idx):
+            return []
+        pontos = self._pontos_fechados(canvas.cena.elementos[idx])
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        total = len(base)
+        if total < 3:
+            return []
+        segmentos = {s % total for s in segmentos}
+        costura_total = self._gerar_costura(base + [base[0]], self._margem_cm)
+        if len(costura_total) < total + 1:
+            return []
+        conectores: list[tuple[QPointF, QPointF]] = []
+        for seg_idx in sorted(segmentos):
+            a_base = QPointF(*base[seg_idx])
+            b_base = QPointF(*base[(seg_idx + 1) % total])
+            a_costura = QPointF(*costura_total[seg_idx])
+            b_costura = QPointF(*costura_total[(seg_idx + 1) % total])
+            conectores.append((a_base, a_costura))
+            conectores.append((b_base, b_costura))
+        return conectores
 
     @staticmethod
     def _distancia_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> float:

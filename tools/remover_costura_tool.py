@@ -7,11 +7,13 @@ from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
 class RemoverCosturaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:remover_costura"
         self.setWindowTitle("Remover Costura")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -61,6 +63,18 @@ class RemoverCosturaDialog(QDialog):
     def atualizar_status(self, texto: str) -> None:
         self.lbl_status.setText(texto)
 
+    def moveEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().moveEvent(event)
+
+    def hideEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().closeEvent(event)
+
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "remover_costura"
@@ -77,6 +91,12 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
+        dialog.adjustSize()
+        fallback = None
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
+            fallback = canvas.mapToGlobal(pos_local)
+        restaurar_posicao(dialog, "dialog:remover_costura", fallback=fallback)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()

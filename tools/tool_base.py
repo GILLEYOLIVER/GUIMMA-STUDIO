@@ -61,7 +61,12 @@ class FerramentaBase:
                     painel_existente.hide()
         painel = getattr(self, "_painel_auxiliar", None)
         if painel is None:
-            self._painel_auxiliar = PainelFerramentaBasico(self.nome, self.descricao_painel, parent=parent)
+            self._painel_auxiliar = PainelFerramentaBasico(
+                self.nome,
+                self.descricao_painel,
+                parent=parent,
+                chave_posicao=f"painel:{self.id_ferramenta}",
+            )
             painel = self._painel_auxiliar
         elif parent is not None and painel.parentWidget() is not parent:
             painel.setParent(parent)
