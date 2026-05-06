@@ -1116,19 +1116,24 @@ class VisualizacaoCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        ferramenta = str(self.ferramenta_ativa or "")
+        ferramentas_com_clique_proprio = {
+            "extrair_molde",
+            "costura",
+            "alinhar",
+            "girar",
+            "espelhar",
+            "elemento_paralelo",
+            "recortar",
+            "cortar",
+        }
+        runtime_ja_processado = False
         if (
-            self.ferramenta_ativa == "extrair_molde"
+            ferramenta in ferramentas_com_clique_proprio
             and self._runtime_tool
             and hasattr(self._runtime_tool, "on_mouse_press")
         ):
-            if self._runtime_tool.on_mouse_press(self, event):
-                return
-        if (
-            self.ferramenta_ativa == "costura"
-            and self._runtime_tool
-            and hasattr(self._runtime_tool, "on_mouse_press")
-            and event.button() == Qt.RightButton
-        ):
+            runtime_ja_processado = True
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if event.button() == Qt.RightButton:
@@ -1158,7 +1163,7 @@ class VisualizacaoCanvas(QWidget):
                     return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
-        if self.ferramenta_ativa != "extrair_molde" and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+        if not runtime_ja_processado and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
