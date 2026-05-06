@@ -1112,6 +1112,14 @@ class VisualizacaoCanvas(QWidget):
         ):
             if self._runtime_tool.on_mouse_press(self, event):
                 return
+        if (
+            self.ferramenta_ativa == "costura"
+            and self._runtime_tool
+            and hasattr(self._runtime_tool, "on_mouse_press")
+            and event.button() == Qt.RightButton
+        ):
+            if self._runtime_tool.on_mouse_press(self, event):
+                return
         if event.button() == Qt.RightButton:
             agora = monotonic()
             if (agora - self._ultimo_clique_direito_ts) <= 0.45:
