@@ -36,7 +36,7 @@ class Ferramenta(FerramentaBase):
     id_ferramenta = "extrair_molde"
     nome = "Extrair Molde"
     usa_painel_auxiliar = False
-    descricao_painel = "LMB rastreia/fixa contorno. Tab alterna candidatos. Shift+LMB compoe. RMB/Enter extrai. LMB solta. RMB apos soltar encerra."
+    descricao_painel = "LMB soma partes ao molde. Tab alterna candidatos. RMB/Enter extrai. LMB solta e continua. Duplo clique encerra."
     TOLERANCIA_FECHAMENTO_CM = 0.10
 
     _dialog_global: QDialog | None = None
@@ -144,7 +144,7 @@ class Ferramenta(FerramentaBase):
         self._ultima_pos_cena = None
         self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
-        self.set_status("LMB rastreia/fixa contorno. Tab alterna candidatos. Shift+LMB compoe. RMB/Enter extrai.")
+        self.set_status("Clique esquerdo soma partes ao molde. Direito/Enter extrai. Depois solte com esquerdo; duplo clique encerra.")
 
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
@@ -185,7 +185,7 @@ class Ferramenta(FerramentaBase):
             if event.button() == Qt.LeftButton:
                 self._finalizar_posicionamento(
                     canvas,
-                    "Molde finalizado. Clique esquerdo novamente para encerrar a ferramenta.",
+                    "Molde solto. Clique esquerdo seleciona outra parte; duplo clique encerra a ferramenta.",
                 )
                 event.accept()
                 return True
@@ -230,7 +230,7 @@ class Ferramenta(FerramentaBase):
                 self._mostrar_aviso_sem_molde(canvas, pos_clique)
                 event.accept()
                 return True
-            adicionar = bool(event.modifiers() & Qt.ShiftModifier)
+            adicionar = True
             self._fixar_contorno(canvas, contorno, adicionar=adicionar)
             self._selecoes_manuais.clear()
             self._idx_selecionado = None
@@ -239,12 +239,12 @@ class Ferramenta(FerramentaBase):
             self._molde_posicionado = False
             self._ultimo_clique_falho = None
             total = len(self._contornos_candidatos)
-            if adicionar:
-                self.set_status("Area adicionada a composicao. Direito/Enter extrai o conjunto.")
+            if len(self._contornos_auto_coords) > 1:
+                self.set_status("Parte adicionada ao molde. Clique esquerdo soma outra; direito/Enter extrai o conjunto.")
             elif total > 1:
                 self.set_status(f"Candidato 1/{total}. Tab alterna, Direito/Enter extrai.")
             else:
-                self.set_status("Contorno selecionado. Clique direito ou Enter para extrair.")
+                self.set_status("Parte selecionada. Clique esquerdo soma outra; direito/Enter extrai.")
             canvas.update()
             event.accept()
             return True
@@ -456,6 +456,11 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_double_click(self, canvas, event) -> bool:
         if event.button() in (Qt.LeftButton, Qt.RightButton):
+            if self._arrastando_molde:
+                self._finalizar_posicionamento(canvas, "Molde solto.")
+            self._limpar_estado_extracao(canvas, "Ferramenta finalizada. Voltando para Selecionar.")
+            canvas.set_ferramenta_ativa("selecionar")
+            canvas.update()
             event.accept()
             return True
         return False
@@ -559,6 +564,10 @@ class Ferramenta(FerramentaBase):
     def _fixar_contorno(self, canvas, contorno: list[tuple[float, float]], adicionar: bool) -> None:
         contorno = self._normalizar_pontos_contorno(contorno)
         if adicionar:
+            if any(self._contornos_equivalentes(contorno, existente, tol=1e-4) for existente in self._contornos_auto_coords):
+                self._contorno_hover_preview = []
+                self._contornos_preparados = {}
+                return
             self._contornos_auto_coords.append(contorno)
         else:
             self._contornos_auto_coords = [contorno]
@@ -609,12 +618,19 @@ class Ferramenta(FerramentaBase):
             return
         self._indice_candidato_atual = (self._indice_candidato_atual + 1) % total
         contorno = self._contornos_candidatos[self._indice_candidato_atual]
-        self._fixar_contorno(canvas, contorno, adicionar=False)
+        contorno = self._normalizar_pontos_contorno(contorno)
+        if self._contornos_auto_coords:
+            self._contornos_auto_coords[-1] = contorno
+            self._contornos_extraidos_preview = [self._preview_de_contorno(c) for c in self._contornos_auto_coords]
+            self._contorno_hover_preview = []
+            self._contornos_preparados = {}
+        else:
+            self._fixar_contorno(canvas, contorno, adicionar=False)
         self.set_status(f"Candidato {self._indice_candidato_atual + 1}/{total}. Tab alterna, Direito/Enter extrai.")
         canvas.update()
 
     def _deve_recalcular_hover(self, pos: QPointF) -> bool:
-        if self._arrastando_molde or self._contornos_auto_coords:
+        if self._arrastando_molde:
             return False
         agora = monotonic()
         if self._ultimo_hover_pos is None:
@@ -1053,7 +1069,14 @@ class Ferramenta(FerramentaBase):
         self._contornos_candidatos = []
         self._indice_candidato_atual = 0
         self._ultimo_hover_pos = None
-        self._molde_posicionado = True
+        self._molde_posicionado = False
+        self._molde_criado = False
+        self._idx_selecionado = None
+        self._selecoes_manuais.clear()
+        self._contornos_extraidos_preview = []
+        self._contornos_auto_coords = []
+        self._contornos_preparados = {}
+        canvas._selecionados = set()
         if self._dialog is None or not isValid(self._dialog):
             self._abrir_config(canvas)
         else:
