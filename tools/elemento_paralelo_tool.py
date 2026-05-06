@@ -443,6 +443,8 @@ class Ferramenta(FerramentaBase):
         return caminho
 
     def _offset_preview_contorno_fechado(self, canvas, idx: int, distancia: float, lado_caminho: float) -> list[QPointF]:
+        if not self._selecao_contorno_completo:
+            return []
         if not (0 <= idx < len(canvas.cena.elementos)):
             return []
         pts = self._pontos_poly(canvas.cena.elementos[idx])
