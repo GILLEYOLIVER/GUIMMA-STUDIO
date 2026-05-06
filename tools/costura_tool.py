@@ -71,14 +71,14 @@ class CosturaDialog(QDialog):
         self.cmb_posicao = QComboBox()
         self.cmb_posicao.addItems(["Selecionar", "Todo molde"])
         self.sp_costura = QDoubleSpinBox()
-        self.sp_costura.setRange(0.1, 20.0)
+        self.sp_costura.setRange(0.0, 999999.0)
         self.sp_costura.setDecimals(2)
         self.sp_costura.setSingleStep(0.1)
         self.sp_costura.setValue(1.0)
         self.sp_costura.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.chk_costura_fim = QCheckBox("Costura fim (cm)")
         self.sp_costura_fim = QDoubleSpinBox()
-        self.sp_costura_fim.setRange(0.0, 20.0)
+        self.sp_costura_fim.setRange(0.0, 999999.0)
         self.sp_costura_fim.setDecimals(2)
         self.sp_costura_fim.setSingleStep(0.1)
         self.sp_costura_fim.setValue(1.0)
@@ -296,7 +296,7 @@ class Ferramenta(FerramentaBase):
                 dialog.atualizar_status(texto)
 
     def _ajustar_margem(self, canvas, delta: float) -> None:
-        self._margem_cm = max(0.1, round(self._margem_cm + delta, 2))
+        self._margem_cm = max(0.0, round(self._margem_cm + delta, 2))
         dialog = self._obter_dialog(canvas)
         dialog.sp_costura.blockSignals(True)
         dialog.sp_costura.setValue(self._margem_cm)
@@ -323,7 +323,7 @@ class Ferramenta(FerramentaBase):
         return dialog
 
     def _definir_margem(self, canvas, valor: float) -> None:
-        self._margem_cm = max(0.1, round(float(valor), 2))
+        self._margem_cm = max(0.0, round(float(valor), 2))
         self._recalcular_preview(canvas)
         self.set_status(self._mensagem_pronta())
 
@@ -529,10 +529,11 @@ class Ferramenta(FerramentaBase):
         return {
             "tipo": "polyline",
             "pontos": pontos,
-            "cor": "#a5c7ff",
+            "cor": str(alvo.get("cor") or "#ff5a00"),
             "espessura": 0.9,
             "estilo": "dash",
             "subtipo_audaces": "costura",
+            "parte_do_molde": True,
             "molde_id": molde_id,
             "costura_de_molde_id": molde_id,
             "margem_costura_cm": float(self._margem_cm),
