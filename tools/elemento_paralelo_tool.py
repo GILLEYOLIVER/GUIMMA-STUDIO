@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from math import sqrt
 from uuid import uuid4
 
@@ -8,7 +7,6 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QDialog, QDoubleSpinBox, QFormLayout, QLabel, QVBoxLayout
 
-from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -66,26 +64,30 @@ class Ferramenta(FerramentaBase):
         self._preview: list[QPointF] = []
         self._preview_2: list[QPointF] = []
         self._hover_info: dict | None = None
+        self._fase = "selecionar"
+        self._alvo_idx: int | None = None
+        self._segmento_inicio: int | None = None
+        self._segmento_hover: int | None = None
+        self._direcao_selecao: int | None = None
+        self._segmentos_selecionados: set[int] = set()
+        self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
+        self._ultima_posicao_mouse: QPointF | None = None
         self._operacao_finalizada = False
         self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        self._preview = []
-        self._preview_2 = []
-        self._hover_info = None
+        self._limpar_estado()
         self._operacao_finalizada = False
         self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Elemento paralelo: mova o mouse para indicar o lado. Esquerdo aplica; direito fecha.")
+        self._status(canvas, "Elemento paralelo: clique no perimetro para iniciar a selecao.")
 
     def on_deactivate(self, canvas):
-        self._preview = []
-        self._preview_2 = []
-        self._hover_info = None
+        self._limpar_estado()
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
             dialog.hide()
@@ -94,15 +96,25 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
-        self._atualizar_preview(canvas, pos)
+        self._ultima_posicao_mouse = QPointF(pos)
+        if self._fase == "posicionar":
+            self._atualizar_preview(canvas, pos)
+        else:
+            self._atualizar_selecao_hover(canvas, pos)
         canvas.update()
         return False
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            if self._operacao_finalizada and not self._direito_confirma_fechamento:
+            if self._fase in {"selecionar", "posicionar"} and (self._alvo_idx is not None or self._preview or self._realce_segmentos):
+                self._limpar_estado()
+                self._operacao_finalizada = True
                 self._direito_confirma_fechamento = True
-                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+                self._status(canvas, "Operacao finalizada. Clique direito novamente fecha a ferramenta.")
+                canvas.update()
+            elif self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operacao finalizada. Clique direito novamente fecha a ferramenta.")
             else:
                 self._fechar(canvas)
             event.accept()
@@ -110,17 +122,27 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
-        self._atualizar_preview(canvas, pos)
-        if not self._preview:
-            self._status(canvas, "Nenhum segmento/contorno encontrado para criar paralelo.")
-            return False
-        if self._preview_2:
-            self._criar_elemento(canvas, self._preview, self._hover_info, registrar=False)
-            self._criar_elemento(canvas, self._preview_2, self._hover_info, registrar=False)
-            canvas._registrar_historico()
+        self._ultima_posicao_mouse = QPointF(pos)
+        if self._fase == "finalizado":
+            self._limpar_estado()
+        if self._fase == "selecionar" and self._alvo_idx is None:
+            if not self._iniciar_selecao(canvas, pos):
+                self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho.")
+                return False
+            event.accept()
+            return True
+        if self._fase == "selecionar":
+            self._fase = "posicionar"
+            self._atualizar_preview(canvas, pos)
+            self._status(canvas, "Trecho fixado. Mova para dentro ou fora para escolher o lado; clique esquerdo confirma.")
             canvas.update()
-        else:
-            self._criar_elemento(canvas, self._preview, self._hover_info)
+            event.accept()
+            return True
+        if self._fase == "posicionar":
+            self._atualizar_preview(canvas, pos)
+            if not self._confirmar_paralela(canvas):
+                self._status(canvas, "Nao foi possivel criar a paralela desse trecho.")
+                return False
         event.accept()
         return True
 
@@ -166,29 +188,94 @@ class Ferramenta(FerramentaBase):
             self._status(canvas, "Não foi possível criar paralelo da seleção.")
 
     def _redesenhar(self, canvas) -> None:
+        if self._fase == "posicionar" and self._ultima_posicao_mouse is not None:
+            self._atualizar_preview(canvas, self._ultima_posicao_mouse)
         canvas.update()
+
+    def _limpar_estado(self) -> None:
+        self._preview = []
+        self._preview_2 = []
+        self._hover_info = None
+        self._fase = "selecionar"
+        self._alvo_idx = None
+        self._segmento_inicio = None
+        self._segmento_hover = None
+        self._direcao_selecao = None
+        self._segmentos_selecionados = set()
+        self._realce_segmentos = []
+        self._ultima_posicao_mouse = None
+
+    def _iniciar_selecao(self, canvas, pos: QPointF) -> bool:
+        info = self._segmento_mais_proximo(canvas, pos)
+        if not info:
+            return False
+        self._alvo_idx = int(info["elemento_idx"])
+        self._segmento_inicio = int(info["segmento_idx"])
+        self._segmento_hover = int(info["segmento_idx"])
+        self._direcao_selecao = None
+        self._segmentos_selecionados = {int(info["segmento_idx"])}
+        canvas._selecionados = {self._alvo_idx}
+        self._atualizar_realce(canvas)
+        self._status(canvas, "Trecho iniciado. Mova pelo perimetro para acrescentar partes; clique esquerdo mostra a paralela.")
+        canvas.update()
+        return True
+
+    def _atualizar_selecao_hover(self, canvas, pos: QPointF) -> None:
+        info = self._segmento_mais_proximo(canvas, pos)
+        self._hover_info = info
+        if self._alvo_idx is None or self._segmento_inicio is None:
+            self._realce_segmentos = []
+            if info:
+                self._realce_segmentos = [(info["segmento_inicio"], info["segmento_fim"])]
+            return
+        if not info or int(info["elemento_idx"]) != self._alvo_idx:
+            return
+        self._segmento_hover = int(info["segmento_idx"])
+        total = self._total_segmentos(canvas, self._alvo_idx)
+        if total <= 0:
+            return
+        if self._segmento_hover != self._segmento_inicio and self._direcao_selecao is None:
+            frente = (self._segmento_hover - self._segmento_inicio) % total
+            tras = (self._segmento_inicio - self._segmento_hover) % total
+            self._direcao_selecao = 1 if frente <= tras else -1
+        direcao = self._direcao_selecao or 1
+        self._segmentos_selecionados = self._segmentos_intervalo(self._segmento_inicio, self._segmento_hover, total, direcao)
+        self._atualizar_realce(canvas)
 
     def _atualizar_preview(self, canvas, pos: QPointF) -> None:
         dialog = self._obter_dialog(canvas)
         self._preview = []
         self._preview_2 = []
-        self._hover_info = None
-        distancia = self._distancia_cena(canvas)
-        info = selecionar_segmento_mais_proximo(canvas, pos)
-        if not info:
+        if self._alvo_idx is None or not self._segmentos_selecionados:
             return
-        a = info["segmento_inicio"]
-        b = info["segmento_fim"]
-        nx, ny = self._normal_segmento(a, b)
-        mx = (a.x() + b.x()) / 2.0
-        my = (a.y() + b.y()) / 2.0
-        if ((pos.x() - mx) * nx + (pos.y() - my) * ny) < 0:
-            nx, ny = -nx, -ny
-        self._preview = [QPointF(a.x() + nx * distancia, a.y() + ny * distancia), QPointF(b.x() + nx * distancia, b.y() + ny * distancia)]
+        distancia = self._distancia_cena(canvas)
+        caminho = self._caminho_segmentos(canvas, self._alvo_idx)
+        if len(caminho) < 2:
+            return
+        lado = self._lado_mouse(caminho, pos)
+        self._preview = self._offset_polyline_lado(caminho, distancia, lado)
         if dialog.chk_distancia_2.isChecked():
             distancia_2 = self._distancia_cena_2(canvas)
-            self._preview_2 = [QPointF(a.x() + nx * distancia_2, a.y() + ny * distancia_2), QPointF(b.x() + nx * distancia_2, b.y() + ny * distancia_2)]
-        self._hover_info = info
+            self._preview_2 = self._offset_polyline_lado(caminho, distancia_2, lado)
+        self._hover_info = {"elemento_idx": self._alvo_idx}
+
+    def _confirmar_paralela(self, canvas) -> bool:
+        if len(self._preview) < 2:
+            return False
+        if self._preview_2:
+            self._criar_elemento(canvas, self._preview, self._hover_info, registrar=False)
+            self._criar_elemento(canvas, self._preview_2, self._hover_info, registrar=False)
+            canvas._registrar_historico()
+            canvas.update()
+        else:
+            self._criar_elemento(canvas, self._preview, self._hover_info)
+        self._fase = "finalizado"
+        self._preview = []
+        self._preview_2 = []
+        self._realce_segmentos = []
+        self._status(canvas, "Elemento paralelo criado. Clique esquerdo inicia outro; direito finaliza.")
+        canvas.update()
+        return True
 
     def _criar_elemento(self, canvas, pontos: list[QPointF], info: dict | None, registrar: bool = True) -> None:
         if len(pontos) < 2:
@@ -221,14 +308,21 @@ class Ferramenta(FerramentaBase):
         self._status(canvas, "Ferramenta Elemento Paralelo finalizada. Voltando para Selecionar.")
 
     def on_paint_overlay(self, canvas, painter):
-        if len(self._preview) < 2 and len(self._preview_2) < 2:
+        if len(self._preview) < 2 and len(self._preview_2) < 2 and not self._realce_segmentos:
             return
         painter.save()
+        if self._realce_segmentos:
+            pen_realce = QPen(QColor("#ff2d2d"), 2.2, Qt.SolidLine)
+            pen_realce.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen_realce)
+            for a, b in self._realce_segmentos:
+                painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         for pontos, cor in ((self._preview, "#00d2ff"), (self._preview_2, "#7fdcff")):
             if len(pontos) < 2:
                 continue
-            pen = QPen(QColor(cor), 1.8, Qt.DashLine)
-            pen.setDashPattern([4.0, 3.0])
+            pen = QPen(QColor(cor), 2.0, Qt.SolidLine)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             for a, b in zip(pontos, pontos[1:]):
                 painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
@@ -251,6 +345,106 @@ class Ferramenta(FerramentaBase):
             except Exception:
                 pass
         return valor * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
+
+    def _segmento_mais_proximo(self, canvas, pos: QPointF) -> dict | None:
+        tolerancia = 10.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        melhor = None
+        for idx in range(len(canvas.cena.elementos) - 1, -1, -1):
+            el = canvas.cena.elementos[idx]
+            pts = self._pontos_poly(el)
+            if len(pts) < 2:
+                continue
+            for seg_idx, (a, b) in enumerate(zip(pts, pts[1:])):
+                proj, dist = self._projetar_ponto_segmento(a, b, pos)
+                if dist <= tolerancia and (melhor is None or dist < melhor["dist"]):
+                    melhor = {
+                        "elemento_idx": idx,
+                        "segmento_idx": seg_idx,
+                        "segmento_inicio": a,
+                        "segmento_fim": b,
+                        "dist": dist,
+                        "proj": proj,
+                    }
+        return melhor
+
+    def _total_segmentos(self, canvas, idx: int) -> int:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return 0
+        return max(0, len(self._pontos_poly(canvas.cena.elementos[idx])) - 1)
+
+    def _segmentos_intervalo(self, inicio: int, fim: int, total: int, direcao: int) -> set[int]:
+        if total <= 0:
+            return set()
+        if direcao >= 0:
+            qtd = (fim - inicio) % total
+            return {(inicio + i) % total for i in range(qtd + 1)}
+        qtd = (inicio - fim) % total
+        return {(inicio - i) % total for i in range(qtd + 1)}
+
+    def _segmentos_ordenados(self, total: int) -> list[int]:
+        if self._segmento_inicio is None or self._segmento_hover is None or total <= 0:
+            return []
+        direcao = self._direcao_selecao or 1
+        if direcao >= 0:
+            qtd = (self._segmento_hover - self._segmento_inicio) % total
+            return [(self._segmento_inicio + i) % total for i in range(qtd + 1)]
+        qtd = (self._segmento_inicio - self._segmento_hover) % total
+        return [(self._segmento_inicio - i) % total for i in range(qtd + 1)]
+
+    def _atualizar_realce(self, canvas) -> None:
+        self._realce_segmentos = []
+        if self._alvo_idx is None or not (0 <= self._alvo_idx < len(canvas.cena.elementos)):
+            return
+        pts = self._pontos_poly(canvas.cena.elementos[self._alvo_idx])
+        for seg_idx in sorted(self._segmentos_selecionados):
+            if 0 <= seg_idx < len(pts) - 1:
+                self._realce_segmentos.append((pts[seg_idx], pts[seg_idx + 1]))
+
+    def _caminho_segmentos(self, canvas, idx: int) -> list[QPointF]:
+        pts = self._pontos_poly(canvas.cena.elementos[idx]) if 0 <= idx < len(canvas.cena.elementos) else []
+        total = max(0, len(pts) - 1)
+        ordenados = self._segmentos_ordenados(total)
+        if not ordenados:
+            return []
+        if (self._direcao_selecao or 1) >= 0:
+            caminho = [QPointF(pts[ordenados[0]])]
+            for seg_idx in ordenados:
+                caminho.append(QPointF(pts[seg_idx + 1]))
+            return caminho
+        caminho = [QPointF(pts[ordenados[0] + 1])]
+        for seg_idx in ordenados:
+            caminho.append(QPointF(pts[seg_idx]))
+        return caminho
+
+    def _lado_mouse(self, pts: list[QPointF], pos: QPointF) -> float:
+        melhor = None
+        for a, b in zip(pts, pts[1:]):
+            _proj, dist = self._projetar_ponto_segmento(a, b, pos)
+            if melhor is None or dist < melhor[0]:
+                melhor = (dist, a, b)
+        if melhor is None:
+            return 1.0
+        _dist, a, b = melhor
+        nx, ny = self._normal_segmento(a, b)
+        mx = (a.x() + b.x()) / 2.0
+        my = (a.y() + b.y()) / 2.0
+        return 1.0 if ((pos.x() - mx) * nx + (pos.y() - my) * ny) >= 0 else -1.0
+
+    def _offset_polyline_lado(self, pts: list[QPointF], distancia: float, lado: float) -> list[QPointF]:
+        if len(pts) < 2:
+            return []
+        linhas = []
+        for a, b in zip(pts, pts[1:]):
+            nx, ny = self._normal_segmento(a, b)
+            nx *= lado
+            ny *= lado
+            linhas.append((QPointF(a.x() + nx * distancia, a.y() + ny * distancia), QPointF(b.x() + nx * distancia, b.y() + ny * distancia)))
+        out = [linhas[0][0]]
+        for i in range(1, len(linhas)):
+            inter = self._intersecao_linhas(linhas[i - 1][0], linhas[i - 1][1], linhas[i][0], linhas[i][1])
+            out.append(inter if inter is not None else linhas[i][0])
+        out.append(linhas[-1][1])
+        return out
 
     def _pontos_poly(self, el: dict) -> list[QPointF]:
         if el.get("tipo") != "polyline":
@@ -290,6 +484,18 @@ class Ferramenta(FerramentaBase):
             out.append(inter if inter is not None else linhas[i][0])
         out.append(QPointF(out[0]))
         return out
+
+    @staticmethod
+    def _projetar_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> tuple[QPointF, float]:
+        abx, aby = b.x() - a.x(), b.y() - a.y()
+        apx, apy = p.x() - a.x(), p.y() - a.y()
+        den = abx * abx + aby * aby
+        if den <= 1e-9:
+            proj = QPointF(a)
+        else:
+            t = max(0.0, min(1.0, (apx * abx + apy * aby) / den))
+            proj = QPointF(a.x() + abx * t, a.y() + aby * t)
+        return proj, sqrt((proj.x() - p.x()) ** 2 + (proj.y() - p.y()) ** 2)
 
     @staticmethod
     def _normal_segmento(a: QPointF, b: QPointF) -> tuple[float, float]:
