@@ -5,7 +5,7 @@ from math import isfinite
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLabel, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -24,8 +24,6 @@ class EspelharDialog(QDialog):
             QDialog { background:#efefef; color:#111111; }
             QLabel, QCheckBox { color:#111111; }
             QComboBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
-            QPushButton { background:#f7f7f7; color:#111111; border:1px solid #b7bec5; min-height:24px; }
-            QPushButton:hover { background:#ffffff; }
             """
         )
         raiz = QVBoxLayout(self)
@@ -45,11 +43,6 @@ class EspelharDialog(QDialog):
         raiz.addLayout(form)
         raiz.addWidget(self.chk_copia)
         raiz.addWidget(self.chk_inverter_reflexo)
-        rod = QHBoxLayout()
-        rod.addStretch(1)
-        self.btn_aplicar = QPushButton("Aplicar")
-        rod.addWidget(self.btn_aplicar)
-        raiz.addLayout(rod)
 
 
 class Ferramenta(FerramentaBase):
@@ -63,15 +56,19 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._ultimo_clique: QPointF | None = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._ultimo_clique = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Espelhar: selecione molde/elementos e clique em Aplicar. Clique no canvas define referência opcional.")
+        self._status(canvas, "Espelhar: clique esquerdo seleciona/referencia. Clique esquerdo novamente aplica. Direito fecha.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -79,19 +76,39 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton:
+            if self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+            else:
+                self._fechar(canvas)
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
         self._ultimo_clique = QPointF(pos)
+        selecionados = set(getattr(canvas, "_selecionados", set()) or set())
         if not getattr(canvas, "_selecionados", set()):
             candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
             if candidatos:
                 canvas._selecionados = {int(candidatos[0])}
                 canvas.update()
-                self._status(canvas, "Elemento selecionado. Clique em Aplicar para espelhar.")
+                self._operacao_finalizada = False
+                self._direito_confirma_fechamento = False
+                self._status(canvas, "Elemento selecionado. Ajuste a caixa e clique esquerdo novamente para espelhar.")
                 event.accept()
                 return True
-        self._status(canvas, "Referência do espelho marcada. Clique em Aplicar ou pressione Enter.")
+        candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
+        if candidatos and int(candidatos[0]) not in selecionados:
+            canvas._selecionados = {int(candidatos[0])}
+            canvas.update()
+            self._operacao_finalizada = False
+            self._direito_confirma_fechamento = False
+            self._status(canvas, "Elemento selecionado. Clique esquerdo novamente para espelhar.")
+            event.accept()
+            return True
+        self._aplicar(canvas)
         event.accept()
         return True
 
@@ -112,7 +129,6 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
-            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: EspelharDialog) -> None:
@@ -150,7 +166,13 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = set(novos_indices)
         canvas._registrar_historico()
         canvas.update()
-        self._status(canvas, f"Espelho {'copiado' if copiar else 'aplicado'} em {len(indices)} elemento(s).")
+        self._operacao_finalizada = True
+        self._direito_confirma_fechamento = False
+        self._status(canvas, f"Espelho {'copiado' if copiar else 'aplicado'} em {len(indices)} elemento(s). Clique esquerdo continua; direito fecha.")
+
+    def _fechar(self, canvas) -> None:
+        canvas.set_ferramenta_ativa("selecionar")
+        self._status(canvas, "Ferramenta Espelhar finalizada. Voltando para Selecionar.")
 
     def _indices_validos(self, canvas) -> list[int]:
         return [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]

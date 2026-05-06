@@ -50,11 +50,6 @@ class GirarDialog(QDialog):
             btn.clicked.connect(lambda _=False, v=valor: self.sp_angulo.setValue(float(v)))
             linha.addWidget(btn)
         raiz.addLayout(linha)
-        rod = QHBoxLayout()
-        rod.addStretch(1)
-        self.btn_aplicar = QPushButton("Aplicar")
-        rod.addWidget(self.btn_aplicar)
-        raiz.addLayout(rod)
 
 
 class Ferramenta(FerramentaBase):
@@ -68,15 +63,19 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._ultimo_clique: QPointF | None = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._ultimo_clique = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Girar: selecione elementos, defina ângulo e aplique. Clique no canvas define pivô opcional.")
+        self._status(canvas, "Girar: clique esquerdo seleciona/pivo. Clique esquerdo novamente aplica. Direito fecha.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -84,19 +83,39 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton:
+            if self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+            else:
+                self._fechar(canvas)
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
         self._ultimo_clique = QPointF(pos)
+        selecionados = set(getattr(canvas, "_selecionados", set()) or set())
         if not getattr(canvas, "_selecionados", set()):
             candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
             if candidatos:
                 canvas._selecionados = {int(candidatos[0])}
                 canvas.update()
-                self._status(canvas, "Elemento selecionado. Clique em Aplicar para girar.")
+                self._operacao_finalizada = False
+                self._direito_confirma_fechamento = False
+                self._status(canvas, "Elemento selecionado. Ajuste a caixa e clique esquerdo novamente para girar.")
                 event.accept()
                 return True
-        self._status(canvas, "Pivô marcado. Clique em Aplicar ou pressione Enter.")
+        candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
+        if candidatos and int(candidatos[0]) not in selecionados:
+            canvas._selecionados = {int(candidatos[0])}
+            canvas.update()
+            self._operacao_finalizada = False
+            self._direito_confirma_fechamento = False
+            self._status(canvas, "Elemento selecionado. Clique esquerdo novamente para girar.")
+            event.accept()
+            return True
+        self._aplicar(canvas)
         event.accept()
         return True
 
@@ -117,7 +136,6 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
-            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: GirarDialog) -> None:
@@ -155,7 +173,13 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = set(novos_indices)
         canvas._registrar_historico()
         canvas.update()
-        self._status(canvas, f"Giro de {ang:g}° aplicado em {len(indices)} elemento(s).")
+        self._operacao_finalizada = True
+        self._direito_confirma_fechamento = False
+        self._status(canvas, f"Giro de {ang:g}° aplicado em {len(indices)} elemento(s). Clique esquerdo continua; direito fecha.")
+
+    def _fechar(self, canvas) -> None:
+        canvas.set_ferramenta_ativa("selecionar")
+        self._status(canvas, "Ferramenta Girar finalizada. Voltando para Selecionar.")
 
     def _pivo(self, canvas, indices: list[int], modo: str) -> QPointF | None:
         if modo == "Último clique" and self._ultimo_clique is not None:
