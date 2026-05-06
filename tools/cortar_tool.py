@@ -83,14 +83,17 @@ class Ferramenta(FerramentaBase):
             nova_seq = [corte] + base[corte_idx + 1:] + base[:corte_idx + 1]
             novo = deepcopy(el)
             novo["pontos"] = nova_seq
-            novo["molde"] = False if novo.get("molde") else novo.get("molde", False)
             novo.setdefault("metadados", {})["aberto_por_corte"] = True
-            self._limpar_controles_invalidos(novo)
+            if novo.get("molde") and self._fechado(nova_seq):
+                self._reconstruir_controles_molde(novo)
+            else:
+                novo["molde"] = False if novo.get("molde") else novo.get("molde", False)
+                self._limpar_controles_invalidos(novo)
             canvas.cena.elementos[idx] = novo
             canvas._selecionados = {idx}
             canvas._registrar_historico()
             canvas.update()
-            self._status(canvas, "Contorno fechado aberto no ponto de corte.")
+            self._status(canvas, "Contorno fechado reposicionado no ponto de corte.")
             return True
 
         parte_a = pontos[: corte_idx + 1]
@@ -174,6 +177,18 @@ class Ferramenta(FerramentaBase):
                 el.pop(chave, None)
         if el.get("molde"):
             el["molde"] = False
+
+    @staticmethod
+    def _reconstruir_controles_molde(el: dict) -> None:
+        pontos = [(float(x), float(y)) for x, y in el.get("pontos", [])]
+        base = pontos[:-1] if len(pontos) >= 2 and Ferramenta._dist_tuple(pontos[0], pontos[-1]) <= 1e-7 else pontos
+        controles = base[:]
+        el["controle_cantos"] = controles
+        el["controle_auxiliares"] = []
+        el["pontos_controle_principais"] = [{"x": x, "y": y} for x, y in controles]
+        el["pontos_auxiliares"] = []
+        el["mostrar_controles"] = True
+        el.setdefault("metadados", {})["controles_recalculados_por"] = "cortar"
 
     def _status(self, canvas, texto: str) -> None:
         self.set_status(texto)

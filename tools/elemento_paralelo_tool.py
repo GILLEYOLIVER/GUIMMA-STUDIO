@@ -4,17 +4,19 @@ from copy import deepcopy
 from math import sqrt
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class ElementoParaleloDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:elemento_paralelo"
         self.setWindowTitle("Elemento paralelo")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -72,6 +74,7 @@ class Ferramenta(FerramentaBase):
         self._preview = []
         self._hover_info = None
         dialog = self._obter_dialog(canvas)
+        self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
         self._status(canvas, "Elemento paralelo: passe o mouse sobre uma linha e clique para criar a paralela.")
@@ -110,11 +113,18 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = ElementoParaleloDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+            instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar_selecao(canvas))
             dialog.sp_distancia.valueChanged.connect(lambda _v: canvas.update())
         return dialog
+
+    def _restaurar_dialog(self, canvas, dialog: ElementoParaleloDialog) -> None:
+        fallback = None
+        if hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _aplicar_selecao(self, canvas) -> None:
         indices = [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
@@ -181,8 +191,15 @@ class Ferramenta(FerramentaBase):
             "parte_do_molde": bool(dialog.chk_manter_molde.isChecked()),
             "metadados": {"tipo_ferramenta": self.id_ferramenta, "origem_idx": info.get("elemento_idx") if info else None},
         }
-        if dialog.chk_manter_molde.isChecked() and origem.get("molde_id"):
-            novo["molde_id"] = origem.get("molde_id")
+        if dialog.chk_manter_molde.isChecked():
+            molde_id = str(origem.get("molde_id") or origem.get("id") or "").strip()
+            if molde_id:
+                origem["molde_id"] = molde_id
+                novo["molde_id"] = molde_id
+                novo["molde_linha_vinculada"] = True
+                novo["nome_molde"] = origem.get("nome_molde")
+                novo["metadados"]["vinculo_molde"] = "linha_paralela"
+                novo["metadados"]["aviso"] = "linha vinculada ao molde; nao substitui o perimetro"
         canvas.cena.elementos.append(novo)
         canvas._selecionados = {len(canvas.cena.elementos) - 1}
         canvas._registrar_historico()

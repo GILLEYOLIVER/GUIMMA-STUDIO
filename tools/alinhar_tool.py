@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from math import isfinite
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class AlinharDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:alinhar"
         self.setWindowTitle("Alinhar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -55,6 +57,7 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         dialog = self._obter_dialog(canvas)
+        self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
         self._status(canvas, "Alinhar: selecione dois ou mais elementos e aplique a operação desejada.")
@@ -100,10 +103,17 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = AlinharDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+            instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
         return dialog
+
+    def _restaurar_dialog(self, canvas, dialog: AlinharDialog) -> None:
+        fallback = None
+        if hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _aplicar(self, canvas) -> None:
         indices = [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
