@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QDialog, QDoubleSpinBox, QFormLayout, QLabel, QVBoxLayout
 
 from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
@@ -20,40 +20,37 @@ class ElementoParaleloDialog(QDialog):
         self.setWindowTitle("Elemento paralelo")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.setFixedWidth(280)
+        self.setFixedWidth(305)
         self.setStyleSheet(
             """
             QDialog { background:#efefef; color:#111111; }
             QLabel, QCheckBox { color:#111111; }
-            QComboBox, QDoubleSpinBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
-            QPushButton { background:#f7f7f7; color:#111111; border:1px solid #b7bec5; min-height:24px; }
-            QPushButton:hover { background:#ffffff; }
+            QDoubleSpinBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
             """
         )
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(8, 8, 8, 8)
         form = QFormLayout()
-        self.cmb_alvo = QComboBox()
-        self.cmb_alvo.addItems(["Segmento clicado", "Todo contorno selecionado"])
-        self.cmb_lado = QComboBox()
-        self.cmb_lado.addItems(["Lado do clique", "Inverter lado"])
         self.sp_distancia = QDoubleSpinBox()
         self.sp_distancia.setRange(0.001, 999999.0)
         self.sp_distancia.setDecimals(3)
         self.sp_distancia.setSingleStep(0.1)
-        self.sp_distancia.setValue(1.0)
-        self.chk_manter_molde = QCheckBox("Nova linha faz parte do molde")
-        self.chk_manter_molde.setChecked(False)
-        form.addRow("Alvo", self.cmb_alvo)
-        form.addRow("Lado", self.cmb_lado)
-        form.addRow("Distância (cm)", self.sp_distancia)
+        self.sp_distancia.setValue(2.0)
+        self.sp_distancia.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.chk_distancia_2 = QCheckBox("Distância paralela 2 (cm)")
+        self.sp_distancia_2 = QDoubleSpinBox()
+        self.sp_distancia_2.setRange(0.001, 999999.0)
+        self.sp_distancia_2.setDecimals(3)
+        self.sp_distancia_2.setSingleStep(0.1)
+        self.sp_distancia_2.setValue(1.0)
+        self.sp_distancia_2.setEnabled(False)
+        self.sp_distancia_2.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.chk_linha_auxiliar = QCheckBox("Inserir elemento como linha auxiliar")
+        form.addRow("Distância paralela (cm)", self.sp_distancia)
+        form.addRow(self.chk_distancia_2, self.sp_distancia_2)
         raiz.addLayout(form)
-        raiz.addWidget(self.chk_manter_molde)
-        rod = QHBoxLayout()
-        rod.addStretch(1)
-        self.btn_aplicar = QPushButton("Aplicar na seleção")
-        rod.addWidget(self.btn_aplicar)
-        raiz.addLayout(rod)
+        raiz.addWidget(self.chk_linha_auxiliar)
+        self.chk_distancia_2.toggled.connect(self.sp_distancia_2.setEnabled)
 
 
 class Ferramenta(FerramentaBase):
@@ -67,20 +64,27 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._preview: list[QPointF] = []
+        self._preview_2: list[QPointF] = []
         self._hover_info: dict | None = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._preview = []
+        self._preview_2 = []
         self._hover_info = None
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Elemento paralelo: passe o mouse sobre uma linha e clique para criar a paralela.")
+        self._status(canvas, "Elemento paralelo: mova o mouse para indicar o lado. Esquerdo aplica; direito fecha.")
 
     def on_deactivate(self, canvas):
         self._preview = []
+        self._preview_2 = []
         self._hover_info = None
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
@@ -95,6 +99,14 @@ class Ferramenta(FerramentaBase):
         return False
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton:
+            if self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+            else:
+                self._fechar(canvas)
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
@@ -102,7 +114,13 @@ class Ferramenta(FerramentaBase):
         if not self._preview:
             self._status(canvas, "Nenhum segmento/contorno encontrado para criar paralelo.")
             return False
-        self._criar_elemento(canvas, self._preview, self._hover_info)
+        if self._preview_2:
+            self._criar_elemento(canvas, self._preview, self._hover_info, registrar=False)
+            self._criar_elemento(canvas, self._preview_2, self._hover_info, registrar=False)
+            canvas._registrar_historico()
+            canvas.update()
+        else:
+            self._criar_elemento(canvas, self._preview, self._hover_info)
         event.accept()
         return True
 
@@ -116,8 +134,9 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
-            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar_selecao(canvas))
-            dialog.sp_distancia.valueChanged.connect(lambda _v: canvas.update())
+            dialog.sp_distancia.valueChanged.connect(lambda _v: self._redesenhar(canvas))
+            dialog.sp_distancia_2.valueChanged.connect(lambda _v: self._redesenhar(canvas))
+            dialog.chk_distancia_2.toggled.connect(lambda _ativo: self._redesenhar(canvas))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: ElementoParaleloDialog) -> None:
@@ -146,40 +165,37 @@ class Ferramenta(FerramentaBase):
         else:
             self._status(canvas, "Não foi possível criar paralelo da seleção.")
 
+    def _redesenhar(self, canvas) -> None:
+        canvas.update()
+
     def _atualizar_preview(self, canvas, pos: QPointF) -> None:
         dialog = self._obter_dialog(canvas)
         self._preview = []
+        self._preview_2 = []
         self._hover_info = None
         distancia = self._distancia_cena(canvas)
-        if dialog.cmb_alvo.currentText() == "Todo contorno selecionado" and getattr(canvas, "_selecionados", set()):
-            idx = sorted(canvas._selecionados)[0]
-            if 0 <= idx < len(canvas.cena.elementos):
-                pts = self._pontos_poly(canvas.cena.elementos[idx])
-                self._preview = self._offset_polyline(pts, distancia, fechar=self._fechado(pts))
-                self._hover_info = {"elemento_idx": idx}
-                return
         info = selecionar_segmento_mais_proximo(canvas, pos)
         if not info:
             return
         a = info["segmento_inicio"]
         b = info["segmento_fim"]
         nx, ny = self._normal_segmento(a, b)
-        if dialog.cmb_lado.currentText() == "Inverter lado":
+        mx = (a.x() + b.x()) / 2.0
+        my = (a.y() + b.y()) / 2.0
+        if ((pos.x() - mx) * nx + (pos.y() - my) * ny) < 0:
             nx, ny = -nx, -ny
-        # Se o clique está do outro lado, inverte para respeitar "lado do clique".
-        if dialog.cmb_lado.currentText() == "Lado do clique":
-            mx = (a.x() + b.x()) / 2.0
-            my = (a.y() + b.y()) / 2.0
-            if ((pos.x() - mx) * nx + (pos.y() - my) * ny) < 0:
-                nx, ny = -nx, -ny
         self._preview = [QPointF(a.x() + nx * distancia, a.y() + ny * distancia), QPointF(b.x() + nx * distancia, b.y() + ny * distancia)]
+        if dialog.chk_distancia_2.isChecked():
+            distancia_2 = self._distancia_cena_2(canvas)
+            self._preview_2 = [QPointF(a.x() + nx * distancia_2, a.y() + ny * distancia_2), QPointF(b.x() + nx * distancia_2, b.y() + ny * distancia_2)]
         self._hover_info = info
 
-    def _criar_elemento(self, canvas, pontos: list[QPointF], info: dict | None) -> None:
+    def _criar_elemento(self, canvas, pontos: list[QPointF], info: dict | None, registrar: bool = True) -> None:
         if len(pontos) < 2:
             return
         dialog = self._obter_dialog(canvas)
         origem = canvas.cena.elementos[int(info["elemento_idx"])] if info and "elemento_idx" in info and 0 <= int(info["elemento_idx"]) < len(canvas.cena.elementos) else {}
+        auxiliar = bool(dialog.chk_linha_auxiliar.isChecked())
         novo = {
             "tipo": "polyline",
             "pontos": [(p.x(), p.y()) for p in pontos],
@@ -187,38 +203,48 @@ class Ferramenta(FerramentaBase):
             "espessura": origem.get("espessura", getattr(canvas, "_linha_espessura", 1.0)),
             "estilo": origem.get("estilo", getattr(canvas, "_linha_estilo", "solid")),
             "id": str(uuid4()),
-            "subtipo_audaces": "paralela",
-            "parte_do_molde": bool(dialog.chk_manter_molde.isChecked()),
+            "subtipo_audaces": "linha_interna" if auxiliar else "paralela",
+            "linha_auxiliar": auxiliar,
             "metadados": {"tipo_ferramenta": self.id_ferramenta, "origem_idx": info.get("elemento_idx") if info else None},
         }
-        if dialog.chk_manter_molde.isChecked():
-            molde_id = str(origem.get("molde_id") or origem.get("id") or "").strip()
-            if molde_id:
-                origem["molde_id"] = molde_id
-                novo["molde_id"] = molde_id
-                novo["molde_linha_vinculada"] = True
-                novo["nome_molde"] = origem.get("nome_molde")
-                novo["metadados"]["vinculo_molde"] = "linha_paralela"
-                novo["metadados"]["aviso"] = "linha vinculada ao molde; nao substitui o perimetro"
         canvas.cena.elementos.append(novo)
         canvas._selecionados = {len(canvas.cena.elementos) - 1}
-        canvas._registrar_historico()
-        canvas.update()
-        self._status(canvas, "Elemento paralelo criado.")
+        if registrar:
+            canvas._registrar_historico()
+            canvas.update()
+        self._operacao_finalizada = True
+        self._direito_confirma_fechamento = False
+        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; direito fecha.")
+
+    def _fechar(self, canvas) -> None:
+        canvas.set_ferramenta_ativa("selecionar")
+        self._status(canvas, "Ferramenta Elemento Paralelo finalizada. Voltando para Selecionar.")
 
     def on_paint_overlay(self, canvas, painter):
-        if len(self._preview) < 2:
+        if len(self._preview) < 2 and len(self._preview_2) < 2:
             return
         painter.save()
-        pen = QPen(QColor("#00d2ff"), 1.8, Qt.DashLine)
-        pen.setDashPattern([4.0, 3.0])
-        painter.setPen(pen)
-        for a, b in zip(self._preview, self._preview[1:]):
-            painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+        for pontos, cor in ((self._preview, "#00d2ff"), (self._preview_2, "#7fdcff")):
+            if len(pontos) < 2:
+                continue
+            pen = QPen(QColor(cor), 1.8, Qt.DashLine)
+            pen.setDashPattern([4.0, 3.0])
+            painter.setPen(pen)
+            for a, b in zip(pontos, pontos[1:]):
+                painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
 
     def _distancia_cena(self, canvas) -> float:
         valor = float(self._obter_dialog(canvas).sp_distancia.value())
+        if hasattr(canvas, "converter_para_cena"):
+            try:
+                return float(canvas.converter_para_cena(valor))
+            except Exception:
+                pass
+        return valor * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
+
+    def _distancia_cena_2(self, canvas) -> float:
+        valor = float(self._obter_dialog(canvas).sp_distancia_2.value())
         if hasattr(canvas, "converter_para_cena"):
             try:
                 return float(canvas.converter_para_cena(valor))

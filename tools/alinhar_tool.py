@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import isfinite
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QLabel, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -22,8 +22,6 @@ class AlinharDialog(QDialog):
             QDialog { background:#efefef; color:#111111; }
             QLabel { color:#111111; }
             QComboBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
-            QPushButton { background:#f7f7f7; color:#111111; border:1px solid #b7bec5; min-height:24px; }
-            QPushButton:hover { background:#ffffff; }
             """
         )
         raiz = QVBoxLayout(self)
@@ -39,11 +37,6 @@ class AlinharDialog(QDialog):
         form.addRow("Operação", self.cmb_operacao)
         form.addRow("Referência", self.cmb_referencia)
         raiz.addLayout(form)
-        linha = QHBoxLayout()
-        linha.addStretch(1)
-        self.btn_aplicar = QPushButton("Aplicar")
-        linha.addWidget(self.btn_aplicar)
-        raiz.addLayout(linha)
 
 
 class Ferramenta(FerramentaBase):
@@ -54,13 +47,20 @@ class Ferramenta(FerramentaBase):
 
     _dialog_por_canvas: dict[int, AlinharDialog] = {}
 
+    def __init__(self):
+        super().__init__()
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
+
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Alinhar: selecione dois ou mais elementos e aplique a operação desejada.")
+        self._status(canvas, "Alinhar: clique esquerdo seleciona. Clique esquerdo novamente aplica. Direito fecha.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -68,13 +68,25 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton:
+            if self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+            else:
+                self._fechar(canvas)
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
         candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
+        selecionados = set(getattr(canvas, "_selecionados", set()) or set())
+        if candidatos and int(candidatos[0]) in selecionados and not (event.modifiers() & Qt.ShiftModifier) and len(selecionados) >= 2:
+            self._aplicar(canvas)
+            event.accept()
+            return True
         if candidatos:
             idx = int(candidatos[0])
-            selecionados = set(getattr(canvas, "_selecionados", set()) or set())
             if event.modifiers() & Qt.ShiftModifier:
                 if idx in selecionados:
                     selecionados.remove(idx)
@@ -84,7 +96,13 @@ class Ferramenta(FerramentaBase):
                 selecionados.add(idx)
             canvas._selecionados = selecionados
             canvas.update()
-            self._status(canvas, f"Selecionados: {len(selecionados)}. Clique em Aplicar para alinhar.")
+            self._operacao_finalizada = False
+            self._direito_confirma_fechamento = False
+            self._status(canvas, f"Selecionados: {len(selecionados)}. Clique esquerdo em selecionado/vazio aplica.")
+            event.accept()
+            return True
+        if len(selecionados) >= 2:
+            self._aplicar(canvas)
             event.accept()
             return True
         return False
@@ -106,7 +124,6 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
-            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: AlinharDialog) -> None:
@@ -137,7 +154,13 @@ class Ferramenta(FerramentaBase):
             self._alinhar(canvas, list(bboxes), bboxes, op, ref)
         canvas._registrar_historico()
         canvas.update()
-        self._status(canvas, f"{op} aplicado em {len(bboxes)} elemento(s).")
+        self._operacao_finalizada = True
+        self._direito_confirma_fechamento = False
+        self._status(canvas, f"{op} aplicado em {len(bboxes)} elemento(s). Clique esquerdo inicia nova seleção; direito fecha.")
+
+    def _fechar(self, canvas) -> None:
+        canvas.set_ferramenta_ativa("selecionar")
+        self._status(canvas, "Ferramenta Alinhar finalizada. Voltando para Selecionar.")
 
     def _alinhar(self, canvas, indices: list[int], bboxes: dict[int, tuple[float, float, float, float]], op: str, ref: tuple[float, float, float, float]):
         rminx, rminy, rmaxx, rmaxy = ref

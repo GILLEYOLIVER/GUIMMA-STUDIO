@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QLabel, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -25,8 +25,6 @@ class RecortarDialog(QDialog):
             QDialog { background:#efefef; color:#111111; }
             QLabel { color:#111111; }
             QComboBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
-            QPushButton { background:#f7f7f7; color:#111111; border:1px solid #b7bec5; min-height:24px; }
-            QPushButton:hover { background:#ffffff; }
             """
         )
         raiz = QVBoxLayout(self)
@@ -36,11 +34,6 @@ class RecortarDialog(QDialog):
         self.cmb_trecho.addItems(["Remover trecho menor", "Remover trecho maior", "Manter trecho menor", "Manter trecho maior"])
         form.addRow("Ação", self.cmb_trecho)
         raiz.addLayout(form)
-        rod = QHBoxLayout()
-        rod.addStretch(1)
-        self.btn_limpar = QPushButton("Limpar pontos")
-        rod.addWidget(self.btn_limpar)
-        raiz.addLayout(rod)
 
 
 class Ferramenta(FerramentaBase):
@@ -56,17 +49,21 @@ class Ferramenta(FerramentaBase):
         self._primeiro: tuple[int, int, QPointF] | None = None
         self._hover: tuple[int, int, QPointF] | None = None
         self._preview: list[QPointF] = []
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._primeiro = None
         self._hover = None
         self._preview = []
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Recortar: clique no início do trecho e depois no fim.")
+        self._status(canvas, "Recortar: esquerdo marca inicio e fim. Direito limpa/finaliza; direito novamente fecha.")
 
     def on_deactivate(self, canvas):
         self._primeiro = None
@@ -93,6 +90,19 @@ class Ferramenta(FerramentaBase):
         return False
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton:
+            if self._primeiro is not None:
+                self._limpar(canvas)
+                self._operacao_finalizada = True
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Recorte finalizado sem aplicar. Clique direito novamente fecha.")
+            elif self._operacao_finalizada and not self._direito_confirma_fechamento:
+                self._direito_confirma_fechamento = True
+                self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
+            else:
+                self._fechar(canvas)
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
@@ -102,6 +112,8 @@ class Ferramenta(FerramentaBase):
             return False
         if self._primeiro is None:
             self._primeiro = alvo
+            self._operacao_finalizada = False
+            self._direito_confirma_fechamento = False
             canvas._selecionados = {alvo[0]}
             self._status(canvas, "Primeiro ponto marcado. Clique no segundo ponto do mesmo elemento.")
             canvas.update()
@@ -113,6 +125,9 @@ class Ferramenta(FerramentaBase):
             return True
         if self._aplicar_recorte(canvas, self._primeiro, alvo):
             self._limpar(canvas, status=False)
+            self._operacao_finalizada = True
+            self._direito_confirma_fechamento = False
+            self._status(canvas, "Recorte aplicado. Clique esquerdo inicia outro recorte; direito fecha.")
             event.accept()
             return True
         self._status(canvas, "Recorte cancelado para evitar geometria inválida.")
@@ -146,7 +161,6 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
-            dialog.btn_limpar.clicked.connect(lambda: self._limpar(canvas))
             dialog.cmb_trecho.currentTextChanged.connect(lambda _txt: self._atualizar_preview_e_redesenhar(canvas))
         return dialog
 
@@ -269,6 +283,10 @@ class Ferramenta(FerramentaBase):
         if status:
             self._status(canvas, "Recortar: pontos limpos. Clique no início do trecho.")
         canvas.update()
+
+    def _fechar(self, canvas) -> None:
+        canvas.set_ferramenta_ativa("selecionar")
+        self._status(canvas, "Ferramenta Recortar finalizada. Voltando para Selecionar.")
 
     def _segmento_mais_proximo(self, canvas, pos: QPointF) -> tuple[int, int, QPointF] | None:
         tolerancia = 10.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)

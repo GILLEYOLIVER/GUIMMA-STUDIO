@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -52,12 +51,6 @@ class CosturaDialog(QDialog):
                 border:1px solid #c8c8c8; padding:3px;
                 font-size:11px;
             }
-            QPushButton {
-                background:#f7f7f7; color:#111111;
-                border:1px solid #b7b7b7; min-height:24px;
-                padding:2px 14px;
-            }
-            QPushButton:hover { background:#ffffff; }
             """
         )
 
@@ -127,9 +120,7 @@ class CosturaDialog(QDialog):
         rodape = QHBoxLayout()
         self.lbl_status = QLabel("Selecione um molde/contorno.")
         self.lbl_status.setWordWrap(True)
-        self.btn_aplicar = QPushButton("Aplicar")
         rodape.addWidget(self.lbl_status, 1)
-        rodape.addWidget(self.btn_aplicar, 0, Qt.AlignRight)
         raiz.addLayout(rodape)
 
         self.chk_costura_fim.toggled.connect(self.sp_costura_fim.setEnabled)
@@ -175,8 +166,7 @@ class Ferramenta(FerramentaBase):
     nome = "Costura"
     usa_painel_auxiliar = False
     descricao_painel = (
-        "Clique em um molde/contorno fechado para criar margem de costura. "
-        "+/- ajusta a margem, Enter aplica na selecao."
+        "Clique esquerdo seleciona, clique esquerdo aplica. Direito finaliza/fecha. +/- ajusta a margem."
     )
     _dialog_por_canvas: dict[int, CosturaDialog] = {}
 
@@ -193,6 +183,7 @@ class Ferramenta(FerramentaBase):
         self._segmentos_selecionados: set[int] = set()
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
         self._preview_conectores: list[tuple[QPointF, QPointF]] = []
+        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
@@ -205,6 +196,7 @@ class Ferramenta(FerramentaBase):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        self._direito_confirma_fechamento = False
         dialog.atualizar_status(self._mensagem_pronta())
 
     def on_deactivate(self, canvas):
@@ -240,13 +232,26 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            if self._costura_finalizada:
-                self._limpar_estado()
-                canvas.set_ferramenta_ativa("selecionar")
-                self.set_status("Ferramenta Costura finalizada. Voltando para Selecionar.")
+            if self._costura_em_andamento:
+                self._finalizar_costura_segmentos(canvas)
+                self._direito_confirma_fechamento = False
                 event.accept()
                 return True
-            return False
+            if self._costura_finalizada:
+                if not self._direito_confirma_fechamento:
+                    self._direito_confirma_fechamento = True
+                    self.set_status("Operação finalizada. Clique direito novamente fecha a ferramenta.")
+                else:
+                    self._limpar_estado()
+                    canvas.set_ferramenta_ativa("selecionar")
+                    self.set_status("Ferramenta Costura finalizada. Voltando para Selecionar.")
+                event.accept()
+                return True
+            self._limpar_estado()
+            canvas.set_ferramenta_ativa("selecionar")
+            self.set_status("Ferramenta Costura finalizada. Voltando para Selecionar.")
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
@@ -257,10 +262,25 @@ class Ferramenta(FerramentaBase):
             self.set_status("Costura: clique em um molde ou contorno fechado.")
             event.accept()
             return True
+        selecionados = set(getattr(canvas, "_selecionados", set()) or set())
+        if idx not in selecionados or self._costura_finalizada:
+            canvas._selecionados = {idx}
+            self._preview_idx = idx
+            self._costura_finalizada = False
+            self._direito_confirma_fechamento = False
+            pontos = self._pontos_fechados(canvas.cena.elementos[idx])
+            self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            total = self._total_segmentos(canvas, idx)
+            self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(range(total)))
+            self.set_status("Molde selecionado. Clique esquerdo novamente aplica; direito fecha.")
+            canvas.update()
+            event.accept()
+            return True
         if self._aplicar_em_indices(canvas, [idx]):
             canvas._selecionados = {idx}
             self._costura_finalizada = True
-            self.set_status(f"Costura criada com margem de {self._fmt(self._margem_cm)} cm. Clique direito encerra.")
+            self._direito_confirma_fechamento = False
+            self.set_status(f"Costura criada com margem de {self._fmt(self._margem_cm)} cm. Clique esquerdo continua; direito fecha.")
         else:
             self.set_status("Nao foi possivel gerar costura para esse contorno.")
         event.accept()
@@ -351,7 +371,6 @@ class Ferramenta(FerramentaBase):
             dialog.cmb_acab_fim.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
             dialog.chk_pique.toggled.connect(lambda _ativo: self._atualizar_dialog_com_preview(canvas))
             dialog.cmb_pique.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
-            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar_dialog(canvas))
         return dialog
 
     def _definir_margem(self, canvas, valor: float) -> None:
@@ -405,6 +424,7 @@ class Ferramenta(FerramentaBase):
         self._segmentos_selecionados = {seg_idx}
         self._costura_em_andamento = True
         self._costura_finalizada = False
+        self._direito_confirma_fechamento = False
         self._atualizar_preview_segmentos(canvas)
         self.set_status("Costura iniciada. Mova no sentido horario para acrescentar; anti-horario seleciona todo o molde. Clique esquerdo termina.")
         canvas.update()
@@ -512,9 +532,10 @@ class Ferramenta(FerramentaBase):
         if self._aplicar_segmentos(canvas, self._alvo_idx, self._segmentos_selecionados):
             self._costura_em_andamento = False
             self._costura_finalizada = True
+            self._direito_confirma_fechamento = False
             self._segmento_inicio = None
             self._segmentos_selecionados = set()
-            self.set_status("Costura finalizada. Clique esquerdo em outra linha para continuar ou clique direito para encerrar.")
+            self.set_status("Costura finalizada. Clique esquerdo em outra linha para continuar ou clique direito para fechar.")
             canvas.update()
             return True
         self.set_status("Nao foi possivel aplicar costura nesses segmentos.")
@@ -729,6 +750,7 @@ class Ferramenta(FerramentaBase):
         self._segmento_inicio = None
         self._segmentos_selecionados = set()
         self._realce_segmentos = []
+        self._direito_confirma_fechamento = False
 
     def _total_segmentos(self, canvas, idx: int) -> int:
         if not self._elemento_valido(canvas, idx):
