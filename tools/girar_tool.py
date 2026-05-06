@@ -4,15 +4,17 @@ from copy import deepcopy
 from math import atan2, cos, degrees, isfinite, radians, sin
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class GirarDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:girar"
         self.setWindowTitle("Girar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -71,6 +73,7 @@ class Ferramenta(FerramentaBase):
         super().on_activate(canvas)
         self._ultimo_clique = None
         dialog = self._obter_dialog(canvas)
+        self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
         self._status(canvas, "Girar: selecione elementos, defina ângulo e aplique. Clique no canvas define pivô opcional.")
@@ -111,10 +114,17 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = GirarDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+            instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
         return dialog
+
+    def _restaurar_dialog(self, canvas, dialog: GirarDialog) -> None:
+        fallback = None
+        if hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _aplicar(self, canvas) -> None:
         indices = [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]

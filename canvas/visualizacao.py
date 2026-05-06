@@ -1954,7 +1954,9 @@ class VisualizacaoCanvas(QWidget):
             return []
         indices: list[int] = []
         for idx, el in enumerate(self.cena.elementos):
-            if str(el.get("costura_de_molde_id") or "") == molde_id:
+            costura_vinculada = str(el.get("costura_de_molde_id") or "") == molde_id
+            linha_vinculada = bool(el.get("molde_linha_vinculada")) and str(el.get("molde_id") or "") == molde_id
+            if costura_vinculada or linha_vinculada:
                 indices.append(idx)
         return indices
 

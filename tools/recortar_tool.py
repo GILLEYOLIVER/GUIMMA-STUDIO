@@ -4,16 +4,18 @@ from copy import deepcopy
 from math import sqrt
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class RecortarDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._chave_posicao = "dialog:recortar"
         self.setWindowTitle("Recortar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -61,6 +63,7 @@ class Ferramenta(FerramentaBase):
         self._hover = None
         self._preview = []
         dialog = self._obter_dialog(canvas)
+        self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
         self._status(canvas, "Recortar: clique no início do trecho e depois no fim.")
@@ -140,11 +143,18 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = RecortarDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+            instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_limpar.clicked.connect(lambda: self._limpar(canvas))
             dialog.cmb_trecho.currentTextChanged.connect(lambda _txt: self._atualizar_preview_e_redesenhar(canvas))
         return dialog
+
+    def _restaurar_dialog(self, canvas, dialog: RecortarDialog) -> None:
+        fallback = None
+        if hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _aplicar_recorte(self, canvas, a_info, b_info) -> bool:
         idx, seg_a, p_a = a_info
@@ -182,8 +192,11 @@ class Ferramenta(FerramentaBase):
                 return False
             novo = deepcopy(el)
             novo["pontos"] = [(p[0], p[1]) if isinstance(p, tuple) else (p.x(), p.y()) for p in manter]
-            novo["molde"] = False if novo.get("molde") else novo.get("molde", False)
-            self._limpar_controles_invalidos(novo)
+            if novo.get("molde") and self._fechado(novo["pontos"]):
+                self._reconstruir_controles_molde(novo)
+            else:
+                novo["molde"] = False if novo.get("molde") else novo.get("molde", False)
+                self._limpar_controles_invalidos(novo)
             canvas.cena.elementos[idx] = novo
             canvas._selecionados = {idx}
         else:
@@ -198,6 +211,7 @@ class Ferramenta(FerramentaBase):
                     return False
                 novo = deepcopy(el)
                 novo["pontos"] = trecho
+                novo["molde"] = False if novo.get("molde") else novo.get("molde", False)
                 self._limpar_controles_invalidos(novo)
                 canvas.cena.elementos[idx] = novo
                 canvas._selecionados = {idx}
@@ -207,12 +221,14 @@ class Ferramenta(FerramentaBase):
                     ea = deepcopy(el)
                     ea["pontos"] = antes
                     ea["id"] = str(uuid4())
+                    ea["molde"] = False if ea.get("molde") else ea.get("molde", False)
                     self._limpar_controles_invalidos(ea)
                     novos.append(ea)
                 if len(depois) >= 2:
                     eb = deepcopy(el)
                     eb["pontos"] = depois
                     eb["id"] = str(uuid4())
+                    eb["molde"] = False if eb.get("molde") else eb.get("molde", False)
                     self._limpar_controles_invalidos(eb)
                     novos.append(eb)
                 if not novos:
@@ -314,6 +330,18 @@ class Ferramenta(FerramentaBase):
             el.pop(chave, None)
         if el.get("molde"):
             el["molde"] = False
+
+    @staticmethod
+    def _reconstruir_controles_molde(el: dict) -> None:
+        pontos = [(float(x), float(y)) for x, y in el.get("pontos", [])]
+        base = pontos[:-1] if len(pontos) >= 2 and Ferramenta._dist(pontos[0], pontos[-1]) <= 1e-7 else pontos
+        controles = base[:]
+        el["controle_cantos"] = controles
+        el["controle_auxiliares"] = []
+        el["pontos_controle_principais"] = [{"x": x, "y": y} for x, y in controles]
+        el["pontos_auxiliares"] = []
+        el["mostrar_controles"] = True
+        el.setdefault("metadados", {})["controles_recalculados_por"] = "recortar"
 
     def _status(self, canvas, texto: str) -> None:
         self.set_status(texto)
