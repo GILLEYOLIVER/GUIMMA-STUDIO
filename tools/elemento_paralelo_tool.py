@@ -255,7 +255,8 @@ class Ferramenta(FerramentaBase):
         direcao = self._direcao_selecao or 1
         intervalo = self._segmentos_intervalo(self._segmento_inicio, self._segmento_hover, total, direcao)
         self._segmentos_visitados.update(intervalo)
-        if len(self._segmentos_visitados) >= total:
+        cobertura_atual = max(len(self._segmentos_visitados), len(intervalo))
+        if cobertura_atual >= self._limite_contorno_completo(total):
             self._selecao_contorno_completo = True
             self._segmentos_selecionados = set(range(total))
         else:
@@ -404,6 +405,12 @@ class Ferramenta(FerramentaBase):
             return {(inicio + i) % total for i in range(qtd + 1)}
         qtd = (inicio - fim) % total
         return {(inicio - i) % total for i in range(qtd + 1)}
+
+    @staticmethod
+    def _limite_contorno_completo(total: int) -> int:
+        if total <= 4:
+            return total
+        return max(4, int(total * 0.82))
 
     def _segmentos_ordenados(self, total: int) -> list[int]:
         if self._segmento_inicio is None or self._segmento_hover is None or total <= 0:
