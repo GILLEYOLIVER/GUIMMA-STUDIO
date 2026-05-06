@@ -471,7 +471,11 @@ class VisualizacaoCanvas(QWidget):
     def apagar_selecionados(self):
         if not self._selecionados:
             return
-        self.cena.elementos = [el for idx, el in enumerate(self.cena.elementos) if idx not in self._selecionados]
+        apagar = set(self._selecionados)
+        for idx in list(self._selecionados):
+            if 0 <= idx < len(self.cena.elementos) and self.cena.elementos[idx].get("molde"):
+                apagar.update(self._indices_costuras_vinculadas(idx))
+        self.cena.elementos = [el for idx, el in enumerate(self.cena.elementos) if idx not in apagar]
         self._selecionados.clear()
         self._registrar_historico()
         self.update()
@@ -1402,11 +1406,13 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
             return
+        pontos_bbox = list(base)
+        pontos_bbox.extend(self._pontos_costuras_vinculadas(el))
         margem_cm = 0.5
-        min_x = min(pt.x() for pt in base) - margem_cm
-        max_x = max(pt.x() for pt in base) + margem_cm
-        min_y = min(pt.y() for pt in base) - margem_cm
-        max_y = max(pt.y() for pt in base) + margem_cm
+        min_x = min(pt.x() for pt in pontos_bbox) - margem_cm
+        max_x = max(pt.x() for pt in pontos_bbox) + margem_cm
+        min_y = min(pt.y() for pt in pontos_bbox) - margem_cm
+        max_y = max(pt.y() for pt in pontos_bbox) + margem_cm
         canto_sup_esq = self._cena_para_tela(QPointF(min_x, min_y))
         canto_inf_dir = self._cena_para_tela(QPointF(max_x, max_y))
         x_ini = min(canto_sup_esq.x(), canto_inf_dir.x())
@@ -1442,6 +1448,7 @@ class VisualizacaoCanvas(QWidget):
         pontos: list[QPointF] = []
         if elemento.get("tipo") == "polyline":
             pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+            pontos.extend(self._pontos_costuras_vinculadas(elemento))
         elif elemento.get("tipo") == "bezier_quadratica":
             pontos = [QPointF(*elemento["p0"]), QPointF(*elemento["p1"]), QPointF(*elemento["p2"])]
         if not pontos:
@@ -1916,7 +1923,7 @@ class VisualizacaoCanvas(QWidget):
         if subtipo == "contorno":
             return cor, max(1.35, esp), "solid"
         if subtipo == "costura":
-            return "#a5c7ff", max(0.85, esp * 0.82), "dash"
+            return cor, max(0.85, esp * 0.82), "dash"
         if subtipo == "linha_interna":
             return "#bfbfbf", max(0.75, esp * 0.8), "solid"
         if subtipo in {"fio", "pique"}:
@@ -1924,6 +1931,34 @@ class VisualizacaoCanvas(QWidget):
         if subtipo in {"texto", "anotacao"}:
             return "#9a9a9a", max(0.7, esp * 0.7), "dot"
         return cor, esp, estilo
+
+    def _molde_id_elemento(self, elemento: dict) -> str:
+        return str(elemento.get("molde_id") or elemento.get("id") or "").strip()
+
+    def _indices_costuras_vinculadas(self, elemento_ou_idx) -> list[int]:
+        if isinstance(elemento_ou_idx, int):
+            if not (0 <= elemento_ou_idx < len(self.cena.elementos)):
+                return []
+            elemento = self.cena.elementos[elemento_ou_idx]
+        else:
+            elemento = elemento_ou_idx
+        molde_id = self._molde_id_elemento(elemento)
+        if not molde_id:
+            return []
+        indices: list[int] = []
+        for idx, el in enumerate(self.cena.elementos):
+            if str(el.get("costura_de_molde_id") or "") == molde_id:
+                indices.append(idx)
+        return indices
+
+    def _pontos_costuras_vinculadas(self, elemento: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for idx in self._indices_costuras_vinculadas(elemento):
+            if 0 <= idx < len(self.cena.elementos):
+                el = self.cena.elementos[idx]
+                if el.get("tipo") == "polyline":
+                    pontos.extend(QPointF(float(x), float(y)) for x, y in el.get("pontos", []))
+        return pontos
 
     def set_mostrar_curva_original_emf(self, ativo: bool):
         self._mostrar_curva_original_emf = bool(ativo)

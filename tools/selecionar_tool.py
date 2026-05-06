@@ -187,6 +187,8 @@ class Ferramenta(FerramentaBase):
             pontos: list[QPointF] = []
             if el.get("tipo") == "polyline":
                 pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+                if hasattr(canvas, "_pontos_costuras_vinculadas"):
+                    pontos.extend(canvas._pontos_costuras_vinculadas(el))
             elif el.get("tipo") == "bezier_quadratica":
                 pontos = [QPointF(*el["p0"]), QPointF(*el["p1"]), QPointF(*el["p2"])]
             if not pontos:
@@ -207,7 +209,7 @@ class Ferramenta(FerramentaBase):
             painter.drawRect(int(x), int(y), int(w), int(h))
 
     def _mover_selecionados(self, canvas, dx: float, dy: float):
-        for idx in list(canvas._selecionados):
+        for idx in self._indices_para_mover(canvas):
             if idx < 0 or idx >= len(canvas.cena.elementos):
                 continue
             el = canvas.cena.elementos[idx]
@@ -239,3 +241,13 @@ class Ferramenta(FerramentaBase):
                 for chave in ("p0", "p1", "p2"):
                     x, y = el[chave]
                     el[chave] = (x + dx, y + dy)
+
+    def _indices_para_mover(self, canvas) -> list[int]:
+        indices = set(int(idx) for idx in getattr(canvas, "_selecionados", set()))
+        if hasattr(canvas, "_indices_costuras_vinculadas"):
+            for idx in list(indices):
+                if 0 <= idx < len(canvas.cena.elementos):
+                    el = canvas.cena.elementos[idx]
+                    if el.get("molde"):
+                        indices.update(canvas._indices_costuras_vinculadas(idx))
+        return sorted(indices)

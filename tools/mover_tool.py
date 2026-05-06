@@ -49,7 +49,7 @@ class Ferramenta(FerramentaBase):
         dy = atual.y() - self._ultimo_ponto.y()
         if abs(dx) < 1e-9 and abs(dy) < 1e-9:
             return True
-        for idx in list(canvas._selecionados):
+        for idx in self._indices_para_mover(canvas):
             if idx < 0 or idx >= len(canvas.cena.elementos):
                 continue
             el = canvas.cena.elementos[idx]
@@ -86,6 +86,16 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         event.accept()
         return True
+
+    def _indices_para_mover(self, canvas) -> list[int]:
+        indices = set(int(idx) for idx in getattr(canvas, "_selecionados", set()))
+        if hasattr(canvas, "_indices_costuras_vinculadas"):
+            for idx in list(indices):
+                if 0 <= idx < len(canvas.cena.elementos):
+                    el = canvas.cena.elementos[idx]
+                    if el.get("molde"):
+                        indices.update(canvas._indices_costuras_vinculadas(idx))
+        return sorted(indices)
 
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton or not self._arrastando:
