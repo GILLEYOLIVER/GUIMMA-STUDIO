@@ -441,9 +441,68 @@ class Ferramenta(FerramentaBase):
             linhas.append((QPointF(a.x() + nx * distancia, a.y() + ny * distancia), QPointF(b.x() + nx * distancia, b.y() + ny * distancia)))
         out = [linhas[0][0]]
         for i in range(1, len(linhas)):
-            inter = self._intersecao_linhas(linhas[i - 1][0], linhas[i - 1][1], linhas[i][0], linhas[i][1])
-            out.append(inter if inter is not None else linhas[i][0])
+            out.extend(self._pontos_juncao_offset(pts[i], linhas[i - 1], linhas[i], abs(distancia)))
         out.append(linhas[-1][1])
+        return self._deduplicar_qpoints(out)
+
+    def _pontos_juncao_offset(
+        self,
+        vertice_original: QPointF,
+        linha_anterior: tuple[QPointF, QPointF],
+        linha_atual: tuple[QPointF, QPointF],
+        distancia: float,
+    ) -> list[QPointF]:
+        inter = self._intersecao_linhas(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
+        limite = max(0.25, distancia * 2.8)
+        if inter is not None:
+            dist_prev = self._dist(inter, linha_anterior[1])
+            dist_next = self._dist(inter, linha_atual[0])
+            dist_vertice = self._dist(inter, vertice_original)
+            if dist_prev <= limite and dist_next <= limite and dist_vertice <= max(limite, distancia * 3.2):
+                return [inter]
+
+        # Em cantos internos ou muito agudos, a intersecao das linhas deslocadas
+        # pode ficar longe demais. Usar uma pequena ponte evita espigões e cruzamentos.
+        return self._ponte_canto(linha_anterior[1], linha_atual[0], vertice_original, distancia)
+
+    def _ponte_canto(self, inicio: QPointF, fim: QPointF, centro: QPointF, distancia: float) -> list[QPointF]:
+        if self._dist(inicio, fim) <= max(1e-6, distancia * 0.12):
+            return [QPointF(fim)]
+        arco = self._arco_curto(centro, inicio, fim, distancia)
+        if len(arco) >= 2:
+            return arco
+        return [QPointF(inicio), QPointF(fim)]
+
+    def _arco_curto(self, centro: QPointF, inicio: QPointF, fim: QPointF, distancia: float) -> list[QPointF]:
+        from math import atan2, cos, pi, sin
+
+        raio = max(self._dist(centro, inicio), self._dist(centro, fim), distancia)
+        if raio <= 1e-9:
+            return []
+        a0 = atan2(inicio.y() - centro.y(), inicio.x() - centro.x())
+        a1 = atan2(fim.y() - centro.y(), fim.x() - centro.x())
+        delta = a1 - a0
+        while delta > pi:
+            delta -= 2.0 * pi
+        while delta < -pi:
+            delta += 2.0 * pi
+        if abs(delta) <= 1e-4 or abs(delta) > (pi * 0.92):
+            return []
+        passos = max(2, min(8, int(abs(delta) / (pi / 12.0)) + 1))
+        pontos = []
+        for i in range(passos + 1):
+            t = i / passos
+            ang = a0 + (delta * t)
+            pontos.append(QPointF(centro.x() + cos(ang) * raio, centro.y() + sin(ang) * raio))
+        return pontos
+
+    @staticmethod
+    def _deduplicar_qpoints(pontos: list[QPointF]) -> list[QPointF]:
+        out: list[QPointF] = []
+        for p in pontos:
+            if out and Ferramenta._dist(out[-1], p) <= 1e-7:
+                continue
+            out.append(QPointF(p))
         return out
 
     def _pontos_poly(self, el: dict) -> list[QPointF]:
