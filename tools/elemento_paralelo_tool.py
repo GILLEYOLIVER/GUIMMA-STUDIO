@@ -78,6 +78,8 @@ class Ferramenta(FerramentaBase):
         self._segmento_hover: int | None = None
         self._direcao_selecao: int | None = None
         self._segmentos_selecionados: set[int] = set()
+        self._segmentos_visitados: set[int] = set()
+        self._selecao_contorno_completo = False
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
         self._ultima_posicao_mouse: QPointF | None = None
         self._operacao_finalizada = False
@@ -210,6 +212,8 @@ class Ferramenta(FerramentaBase):
         self._segmento_hover = None
         self._direcao_selecao = None
         self._segmentos_selecionados = set()
+        self._segmentos_visitados = set()
+        self._selecao_contorno_completo = False
         self._realce_segmentos = []
         self._ultima_posicao_mouse = None
 
@@ -222,6 +226,8 @@ class Ferramenta(FerramentaBase):
         self._segmento_hover = int(info["segmento_idx"])
         self._direcao_selecao = None
         self._segmentos_selecionados = {int(info["segmento_idx"])}
+        self._segmentos_visitados = {int(info["segmento_idx"])}
+        self._selecao_contorno_completo = False
         canvas._selecionados = {self._alvo_idx}
         self._atualizar_realce(canvas)
         self._status(canvas, "Trecho iniciado. Mova pelo perimetro para acrescentar partes; clique esquerdo mostra a paralela.")
@@ -247,7 +253,13 @@ class Ferramenta(FerramentaBase):
             tras = (self._segmento_inicio - self._segmento_hover) % total
             self._direcao_selecao = 1 if frente <= tras else -1
         direcao = self._direcao_selecao or 1
-        self._segmentos_selecionados = self._segmentos_intervalo(self._segmento_inicio, self._segmento_hover, total, direcao)
+        intervalo = self._segmentos_intervalo(self._segmento_inicio, self._segmento_hover, total, direcao)
+        self._segmentos_visitados.update(intervalo)
+        if len(self._segmentos_visitados) >= total:
+            self._selecao_contorno_completo = True
+            self._segmentos_selecionados = set(range(total))
+        else:
+            self._segmentos_selecionados = intervalo
         self._atualizar_realce(canvas)
 
     def _atualizar_preview(self, canvas, pos: QPointF) -> None:
@@ -261,10 +273,14 @@ class Ferramenta(FerramentaBase):
         if len(caminho) < 2:
             return
         lado = self._lado_mouse(caminho, pos)
-        self._preview = self._offset_polyline_lado(caminho, distancia, lado)
+        self._preview = self._offset_preview_contorno_fechado(canvas, self._alvo_idx, distancia, lado)
+        if not self._preview:
+            self._preview = self._offset_polyline_lado(caminho, distancia, lado)
         if dialog.chk_distancia_2.isChecked():
             distancia_2 = self._distancia_cena_2(canvas)
-            self._preview_2 = self._offset_polyline_lado(caminho, distancia_2, lado)
+            self._preview_2 = self._offset_preview_contorno_fechado(canvas, self._alvo_idx, distancia_2, lado)
+            if not self._preview_2:
+                self._preview_2 = self._offset_polyline_lado(caminho, distancia_2, lado)
         self._hover_info = {"elemento_idx": self._alvo_idx}
 
     def _confirmar_paralela(self, canvas) -> bool:
@@ -393,6 +409,8 @@ class Ferramenta(FerramentaBase):
         if self._segmento_inicio is None or self._segmento_hover is None or total <= 0:
             return []
         direcao = self._direcao_selecao or 1
+        if self._selecao_contorno_completo:
+            return [(self._segmento_inicio + (i * direcao)) % total for i in range(total)]
         if direcao >= 0:
             qtd = (self._segmento_hover - self._segmento_inicio) % total
             return [(self._segmento_inicio + i) % total for i in range(qtd + 1)]
@@ -424,6 +442,34 @@ class Ferramenta(FerramentaBase):
             caminho.append(QPointF(pts[seg_idx]))
         return caminho
 
+    def _offset_preview_contorno_fechado(self, canvas, idx: int, distancia: float, lado_caminho: float) -> list[QPointF]:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return []
+        pts = self._pontos_poly(canvas.cena.elementos[idx])
+        if not self._fechado(pts):
+            return []
+        base = pts[:-1]
+        total = len(base)
+        ordenados = self._segmentos_ordenados(total)
+        if total < 2 or not ordenados:
+            return []
+        direcao = self._direcao_selecao or 1
+        lado_contorno = lado_caminho if direcao >= 0 else -lado_caminho
+        vertices_offset = self._offset_vertices_contorno(base, distancia, lado_contorno)
+        if len(vertices_offset) != total:
+            return []
+        if direcao >= 0:
+            pontos = [QPointF(vertices_offset[ordenados[0]])]
+            for seg_idx in ordenados:
+                pontos.append(QPointF(vertices_offset[(seg_idx + 1) % total]))
+        else:
+            pontos = [QPointF(vertices_offset[(ordenados[0] + 1) % total])]
+            for seg_idx in ordenados:
+                pontos.append(QPointF(vertices_offset[seg_idx]))
+        if self._selecao_contorno_completo and pontos:
+            pontos.append(QPointF(pontos[0]))
+        return self._deduplicar_qpoints(pontos)
+
     def _lado_mouse(self, pts: list[QPointF], pos: QPointF) -> float:
         melhor = None
         for a, b in zip(pts, pts[1:]):
@@ -452,6 +498,21 @@ class Ferramenta(FerramentaBase):
             out.extend(self._pontos_juncao_offset(pts[i], linhas[i - 1], linhas[i], abs(distancia)))
         out.append(linhas[-1][1])
         return self._deduplicar_qpoints(out)
+
+    def _offset_vertices_contorno(self, base: list[QPointF], distancia: float, lado: float) -> list[QPointF]:
+        linhas = []
+        n = len(base)
+        for i in range(n):
+            a, b = base[i], base[(i + 1) % n]
+            nx, ny = self._normal_segmento(a, b)
+            nx *= lado
+            ny *= lado
+            linhas.append((QPointF(a.x() + nx * distancia, a.y() + ny * distancia), QPointF(b.x() + nx * distancia, b.y() + ny * distancia)))
+        out = []
+        for i in range(n):
+            inter = self._intersecao_linhas(linhas[(i - 1) % n][0], linhas[(i - 1) % n][1], linhas[i][0], linhas[i][1])
+            out.append(inter if inter is not None else linhas[i][0])
+        return out
 
     def _pontos_juncao_offset(
         self,
