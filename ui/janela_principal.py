@@ -105,6 +105,26 @@ class GuimmaStudioMainWindow(QMainWindow):
     ZOOM_INICIAL_CANVAS = 8.760
     ORIGEM_INICIAL_CANVAS_X = 110.0
     ORIGEM_INICIAL_CANVAS_Y = 0.0
+    FERRAMENTAS_USUARIO_PADRAO = [
+        "selecionar",
+        "reta",
+        "curva",
+        "retangulo",
+        "por_coordenada",
+        "extrair_molde",
+        "criar_molde",
+        "sentido_fio",
+        "costura",
+        "remover_costura",
+        "inserir_pique",
+        "manipular_pontos",
+        "mover",
+        "redefinir_perimetro",
+        "cortar",
+        "unir",
+        "espelhar",
+        "conferir",
+    ]
 
     def __init__(self):
         super().__init__()
@@ -138,7 +158,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
-        self._ferramentas_usuario_ids: list[str] = list(self.projeto_atual.preferencias_usuario.get("ferramentas_usuario", []))
+        ferramentas_usuario = self.projeto_atual.preferencias_usuario.get(
+            "ferramentas_usuario",
+            self.FERRAMENTAS_USUARIO_PADRAO,
+        )
+        self._ferramentas_usuario_ids: list[str] = list(ferramentas_usuario or self.FERRAMENTAS_USUARIO_PADRAO)
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
         self._barra_usuarios_habilitada = True
@@ -4108,7 +4132,10 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _inicializar_perfis_usuarios(self):
         perfis = self.projeto_atual.preferencias_usuario.get("perfis_usuarios")
         if isinstance(perfis, dict) and perfis:
-            self._perfis_usuarios = {str(nome): list(ids) for nome, ids in perfis.items()}
+            self._perfis_usuarios = {
+                str(nome): list(ids) if ids else list(self.FERRAMENTAS_USUARIO_PADRAO)
+                for nome, ids in perfis.items()
+            }
         else:
             self._perfis_usuarios = {"Usuário 1": list(self._ferramentas_usuario_ids)}
         perfil_atual = self.projeto_atual.preferencias_usuario.get("perfil_usuario_atual")
@@ -4116,7 +4143,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._perfil_usuario_atual = perfil_atual
         else:
             self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
-        self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(self._perfil_usuario_atual, []))
+        self._ferramentas_usuario_ids = list(
+            self._perfis_usuarios.get(self._perfil_usuario_atual, []) or self.FERRAMENTAS_USUARIO_PADRAO
+        )
         cfgs = self.projeto_atual.preferencias_usuario.get("perfis_usuarios_cfg")
         if isinstance(cfgs, dict):
             self._perfis_usuarios_cfg = {str(nome): dict(cfg or {}) for nome, cfg in cfgs.items()}
