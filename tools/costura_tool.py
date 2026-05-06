@@ -347,8 +347,8 @@ class Ferramenta(FerramentaBase):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.sp_costura.valueChanged.connect(lambda valor: self._definir_margem(canvas, float(valor)))
             dialog.cmb_posicao.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
-            dialog.cmb_acab_ini.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
-            dialog.cmb_acab_fim.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
+            dialog.cmb_acab_ini.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
+            dialog.cmb_acab_fim.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
             dialog.chk_pique.toggled.connect(lambda _ativo: self._atualizar_dialog_com_preview(canvas))
             dialog.cmb_pique.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar_dialog(canvas))
@@ -417,6 +417,10 @@ class Ferramenta(FerramentaBase):
     def _tipo_operacao(self, canvas) -> str:
         return self._obter_dialog(canvas).cmb_tipo.currentText()
 
+    def _acabamentos_atuais(self, canvas) -> tuple[str, str]:
+        dialog = self._obter_dialog(canvas)
+        return dialog.cmb_acab_ini.currentText(), dialog.cmb_acab_fim.currentText()
+
     def _cor_preview_alvo(self, canvas) -> QColor:
         idx = self._alvo_idx if self._alvo_idx is not None else self._preview_idx
         if idx is not None and 0 <= idx < len(canvas.cena.elementos):
@@ -457,6 +461,7 @@ class Ferramenta(FerramentaBase):
             self._pontos_fechados(canvas.cena.elementos[idx]),
             {seg_idx},
             self._margem_cm,
+            *self._acabamentos_atuais(canvas),
         )]
         self._preview_conectores = self._gerar_conectores_preview_segmentos(canvas, idx, {seg_idx})
         self._obter_dialog(canvas).atualizar_tabela_segmentos(self._total_segmentos(canvas, idx), {seg_idx})
@@ -490,6 +495,7 @@ class Ferramenta(FerramentaBase):
             pontos,
             self._segmentos_selecionados,
             self._margem_cm,
+            *self._acabamentos_atuais(canvas),
         )]
         base = [QPointF(x, y) for x, y in pontos[:-1]]
         total = len(base)
@@ -521,7 +527,7 @@ class Ferramenta(FerramentaBase):
             return self._aplicar_offset_segmentos(canvas, idx, segmentos)
         alvo = canvas.cena.elementos[idx]
         pontos = self._pontos_fechados(alvo)
-        costura = self._gerar_costura_segmentos(pontos, segmentos, self._margem_cm)
+        costura = self._gerar_costura_segmentos(pontos, segmentos, self._margem_cm, *self._acabamentos_atuais(canvas))
         if len(costura) < 2:
             return False
         molde_id = str(alvo.get("molde_id") or alvo.get("id") or "")
@@ -596,14 +602,25 @@ class Ferramenta(FerramentaBase):
         costura_total = self._gerar_costura(base + [base[0]], self._margem_cm)
         if len(costura_total) < total + 1:
             return False
-        novos: list[tuple[float, float]] = []
-        for vert_idx, ponto in enumerate(base):
-            seg_anterior = (vert_idx - 1) % total
-            seg_atual = vert_idx % total
-            if seg_anterior in segmentos or seg_atual in segmentos:
-                novos.append(costura_total[vert_idx])
-            else:
-                novos.append(ponto)
+        grupos = self._agrupar_segmentos(segmentos, total)
+        if len(grupos) != 1:
+            return False
+        grupo = grupos[0]
+        inicio = grupo[0]
+        fim = (grupo[-1] + 1) % total
+        acabamento_ini, acabamento_fim = self._acabamentos_atuais(canvas)
+        cap_ini = self._pontos_acabamento_extremidade(base, costura_total, inicio, grupo[0], self._margem_cm, acabamento_ini, inicio=True)
+        cap_fim = self._pontos_acabamento_extremidade(base, costura_total, fim, grupo[-1], self._margem_cm, acabamento_fim, inicio=False)
+        trecho_offset: list[tuple[float, float]] = []
+        for pos, seg_idx in enumerate(grupo):
+            if pos == 0:
+                trecho_offset.append(costura_total[seg_idx])
+            trecho_offset.append(costura_total[(seg_idx + 1) % total])
+        faixa = self._deduplicar_pontos(cap_ini + trecho_offset + cap_fim)
+        if inicio <= fim:
+            novos = list(base[:inicio]) + faixa + list(base[fim + 1:])
+        else:
+            novos = faixa + list(base[fim + 1:inicio])
         if novos and self._dist(novos[0], novos[-1]) > 1e-6:
             novos.append(novos[0])
         self._atualizar_geometria_molde(alvo, novos)
@@ -726,11 +743,38 @@ class Ferramenta(FerramentaBase):
             return 0
         return (fim - inicio) % total
 
+    def _agrupar_segmentos(self, segmentos: set[int], total: int) -> list[list[int]]:
+        if total <= 0 or not segmentos:
+            return []
+        ordenados = sorted({s % total for s in segmentos})
+        grupos: list[list[int]] = []
+        grupo = [ordenados[0]]
+        for seg_idx in ordenados[1:]:
+            if seg_idx == grupo[-1] + 1:
+                grupo.append(seg_idx)
+            else:
+                grupos.append(grupo)
+                grupo = [seg_idx]
+        grupos.append(grupo)
+        if len(grupos) > 1 and grupos[0][0] == 0 and grupos[-1][-1] == total - 1:
+            grupos[0] = grupos[-1] + grupos[0]
+            grupos.pop()
+        return grupos
+
+    def _deduplicar_pontos(self, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        saida: list[tuple[float, float]] = []
+        for ponto in pontos:
+            if not saida or self._dist(saida[-1], ponto) > 1e-6:
+                saida.append((round(float(ponto[0]), 6), round(float(ponto[1]), 6)))
+        return saida
+
     def _gerar_costura_segmentos(
         self,
         pontos: list[tuple[float, float]],
         segmentos: set[int],
         margem: float,
+        acabamento_inicial: str = "Canto reto",
+        acabamento_final: str = "Canto reto",
     ) -> list[tuple[float, float]]:
         base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
         total = len(base)
@@ -758,13 +802,97 @@ class Ferramenta(FerramentaBase):
 
         saida: list[tuple[float, float]] = []
         for grupo in grupos:
+            inicio = grupo[0]
+            fim_vertice = (grupo[-1] + 1) % total
+            cap_ini = self._pontos_acabamento_extremidade(
+                base,
+                costura_total,
+                inicio,
+                grupo[0],
+                margem,
+                acabamento_inicial,
+                inicio=True,
+            )
+            for ponto in cap_ini:
+                if not saida or self._dist(saida[-1], ponto) > 1e-6:
+                    saida.append(ponto)
             for pos, seg_idx in enumerate(grupo):
-                if not saida or pos == 0:
+                if not saida or (pos == 0 and self._dist(saida[-1], costura_total[seg_idx]) > 1e-6):
                     saida.append(costura_total[seg_idx])
-                saida.append(costura_total[(seg_idx + 1) % total])
+                prox = costura_total[(seg_idx + 1) % total]
+                if not saida or self._dist(saida[-1], prox) > 1e-6:
+                    saida.append(prox)
+            cap_fim = self._pontos_acabamento_extremidade(
+                base,
+                costura_total,
+                fim_vertice,
+                grupo[-1],
+                margem,
+                acabamento_final,
+                inicio=False,
+            )
+            for ponto in cap_fim:
+                if not saida or self._dist(saida[-1], ponto) > 1e-6:
+                    saida.append(ponto)
             if len(grupos) > 1:
                 saida.append(saida[-1])
         return saida
+
+    def _pontos_acabamento_extremidade(
+        self,
+        base: list[tuple[float, float]],
+        costura_total: list[tuple[float, float]],
+        vertice_idx: int,
+        seg_idx: int,
+        margem: float,
+        acabamento: str,
+        inicio: bool,
+    ) -> list[tuple[float, float]]:
+        total = len(base)
+        if total <= 0 or len(costura_total) < total + 1:
+            return []
+        base_pt = base[vertice_idx % total]
+        off_pt = costura_total[vertice_idx % total]
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        tx = b[0] - a[0]
+        ty = b[1] - a[1]
+        comp = sqrt((tx * tx) + (ty * ty)) or 1.0
+        tx /= comp
+        ty /= comp
+        if inicio:
+            tx = -tx
+            ty = -ty
+        nx = off_pt[0] - base_pt[0]
+        ny = off_pt[1] - base_pt[1]
+        ncomp = sqrt((nx * nx) + (ny * ny)) or max(1e-9, abs(margem))
+        nx /= ncomp
+        ny /= ncomp
+        dist = abs(float(margem))
+        nome = str(acabamento or "Canto reto").strip().lower()
+
+        def p(dx_t: float, dx_n: float) -> tuple[float, float]:
+            return (
+                round(base_pt[0] + (tx * dx_t) + (nx * dx_n), 6),
+                round(base_pt[1] + (ty * dx_t) + (ny * dx_n), 6),
+            )
+
+        if "45" in nome:
+            pontos = [base_pt, p(dist, dist)]
+        elif "90" in nome:
+            pontos = [base_pt, p(dist, 0.0), p(dist, dist)]
+        elif "degrau" in nome:
+            pontos = [base_pt, p(dist * 0.55, 0.0), p(dist * 0.55, dist), off_pt]
+        elif "fechado" in nome:
+            pontos = [base_pt, p(dist * 0.75, dist), off_pt]
+        elif "aberto" in nome:
+            pontos = [base_pt, p(dist * 0.75, 0.0), off_pt]
+        else:
+            pontos = [base_pt, off_pt]
+
+        if not inicio:
+            pontos = list(reversed(pontos))
+        return [(round(float(x), 6), round(float(y), 6)) for x, y in pontos]
 
     def _gerar_conectores_preview_segmentos(
         self,
