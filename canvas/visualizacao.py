@@ -16,6 +16,7 @@ from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
 class VisualizacaoCanvas(QWidget):
@@ -195,7 +196,7 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas_changed.emit(visivel)
 
     def set_painel_auxiliar_posicao(self, pos: tuple[int, int] | None):
-        self._painel_coordenadas_posicao = None
+        self._painel_coordenadas_posicao = pos
         self._reposicionar_painel_coordenadas()
 
     def sincronizar_paineis_auxiliares(self):
@@ -664,9 +665,15 @@ class VisualizacaoCanvas(QWidget):
     def _reposicionar_painel_coordenadas(self):
         if not self.painel_coordenadas.isVisible():
             return
+        if self._painel_coordenadas_posicao is not None:
+            x, y = self._painel_coordenadas_posicao
+            self.painel_coordenadas.move(QPoint(int(x), int(y)))
+            salvar_posicao(self.painel_coordenadas, "painel:coordenadas")
+            return
         x = max(8, self.width() - self.painel_coordenadas.width() - 12)
         y = 16
-        self.painel_coordenadas.move(x, y)
+        if not restaurar_posicao(self.painel_coordenadas, "painel:coordenadas", fallback=QPoint(x, y)):
+            salvar_posicao(self.painel_coordenadas, "painel:coordenadas")
 
     def calcular_posicao_painel_auxiliar(self, largura: int, altura: int, abaixo_coordenadas: bool = True) -> QPoint:
         margem_direita = 12

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 if TYPE_CHECKING:
     from canvas.visualizacao import VisualizacaoCanvas
@@ -38,6 +39,7 @@ class RetaToolUI(QFrame):
         self.setFixedWidth(324)
         self._drag_offset_local: QPoint | None = None
         self._margem_canvas = 12
+        self._chave_posicao = "painel:reta"
 
         self._botoes_modo: dict[str, QPushButton] = {}
         self.modo_atual = "livre"
@@ -330,6 +332,7 @@ class RetaToolUI(QFrame):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and self._drag_offset_local is not None:
             self._drag_offset_local = None
+            salvar_posicao(self, self._chave_posicao)
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -360,13 +363,19 @@ class RetaToolUI(QFrame):
         parent = self.parentWidget()
         if parent is not None and hasattr(parent, "calcular_posicao_painel_auxiliar"):
             destino = parent.calcular_posicao_painel_auxiliar(self.width(), self.height(), abaixo_coordenadas=True)
-            self.move(self._ajustar_para_canvas(destino))
+            if not restaurar_posicao(self, self._chave_posicao, fallback=self._ajustar_para_canvas(destino)):
+                salvar_posicao(self, self._chave_posicao)
             return
-        self.move(self._ajustar_para_canvas(QPoint(10_000, 0)))
+        if not restaurar_posicao(self, self._chave_posicao, fallback=self._ajustar_para_canvas(QPoint(10_000, 0))):
+            salvar_posicao(self, self._chave_posicao)
 
     def fechar(self):
         self.hide()
         self.fechado.emit()
+
+    def hideEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
 
 
 class Ferramenta(FerramentaBase):

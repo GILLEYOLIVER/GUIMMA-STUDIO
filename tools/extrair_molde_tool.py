@@ -30,6 +30,7 @@ from core.geometry_bridge import (
     polyline_from_element,
 )
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class Ferramenta(FerramentaBase):
@@ -1700,6 +1701,7 @@ class Ferramenta(FerramentaBase):
                 chk.toggled.connect(self._salvar_cfg_global)
 
             cls._dialog_global = dialog
+            instalar_memoria_posicao(dialog, "dialog:extrair_molde")
             dialog.destroyed.connect(lambda *_: type(self)._limpar_referencias_ui_global())
             self._aplicar_cfg_na_ui()
         else:
@@ -1732,7 +1734,7 @@ class Ferramenta(FerramentaBase):
                 self._dialog.height(),
                 abaixo_coordenadas=True,
             )
-            self._dialog.move(canvas.mapToGlobal(destino_local))
+            restaurar_posicao(self._dialog, "dialog:extrair_molde", fallback=canvas.mapToGlobal(destino_local))
 
     def _salvar_cfg(self, *_):
         self._salvar_cfg_global()

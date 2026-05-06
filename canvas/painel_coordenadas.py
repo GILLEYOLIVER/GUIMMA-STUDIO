@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from math import atan2, degrees, sqrt
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+from ui.posicao_janelas import salvar_posicao
 
 
 class PainelCoordenadas(QFrame):
@@ -19,6 +21,8 @@ class PainelCoordenadas(QFrame):
         self._unidade_sigla = "cm"
         self._unidade_fator = 1.0
         self._casas_decimais = 2
+        self._drag_offset_local: QPoint | None = None
+        self._chave_posicao = "painel:coordenadas"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -164,10 +168,35 @@ class PainelCoordenadas(QFrame):
         self.d_preview.setText(f"{dist / self._unidade_fator:.{self._casas_decimais}f}")
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.position().y() <= 28:
+            self._drag_offset_local = event.position().toPoint()
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._drag_offset_local is not None and event.buttons() & Qt.LeftButton:
+            parent = self.parentWidget()
+            destino = self.pos() + event.position().toPoint() - self._drag_offset_local
+            if parent is not None:
+                x = max(8, min(destino.x(), max(8, parent.width() - self.width() - 8)))
+                y = max(8, min(destino.y(), max(8, parent.height() - self.height() - 8)))
+                destino = QPoint(x, y)
+            self.move(destino)
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._drag_offset_local is not None:
+            self._drag_offset_local = None
+            salvar_posicao(self, self._chave_posicao)
+            self.posicao_alterada.emit(self.x(), self.y())
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
+
+    def hideEvent(self, event):
+        salvar_posicao(self, self._chave_posicao)
+        self.posicao_alterada.emit(self.x(), self.y())
+        super().hideEvent(event)

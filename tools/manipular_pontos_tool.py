@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class Ferramenta(FerramentaBase):
@@ -72,6 +73,7 @@ class Ferramenta(FerramentaBase):
             lay.addRow("Nº pontos", Ferramenta._cmb_n_pontos_global)
             lay.addRow("", Ferramenta._chk_discreto_global)
             Ferramenta._dlg_global.setFixedWidth(210)
+            instalar_memoria_posicao(Ferramenta._dlg_global, "dialog:manipular_pontos")
         self._dlg_passo = Ferramenta._dlg_global
         self._edt_dx = Ferramenta._edt_dx_global
         self._edt_dy = Ferramenta._edt_dy_global
@@ -90,7 +92,7 @@ class Ferramenta(FerramentaBase):
                 self._dlg_passo.height(),
                 abaixo_coordenadas=True,
             )
-            self._dlg_passo.move(canvas.mapToGlobal(pos_local))
+            restaurar_posicao(self._dlg_passo, "dialog:manipular_pontos", fallback=canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
         try:

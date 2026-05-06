@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLab
 
 from tools.medicao_utils import comprimento_total_elemento, selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class RedefinirPerimetroDialog(QDialog):
@@ -61,6 +62,12 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
+        dialog.adjustSize()
+        fallback = None
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
+            fallback = canvas.mapToGlobal(pos_local)
+        restaurar_posicao(dialog, "dialog:redefinir_perimetro", fallback=fallback)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -112,6 +119,7 @@ class Ferramenta(FerramentaBase):
         parent = canvas.window() if hasattr(canvas, "window") else canvas
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = RedefinirPerimetroDialog(parent)
+            instalar_memoria_posicao(dialog, "dialog:redefinir_perimetro")
             self._dialog_por_canvas[chave] = dialog
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
