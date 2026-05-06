@@ -5,17 +5,132 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from tools.tool_base import FerramentaBase
+
+
+class CosturaDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Costura")
+        self.setWindowFlag(Qt.Tool, True)
+        self.setModal(False)
+        self.setFixedWidth(378)
+        self.setStyleSheet(
+            """
+            QDialog { background:#f2f2f2; color:#111111; }
+            QLabel { color:#111111; font-size:11px; }
+            QComboBox, QDoubleSpinBox {
+                background:#ffffff; color:#111111;
+                border:1px solid #aeb4ba; min-height:21px;
+                padding-left:3px;
+            }
+            QCheckBox { color:#111111; font-size:11px; }
+            QPushButton {
+                background:#f7f7f7; color:#111111;
+                border:1px solid #b7b7b7; min-height:24px;
+                padding:2px 14px;
+            }
+            QPushButton:hover { background:#ffffff; }
+            """
+        )
+
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(6, 6, 6, 6)
+        raiz.setSpacing(6)
+
+        topo = QGridLayout()
+        topo.setHorizontalSpacing(12)
+        topo.setVerticalSpacing(5)
+        self.cmb_tipo = QComboBox()
+        self.cmb_tipo.addItems(["Costura", "Offset"])
+        self.cmb_posicao = QComboBox()
+        self.cmb_posicao.addItems(["Selecionar", "Todo molde"])
+        self.sp_costura = QDoubleSpinBox()
+        self.sp_costura.setRange(0.1, 20.0)
+        self.sp_costura.setDecimals(2)
+        self.sp_costura.setSingleStep(0.1)
+        self.sp_costura.setValue(1.0)
+        self.sp_costura.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.chk_costura_fim = QCheckBox("Costura fim (cm)")
+        self.sp_costura_fim = QDoubleSpinBox()
+        self.sp_costura_fim.setRange(0.0, 20.0)
+        self.sp_costura_fim.setDecimals(2)
+        self.sp_costura_fim.setSingleStep(0.1)
+        self.sp_costura_fim.setValue(1.0)
+        self.sp_costura_fim.setEnabled(False)
+        self.sp_costura_fim.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.chk_pique = QCheckBox("Pique")
+        self.chk_pique.setChecked(True)
+        self.cmb_pique = QComboBox()
+        self.cmb_pique.addItems(["T", "V", "I", "Nenhum"])
+
+        topo.addWidget(self.cmb_tipo, 0, 0, 1, 2)
+        topo.addWidget(QLabel("Posicao"), 0, 2)
+        topo.addWidget(self.cmb_posicao, 0, 3)
+        topo.addWidget(QLabel("Costura (cm)"), 1, 0)
+        topo.addWidget(self.sp_costura, 1, 1)
+        topo.addWidget(self.chk_pique, 1, 2)
+        topo.addWidget(self.cmb_pique, 1, 3)
+        topo.addWidget(self.chk_costura_fim, 2, 0)
+        topo.addWidget(self.sp_costura_fim, 2, 1)
+        raiz.addLayout(topo)
+
+        acab = QGridLayout()
+        acab.setHorizontalSpacing(8)
+        self.cmb_acab_ini = QComboBox()
+        self.cmb_acab_fim = QComboBox()
+        acabamentos = ["Canto reto", "V aberto", "V fechado", "Degrau", "45 graus", "90 graus"]
+        self.cmb_acab_ini.addItems(acabamentos)
+        self.cmb_acab_fim.addItems(acabamentos)
+        acab.addWidget(QLabel("Acabamento inicial"), 0, 0)
+        acab.addWidget(self.cmb_acab_ini, 0, 1)
+        acab.addWidget(QLabel("Acabamento final"), 0, 2)
+        acab.addWidget(self.cmb_acab_fim, 0, 3)
+        raiz.addLayout(acab)
+
+        rodape = QHBoxLayout()
+        self.lbl_status = QLabel("Selecione um molde/contorno.")
+        self.lbl_status.setWordWrap(True)
+        self.btn_aplicar = QPushButton("Aplicar")
+        rodape.addWidget(self.lbl_status, 1)
+        rodape.addWidget(self.btn_aplicar, 0, Qt.AlignRight)
+        raiz.addLayout(rodape)
+
+        self.chk_costura_fim.toggled.connect(self.sp_costura_fim.setEnabled)
+
+    def margem(self) -> float:
+        return float(self.sp_costura.value())
+
+    def atualizar_status(self, texto: str) -> None:
+        self.lbl_status.setText(texto)
+
+    def atualizar_trechos(self, pontos: list[QPointF]) -> None:
+        if len(pontos) >= 4:
+            self.atualizar_status(f"Preview de costura com margem de {Ferramenta._fmt(self.margem())} cm.")
 
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "costura"
     nome = "Costura"
+    usa_painel_auxiliar = False
     descricao_painel = (
         "Clique em um molde/contorno fechado para criar margem de costura. "
         "+/- ajusta a margem, Enter aplica na selecao."
     )
+    _dialog_por_canvas: dict[int, CosturaDialog] = {}
 
     def __init__(self):
         super().__init__()
@@ -24,15 +139,20 @@ class Ferramenta(FerramentaBase):
         self._preview_idx: int | None = None
 
     def on_activate(self, canvas):
-        super().on_activate(canvas)
-        self.set_status(self._mensagem_pronta())
+        dialog = self._obter_dialog(canvas)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        dialog.atualizar_status(self._mensagem_pronta())
 
     def on_deactivate(self, canvas):
         self._preview = []
         self._preview_idx = None
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.hide()
         if canvas is not None:
             canvas.update()
-        super().on_deactivate(canvas)
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
@@ -42,6 +162,7 @@ class Ferramenta(FerramentaBase):
         if idx is not None:
             pontos = self._pontos_fechados(canvas.cena.elementos[idx])
             self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            self._atualizar_dialog_com_preview(canvas)
         canvas.update()
         return False
 
@@ -98,13 +219,66 @@ class Ferramenta(FerramentaBase):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
 
+    def set_status(self, texto: str):
+        for dialog in self._dialog_por_canvas.values():
+            if dialog is not None and dialog.isVisible():
+                dialog.atualizar_status(texto)
+
     def _ajustar_margem(self, canvas, delta: float) -> None:
         self._margem_cm = max(0.1, round(self._margem_cm + delta, 2))
+        dialog = self._obter_dialog(canvas)
+        dialog.sp_costura.blockSignals(True)
+        dialog.sp_costura.setValue(self._margem_cm)
+        dialog.sp_costura.blockSignals(False)
         if self._preview_idx is not None and self._elemento_valido(canvas, self._preview_idx):
             pontos = self._pontos_fechados(canvas.cena.elementos[self._preview_idx])
             self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            self._atualizar_dialog_com_preview(canvas)
         canvas.update()
         self.set_status(self._mensagem_pronta())
+
+    def _obter_dialog(self, canvas) -> CosturaDialog:
+        chave = id(canvas)
+        dialog = self._dialog_por_canvas.get(chave)
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        if dialog is None or dialog.parentWidget() is not parent:
+            dialog = CosturaDialog(parent)
+            self._dialog_por_canvas[chave] = dialog
+        if not hasattr(dialog, "_hooked"):
+            dialog._hooked = True  # type: ignore[attr-defined]
+            dialog.sp_costura.valueChanged.connect(lambda valor: self._definir_margem(canvas, float(valor)))
+            dialog.cmb_posicao.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
+            dialog.cmb_acab_ini.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
+            dialog.cmb_acab_fim.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
+            dialog.chk_pique.toggled.connect(lambda _ativo: self._atualizar_dialog_com_preview(canvas))
+            dialog.cmb_pique.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
+            dialog.btn_aplicar.clicked.connect(lambda: self._aplicar_dialog(canvas))
+        return dialog
+
+    def _definir_margem(self, canvas, valor: float) -> None:
+        self._margem_cm = max(0.1, round(float(valor), 2))
+        self._recalcular_preview(canvas)
+        self.set_status(self._mensagem_pronta())
+
+    def _recalcular_preview(self, canvas) -> None:
+        if self._preview_idx is not None and self._elemento_valido(canvas, self._preview_idx):
+            pontos = self._pontos_fechados(canvas.cena.elementos[self._preview_idx])
+            self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            self._atualizar_dialog_com_preview(canvas)
+        canvas.update()
+
+    def _atualizar_dialog_com_preview(self, canvas) -> None:
+        dialog = self._obter_dialog(canvas)
+        dialog.atualizar_trechos(self._preview)
+
+    def _aplicar_dialog(self, canvas) -> None:
+        indices = [idx for idx in sorted(getattr(canvas, "_selecionados", set())) if self._elemento_valido(canvas, idx)]
+        if not indices and self._preview_idx is not None:
+            indices = [self._preview_idx]
+        if self._aplicar_em_indices(canvas, indices):
+            self.set_status(f"Costura aplicada em {len(indices)} molde(s).")
+        else:
+            self.set_status("Selecione um molde/contorno fechado ou passe o mouse sobre um alvo.")
 
     def _aplicar_em_indices(self, canvas, indices: list[int]) -> bool:
         alterou = False
@@ -123,14 +297,26 @@ class Ferramenta(FerramentaBase):
                 molde_id = str(uuid4())
                 alvo["molde_id"] = molde_id
             self._remover_costuras_do_alvo(canvas, molde_id)
-            canvas.cena.elementos.append(self._elemento_costura(costura, alvo, molde_id))
+            canvas.cena.elementos.append(self._elemento_costura(canvas, costura, alvo, molde_id))
             alterou = True
         if alterou:
             canvas._registrar_historico()
             canvas.update()
         return alterou
 
-    def _elemento_costura(self, pontos: list[tuple[float, float]], alvo: dict, molde_id: str) -> dict:
+    def _elemento_costura(self, canvas, pontos: list[tuple[float, float]], alvo: dict, molde_id: str) -> dict:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        tipo_costura = "Costura"
+        posicao = "Selecionar"
+        pique = ""
+        acabamento_inicial = ""
+        acabamento_final = ""
+        if dialog is not None:
+            tipo_costura = dialog.cmb_tipo.currentText()
+            posicao = dialog.cmb_posicao.currentText()
+            pique = dialog.cmb_pique.currentText() if dialog.chk_pique.isChecked() else ""
+            acabamento_inicial = dialog.cmb_acab_ini.currentText()
+            acabamento_final = dialog.cmb_acab_fim.currentText()
         return {
             "tipo": "polyline",
             "pontos": pontos,
@@ -141,10 +327,20 @@ class Ferramenta(FerramentaBase):
             "molde_id": molde_id,
             "costura_de_molde_id": molde_id,
             "margem_costura_cm": float(self._margem_cm),
+            "tipo_costura": tipo_costura,
+            "posicao_costura": posicao,
+            "pique_costura": pique,
+            "acabamento_inicial": acabamento_inicial,
+            "acabamento_final": acabamento_final,
             "metadados": {
                 "tipo_ferramenta": self.id_ferramenta,
                 "subtipo_audaces": "costura",
                 "origem_nome_molde": str(alvo.get("nome_molde") or ""),
+                "tipo_costura": tipo_costura,
+                "posicao_costura": posicao,
+                "pique_costura": pique,
+                "acabamento_inicial": acabamento_inicial,
+                "acabamento_final": acabamento_final,
             },
         }
 
