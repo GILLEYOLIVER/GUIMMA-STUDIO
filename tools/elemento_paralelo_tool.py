@@ -460,17 +460,13 @@ class Ferramenta(FerramentaBase):
         linha_atual: tuple[QPointF, QPointF],
         distancia: float,
     ) -> list[QPointF]:
+        del vertice_original
         inter = self._intersecao_linhas(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
-        limite = max(0.25, distancia * 2.8)
         if inter is not None:
-            dist_prev = self._dist(inter, linha_anterior[1])
-            dist_next = self._dist(inter, linha_atual[0])
-            dist_vertice = self._dist(inter, vertice_original)
-            if dist_prev <= limite and dist_next <= limite and dist_vertice <= max(limite, distancia * 3.2):
-                return [inter]
+            return [inter]
 
-        # Em cantos internos ou muito agudos, a intersecao das linhas deslocadas
-        # pode ficar longe demais. Usar uma pequena ponte evita espigões e cruzamentos.
+        # Linhas paralelas nao possuem ponto unico de encontro; nesse caso, a
+        # ponte reta fecha o trecho sem inverter a ordem da paralela.
         return self._ponte_canto_reta(linha_anterior[1], linha_atual[0], distancia)
 
     def _ponte_canto_reta(self, inicio: QPointF, fim: QPointF, distancia: float) -> list[QPointF]:
