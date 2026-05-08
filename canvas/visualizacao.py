@@ -1126,6 +1126,7 @@ class VisualizacaoCanvas(QWidget):
             "elemento_paralelo",
             "recortar",
             "cortar",
+            "sentido_fio",
         }
         runtime_ja_processado = False
         if (
