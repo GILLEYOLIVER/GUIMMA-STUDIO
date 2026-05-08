@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from math import atan2, cos, degrees, hypot, isfinite, radians, sin
+from math import atan2, cos, degrees, hypot, isfinite, radians
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout
 
+from canvas.snap import SnapResult
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -76,6 +77,7 @@ class Ferramenta(FerramentaBase):
     descricao_painel = "Define o sentido do fio do molde com dois pontos e angulo opcional."
 
     _dialog_por_canvas: dict[int, SentidoFioDialog] = {}
+    ANGULOS_PRINCIPAIS = (0.0, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0, 180.0, 210.0, 225.0, 240.0, 270.0, 300.0, 315.0, 330.0)
 
     def __init__(self):
         super().__init__()
@@ -111,7 +113,7 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
 
-        pos = canvas._ponto_com_snap(event.position())
+        pos = self._ponto_com_snap_fio(canvas, event.position())
         alvo = self._molde_em_ponto(canvas, pos)
         if alvo is not None and (self._molde_idx is None or alvo != self._molde_idx):
             self._selecionar_molde(canvas, alvo)
@@ -148,34 +150,51 @@ class Ferramenta(FerramentaBase):
     def on_mouse_move(self, canvas, event) -> bool:
         if self._inicio is None:
             return False
-        pos = canvas._ponto_com_snap(event.position())
+        pos = self._ponto_com_snap_fio(canvas, event.position())
         self._fim_preview = self._ponto_final_com_config(canvas, self._inicio, pos)
         canvas.update()
         event.accept()
         return True
 
     def on_paint_overlay(self, canvas, painter):
+        self._desenhar_realce_molde(canvas, painter)
         if self._inicio is None or self._fim_preview is None:
             return
 
         p0 = canvas._cena_para_tela(self._inicio)
         p1 = canvas._cena_para_tela(self._fim_preview)
-        ang = self._angulo(self._inicio, self._fim_preview)
+        ang = self._normalizar_angulo(self._angulo(self._inicio, self._fim_preview))
 
         painter.save()
         pen = QPen(QColor("#ff00d4"), 1.0, Qt.DashLine)
         pen.setDashPattern([3.0, 2.0])
         painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
         painter.drawLine(p0, p1)
         painter.drawLine(QPointF(p0.x() - 5, p0.y()), QPointF(p0.x() + 5, p0.y()))
         painter.drawLine(QPointF(p0.x(), p0.y() - 5), QPointF(p0.x(), p0.y() + 5))
         painter.drawLine(QPointF(p1.x() - 7, p1.y() - 7), QPointF(p1.x() + 7, p1.y() + 7))
         painter.drawLine(QPointF(p1.x() + 7, p1.y() - 7), QPointF(p1.x() - 7, p1.y() + 7))
 
-        raio = max(22.0, min(78.0, hypot(p1.x() - p0.x(), p1.y() - p0.y()) * 0.45))
+        raio = 16.0
         painter.drawEllipse(QRectF(p0.x() - raio, p0.y() - raio, raio * 2.0, raio * 2.0))
-        painter.drawText(int(p1.x() + 6), int(p1.y() + 12), f"{self._normalizar_angulo(ang):g} deg")
+        painter.drawText(int(p1.x() + 6), int(p1.y() + 12), f"{ang:g} deg")
         painter.restore()
+
+    def obter_candidatos_snap(self, canvas, cursor: QPointF):
+        if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
+            return []
+        el = canvas.cena.elementos[self._molde_idx]
+        candidatos: list[SnapResult] = []
+        tol = self._tolerancia_snap_cena(canvas)
+        for ponto in self._pontos_snap_molde(el):
+            self._adicionar_snap(candidatos, cursor, ponto, "nó", self._molde_idx, tol)
+        for a, b in self._segmentos_snap_molde(el):
+            proj = canvas._snap_manager._projetar_em_segmento(cursor, a, b)
+            meio = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+            self._adicionar_snap(candidatos, cursor, proj, "borda", self._molde_idx, tol)
+            self._adicionar_snap(candidatos, cursor, meio, "ponto médio", self._molde_idx, tol)
+        return candidatos
 
     def _obter_dialog(self, canvas) -> SentidoFioDialog:
         chave = id(canvas)
@@ -210,9 +229,11 @@ class Ferramenta(FerramentaBase):
         comp = hypot(dx, dy)
         if comp <= 1e-9:
             return QPointF(pos_mouse)
-        ang = atan2(dy, dx)
+        angulo = degrees(atan2(dy, dx))
+        angulo = self._angulo_principal_mais_proximo(angulo)
         if dialog.chk_usar_angulo.isChecked():
-            ang += radians(float(dialog.sp_angulo.value()))
+            angulo += float(dialog.sp_angulo.value())
+        ang = radians(angulo)
         return QPointF(inicio.x() + (cos(ang) * comp), inicio.y() + (sin(ang) * comp))
 
     def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF) -> None:
@@ -269,6 +290,75 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = {idx}
         canvas.update()
 
+    def _ponto_com_snap_fio(self, canvas, pos_tela: QPointF) -> QPointF:
+        return canvas._ponto_com_snap(pos_tela)
+
+    def _desenhar_realce_molde(self, canvas, painter) -> None:
+        if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[self._molde_idx]
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", []) if self._eh_ponto((x, y))]
+        if len(pontos) < 2:
+            return
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
+        pen = QPen(QColor("#1e9bff"), 1.4, Qt.DashLine)
+        pen.setDashPattern([4.0, 3.0])
+        painter.setPen(pen)
+        path = QPainterPath(canvas._cena_para_tela(pontos[0]))
+        for ponto in pontos[1:]:
+            path.lineTo(canvas._cena_para_tela(ponto))
+        painter.drawPath(path)
+        for ponto in self._pontos_snap_molde(el):
+            tela = canvas._cena_para_tela(ponto)
+            painter.drawRect(QRectF(tela.x() - 3.0, tela.y() - 3.0, 6.0, 6.0))
+        painter.restore()
+
+    def _pontos_snap_molde(self, el: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for chave in ("pontos", "controle_cantos", "controle_auxiliares"):
+            if isinstance(el.get(chave), list):
+                for p in el.get(chave, []):
+                    if self._eh_ponto(p):
+                        pontos.append(QPointF(float(p[0]), float(p[1])))
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            p = el.get(chave)
+            if self._eh_ponto(p):
+                pontos.append(QPointF(float(p[0]), float(p[1])))
+        return pontos
+
+    def _segmentos_snap_molde(self, el: dict) -> list[tuple[QPointF, QPointF]]:
+        segmentos: list[tuple[QPointF, QPointF]] = []
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", []) if self._eh_ponto((x, y))]
+        segmentos.extend((a, b) for a, b in zip(pontos, pontos[1:]))
+        fio_origem = el.get("fio_origem")
+        fio_fim = el.get("fio_fim")
+        if self._eh_ponto(fio_origem) and self._eh_ponto(fio_fim):
+            segmentos.append((
+                QPointF(float(fio_origem[0]), float(fio_origem[1])),
+                QPointF(float(fio_fim[0]), float(fio_fim[1])),
+            ))
+        return segmentos
+
+    def _adicionar_snap(
+        self,
+        candidatos: list[SnapResult],
+        cursor: QPointF,
+        ponto: QPointF,
+        tipo: str,
+        elemento_idx: int,
+        tolerancia: float,
+    ) -> None:
+        dist = self._dist(cursor, ponto)
+        if dist <= tolerancia:
+            candidatos.append(SnapResult(ponto=QPointF(ponto), tipo=tipo, distancia=dist, elemento_idx=elemento_idx))
+
+    @staticmethod
+    def _tolerancia_snap_cena(canvas) -> float:
+        if hasattr(canvas, "_tolerancia_snap_px"):
+            return float(canvas._tolerancia_snap_px()) / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        return 10.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+
     def _fechar(self, canvas) -> None:
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Sentido Fio finalizada. Voltando para Selecionar.")
@@ -310,6 +400,13 @@ class Ferramenta(FerramentaBase):
     def _normalizar_angulo(angulo: float) -> float:
         valor = float(angulo) % 360.0
         return 0.0 if abs(valor - 360.0) <= 1e-9 else valor
+
+    def _angulo_principal_mais_proximo(self, angulo: float) -> float:
+        normalizado = self._normalizar_angulo(angulo)
+        return min(
+            self.ANGULOS_PRINCIPAIS,
+            key=lambda alvo: min(abs(normalizado - alvo), 360.0 - abs(normalizado - alvo)),
+        )
 
     def _angulo_fio_atual(self, el: dict) -> float:
         origem = el.get("fio_origem")
