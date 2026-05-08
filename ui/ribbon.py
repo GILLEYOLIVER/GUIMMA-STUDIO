@@ -440,7 +440,13 @@ class RibbonGroup(QFrame):
     estilo_changed = Signal(dict)
     adicionar_usuario = Signal(str)
 
-    def __init__(self, titulo: str, tools: list[ToolDef], parent: QWidget | None = None):
+    def __init__(
+        self,
+        titulo: str,
+        tools: list[ToolDef],
+        parent: QWidget | None = None,
+        compactar: bool = True,
+    ):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
         self.setFixedHeight(100)
@@ -459,7 +465,7 @@ class RibbonGroup(QFrame):
             "por_raio",
         }
 
-        if len(tools) > 4:
+        if compactar and len(tools) > 4:
             corpo = QHBoxLayout()
             corpo.setSpacing(4)
             principais = [tool for tool in tools if tool.tool_id in destaque_tools]
@@ -580,13 +586,18 @@ class RibbonPage(QWidget):
     tool_selected = Signal(str)
     adicionar_usuario = Signal(str)
 
-    def __init__(self, grupos: list[tuple[str, list[ToolDef]]], parent: QWidget | None = None):
+    def __init__(
+        self,
+        grupos: list[tuple[str, list[ToolDef]]],
+        parent: QWidget | None = None,
+        compactar_grupos: bool = True,
+    ):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 1, 5, 1)
         layout.setSpacing(0)
         for titulo, tools in grupos:
-            group = RibbonGroup(titulo, tools)
+            group = RibbonGroup(titulo, tools, compactar=compactar_grupos)
             group.tool_selected.connect(self.tool_selected.emit)
             group.adicionar_usuario.connect(self.adicionar_usuario.emit)
             layout.addWidget(group)
@@ -658,6 +669,31 @@ class RibbonWidget(QWidget):
     def tool_def(self, tool_id: str) -> ToolDef | None:
         return self._tools.get(tool_id)
 
+    def set_user_tools(self, tool_ids: list[str], titulo: str):
+        index = self._tab_index_by_id("usuarios")
+        if index is None:
+            return
+
+        titulo = titulo.strip() or "Usuario 1"
+        self._tabs[index].title = titulo
+        self.tabbar.setTabText(index, titulo)
+
+        tools = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+        grupos = [(titulo, tools)] if tools else []
+        pagina = RibbonPage(grupos, compactar_grupos=False)
+        pagina.tool_selected.connect(self._on_tool_selected)
+        pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)
+        for grupo in pagina.findChildren(RibbonGroup):
+            grupo.estilo_changed.connect(self.estilo_changed.emit)
+
+        pagina_atual = self.paginas.currentIndex()
+        antiga = self.paginas.widget(index)
+        self.paginas.removeWidget(antiga)
+        antiga.deleteLater()
+        self.paginas.insertWidget(index, pagina)
+        if pagina_atual == index:
+            self.paginas.setCurrentIndex(index)
+
     def _on_tool_selected(self, tool_id: str):
         self.set_active_tool(tool_id)
         self.tool_selected.emit(tool_id)
@@ -681,6 +717,12 @@ class RibbonWidget(QWidget):
     def tab_id_at(self, index: int) -> str | None:
         if 0 <= index < len(self._tabs):
             return self._tabs[index].tab_id
+        return None
+
+    def _tab_index_by_id(self, tab_id: str) -> int | None:
+        for index, tab in enumerate(self._tabs):
+            if tab.tab_id == tab_id:
+                return index
         return None
 
     def current_tab_id(self) -> str | None:
