@@ -85,12 +85,14 @@ class Ferramenta(FerramentaBase):
         self._inicio: QPointF | None = None
         self._fim_preview: QPointF | None = None
         self._angulo_preview: float | None = None
+        self._snapshot_fio: dict | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._molde_idx = self._molde_selecionado(canvas)
         self._inicio = None
         self._fim_preview = None
+        self._snapshot_fio = None
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         self._atualizar_controles_dialog(dialog)
@@ -99,6 +101,7 @@ class Ferramenta(FerramentaBase):
         self._status(canvas, "Sentido do fio: clique no molde para selecionar ou clique o inicio do fio.")
 
     def on_deactivate(self, canvas):
+        self._restaurar_snapshot_fio(canvas)
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
             dialog.hide()
@@ -110,6 +113,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
+            self._restaurar_snapshot_fio(canvas)
             self._fechar(canvas)
             event.accept()
             return True
@@ -123,6 +127,7 @@ class Ferramenta(FerramentaBase):
             self._inicio = None
             self._fim_preview = None
             self._angulo_preview = None
+            self._snapshot_fio = None
             self._status(canvas, "Molde selecionado. Clique para marcar o inicio do fio.")
             event.accept()
             return True
@@ -136,6 +141,7 @@ class Ferramenta(FerramentaBase):
             self._inicio = QPointF(pos)
             self._fim_preview = QPointF(pos)
             self._angulo_preview = None
+            self._snapshot_fio = self._capturar_snapshot_fio(canvas, self._molde_idx)
             self._status(canvas, "Inicio marcado. Mova o mouse no sentido desejado e clique para aplicar.")
             canvas.update()
             event.accept()
@@ -150,6 +156,7 @@ class Ferramenta(FerramentaBase):
         self._inicio = None
         self._fim_preview = None
         self._angulo_preview = None
+        self._snapshot_fio = None
         event.accept()
         return True
 
@@ -158,6 +165,8 @@ class Ferramenta(FerramentaBase):
             return False
         pos = self._ponto_com_snap_fio(canvas, event.position())
         self._fim_preview, self._angulo_preview = self._ponto_final_com_config(canvas, self._inicio, pos)
+        if self._molde_idx is not None:
+            self._aplicar_preview_no_molde(canvas, self._molde_idx, self._inicio, self._fim_preview, self._angulo_preview)
         canvas.update()
         event.accept()
         return True
@@ -268,6 +277,18 @@ class Ferramenta(FerramentaBase):
         canvas._registrar_historico()
         canvas.update()
         self._status(canvas, f"Sentido do fio aplicado em {self._normalizar_angulo(angulo_novo):g} deg.")
+
+    def _aplicar_preview_no_molde(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo: float) -> None:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        if not el.get("molde"):
+            return
+        el["fio_origem"] = (float(inicio.x()), float(inicio.y()))
+        el["fio_fim"] = (float(fim.x()), float(fim.y()))
+        el["fio_angulo"] = self._normalizar_angulo(angulo)
+        el["mostrar_fio"] = True
+        canvas._selecionados = {idx}
 
     def _molde_selecionado(self, canvas) -> int | None:
         for idx in sorted(getattr(canvas, "_selecionados", set()) or []):
@@ -390,6 +411,34 @@ class Ferramenta(FerramentaBase):
     def _fechar(self, canvas) -> None:
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Sentido Fio finalizada. Voltando para Selecionar.")
+
+    def _capturar_snapshot_fio(self, canvas, idx: int | None) -> dict | None:
+        if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
+            return None
+        el = canvas.cena.elementos[idx]
+        return {
+            "idx": idx,
+            "fio_origem": el.get("fio_origem"),
+            "fio_fim": el.get("fio_fim"),
+            "fio_angulo": el.get("fio_angulo"),
+            "mostrar_fio": el.get("mostrar_fio"),
+        }
+
+    def _restaurar_snapshot_fio(self, canvas) -> None:
+        snap = self._snapshot_fio
+        self._snapshot_fio = None
+        if not snap:
+            return
+        idx = int(snap.get("idx", -1))
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        for chave in ("fio_origem", "fio_fim", "fio_angulo", "mostrar_fio"):
+            if snap.get(chave) is None:
+                el.pop(chave, None)
+            else:
+                el[chave] = snap.get(chave)
+        canvas.update()
 
     def _girar_molde(self, el: dict, pivo: QPointF, angulo: float) -> None:
         a = radians(angulo)
