@@ -84,6 +84,7 @@ class Ferramenta(FerramentaBase):
         self._molde_idx: int | None = None
         self._inicio: QPointF | None = None
         self._fim_preview: QPointF | None = None
+        self._angulo_preview: float | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -92,6 +93,7 @@ class Ferramenta(FerramentaBase):
         self._fim_preview = None
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
+        self._atualizar_controles_dialog(dialog)
         dialog.show()
         dialog.raise_()
         self._status(canvas, "Sentido do fio: clique no molde para selecionar ou clique o inicio do fio.")
@@ -102,6 +104,7 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
         self._inicio = None
         self._fim_preview = None
+        self._angulo_preview = None
         if canvas is not None:
             canvas.update()
 
@@ -119,6 +122,7 @@ class Ferramenta(FerramentaBase):
             self._selecionar_molde(canvas, alvo)
             self._inicio = None
             self._fim_preview = None
+            self._angulo_preview = None
             self._status(canvas, "Molde selecionado. Clique para marcar o inicio do fio.")
             event.accept()
             return True
@@ -131,19 +135,21 @@ class Ferramenta(FerramentaBase):
         if self._inicio is None:
             self._inicio = QPointF(pos)
             self._fim_preview = QPointF(pos)
+            self._angulo_preview = None
             self._status(canvas, "Inicio marcado. Mova o mouse no sentido desejado e clique para aplicar.")
             canvas.update()
             event.accept()
             return True
 
-        fim = self._ponto_final_com_config(canvas, self._inicio, pos)
+        fim, angulo = self._ponto_final_com_config(canvas, self._inicio, pos)
         if self._dist(self._inicio, fim) <= 1e-6:
             self._status(canvas, "Sentido do fio: informe um segundo ponto diferente do inicio.")
             event.accept()
             return True
-        self._aplicar(canvas, self._molde_idx, self._inicio, fim)
+        self._aplicar(canvas, self._molde_idx, self._inicio, fim, angulo)
         self._inicio = None
         self._fim_preview = None
+        self._angulo_preview = None
         event.accept()
         return True
 
@@ -151,7 +157,7 @@ class Ferramenta(FerramentaBase):
         if self._inicio is None:
             return False
         pos = self._ponto_com_snap_fio(canvas, event.position())
-        self._fim_preview = self._ponto_final_com_config(canvas, self._inicio, pos)
+        self._fim_preview, self._angulo_preview = self._ponto_final_com_config(canvas, self._inicio, pos)
         canvas.update()
         event.accept()
         return True
@@ -163,13 +169,15 @@ class Ferramenta(FerramentaBase):
 
         p0 = canvas._cena_para_tela(self._inicio)
         p1 = canvas._cena_para_tela(self._fim_preview)
-        ang = self._normalizar_angulo(self._angulo(self._inicio, self._fim_preview))
+        ang = self._normalizar_angulo(
+            self._angulo_preview if self._angulo_preview is not None else self._angulo(self._inicio, self._fim_preview)
+        )
 
         painter.save()
         pen = QPen(QColor("#ff00d4"), 1.0, Qt.DashLine)
         pen.setDashPattern([3.0, 2.0])
         painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(QColor(255, 0, 212, 24))
         painter.drawLine(p0, p1)
         painter.drawLine(QPointF(p0.x() - 5, p0.y()), QPointF(p0.x() + 5, p0.y()))
         painter.drawLine(QPointF(p0.x(), p0.y() - 5), QPointF(p0.x(), p0.y() + 5))
@@ -216,7 +224,7 @@ class Ferramenta(FerramentaBase):
             fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 80))
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
-    def _ponto_final_com_config(self, canvas, inicio: QPointF, pos_mouse: QPointF) -> QPointF:
+    def _ponto_final_com_config(self, canvas, inicio: QPointF, pos_mouse: QPointF) -> tuple[QPointF, float]:
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
         if modo == "Horizontal":
@@ -228,15 +236,17 @@ class Ferramenta(FerramentaBase):
         dy = pos_mouse.y() - inicio.y()
         comp = hypot(dx, dy)
         if comp <= 1e-9:
-            return QPointF(pos_mouse)
+            return QPointF(pos_mouse), 0.0
         angulo = degrees(atan2(dy, dx))
         angulo = self._angulo_principal_mais_proximo(angulo)
         if dialog.chk_usar_angulo.isChecked():
             angulo += float(dialog.sp_angulo.value())
+            angulo = self._angulo_principal_mais_proximo(angulo)
+        angulo = self._normalizar_angulo(angulo)
         ang = radians(angulo)
-        return QPointF(inicio.x() + (cos(ang) * comp), inicio.y() + (sin(ang) * comp))
+        return QPointF(inicio.x() + (cos(ang) * comp), inicio.y() + (sin(ang) * comp)), angulo
 
-    def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF) -> None:
+    def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo_novo: float) -> None:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
@@ -245,7 +255,7 @@ class Ferramenta(FerramentaBase):
             return
 
         dialog = self._obter_dialog(canvas)
-        angulo_novo = self._angulo(inicio, fim)
+        angulo_novo = self._normalizar_angulo(angulo_novo)
         if dialog.chk_girar_molde.isChecked():
             angulo_antigo = self._angulo_fio_atual(el)
             self._girar_molde(el, inicio, angulo_novo - angulo_antigo)
@@ -291,7 +301,25 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _ponto_com_snap_fio(self, canvas, pos_tela: QPointF) -> QPointF:
-        return canvas._ponto_com_snap(pos_tela)
+        pos = canvas._ponto_com_snap(pos_tela)
+        dialog = self._obter_dialog(canvas)
+        if dialog.cmb_modo.currentText() != "Pontos do mouse":
+            return pos
+        local = self._snap_local_molde(canvas, canvas._tela_para_cena(pos_tela))
+        return local if local is not None else pos
+
+    def _snap_local_molde(self, canvas, cursor: QPointF) -> QPointF | None:
+        if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
+            return None
+        candidatos = self.obter_candidatos_snap(canvas, cursor)
+        if not candidatos:
+            return None
+        candidatos.sort(key=lambda c: (0 if c.tipo in {"nó", "fio"} else 1, c.distancia))
+        snap = candidatos[0]
+        canvas._snap_resultado = snap
+        canvas._snap_candidatos = candidatos
+        canvas._snap_indice = 0
+        return snap.ponto
 
     def _desenhar_realce_molde(self, canvas, painter) -> None:
         if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
@@ -400,6 +428,10 @@ class Ferramenta(FerramentaBase):
     def _normalizar_angulo(angulo: float) -> float:
         valor = float(angulo) % 360.0
         return 0.0 if abs(valor - 360.0) <= 1e-9 else valor
+
+    def _atualizar_controles_dialog(self, dialog: SentidoFioDialog) -> None:
+        dialog.sp_angulo.setSingleStep(15.0)
+        dialog.sp_angulo.setDecimals(0)
 
     def _angulo_principal_mais_proximo(self, angulo: float) -> float:
         normalizado = self._normalizar_angulo(angulo)
