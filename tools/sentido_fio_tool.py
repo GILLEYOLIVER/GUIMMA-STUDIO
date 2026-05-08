@@ -198,15 +198,15 @@ class Ferramenta(FerramentaBase):
         painter.drawText(int(p1.x() + 6), int(p1.y() + 12), f"{ang:g} deg")
         painter.restore()
 
-    def obter_candidatos_snap(self, canvas, cursor: QPointF):
+    def obter_candidatos_snap(self, canvas, cursor: QPointF, incluir_fio: bool = True):
         if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
             return []
         el = canvas.cena.elementos[self._molde_idx]
         candidatos: list[SnapResult] = []
         tol = self._tolerancia_snap_cena(canvas)
-        for ponto in self._pontos_snap_molde(el):
+        for ponto in self._pontos_snap_molde(el, incluir_fio=incluir_fio):
             self._adicionar_snap(candidatos, cursor, ponto, "nó", self._molde_idx, tol)
-        for a, b in self._segmentos_snap_molde(el):
+        for a, b in self._segmentos_snap_molde(el, incluir_fio=incluir_fio):
             proj = canvas._snap_manager._projetar_em_segmento(cursor, a, b)
             meio = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
             self._adicionar_snap(candidatos, cursor, proj, "borda", self._molde_idx, tol)
@@ -327,17 +327,20 @@ class Ferramenta(FerramentaBase):
         if dialog.cmb_modo.currentText() != "Pontos do mouse":
             return pos
         cursor = canvas._tela_para_cena(pos_tela)
-        local = self._snap_local_molde(canvas, cursor)
+        arrastando_fim = self._inicio is not None
+        local = self._snap_local_molde(canvas, cursor, incluir_fio=not arrastando_fim)
         if self._inicio is not None and local is not None:
             tol_inicio = max(2.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 1e-4)
             if self._dist(local, self._inicio) <= tol_inicio:
                 return cursor
+        if arrastando_fim:
+            return local if local is not None else cursor
         return local if local is not None else pos
 
-    def _snap_local_molde(self, canvas, cursor: QPointF) -> QPointF | None:
+    def _snap_local_molde(self, canvas, cursor: QPointF, incluir_fio: bool = True) -> QPointF | None:
         if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
             return None
-        candidatos = self.obter_candidatos_snap(canvas, cursor)
+        candidatos = self.obter_candidatos_snap(canvas, cursor, incluir_fio=incluir_fio)
         if not candidatos:
             return None
         candidatos.sort(key=lambda c: (0 if c.tipo in {"nó", "fio"} else 1, c.distancia))
@@ -368,26 +371,29 @@ class Ferramenta(FerramentaBase):
             painter.drawRect(QRectF(tela.x() - 3.0, tela.y() - 3.0, 6.0, 6.0))
         painter.restore()
 
-    def _pontos_snap_molde(self, el: dict) -> list[QPointF]:
+    def _pontos_snap_molde(self, el: dict, incluir_fio: bool = True) -> list[QPointF]:
         pontos: list[QPointF] = []
         for chave in ("pontos", "controle_cantos", "controle_auxiliares"):
             if isinstance(el.get(chave), list):
                 for p in el.get(chave, []):
                     if self._eh_ponto(p):
                         pontos.append(QPointF(float(p[0]), float(p[1])))
-        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+        chaves_extra = ["ponto_texto", "seta_origem", "seta_fim"]
+        if incluir_fio:
+            chaves_extra.extend(["fio_origem", "fio_fim"])
+        for chave in chaves_extra:
             p = el.get(chave)
             if self._eh_ponto(p):
                 pontos.append(QPointF(float(p[0]), float(p[1])))
         return pontos
 
-    def _segmentos_snap_molde(self, el: dict) -> list[tuple[QPointF, QPointF]]:
+    def _segmentos_snap_molde(self, el: dict, incluir_fio: bool = True) -> list[tuple[QPointF, QPointF]]:
         segmentos: list[tuple[QPointF, QPointF]] = []
         pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", []) if self._eh_ponto((x, y))]
         segmentos.extend((a, b) for a, b in zip(pontos, pontos[1:]))
         fio_origem = el.get("fio_origem")
         fio_fim = el.get("fio_fim")
-        if self._eh_ponto(fio_origem) and self._eh_ponto(fio_fim):
+        if incluir_fio and self._eh_ponto(fio_origem) and self._eh_ponto(fio_fim):
             segmentos.append((
                 QPointF(float(fio_origem[0]), float(fio_origem[1])),
                 QPointF(float(fio_fim[0]), float(fio_fim[1])),
