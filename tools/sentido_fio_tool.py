@@ -326,7 +326,12 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         if dialog.cmb_modo.currentText() != "Pontos do mouse":
             return pos
-        local = self._snap_local_molde(canvas, canvas._tela_para_cena(pos_tela))
+        cursor = canvas._tela_para_cena(pos_tela)
+        local = self._snap_local_molde(canvas, cursor)
+        if self._inicio is not None and local is not None:
+            tol_inicio = max(2.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 1e-4)
+            if self._dist(local, self._inicio) <= tol_inicio:
+                return cursor
         return local if local is not None else pos
 
     def _snap_local_molde(self, canvas, cursor: QPointF) -> QPointF | None:
