@@ -368,6 +368,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.adicionar_usuario.connect(self._adicionar_ferramenta_usuario)
         self.ribbon.tool_selected.connect(self._abrir_pagina_ferramenta)
         self.ribbon.estilo_changed.connect(self._atualizar_estilo_desenho)
+        self._sincronizar_aba_usuario_ribbon()
         sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
         sup.addStretch(1)
 
@@ -4221,13 +4222,22 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfil_usuario_atual = nome
         self._persistir_perfis_usuarios()
         self._atualizar_combo_perfis_usuarios()
+        self._atualizar_linha_usuarios()
         self.lbl_status.setText(f"Perfil '{nome}' criado.")
 
     def _salvar_perfil_usuario_atual(self):
         self._sincronizar_perfil_usuario_atual()
         self.lbl_status.setText(f"Perfil '{self._perfil_usuario_atual}' salvo.")
 
+    def _sincronizar_aba_usuario_ribbon(self):
+        if not hasattr(self, "ribbon"):
+            return
+        self.ribbon.set_user_tools(list(self._ferramentas_usuario_ids), str(self._perfil_usuario_atual))
+        self.ribbon.set_active_tool(getattr(self, "_ferramenta_ativa_id", "selecionar"))
+        self.ribbon.aplicar_estilo(getattr(self, "_estilo_desenho_atual", {}))
+
     def _atualizar_linha_usuarios(self):
+        self._sincronizar_aba_usuario_ribbon()
         if not hasattr(self, "layout_linha_usuario"):
             return
         while self.layout_linha_usuario.count():
