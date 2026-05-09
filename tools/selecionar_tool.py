@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import sqrt
+from math import atan2, cos, degrees, isfinite, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
@@ -13,6 +13,7 @@ class Ferramenta(FerramentaBase):
     nome = "Selecionar"
     usa_painel_auxiliar = False
     descricao_painel = "Selecione elementos com clique, caixa de seleção e ciclo com botão direito."
+    EIXOS_FIO = (0.0, 270.0, 180.0, 90.0)
 
     def __init__(self):
         super().__init__()
@@ -162,6 +163,42 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def on_mouse_double_click(self, canvas, event) -> bool:
+        if event.button() != Qt.LeftButton:
+            return False
+        if not self._rotacao_duplo_clique_ativa(canvas):
+            return False
+
+        pos = canvas._tela_para_cena(event.position())
+        idx = canvas._indice_molde_em_ponto(pos) if hasattr(canvas, "_indice_molde_em_ponto") else None
+        if idx is None:
+            pos_snap = canvas._ponto_com_snap(event.position())
+            idx = canvas._indice_molde_em_ponto(pos_snap) if hasattr(canvas, "_indice_molde_em_ponto") else None
+        if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+
+        molde = canvas.cena.elementos[idx]
+        if not molde.get("molde"):
+            return False
+
+        angulo_atual = self._angulo_fio_atual(molde)
+        angulo_alvo = self._proximo_eixo_fio(angulo_atual)
+        delta = self._delta_angular(angulo_atual, angulo_alvo)
+        pivo = self._pivo_rotacao_fio(molde)
+        self._girar_molde_para_fio(molde, pivo, delta)
+        molde["fio_angulo"] = angulo_alvo
+        molde["mostrar_fio"] = True
+
+        self._arrastando_selecao = False
+        self._ultimo_ponto_arrasto = None
+        self._movido = False
+        canvas._selecionados = {idx}
+        canvas._registrar_historico()
+        canvas.update()
+        self.set_status(f"Molde girado: fio alinhado em {int(angulo_alvo)}°.")
+        event.accept()
+        return True
+
     def on_paint_overlay(self, canvas, painter):
         self._desenhar_realce_elementos(canvas, painter)
         if self._inicio_caixa is None or self._fim_caixa is None:
@@ -251,3 +288,99 @@ class Ferramenta(FerramentaBase):
                     if el.get("molde"):
                         indices.update(canvas._indices_costuras_vinculadas(idx))
         return sorted(indices)
+
+    def _girar_molde_para_fio(self, el: dict, pivo: QPointF, angulo: float) -> None:
+        a = radians(angulo)
+        ca, sa = cos(a), sin(a)
+
+        def rot(p):
+            x, y = float(p[0]), float(p[1])
+            dx, dy = x - pivo.x(), y - pivo.y()
+            return (pivo.x() + (dx * ca) + (dy * sa), pivo.y() - (dx * sa) + (dy * ca))
+
+        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro", "distancias_no_perimetro", "marcacoes_perimetro"):
+            if isinstance(el.get(chave), list):
+                el[chave] = [rot(p) if self._eh_ponto(p) else p for p in el.get(chave, [])]
+        for chave in ("ponto_texto", "seta_origem", "seta_fim", "fio_origem", "fio_fim"):
+            if self._eh_ponto(el.get(chave)):
+                el[chave] = rot(el[chave])
+        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
+            if isinstance(el.get(chave), list):
+                for item in el[chave]:
+                    if isinstance(item, dict) and "x" in item and "y" in item:
+                        x, y = rot((item["x"], item["y"]))
+                        item["x"] = x
+                        item["y"] = y
+
+    def _pivo_rotacao_fio(self, el: dict) -> QPointF:
+        fio_origem = el.get("fio_origem")
+        if self._eh_ponto(fio_origem):
+            return QPointF(float(fio_origem[0]), float(fio_origem[1]))
+
+        pontos = self._todos_pontos_elemento(el)
+        if pontos:
+            return QPointF(
+                (min(x for x, _ in pontos) + max(x for x, _ in pontos)) / 2.0,
+                (min(y for _, y in pontos) + max(y for _, y in pontos)) / 2.0,
+            )
+        return QPointF(0.0, 0.0)
+
+    def _todos_pontos_elemento(self, el: dict) -> list[tuple[float, float]]:
+        pontos: list[tuple[float, float]] = []
+        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro"):
+            if isinstance(el.get(chave), list):
+                for p in el.get(chave, []):
+                    if self._eh_ponto(p):
+                        pontos.append((float(p[0]), float(p[1])))
+        for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
+            if self._eh_ponto(el.get(chave)):
+                p = el[chave]
+                pontos.append((float(p[0]), float(p[1])))
+        return pontos
+
+    def _angulo_fio_atual(self, el: dict) -> float:
+        origem = el.get("fio_origem")
+        fim = el.get("fio_fim")
+        if self._eh_ponto(origem) and self._eh_ponto(fim):
+            return self._normalizar_angulo(
+                degrees(atan2(-(float(fim[1]) - float(origem[1])), float(fim[0]) - float(origem[0])))
+            )
+        try:
+            return self._normalizar_angulo(float(el.get("fio_angulo") or 0.0))
+        except Exception:
+            return 0.0
+
+    def _proximo_eixo_fio(self, angulo_atual: float) -> float:
+        atual = self._normalizar_angulo(angulo_atual)
+        for idx, eixo in enumerate(self.EIXOS_FIO):
+            if self._distancia_angular(atual, eixo) <= 1e-6:
+                return self.EIXOS_FIO[(idx + 1) % len(self.EIXOS_FIO)]
+        return self.EIXOS_FIO[0]
+
+    @staticmethod
+    def _delta_angular(origem: float, destino: float) -> float:
+        return ((float(destino) - float(origem) + 180.0) % 360.0) - 180.0
+
+    @staticmethod
+    def _distancia_angular(a: float, b: float) -> float:
+        return abs(((float(a) - float(b) + 180.0) % 360.0) - 180.0)
+
+    @staticmethod
+    def _normalizar_angulo(angulo: float) -> float:
+        valor = float(angulo) % 360.0
+        return 0.0 if abs(valor - 360.0) <= 1e-9 else valor
+
+    @staticmethod
+    def _eh_ponto(p) -> bool:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            return False
+        try:
+            return isfinite(float(p[0])) and isfinite(float(p[1]))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _rotacao_duplo_clique_ativa(canvas) -> bool:
+        janela = canvas.window() if hasattr(canvas, "window") else None
+        opcoes = getattr(janela, "_opcoes_app", {}) if janela is not None else {}
+        return bool(opcoes.get("rotacionar_duplo_clique", True))

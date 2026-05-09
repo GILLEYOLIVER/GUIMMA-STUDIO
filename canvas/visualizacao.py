@@ -1203,11 +1203,7 @@ class VisualizacaoCanvas(QWidget):
                 self._runtime_tool.on_mouse_double_click(self, event)
             event.accept()
             return
-        if (
-            self.ferramenta_ativa == "extrair_molde"
-            and self._runtime_tool
-            and hasattr(self._runtime_tool, "on_mouse_double_click")
-        ):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_double_click"):
             if self._runtime_tool.on_mouse_double_click(self, event):
                 return
         if self.ferramenta_ativa != "selecionar" and event.button() in (Qt.LeftButton, Qt.RightButton):
