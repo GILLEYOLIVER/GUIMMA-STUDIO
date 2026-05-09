@@ -62,8 +62,11 @@ class _FakeCanvas(QWidget):
         self.lbl_status = None
         self.historico = 0
         self.atualizou = False
+        self.ponto_snap_forcado = None
 
     def _ponto_com_snap(self, pos):
+        if self.ponto_snap_forcado is not None:
+            return QPointF(self.ponto_snap_forcado)
         return QPointF(pos)
 
     def _tela_para_cena(self, pos):
@@ -135,6 +138,32 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertEqual(fim, pos)
         self.assertNotEqual(round(angulo, 6), 30.0)
         self.assertAlmostEqual(angulo, 28.072486, places=5)
+
+    def test_pontos_do_mouse_com_girar_molde_ignora_snap_de_posicao(self):
+        canvas = _FakeCanvas()
+        canvas.ponto_snap_forcado = QPointF(10.0, 0.0)
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        ferramenta._obter_dialog(canvas).chk_girar_molde.setChecked(True)
+
+        ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
+
+        self.assertEqual(ponto, QPointF(2.3, 1.7))
+        self.assertIsNone(canvas._snap_resultado)
+
+    def test_pontos_do_molde_com_girar_molde_ignora_snap_de_posicao(self):
+        canvas = _FakeCanvas()
+        canvas.ponto_snap_forcado = QPointF(10.0, 0.0)
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Pontos do molde")
+        dialog.chk_girar_molde.setChecked(True)
+
+        ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
+
+        self.assertEqual(ponto, QPointF(2.3, 1.7))
+        self.assertIsNone(canvas._snap_resultado)
 
     def test_pontos_do_mouse_com_snap_desligado_mantem_angulo_livre(self):
         canvas = _FakeCanvas()

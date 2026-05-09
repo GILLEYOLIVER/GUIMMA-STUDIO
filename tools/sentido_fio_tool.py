@@ -367,11 +367,15 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _ponto_com_snap_fio(self, canvas, pos_tela: QPointF) -> QPointF:
-        pos = canvas._ponto_com_snap(pos_tela)
         dialog = self._obter_dialog(canvas)
-        if dialog.cmb_modo.currentText() != "Pontos do mouse":
-            return pos
+        modo = dialog.cmb_modo.currentText()
         cursor = canvas._tela_para_cena(pos_tela)
+        if dialog.chk_girar_molde.isChecked() and modo in {"Pontos do mouse", "Pontos do molde"}:
+            return cursor
+
+        pos = canvas._ponto_com_snap(pos_tela)
+        if modo != "Pontos do mouse":
+            return pos
         arrastando_fim = self._inicio is not None
         local = self._snap_local_molde(canvas, cursor, incluir_fio=not arrastando_fim)
         if self._inicio is not None and local is not None:
