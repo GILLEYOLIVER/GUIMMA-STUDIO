@@ -46,10 +46,14 @@ class _FakeCanvas(QWidget):
                     "tipo": "polyline",
                     "molde": True,
                     "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                    "fio_origem": (2.0, 1.0),
+                    "fio_fim": (8.0, 1.0),
+                    "fio_angulo": 0.0,
                 }
             ]
         )
         self.zoom = 1.0
+        self._snap_ativo = True
         self._selecionados = {0}
         self._snap_resultado = None
         self._snap_candidatos = []
@@ -64,6 +68,9 @@ class _FakeCanvas(QWidget):
 
     def _tela_para_cena(self, pos):
         return QPointF(pos)
+
+    def snap_ativo(self):
+        return self._snap_ativo
 
     def _indice_molde_em_ponto(self, pos):
         return 0 if 0.0 <= pos.x() <= 10.0 and 0.0 <= pos.y() <= 5.0 else None
@@ -104,15 +111,48 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertTrue(canvas.atualizou)
 
-    def test_modo_livre_nao_arredonda_angulo(self):
+    def test_pontos_do_mouse_com_snap_ligado_trava_angulo_principal(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
 
-        fim, angulo = ferramenta._ponto_final_com_config(canvas, QPointF(2.0, 1.0), QPointF(8.0, 2.0))
+        inicio = QPointF(2.0, 1.0)
+        fim, angulo = ferramenta._ponto_final_com_config(canvas, inicio, QPointF(8.0, -4.0))
 
-        self.assertEqual(fim, QPointF(8.0, 2.0))
-        self.assertAlmostEqual(angulo, 9.462322, places=5)
+        self.assertAlmostEqual(fim.x() - inicio.x(), inicio.y() - fim.y())
+        self.assertEqual(angulo, 45.0)
+
+    def test_pontos_do_mouse_com_snap_desligado_mantem_angulo_livre(self):
+        canvas = _FakeCanvas()
+        canvas._snap_ativo = False
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+
+        fim, angulo = ferramenta._ponto_final_com_config(canvas, QPointF(2.0, 1.0), QPointF(8.0, -4.0))
+
+        self.assertEqual(fim, QPointF(8.0, -4.0))
+        self.assertAlmostEqual(angulo, 39.805571, places=5)
+
+    def test_girar_molde_usa_angulo_anterior_ao_preview(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.chk_girar_molde.setChecked(True)
+        ferramenta._snapshot_fio = ferramenta._capturar_snapshot_fio(canvas, 0)
+
+        molde = canvas.cena.elementos[0]
+        molde["fio_origem"] = (2.0, 1.0)
+        molde["fio_fim"] = (2.0, 7.0)
+        molde["fio_angulo"] = 90.0
+
+        ferramenta._aplicar(canvas, 0, QPointF(2.0, 1.0), QPointF(2.0, 7.0), 90.0)
+
+        self.assertAlmostEqual(molde["pontos"][1][0], 1.0)
+        self.assertAlmostEqual(molde["pontos"][1][1], -7.0)
+        self.assertEqual(molde["fio_origem"], (2.0, 1.0))
+        self.assertEqual(molde["fio_fim"], (2.0, 7.0))
+        self.assertEqual(molde["fio_angulo"], 90.0)
 
 
 if __name__ == "__main__":
