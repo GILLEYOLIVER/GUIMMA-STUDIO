@@ -45,6 +45,9 @@ class _FakeCanvas(QWidget):
                     "tipo": "polyline",
                     "pontos": [(0.0, 0.0), (10.0, 0.0)],
                     "controle_cantos": [(0.0, 0.0), (10.0, 0.0)],
+                    "pontos_controle_referencia": [(10.0, 0.0)],
+                    "pontos_controle_principais": [{"x": 10.0, "y": 0.0}],
+                    "pontos_auxiliares": [{"x": 5.0, "y": 0.0}],
                 }
             ]
         )
@@ -88,6 +91,15 @@ class GirarToolTestCase(unittest.TestCase):
         ponto_girado = canvas.cena.elementos[0]["pontos"][1]
         self.assertAlmostEqual(ponto_girado[0], 7.0710678118654755)
         self.assertAlmostEqual(ponto_girado[1], -7.071067811865475)
+        ponto_referencia = canvas.cena.elementos[0]["pontos_controle_referencia"][0]
+        self.assertAlmostEqual(ponto_referencia[0], 7.0710678118654755)
+        self.assertAlmostEqual(ponto_referencia[1], -7.071067811865475)
+        ponto_principal = canvas.cena.elementos[0]["pontos_controle_principais"][0]
+        self.assertAlmostEqual(ponto_principal["x"], 7.0710678118654755)
+        self.assertAlmostEqual(ponto_principal["y"], -7.071067811865475)
+        ponto_auxiliar = canvas.cena.elementos[0]["pontos_auxiliares"][0]
+        self.assertAlmostEqual(ponto_auxiliar["x"], 3.5355339059327378)
+        self.assertAlmostEqual(ponto_auxiliar["y"], -3.5355339059327373)
         self.assertEqual(ferramenta._angulo_preview_2p, 45.0)
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
