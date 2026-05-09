@@ -273,7 +273,8 @@ class Ferramenta(FerramentaBase):
             fim = QPointF(inicio.x(), inicio.y() + dy)
             return fim, angulo
 
-        if dialog.chk_usar_angulo.isChecked():
+        girar_por_fio = dialog.chk_girar_molde.isChecked() and modo in {"Pontos do mouse", "Pontos do molde"}
+        if dialog.chk_usar_angulo.isChecked() and not girar_por_fio and modo != "Pontos do molde":
             angulo = self._normalizar_angulo(float(dialog.sp_angulo.value()))
             ang = radians(angulo)
             fim = QPointF(
@@ -283,7 +284,7 @@ class Ferramenta(FerramentaBase):
             return fim, angulo
 
         angulo = self._normalizar_angulo(degrees(atan2(-dy, dx)))
-        if modo == "Pontos do mouse" and self._snap_angular_ativo(canvas):
+        if modo == "Pontos do mouse" and not girar_por_fio and self._snap_angular_ativo(canvas):
             angulo = self._angulo_principal_mais_proximo(angulo)
             ang = radians(angulo)
             return QPointF(
@@ -303,8 +304,15 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         angulo_novo = self._normalizar_angulo(angulo_novo)
         if dialog.chk_girar_molde.isChecked():
-            angulo_antigo = self._angulo_fio_snapshot(canvas, idx)
-            self._girar_molde(el, inicio, angulo_novo - angulo_antigo)
+            if dialog.cmb_modo.currentText() in {"Pontos do mouse", "Pontos do molde"}:
+                angulo_giro = -angulo_novo
+                fim_rotacionado = self._rotacionar_ponto(fim, inicio, angulo_giro)
+                fim = QPointF(float(fim_rotacionado[0]), float(fim_rotacionado[1]))
+                self._girar_molde(el, inicio, angulo_giro)
+                angulo_novo = 0.0
+            else:
+                angulo_antigo = self._angulo_fio_snapshot(canvas, idx)
+                self._girar_molde(el, inicio, angulo_novo - angulo_antigo)
 
         el["fio_origem"] = (float(inicio.x()), float(inicio.y()))
         el["fio_fim"] = (float(fim.x()), float(fim.y()))
@@ -580,20 +588,34 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _girar_molde(self, el: dict, pivo: QPointF, angulo: float) -> None:
-        a = radians(angulo)
-        ca, sa = cos(a), sin(a)
-
         def rot(p):
-            x, y = float(p[0]), float(p[1])
-            dx, dy = x - pivo.x(), y - pivo.y()
-            return (pivo.x() + (dx * ca) + (dy * sa), pivo.y() - (dx * sa) + (dy * ca))
+            return self._rotacionar_ponto(p, pivo, angulo)
 
-        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro", "distancias_no_perimetro", "marcacoes_perimetro"):
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_referencia",
+            "marcacoes_no_perimetro",
+            "distancias_no_perimetro",
+            "marcacoes_perimetro",
+        ):
             if isinstance(el.get(chave), list):
                 el[chave] = [rot(p) if self._eh_ponto(p) else p for p in el.get(chave, [])]
         for chave in ("ponto_texto", "seta_origem", "seta_fim", "fio_origem", "fio_fim"):
             if self._eh_ponto(el.get(chave)):
                 el[chave] = rot(el[chave])
+
+    @staticmethod
+    def _rotacionar_ponto(p, pivo: QPointF, angulo: float) -> tuple[float, float]:
+        a = radians(angulo)
+        ca, sa = cos(a), sin(a)
+        if isinstance(p, QPointF):
+            x, y = float(p.x()), float(p.y())
+        else:
+            x, y = float(p[0]), float(p[1])
+        dx, dy = x - pivo.x(), y - pivo.y()
+        return (pivo.x() + (dx * ca) + (dy * sa), pivo.y() - (dx * sa) + (dy * ca))
 
     @staticmethod
     def _eh_ponto(p) -> bool:
