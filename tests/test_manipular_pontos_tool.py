@@ -44,15 +44,27 @@ class _FakeCanvas(QWidget):
                 {
                     "tipo": "polyline",
                     "molde": True,
-                    "pontos": [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                    "pontos": [
+                        (0.0, 0.0),
+                        (5.0, 0.0),
+                        (10.0, 0.0),
+                        (10.0, 2.5),
+                        (10.0, 5.0),
+                        (5.0, 2.5),
+                        (0.0, 0.0),
+                    ],
                     "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
-                    "controle_auxiliares": [(5.0, 0.0)],
+                    "controle_auxiliares": [(5.0, 0.0), (10.0, 2.5), (5.0, 2.5)],
                     "pontos_controle_principais": [
                         {"x": 0.0, "y": 0.0},
                         {"x": 10.0, "y": 0.0},
                         {"x": 10.0, "y": 5.0},
                     ],
-                    "pontos_auxiliares": [{"x": 5.0, "y": 0.0}],
+                    "pontos_auxiliares": [
+                        {"x": 5.0, "y": 0.0},
+                        {"x": 10.0, "y": 2.5},
+                        {"x": 5.0, "y": 2.5},
+                    ],
                     "fio_origem": (2.0, 1.0),
                     "fio_fim": (8.0, 1.0),
                 }
@@ -106,6 +118,8 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][1], (12.0, 2.0))
         self.assertEqual(molde["pontos"][2], (12.0, 2.0))
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 12.0, "y": 2.0})
+        self.assertEqual(molde["controle_auxiliares"], [(6.0, 1.0), (11.0, 3.5), (5.0, 2.5)])
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": 6.0, "y": 1.0}, {"x": 11.0, "y": 3.5}, {"x": 5.0, "y": 2.5}])
         self.assertEqual(canvas.historico, 1)
 
     def test_arrasta_ponto_auxiliar_do_molde_move_cantos_vizinhos(self):
@@ -118,9 +132,9 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["controle_auxiliares"][0], (5.0, 2.0))
+        self.assertEqual(molde["controle_auxiliares"], [(5.0, 2.0), (10.0, 3.5), (5.0, 3.5)])
         self.assertEqual(molde["pontos"][1], (5.0, 2.0))
-        self.assertEqual(molde["pontos_auxiliares"][0], {"x": 5.0, "y": 2.0})
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": 5.0, "y": 2.0}, {"x": 10.0, "y": 3.5}, {"x": 5.0, "y": 3.5}])
         self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
         self.assertEqual(molde["controle_cantos"][1], (10.0, 2.0))
         self.assertEqual(molde["pontos"][0], (0.0, 2.0))
