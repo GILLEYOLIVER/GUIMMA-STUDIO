@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import atan2, cos, degrees, isfinite, radians, sin
+from math import atan2, cos, degrees, hypot, isfinite, radians, sin
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
@@ -36,8 +37,11 @@ class GirarDialog(QDialog):
         self.sp_angulo.setDecimals(2)
         self.sp_angulo.setSingleStep(5.0)
         self.sp_angulo.setValue(90.0)
+        self.cmb_modo = QComboBox()
+        self.cmb_modo.addItems(["Ângulo", "Girar em 2 pontos"])
         self.cmb_pivo = QComboBox()
         self.cmb_pivo.addItems(["Centro da seleção", "Último clique", "Origem 0,0"])
+        form.addRow("Modo", self.cmb_modo)
         self.chk_copia = QCheckBox("Criar cópia girada")
         self.chk_copia.setChecked(False)
         form.addRow("Ângulo (graus)", self.sp_angulo)
@@ -59,18 +63,26 @@ class Ferramenta(FerramentaBase):
     descricao_painel = "Gira elementos selecionados por ângulo, preservando controles, piques e fio."
 
     _dialog_por_canvas: dict[int, GirarDialog] = {}
+    ANGULOS_PRINCIPAIS = (0.0, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0, 180.0, 210.0, 225.0, 240.0, 270.0, 300.0, 315.0, 330.0)
 
     def __init__(self):
         super().__init__()
         self._ultimo_clique: QPointF | None = None
         self._operacao_finalizada = False
         self._direito_confirma_fechamento = False
+        self._estado_2p = "pivo"
+        self._pivo_2p: QPointF | None = None
+        self._referencia_2p: QPointF | None = None
+        self._preview_2p: QPointF | None = None
+        self._angulo_preview_2p = 0.0
+        self._snapshot_2p: list[tuple[int, dict]] = []
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._ultimo_clique = None
         self._operacao_finalizada = False
         self._direito_confirma_fechamento = False
+        self._resetar_2p()
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
@@ -80,6 +92,7 @@ class Ferramenta(FerramentaBase):
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
+            self._restaurar_snapshot_2p(canvas)
             dialog.hide()
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -93,6 +106,9 @@ class Ferramenta(FerramentaBase):
             return True
         if event.button() != Qt.LeftButton:
             return False
+        dialog = self._obter_dialog(canvas)
+        if dialog.cmb_modo.currentText() == "Girar em 2 pontos":
+            return self._mouse_press_2p(canvas, event)
         pos = canvas._ponto_com_snap(event.position())
         self._ultimo_clique = QPointF(pos)
         selecionados = set(getattr(canvas, "_selecionados", set()) or set())
@@ -126,6 +142,19 @@ class Ferramenta(FerramentaBase):
             return True
         return False
 
+    def on_mouse_move(self, canvas, event) -> bool:
+        dialog = self._obter_dialog(canvas)
+        if dialog.cmb_modo.currentText() != "Girar em 2 pontos":
+            return False
+        if self._estado_2p != "girando" or self._pivo_2p is None or self._referencia_2p is None:
+            return False
+        pos = canvas._ponto_com_snap(event.position())
+        self._preview_2p = QPointF(pos)
+        self._aplicar_preview_2p(canvas, pos)
+        canvas.update()
+        event.accept()
+        return True
+
     def _obter_dialog(self, canvas) -> GirarDialog:
         chave = id(canvas)
         parent = canvas.window() if hasattr(canvas, "window") else canvas
@@ -136,6 +165,7 @@ class Ferramenta(FerramentaBase):
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
+            dialog.cmb_modo.currentTextChanged.connect(lambda _texto, c=canvas: self._modo_alterado(c))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: GirarDialog) -> None:
@@ -177,7 +207,98 @@ class Ferramenta(FerramentaBase):
         self._direito_confirma_fechamento = False
         self._status(canvas, f"Giro de {ang:g}° aplicado em {len(indices)} elemento(s). Clique esquerdo continua; direito fecha.")
 
+    def _mouse_press_2p(self, canvas, event) -> bool:
+        pos = canvas._ponto_com_snap(event.position())
+        self._ultimo_clique = QPointF(pos)
+        indices = self._indices_selecionados(canvas)
+        if not indices:
+            candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
+            if candidatos:
+                canvas._selecionados = {int(candidatos[0])}
+                indices = self._indices_selecionados(canvas)
+        if not indices:
+            self._status(canvas, "Girar em 2 pontos: selecione um molde ou elemento primeiro.")
+            event.accept()
+            return True
+
+        if self._estado_2p == "pivo":
+            self._pivo_2p = QPointF(pos)
+            self._referencia_2p = None
+            self._preview_2p = None
+            self._snapshot_2p = []
+            self._estado_2p = "referencia"
+            self._status(canvas, "Pivô marcado. Clique no segundo ponto de referência.")
+            canvas.update()
+            event.accept()
+            return True
+
+        if self._estado_2p == "referencia":
+            if self._pivo_2p is None or self._dist(self._pivo_2p, pos) <= 1e-6:
+                self._status(canvas, "Girar em 2 pontos: escolha um segundo ponto diferente do pivô.")
+                event.accept()
+                return True
+            self._referencia_2p = QPointF(pos)
+            self._preview_2p = QPointF(pos)
+            self._snapshot_2p = [(idx, deepcopy(canvas.cena.elementos[idx])) for idx in indices]
+            self._estado_2p = "girando"
+            self._status(canvas, "Mova para girar. O ângulo trava em 0, 30, 45, 60, 90... Clique para confirmar.")
+            canvas.update()
+            event.accept()
+            return True
+
+        if self._estado_2p == "girando":
+            self._aplicar_preview_2p(canvas, pos)
+            canvas._registrar_historico()
+            self._snapshot_2p = []
+            self._estado_2p = "pivo"
+            self._operacao_finalizada = True
+            self._direito_confirma_fechamento = False
+            self._status(canvas, f"Giro em 2 pontos aplicado: {self._angulo_preview_2p:g}°.")
+            canvas.update()
+            event.accept()
+            return True
+
+        return False
+
+    def _aplicar_preview_2p(self, canvas, pos: QPointF) -> None:
+        if self._pivo_2p is None or self._referencia_2p is None or not self._snapshot_2p:
+            return
+        ang_ref = self._angulo_entre(self._pivo_2p, self._referencia_2p)
+        ang_atual = self._angulo_principal_mais_proximo(self._angulo_entre(self._pivo_2p, pos))
+        delta = self._delta_angular(ang_ref, ang_atual)
+        self._angulo_preview_2p = delta
+        for idx, original in self._snapshot_2p:
+            if 0 <= idx < len(canvas.cena.elementos):
+                el = deepcopy(original)
+                self._girar_elemento(el, self._pivo_2p, -delta)
+                canvas.cena.elementos[idx] = el
+
+    def _indices_selecionados(self, canvas) -> list[int]:
+        return [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
+
+    def _modo_alterado(self, canvas) -> None:
+        self._restaurar_snapshot_2p(canvas)
+        self._resetar_2p()
+        if canvas is not None:
+            canvas.update()
+
+    def _resetar_2p(self) -> None:
+        self._estado_2p = "pivo"
+        self._pivo_2p = None
+        self._referencia_2p = None
+        self._preview_2p = None
+        self._angulo_preview_2p = 0.0
+        self._snapshot_2p = []
+
+    def _restaurar_snapshot_2p(self, canvas) -> None:
+        for idx, original in self._snapshot_2p:
+            if 0 <= idx < len(canvas.cena.elementos):
+                canvas.cena.elementos[idx] = deepcopy(original)
+        self._snapshot_2p = []
+
     def _fechar(self, canvas) -> None:
+        self._restaurar_snapshot_2p(canvas)
+        self._resetar_2p()
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Girar finalizada. Voltando para Selecionar.")
 
@@ -192,6 +313,79 @@ class Ferramenta(FerramentaBase):
         if not pts:
             return None
         return QPointF((min(x for x, _ in pts) + max(x for x, _ in pts)) / 2.0, (min(y for _, y in pts) + max(y for _, y in pts)) / 2.0)
+
+    def on_paint_overlay(self, canvas, painter):
+        dialog = self._obter_dialog(canvas)
+        if dialog.cmb_modo.currentText() != "Girar em 2 pontos":
+            return
+        if self._pivo_2p is None:
+            return
+        painter.save()
+        pivo_tela = canvas._cena_para_tela(self._pivo_2p)
+        painter.setPen(QPen(QColor("#24b26b"), 2.0))
+        painter.setBrush(QColor(36, 178, 107, 80))
+        painter.drawEllipse(pivo_tela, 5, 5)
+        painter.setPen(QColor("#ffffff"))
+        font = QFont("Arial", 8)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(int(pivo_tela.x() + 6), int(pivo_tela.y() - 6), "1")
+
+        if self._referencia_2p is not None:
+            ref_tela = canvas._cena_para_tela(self._referencia_2p)
+            painter.setPen(QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawLine(pivo_tela, ref_tela)
+            painter.drawEllipse(ref_tela, 5, 5)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(int(ref_tela.x() + 6), int(ref_tela.y() - 6), "2")
+
+        if self._estado_2p == "girando" and self._referencia_2p is not None and self._preview_2p is not None:
+            self._desenhar_preview_2p(canvas, painter)
+        painter.restore()
+
+    def _desenhar_preview_2p(self, canvas, painter) -> None:
+        if self._pivo_2p is None or self._referencia_2p is None:
+            return
+        comp = self._dist(self._pivo_2p, self._referencia_2p)
+        if comp <= 0.0001:
+            return
+        ang_ref = self._angulo_entre(self._pivo_2p, self._referencia_2p)
+        ang_destino = (ang_ref + self._angulo_preview_2p) % 360.0
+        destino = self._destino_polar(self._pivo_2p, comp, ang_destino)
+        pivo_tela = canvas._cena_para_tela(self._pivo_2p)
+        destino_tela = canvas._cena_para_tela(destino)
+
+        painter.setPen(QPen(QColor("#ff7ee6"), 1.2, Qt.DotLine))
+        painter.setBrush(Qt.NoBrush)
+        ref = QPointF(self._pivo_2p.x() + comp, self._pivo_2p.y())
+        painter.drawLine(pivo_tela, canvas._cena_para_tela(ref))
+        passos = max(18, int(abs(self._angulo_preview_2p) / 3.0))
+        pontos_arco = []
+        for i in range(passos + 1):
+            t = i / max(passos, 1)
+            ang = ang_ref + (self._angulo_preview_2p * t)
+            pontos_arco.append(canvas._cena_para_tela(self._destino_polar(self._pivo_2p, comp, ang)))
+        for a, b in zip(pontos_arco, pontos_arco[1:]):
+            painter.drawLine(a, b)
+
+        painter.setPen(QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine))
+        painter.drawLine(pivo_tela, destino_tela)
+        painter.setPen(QPen(QColor("#ffd400"), 2.0))
+        painter.drawEllipse(destino_tela, 7, 7)
+        painter.drawLine(QPointF(destino_tela.x() - 9, destino_tela.y()), QPointF(destino_tela.x() + 9, destino_tela.y()))
+        painter.drawLine(QPointF(destino_tela.x(), destino_tela.y() - 9), QPointF(destino_tela.x(), destino_tela.y() + 9))
+
+        meio = QPointF((pivo_tela.x() + destino_tela.x()) / 2.0, (pivo_tela.y() + destino_tela.y()) / 2.0)
+        texto = f"{comp:.2f}  |  {self._angulo_preview_2p:.1f}°"
+        font = QFont("Arial", 8)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        largura = metrics.horizontalAdvance(texto)
+        painter.fillRect(int(meio.x() - (largura / 2) - 6), int(meio.y() - 11), largura + 12, 20, QColor(8, 18, 28, 215))
+        painter.setPen(QColor("#ffd47d"))
+        painter.drawText(int(meio.x() - (largura / 2)), int(meio.y() + 4), texto)
 
     def _girar_elemento(self, el: dict, pivo: QPointF, angulo: float) -> None:
         a = radians(angulo)
@@ -224,6 +418,31 @@ class Ferramenta(FerramentaBase):
             fo, ff = el["fio_origem"], el["fio_fim"]
             el["fio_angulo"] = degrees(atan2(float(ff[1]) - float(fo[1]), float(ff[0]) - float(fo[0])))
         el.setdefault("metadados", {})["ultima_transformacao"] = f"girar_{angulo:g}"
+
+    @staticmethod
+    def _destino_polar(origem: QPointF, comprimento: float, angulo: float) -> QPointF:
+        rad = radians(angulo)
+        return QPointF(origem.x() + (cos(rad) * comprimento), origem.y() - (sin(rad) * comprimento))
+
+    @staticmethod
+    def _dist(a: QPointF, b: QPointF) -> float:
+        return hypot(a.x() - b.x(), a.y() - b.y())
+
+    @staticmethod
+    def _angulo_entre(p1: QPointF, p2: QPointF) -> float:
+        ang = degrees(atan2(-(p2.y() - p1.y()), p2.x() - p1.x()))
+        return ang if ang >= 0 else ang + 360.0
+
+    def _angulo_principal_mais_proximo(self, angulo: float) -> float:
+        normalizado = float(angulo) % 360.0
+        return min(
+            self.ANGULOS_PRINCIPAIS,
+            key=lambda alvo: min(abs(normalizado - alvo), 360.0 - abs(normalizado - alvo)),
+        )
+
+    @staticmethod
+    def _delta_angular(origem: float, destino: float) -> float:
+        return ((float(destino) - float(origem) + 180.0) % 360.0) - 180.0
 
     def _todos_pontos(self, el: dict) -> list[tuple[float, float]]:
         pts: list[tuple[float, float]] = []
