@@ -513,6 +513,7 @@ class Ferramenta(FerramentaBase):
             self._arrastar_canto_molde(canvas, el, controle_idx, destino)
         else:
             self._arrastar_auxiliar_molde(canvas, el, controle_idx, destino)
+        self._recravar_auxiliares_no_perimetro(el)
         self._reajustar_fio_no_molde(el)
 
     def _arrastar_canto_molde(self, canvas, el: dict, controle_idx: int, destino: QPointF):
@@ -582,6 +583,19 @@ class Ferramenta(FerramentaBase):
             if canvas._dist(p0, pn) <= tol:
                 pontos[-1] = pontos[0]
         el["pontos"] = pontos
+
+    def _recravar_auxiliares_no_perimetro(self, el: dict) -> None:
+        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", [])) if p is not None]
+        if len(cantos) < 2:
+            return
+        auxiliares: list[tuple[float, float]] = []
+        limite = len(cantos) if len(cantos) >= 3 else len(cantos) - 1
+        for i in range(max(0, limite)):
+            a = cantos[i]
+            b = cantos[(i + 1) % len(cantos)]
+            auxiliares.append(((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0))
+        el["controle_auxiliares"] = auxiliares
+        el["pontos_auxiliares"] = [{"x": x, "y": y} for x, y in auxiliares]
 
     def _atualizar_espelho_controle(self, el: dict, chave: str, idx: int, destino: QPointF) -> None:
         itens = el.get(chave)
