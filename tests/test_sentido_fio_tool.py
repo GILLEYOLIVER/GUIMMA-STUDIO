@@ -246,18 +246,33 @@ class SentidoFioToolTestCase(unittest.TestCase):
     def test_girar_molde_move_pontos_de_controle_principais(self):
         canvas = _FakeCanvas()
         molde = canvas.cena.elementos[0]
+        molde["controle_cantos"] = [{"x": 10.0, "y": 0.0}]
         molde["pontos_controle_principais"] = [{"x": 10.0, "y": 0.0}]
         molde["pontos_auxiliares"] = [{"x": 5.0, "y": 0.0}]
         ferramenta = FerramentaSentidoFio()
 
         ferramenta._girar_molde(molde, QPointF(0.0, 0.0), 90.0)
 
+        canto = molde["controle_cantos"][0]
+        self.assertAlmostEqual(canto[0], 0.0)
+        self.assertAlmostEqual(canto[1], -10.0)
         ponto_principal = molde["pontos_controle_principais"][0]
         self.assertAlmostEqual(ponto_principal["x"], 0.0)
         self.assertAlmostEqual(ponto_principal["y"], -10.0)
         ponto_auxiliar = molde["pontos_auxiliares"][0]
         self.assertAlmostEqual(ponto_auxiliar["x"], 0.0)
         self.assertAlmostEqual(ponto_auxiliar["y"], -5.0)
+
+    def test_snap_do_sentido_fio_aceita_cantos_em_dict(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        molde = canvas.cena.elementos[0]
+        molde["controle_cantos"] = [{"x": 4.0, "y": 2.0}]
+
+        pontos = ferramenta._pontos_snap_molde(molde)
+
+        self.assertIn(QPointF(4.0, 2.0), pontos)
 
     def test_realce_usa_apenas_pontos_principais_do_molde(self):
         ferramenta = FerramentaSentidoFio()

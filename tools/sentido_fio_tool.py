@@ -483,15 +483,16 @@ class Ferramenta(FerramentaBase):
         for chave in ("pontos", "controle_cantos", "controle_auxiliares"):
             if isinstance(el.get(chave), list):
                 for p in el.get(chave, []):
-                    if self._eh_ponto(p):
-                        pontos.append(QPointF(float(p[0]), float(p[1])))
+                    ponto = self._ponto_qt(p)
+                    if ponto is not None:
+                        pontos.append(ponto)
         chaves_extra = ["ponto_texto", "seta_origem", "seta_fim"]
         if incluir_fio:
             chaves_extra.extend(["fio_origem", "fio_fim"])
         for chave in chaves_extra:
-            p = el.get(chave)
-            if self._eh_ponto(p):
-                pontos.append(QPointF(float(p[0]), float(p[1])))
+            ponto = self._ponto_qt(el.get(chave))
+            if ponto is not None:
+                pontos.append(ponto)
         return pontos
 
     def _pontos_realce_principais_molde(self, el: dict) -> list[QPointF]:
@@ -618,6 +619,8 @@ class Ferramenta(FerramentaBase):
         ca, sa = cos(a), sin(a)
         if isinstance(p, QPointF):
             x, y = float(p.x()), float(p.y())
+        elif isinstance(p, dict):
+            x, y = float(p["x"]), float(p["y"])
         else:
             x, y = float(p[0]), float(p[1])
         dx, dy = x - pivo.x(), y - pivo.y()
@@ -625,14 +628,22 @@ class Ferramenta(FerramentaBase):
 
     @staticmethod
     def _eh_ponto(p) -> bool:
-        if not isinstance(p, (list, tuple)) or len(p) < 2:
-            return False
         try:
-            return isfinite(float(p[0])) and isfinite(float(p[1]))
+            if isinstance(p, QPointF):
+                x, y = p.x(), p.y()
+            elif isinstance(p, dict):
+                x, y = p["x"], p["y"]
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = p[0], p[1]
+            else:
+                return False
+            return isfinite(float(x)) and isfinite(float(y))
         except Exception:
             return False
 
     def _ponto_qt(self, p) -> QPointF | None:
+        if isinstance(p, QPointF):
+            return QPointF(p)
         if isinstance(p, dict):
             try:
                 return QPointF(float(p["x"]), float(p["y"]))
