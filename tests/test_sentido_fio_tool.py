@@ -243,6 +243,22 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertAlmostEqual(molde["pontos"][1][0], 9.602631123499285)
         self.assertAlmostEqual(molde["pontos"][1][1], 3.6832815729997472)
 
+    def test_girar_molde_move_pontos_de_controle_principais(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["pontos_controle_principais"] = [{"x": 10.0, "y": 0.0}]
+        molde["pontos_auxiliares"] = [{"x": 5.0, "y": 0.0}]
+        ferramenta = FerramentaSentidoFio()
+
+        ferramenta._girar_molde(molde, QPointF(0.0, 0.0), 90.0)
+
+        ponto_principal = molde["pontos_controle_principais"][0]
+        self.assertAlmostEqual(ponto_principal["x"], 0.0)
+        self.assertAlmostEqual(ponto_principal["y"], -10.0)
+        ponto_auxiliar = molde["pontos_auxiliares"][0]
+        self.assertAlmostEqual(ponto_auxiliar["x"], 0.0)
+        self.assertAlmostEqual(ponto_auxiliar["y"], -5.0)
+
     def test_realce_usa_apenas_pontos_principais_do_molde(self):
         ferramenta = FerramentaSentidoFio()
         molde = {
