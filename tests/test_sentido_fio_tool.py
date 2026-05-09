@@ -286,6 +286,25 @@ class SentidoFioToolTestCase(unittest.TestCase):
 
         self.assertEqual([(p.x(), p.y()) for p in pontos], [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)])
 
+    def test_realce_nao_soma_pontos_controle_principais_quando_ha_cantos(self):
+        ferramenta = FerramentaSentidoFio()
+        molde = {
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+            "pontos_controle_principais": [
+                {"x": -4.0, "y": -4.0},
+                {"x": 14.0, "y": -4.0},
+                {"x": 14.0, "y": 9.0},
+                {"x": -4.0, "y": 9.0},
+            ],
+        }
+
+        pontos = ferramenta._pontos_realce_principais_molde(molde)
+
+        self.assertEqual(
+            [(p.x(), p.y()) for p in pontos],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
