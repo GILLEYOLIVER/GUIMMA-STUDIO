@@ -346,7 +346,7 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_paint_overlay(self, canvas, painter):
-        self._desenhar_elemento_hover(canvas, painter)
+        self._desenhar_molde_em_manipulacao(canvas, painter)
         self._desenhar_controles_molde_hover(canvas, painter)
         self._desenhar_guia(canvas, painter)
         self._desenhar_hover(canvas, painter)
@@ -671,32 +671,28 @@ class Ferramenta(FerramentaBase):
             tela = canvas._cena_para_tela(pt)
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
 
-    def _desenhar_elemento_hover(self, canvas, painter):
-        idx = self._hover_elemento_idx
+    def _desenhar_molde_em_manipulacao(self, canvas, painter):
+        idx = None
+        if self._arrastando_controle_molde is not None:
+            idx = self._arrastando_controle_molde[0]
+        elif self._arrastando_ponto_poly is not None:
+            idx = self._arrastando_ponto_poly[0]
+        elif self._hover_controle_molde is not None:
+            idx = self._hover_controle_molde[0]
         if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
+        if not el.get("molde") or el.get("tipo") != "polyline":
+            return
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if len(pontos) < 2:
+            return
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
         cor = "#2da8ff"
         esp = max(1.6, float(el.get("espessura", 1.0)) + 0.7)
-        if el.get("tipo") == "polyline":
-            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            if len(pontos) >= 2:
-                canvas._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp, estilo="solid", amplitude=1.0)
-        elif el.get("tipo") == "bezier_quadratica":
-            p0 = QPointF(*el["p0"])
-            p1 = QPointF(*el["p1"])
-            p2 = QPointF(*el["p2"])
-            canvas._desenhar_bezier_quadratica(
-                painter,
-                p0,
-                p1,
-                p2,
-                cor=cor,
-                espessura=esp,
-                estilo="solid",
-                amplitude=1.0,
-                destacar_controles=bool(el.get("molde")),
-            )
+        canvas._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp, estilo="solid", amplitude=1.0)
+        painter.restore()
 
     def _desenhar_hover(self, canvas, painter):
         if self._hover_ponto_poly is not None:
