@@ -364,20 +364,22 @@ class Ferramenta(FerramentaBase):
         modo = dialog.cmb_modo.currentText()
         cursor = canvas._tela_para_cena(pos_tela)
         if modo in {"Pontos do mouse", "Pontos do molde"}:
-            return cursor
+            if not self._snap_angular_ativo(canvas):
+                canvas._snap_resultado = None
+                canvas._snap_candidatos = []
+                canvas._snap_indice = 0
+                return cursor
+
+            arrastando_fim = self._inicio is not None
+            local = self._snap_local_molde(canvas, cursor, incluir_fio=not arrastando_fim)
+            if arrastando_fim and local is not None:
+                tol_inicio = max(2.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 1e-4)
+                if self._dist(local, self._inicio) <= tol_inicio:
+                    return cursor
+            return local if local is not None else cursor
 
         pos = canvas._ponto_com_snap(pos_tela)
-        if modo != "Pontos do mouse":
-            return pos
-        arrastando_fim = self._inicio is not None
-        local = self._snap_local_molde(canvas, cursor, incluir_fio=not arrastando_fim)
-        if self._inicio is not None and local is not None:
-            tol_inicio = max(2.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 1e-4)
-            if self._dist(local, self._inicio) <= tol_inicio:
-                return cursor
-        if arrastando_fim:
-            return local if local is not None else cursor
-        return local if local is not None else pos
+        return pos
 
     def _snap_local_molde(self, canvas, cursor: QPointF, incluir_fio: bool = True) -> QPointF | None:
         if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
@@ -385,7 +387,7 @@ class Ferramenta(FerramentaBase):
         candidatos = self.obter_candidatos_snap(canvas, cursor, incluir_fio=incluir_fio)
         if not candidatos:
             return None
-        candidatos.sort(key=lambda c: (0 if c.tipo in {"nó", "fio"} else 1, c.distancia))
+        candidatos.sort(key=lambda c: (c.distancia, 0 if c.tipo in {"nó", "fio"} else 1))
         snap = candidatos[0]
         canvas._snap_resultado = snap
         canvas._snap_candidatos = candidatos
