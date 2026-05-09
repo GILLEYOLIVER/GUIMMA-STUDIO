@@ -496,15 +496,9 @@ class Ferramenta(FerramentaBase):
         return pontos
 
     def _pontos_realce_principais_molde(self, el: dict) -> list[QPointF]:
-        pontos: list[QPointF] = []
-
-        for chave in ("controle_cantos", "pontos_controle_principais"):
-            if not isinstance(el.get(chave), list):
-                continue
-            for p in el.get(chave, []):
-                ponto = self._ponto_qt(p)
-                if ponto is not None:
-                    pontos.append(ponto)
+        pontos = self._coletar_pontos_chave(el, "controle_cantos")
+        if not pontos:
+            pontos = self._coletar_pontos_chave(el, "pontos_controle_principais")
 
         if not pontos:
             base = [self._ponto_qt(p) for p in el.get("pontos", [])]
@@ -513,6 +507,16 @@ class Ferramenta(FerramentaBase):
                 pontos = [pontos[0], pontos[-1]]
 
         return self._remover_pontos_duplicados(pontos)
+
+    def _coletar_pontos_chave(self, el: dict, chave: str) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(el.get(chave), list):
+            return pontos
+        for p in el.get(chave, []):
+            ponto = self._ponto_qt(p)
+            if ponto is not None:
+                pontos.append(ponto)
+        return pontos
 
     def _segmentos_snap_molde(self, el: dict, incluir_fio: bool = True) -> list[tuple[QPointF, QPointF]]:
         segmentos: list[tuple[QPointF, QPointF]] = []
