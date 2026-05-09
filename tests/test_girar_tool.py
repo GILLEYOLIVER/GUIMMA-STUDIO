@@ -54,6 +54,7 @@ class _FakeCanvas(QWidget):
         self._selecionados = {0}
         self.historico = 0
         self.atualizou = False
+        self.ferramenta_ativa = None
 
     def _ponto_com_snap(self, pos):
         return QPointF(pos)
@@ -69,6 +70,9 @@ class _FakeCanvas(QWidget):
 
     def update(self):
         self.atualizou = True
+
+    def set_ferramenta_ativa(self, nome):
+        self.ferramenta_ativa = nome
 
 
 @unittest.skipIf(FerramentaGirar is None, "PySide6 não disponível neste ambiente")
@@ -105,6 +109,41 @@ class GirarToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(ferramenta._estado_2p, "pivo")
+
+    def test_clique_direito_cancela_girar_em_2_pontos_sem_fechar(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaGirar()
+        ferramenta.on_activate(canvas)
+        ferramenta._obter_dialog(canvas).cmb_modo.setCurrentText("Girar em 2 pontos")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertEqual(ferramenta._estado_2p, "referencia")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(button=Qt.RightButton)))
+
+        self.assertEqual(ferramenta._estado_2p, "pivo")
+        self.assertIsNone(ferramenta._pivo_2p)
+        self.assertIsNone(ferramenta._referencia_2p)
+        self.assertEqual(canvas.historico, 0)
+        self.assertIsNone(canvas.ferramenta_ativa)
+
+    def test_clique_direito_cancela_preview_e_restaura_molde(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaGirar()
+        ferramenta.on_activate(canvas)
+        ferramenta._obter_dialog(canvas).cmb_modo.setCurrentText("Girar em 2 pontos")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
+        self.assertNotEqual(canvas.cena.elementos[0]["pontos"][1], (10.0, 0.0))
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(button=Qt.RightButton)))
+
+        self.assertEqual(canvas.cena.elementos[0]["pontos"][1], (10.0, 0.0))
+        self.assertEqual(ferramenta._estado_2p, "pivo")
+        self.assertEqual(canvas.historico, 0)
+        self.assertIsNone(canvas.ferramenta_ativa)
 
 
 if __name__ == "__main__":
