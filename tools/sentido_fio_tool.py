@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from math import atan2, cos, degrees, hypot, isfinite, radians
+from math import atan2, cos, degrees, hypot, isfinite, radians, sin
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainterPath, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout
 
 from canvas.snap import SnapResult
@@ -181,21 +181,37 @@ class Ferramenta(FerramentaBase):
         ang = self._normalizar_angulo(
             self._angulo_preview if self._angulo_preview is not None else self._angulo(self._inicio, self._fim_preview)
         )
+        comp = self._dist(self._inicio, self._fim_preview)
 
         painter.save()
-        pen = QPen(QColor("#ff00d4"), 1.0, Qt.DashLine)
+        self._desenhar_guia_angular_fio(canvas, painter, self._inicio, comp, ang)
+        self._desenhar_referencia_360(canvas, painter)
+
+        pen = QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine)
         pen.setDashPattern([3.0, 2.0])
         painter.setPen(pen)
         painter.setBrush(QColor(255, 0, 212, 24))
         painter.drawLine(p0, p1)
         painter.drawLine(QPointF(p0.x() - 5, p0.y()), QPointF(p0.x() + 5, p0.y()))
         painter.drawLine(QPointF(p0.x(), p0.y() - 5), QPointF(p0.x(), p0.y() + 5))
-        painter.drawLine(QPointF(p1.x() - 7, p1.y() - 7), QPointF(p1.x() + 7, p1.y() + 7))
-        painter.drawLine(QPointF(p1.x() + 7, p1.y() - 7), QPointF(p1.x() - 7, p1.y() + 7))
+        painter.setPen(QPen(QColor("#ffd400"), 2.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(p1, 7, 7)
+        painter.drawLine(QPointF(p1.x() - 9, p1.y()), QPointF(p1.x() + 9, p1.y()))
+        painter.drawLine(QPointF(p1.x(), p1.y() - 9), QPointF(p1.x(), p1.y() + 9))
 
-        raio = 16.0
-        painter.drawEllipse(QRectF(p0.x() - raio, p0.y() - raio, raio * 2.0, raio * 2.0))
-        painter.drawText(int(p1.x() + 6), int(p1.y() + 12), f"{ang:g} deg")
+        meio = QPointF((p0.x() + p1.x()) / 2.0, (p0.y() + p1.y()) / 2.0)
+        texto = f"{comp:.2f}  |  {ang:.1f} deg"
+        font = QFont("Arial", 8)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        largura = metrics.horizontalAdvance(texto)
+        painter.fillRect(
+            int(meio.x() - (largura / 2) - 6), int(meio.y() - 11), largura + 12, 20, QColor(8, 18, 28, 215)
+        )
+        painter.setPen(QColor("#ffd47d"))
+        painter.drawText(int(meio.x() - (largura / 2)), int(meio.y() + 4), texto)
         painter.restore()
 
     def obter_candidatos_snap(self, canvas, cursor: QPointF, incluir_fio: bool = True):
@@ -236,11 +252,6 @@ class Ferramenta(FerramentaBase):
     def _ponto_final_com_config(self, canvas, inicio: QPointF, pos_mouse: QPointF) -> tuple[QPointF, float]:
         """
         Calcula o ponto final e o angulo do sentido do fio.
-
-        Correção importante:
-        - No modo livre, o angulo NÃO deve ser arredondado automaticamente para
-          0, 30, 45, 90 etc. Isso era o que fazia a ferramenta parecer travada.
-        - A caixa "Travar angulo" só deve mandar quando estiver marcada.
         """
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
@@ -258,7 +269,7 @@ class Ferramenta(FerramentaBase):
             return fim, angulo
 
         if modo == "Vertical":
-            angulo = 90.0 if dy >= 0 else 270.0
+            angulo = 90.0 if dy <= 0 else 270.0
             fim = QPointF(inicio.x(), inicio.y() + dy)
             return fim, angulo
 
@@ -267,11 +278,18 @@ class Ferramenta(FerramentaBase):
             ang = radians(angulo)
             fim = QPointF(
                 inicio.x() + (cos(ang) * comp),
-                inicio.y() + (sin(ang) * comp),
+                inicio.y() - (sin(ang) * comp),
             )
             return fim, angulo
 
-        angulo = self._normalizar_angulo(degrees(atan2(dy, dx)))
+        angulo = self._normalizar_angulo(degrees(atan2(-dy, dx)))
+        if modo == "Pontos do mouse" and self._snap_angular_ativo(canvas):
+            angulo = self._angulo_principal_mais_proximo(angulo)
+            ang = radians(angulo)
+            return QPointF(
+                inicio.x() + (cos(ang) * comp),
+                inicio.y() - (sin(ang) * comp),
+            ), angulo
         return QPointF(pos_mouse), angulo
 
     def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo_novo: float) -> None:
@@ -285,7 +303,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         angulo_novo = self._normalizar_angulo(angulo_novo)
         if dialog.chk_girar_molde.isChecked():
-            angulo_antigo = self._angulo_fio_atual(el)
+            angulo_antigo = self._angulo_fio_snapshot(canvas, idx)
             self._girar_molde(el, inicio, angulo_novo - angulo_antigo)
 
         el["fio_origem"] = (float(inicio.x()), float(inicio.y()))
@@ -390,6 +408,69 @@ class Ferramenta(FerramentaBase):
             painter.drawRect(QRectF(tela.x() - 3.0, tela.y() - 3.0, 6.0, 6.0))
         painter.restore()
 
+    def _desenhar_guia_angular_fio(
+        self, canvas, painter, origem: QPointF, comprimento: float, angulo_graus: float
+    ) -> None:
+        if comprimento <= 0.0001:
+            return
+
+        origem_tela = canvas._cena_para_tela(origem)
+        painter.setPen(QPen(QColor("#ff7ee6"), 1.2, Qt.DotLine))
+        painter.setBrush(Qt.NoBrush)
+
+        raio_origem = max(5.0, 5.0 * float(getattr(canvas, "zoom", 1.0)) * 0.05)
+        painter.drawEllipse(origem_tela, raio_origem, raio_origem)
+
+        ref = QPointF(origem.x() + comprimento, origem.y())
+        painter.drawLine(origem_tela, canvas._cena_para_tela(ref))
+
+        passos = max(18, int(max(1.0, angulo_graus) / 3.0))
+        pontos_arco: list[QPointF] = []
+        for i in range(passos + 1):
+            t = i / max(passos, 1)
+            a = angulo_graus * t
+            rad = radians(a)
+            px = origem.x() + (comprimento * cos(rad))
+            py = origem.y() - (comprimento * sin(rad))
+            pontos_arco.append(canvas._cena_para_tela(QPointF(px, py)))
+
+        for i in range(len(pontos_arco) - 1):
+            painter.drawLine(pontos_arco[i], pontos_arco[i + 1])
+
+    def _desenhar_referencia_360(self, canvas, painter) -> None:
+        if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[self._molde_idx]
+        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", []) if self._eh_ponto((x, y))]
+        if len(pontos) < 2:
+            return
+
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        largura = max(xs) - min(xs)
+        altura = max(ys) - min(ys)
+        if largura <= 0.0001 or altura <= 0.0001:
+            return
+
+        p1 = canvas._cena_para_tela(QPointF(min(xs) + (largura * 0.52), min(ys) + (altura * 0.24)))
+        p2 = canvas._cena_para_tela(QPointF(min(xs) + (largura * 0.82), min(ys) + (altura * 0.24)))
+        painter.setPen(QPen(QColor("#ffffff"), 1.1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(p1, p2)
+        self._desenhar_ponta_referencia_360(painter, p1, -1.0)
+        self._desenhar_ponta_referencia_360(painter, p2, 1.0)
+
+        font = QFont("Arial", 7)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(int(p2.x() + 6), int(p2.y() + 4), "360°")
+
+    @staticmethod
+    def _desenhar_ponta_referencia_360(painter, ponta: QPointF, direcao: float) -> None:
+        tamanho = 6.0
+        painter.drawLine(ponta, QPointF(ponta.x() - (direcao * tamanho), ponta.y() - 2.5))
+        painter.drawLine(ponta, QPointF(ponta.x() - (direcao * tamanho), ponta.y() + 2.5))
+
     def _pontos_snap_molde(self, el: dict, incluir_fio: bool = True) -> list[QPointF]:
         pontos: list[QPointF] = []
         for chave in ("pontos", "controle_cantos", "controle_auxiliares"):
@@ -438,6 +519,15 @@ class Ferramenta(FerramentaBase):
             return float(canvas._tolerancia_snap_px()) / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
         return 10.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
 
+    @staticmethod
+    def _snap_angular_ativo(canvas) -> bool:
+        if hasattr(canvas, "snap_ativo"):
+            try:
+                return bool(canvas.snap_ativo())
+            except Exception:
+                pass
+        return bool(getattr(canvas, "_snap_ativo", True))
+
     def _fechar(self, canvas) -> None:
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Sentido Fio finalizada. Voltando para Selecionar.")
@@ -477,7 +567,7 @@ class Ferramenta(FerramentaBase):
         def rot(p):
             x, y = float(p[0]), float(p[1])
             dx, dy = x - pivo.x(), y - pivo.y()
-            return (pivo.x() + (dx * ca) - (dy * sa), pivo.y() + (dx * sa) + (dy * ca))
+            return (pivo.x() + (dx * ca) + (dy * sa), pivo.y() - (dx * sa) + (dy * ca))
 
         for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro", "distancias_no_perimetro", "marcacoes_perimetro"):
             if isinstance(el.get(chave), list):
@@ -501,7 +591,8 @@ class Ferramenta(FerramentaBase):
 
     @staticmethod
     def _angulo(inicio: QPointF, fim: QPointF) -> float:
-        return degrees(atan2(fim.y() - inicio.y(), fim.x() - inicio.x()))
+        ang = degrees(atan2(-(fim.y() - inicio.y()), fim.x() - inicio.x()))
+        return ang if ang >= 0 else ang + 360.0
 
     @staticmethod
     def _normalizar_angulo(angulo: float) -> float:
@@ -518,6 +609,21 @@ class Ferramenta(FerramentaBase):
             self.ANGULOS_PRINCIPAIS,
             key=lambda alvo: min(abs(normalizado - alvo), 360.0 - abs(normalizado - alvo)),
         )
+
+    def _angulo_fio_snapshot(self, canvas, idx: int) -> float:
+        snap = self._snapshot_fio
+        if snap and int(snap.get("idx", -1)) == int(idx):
+            origem = snap.get("fio_origem")
+            fim = snap.get("fio_fim")
+            if self._eh_ponto(origem) and self._eh_ponto(fim):
+                return self._angulo(QPointF(float(origem[0]), float(origem[1])), QPointF(float(fim[0]), float(fim[1])))
+            try:
+                return float(snap.get("fio_angulo") or 0.0)
+            except Exception:
+                return 0.0
+        if 0 <= idx < len(canvas.cena.elementos):
+            return self._angulo_fio_atual(canvas.cena.elementos[idx])
+        return 0.0
 
     def _angulo_fio_atual(self, el: dict) -> float:
         origem = el.get("fio_origem")
