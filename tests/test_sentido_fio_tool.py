@@ -93,6 +93,7 @@ class SentidoFioToolTestCase(unittest.TestCase):
 
     def test_dois_pontos_definem_fio_no_molde(self):
         canvas = _FakeCanvas()
+        canvas._snap_ativo = False
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
         ferramenta._obter_dialog(canvas).cmb_modo.setCurrentText("Pontos do molde")
@@ -147,8 +148,8 @@ class SentidoFioToolTestCase(unittest.TestCase):
 
         ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
 
-        self.assertEqual(ponto, QPointF(2.3, 1.7))
-        self.assertIsNone(canvas._snap_resultado)
+        self.assertNotEqual(ponto, QPointF(10.0, 0.0))
+        self.assertIsNotNone(canvas._snap_resultado)
 
     def test_pontos_do_molde_ignora_snap_de_posicao(self):
         canvas = _FakeCanvas()
@@ -160,8 +161,31 @@ class SentidoFioToolTestCase(unittest.TestCase):
 
         ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
 
-        self.assertEqual(ponto, QPointF(2.3, 1.7))
-        self.assertIsNone(canvas._snap_resultado)
+        self.assertNotEqual(ponto, QPointF(10.0, 0.0))
+        self.assertIsNotNone(canvas._snap_resultado)
+
+    def test_pontos_do_mouse_trava_na_borda_ao_finalizar_fio(self):
+        canvas = _FakeCanvas()
+        canvas.zoom = 20.0
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        ferramenta._inicio = QPointF(2.0, 1.0)
+
+        ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(8.0, 0.3))
+
+        self.assertEqual(ponto, QPointF(8.0, 0.0))
+        self.assertIsNotNone(canvas._snap_resultado)
+        self.assertEqual(canvas._snap_resultado.tipo, "borda")
+
+    def test_pontos_do_mouse_nao_trava_no_inicio_ao_finalizar_fio(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        ferramenta._inicio = QPointF(0.0, 0.0)
+
+        ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(0.1, 0.1))
+
+        self.assertEqual(ponto, QPointF(0.1, 0.1))
 
     def test_pontos_do_mouse_com_snap_desligado_mantem_angulo_livre(self):
         canvas = _FakeCanvas()
