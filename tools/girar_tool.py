@@ -97,6 +97,11 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
+            dialog = self._obter_dialog(canvas)
+            if dialog.cmb_modo.currentText() == "Girar em 2 pontos" and self._estado_2p != "pivo":
+                self._cancelar_2p(canvas)
+                event.accept()
+                return True
             if self._operacao_finalizada and not self._direito_confirma_fechamento:
                 self._direito_confirma_fechamento = True
                 self._status(canvas, "Operação finalizada. Clique direito novamente fecha a ferramenta.")
@@ -289,6 +294,14 @@ class Ferramenta(FerramentaBase):
         self._preview_2p = None
         self._angulo_preview_2p = 0.0
         self._snapshot_2p = []
+
+    def _cancelar_2p(self, canvas) -> None:
+        self._restaurar_snapshot_2p(canvas)
+        self._resetar_2p()
+        self._operacao_finalizada = False
+        self._direito_confirma_fechamento = False
+        canvas.update()
+        self._status(canvas, "Girar em 2 pontos cancelado. Clique no pivô para recomeçar.")
 
     def _restaurar_snapshot_2p(self, canvas) -> None:
         for idx, original in self._snapshot_2p:
