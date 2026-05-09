@@ -604,6 +604,13 @@ class Ferramenta(FerramentaBase):
         for chave in ("ponto_texto", "seta_origem", "seta_fim", "fio_origem", "fio_fim"):
             if self._eh_ponto(el.get(chave)):
                 el[chave] = rot(el[chave])
+        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
+            if isinstance(el.get(chave), list):
+                for item in el[chave]:
+                    if isinstance(item, dict) and "x" in item and "y" in item:
+                        x, y = rot((item["x"], item["y"]))
+                        item["x"] = x
+                        item["y"] = y
 
     @staticmethod
     def _rotacionar_ponto(p, pivo: QPointF, angulo: float) -> tuple[float, float]:
