@@ -114,7 +114,7 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertTrue(canvas.atualizou)
 
-    def test_pontos_do_mouse_com_snap_ligado_trava_angulo_principal(self):
+    def test_pontos_do_mouse_com_snap_ligado_mantem_angulo_livre(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
@@ -122,8 +122,8 @@ class SentidoFioToolTestCase(unittest.TestCase):
         inicio = QPointF(2.0, 1.0)
         fim, angulo = ferramenta._ponto_final_com_config(canvas, inicio, QPointF(8.0, -4.0))
 
-        self.assertAlmostEqual(fim.x() - inicio.x(), inicio.y() - fim.y())
-        self.assertEqual(angulo, 45.0)
+        self.assertEqual(fim, QPointF(8.0, -4.0))
+        self.assertAlmostEqual(angulo, 39.805571, places=5)
 
     def test_pontos_do_mouse_com_girar_molde_nao_trava_snap_angular(self):
         canvas = _FakeCanvas()
@@ -139,26 +139,24 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertNotEqual(round(angulo, 6), 30.0)
         self.assertAlmostEqual(angulo, 28.072486, places=5)
 
-    def test_pontos_do_mouse_com_girar_molde_ignora_snap_de_posicao(self):
+    def test_pontos_do_mouse_ignora_snap_de_posicao(self):
         canvas = _FakeCanvas()
         canvas.ponto_snap_forcado = QPointF(10.0, 0.0)
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
-        ferramenta._obter_dialog(canvas).chk_girar_molde.setChecked(True)
 
         ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
 
         self.assertEqual(ponto, QPointF(2.3, 1.7))
         self.assertIsNone(canvas._snap_resultado)
 
-    def test_pontos_do_molde_com_girar_molde_ignora_snap_de_posicao(self):
+    def test_pontos_do_molde_ignora_snap_de_posicao(self):
         canvas = _FakeCanvas()
         canvas.ponto_snap_forcado = QPointF(10.0, 0.0)
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
         dialog.cmb_modo.setCurrentText("Pontos do molde")
-        dialog.chk_girar_molde.setChecked(True)
 
         ponto = ferramenta._ponto_com_snap_fio(canvas, QPointF(2.3, 1.7))
 

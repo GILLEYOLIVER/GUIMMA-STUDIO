@@ -284,13 +284,6 @@ class Ferramenta(FerramentaBase):
             return fim, angulo
 
         angulo = self._normalizar_angulo(degrees(atan2(-dy, dx)))
-        if modo == "Pontos do mouse" and not girar_por_fio and self._snap_angular_ativo(canvas):
-            angulo = self._angulo_principal_mais_proximo(angulo)
-            ang = radians(angulo)
-            return QPointF(
-                inicio.x() + (cos(ang) * comp),
-                inicio.y() - (sin(ang) * comp),
-            ), angulo
         return QPointF(pos_mouse), angulo
 
     def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo_novo: float) -> None:
@@ -370,7 +363,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
         cursor = canvas._tela_para_cena(pos_tela)
-        if dialog.chk_girar_molde.isChecked() and modo in {"Pontos do mouse", "Pontos do molde"}:
+        if modo in {"Pontos do mouse", "Pontos do molde"}:
             return cursor
 
         pos = canvas._ponto_com_snap(pos_tela)
