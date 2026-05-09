@@ -122,6 +122,20 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertAlmostEqual(fim.x() - inicio.x(), inicio.y() - fim.y())
         self.assertEqual(angulo, 45.0)
 
+    def test_pontos_do_mouse_com_girar_molde_nao_trava_snap_angular(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        ferramenta._obter_dialog(canvas).chk_girar_molde.setChecked(True)
+
+        inicio = QPointF(2.0, 1.0)
+        pos = QPointF(8.0, -2.2)
+        fim, angulo = ferramenta._ponto_final_com_config(canvas, inicio, pos)
+
+        self.assertEqual(fim, pos)
+        self.assertNotEqual(round(angulo, 6), 30.0)
+        self.assertAlmostEqual(angulo, 28.072486, places=5)
+
     def test_pontos_do_mouse_com_snap_desligado_mantem_angulo_livre(self):
         canvas = _FakeCanvas()
         canvas._snap_ativo = False
@@ -138,6 +152,7 @@ class SentidoFioToolTestCase(unittest.TestCase):
         ferramenta = FerramentaSentidoFio()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Posicionar fio")
         dialog.chk_girar_molde.setChecked(True)
         ferramenta._snapshot_fio = ferramenta._capturar_snapshot_fio(canvas, 0)
 
@@ -153,6 +168,29 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertEqual(molde["fio_origem"], (2.0, 1.0))
         self.assertEqual(molde["fio_fim"], (2.0, 7.0))
         self.assertEqual(molde["fio_angulo"], 90.0)
+
+    def test_pontos_do_molde_com_girar_molde_define_fio_como_zero_graus(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSentidoFio()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Pontos do molde")
+        dialog.chk_usar_angulo.setChecked(True)
+        dialog.sp_angulo.setValue(90.0)
+        dialog.chk_girar_molde.setChecked(True)
+        ferramenta._snapshot_fio = ferramenta._capturar_snapshot_fio(canvas, 0)
+
+        inicio = QPointF(2.0, 1.0)
+        fim, angulo = ferramenta._ponto_final_com_config(canvas, inicio, QPointF(8.0, -2.0))
+        ferramenta._aplicar(canvas, 0, inicio, fim, angulo)
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["fio_origem"], (2.0, 1.0))
+        self.assertAlmostEqual(molde["fio_fim"][0], 8.70820393249937)
+        self.assertAlmostEqual(molde["fio_fim"][1], 1.0)
+        self.assertEqual(molde["fio_angulo"], 0.0)
+        self.assertAlmostEqual(molde["pontos"][1][0], 9.602631123499285)
+        self.assertAlmostEqual(molde["pontos"][1][1], 3.6832815729997472)
 
     def test_realce_usa_apenas_pontos_principais_do_molde(self):
         ferramenta = FerramentaSentidoFio()
