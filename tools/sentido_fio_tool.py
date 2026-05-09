@@ -53,8 +53,8 @@ class SentidoFioDialog(QDialog):
 
         linha_angulo = QHBoxLayout()
         linha_angulo.setContentsMargins(0, 0, 0, 0)
-        self.chk_usar_angulo = QCheckBox("Usar angulo")
-        self.chk_usar_angulo.setChecked(True)
+        self.chk_usar_angulo = QCheckBox("Travar angulo")
+        self.chk_usar_angulo.setChecked(False)
         self.sp_angulo = QDoubleSpinBox()
         self.sp_angulo.setRange(-3600.0, 3600.0)
         self.sp_angulo.setDecimals(2)
@@ -234,26 +234,45 @@ class Ferramenta(FerramentaBase):
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _ponto_final_com_config(self, canvas, inicio: QPointF, pos_mouse: QPointF) -> tuple[QPointF, float]:
+        """
+        Calcula o ponto final e o angulo do sentido do fio.
+
+        Correção importante:
+        - No modo livre, o angulo NÃO deve ser arredondado automaticamente para
+          0, 30, 45, 90 etc. Isso era o que fazia a ferramenta parecer travada.
+        - A caixa "Travar angulo" só deve mandar quando estiver marcada.
+        """
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
-        if modo == "Horizontal":
-            pos_mouse = QPointF(pos_mouse.x(), inicio.y())
-        elif modo == "Vertical":
-            pos_mouse = QPointF(inicio.x(), pos_mouse.y())
 
         dx = pos_mouse.x() - inicio.x()
         dy = pos_mouse.y() - inicio.y()
         comp = hypot(dx, dy)
+
         if comp <= 1e-9:
             return QPointF(pos_mouse), 0.0
-        angulo = degrees(atan2(dy, dx))
-        angulo = self._angulo_principal_mais_proximo(angulo)
+
+        if modo == "Horizontal":
+            angulo = 0.0 if dx >= 0 else 180.0
+            fim = QPointF(inicio.x() + dx, inicio.y())
+            return fim, angulo
+
+        if modo == "Vertical":
+            angulo = 90.0 if dy >= 0 else 270.0
+            fim = QPointF(inicio.x(), inicio.y() + dy)
+            return fim, angulo
+
         if dialog.chk_usar_angulo.isChecked():
-            angulo += float(dialog.sp_angulo.value())
-            angulo = self._angulo_principal_mais_proximo(angulo)
-        angulo = self._normalizar_angulo(angulo)
-        ang = radians(angulo)
-        return QPointF(inicio.x() + (cos(ang) * comp), inicio.y() + (sin(ang) * comp)), angulo
+            angulo = self._normalizar_angulo(float(dialog.sp_angulo.value()))
+            ang = radians(angulo)
+            fim = QPointF(
+                inicio.x() + (cos(ang) * comp),
+                inicio.y() + (sin(ang) * comp),
+            )
+            return fim, angulo
+
+        angulo = self._normalizar_angulo(degrees(atan2(dy, dx)))
+        return QPointF(pos_mouse), angulo
 
     def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo_novo: float) -> None:
         if not (0 <= idx < len(canvas.cena.elementos)):
