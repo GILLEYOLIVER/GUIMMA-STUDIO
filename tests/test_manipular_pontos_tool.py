@@ -108,7 +108,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 12.0, "y": 2.0})
         self.assertEqual(canvas.historico, 1)
 
-    def test_arrasta_ponto_auxiliar_do_molde_sem_mover_cantos(self):
+    def test_arrasta_ponto_auxiliar_do_molde_move_cantos_vizinhos(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()
         ferramenta.on_activate(canvas)
@@ -121,8 +121,12 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_auxiliares"][0], (5.0, 2.0))
         self.assertEqual(molde["pontos"][1], (5.0, 2.0))
         self.assertEqual(molde["pontos_auxiliares"][0], {"x": 5.0, "y": 2.0})
-        self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
-        self.assertEqual(molde["controle_cantos"][1], (10.0, 0.0))
+        self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
+        self.assertEqual(molde["controle_cantos"][1], (10.0, 2.0))
+        self.assertEqual(molde["pontos"][0], (0.0, 2.0))
+        self.assertEqual(molde["pontos"][2], (10.0, 2.0))
+        self.assertEqual(molde["pontos_controle_principais"][0], {"x": 0.0, "y": 2.0})
+        self.assertEqual(molde["pontos_controle_principais"][1], {"x": 10.0, "y": 2.0})
         self.assertEqual(canvas.historico, 1)
 
 

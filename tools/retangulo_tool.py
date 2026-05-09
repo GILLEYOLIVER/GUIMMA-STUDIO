@@ -64,7 +64,7 @@ class Ferramenta(FerramentaBase):
         self._desenhar_preview(canvas, painter)
 
     def _desenhar_preview(self, canvas, painter):
-        if not self._inicio or not self._preview:
+        if self._inicio is None or self._preview is None:
             return
         p1 = self._inicio
         p3 = self._preview
@@ -116,8 +116,17 @@ class Ferramenta(FerramentaBase):
     def _pontos_auxiliares_segmento(self, inicio: QPointF, fim: QPointF) -> list[QPointF]:
         return [QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)]
 
+    def _pontos_auxiliares_entre_cantos(self, cantos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(cantos) < 2:
+            return []
+        auxiliares: list[tuple[float, float]] = []
+        for i, atual in enumerate(cantos):
+            proximo = cantos[(i + 1) % len(cantos)]
+            auxiliares.append(((float(atual[0]) + float(proximo[0])) / 2.0, (float(atual[1]) + float(proximo[1])) / 2.0))
+        return auxiliares
+
     def _finalizar(self, canvas):
-        if not self._inicio or not self._preview:
+        if self._inicio is None or self._preview is None:
             return
         p1 = self._inicio
         p3 = self._preview
@@ -145,12 +154,7 @@ class Ferramenta(FerramentaBase):
             largura = max_x - min_x
             margem = largura * 0.20
             controle_cantos = [(float(x), float(y)) for x, y in payload["controle_cantos"]]
-            helpers_raw = payload.get("pontos_auxiliares", [])
-            controle_auxiliares = [
-                (float(item.get("x", 0.0)), float(item.get("y", 0.0)))
-                for item in helpers_raw
-                if isinstance(item, dict)
-            ]
+            controle_auxiliares = self._pontos_auxiliares_entre_cantos(controle_cantos)
             canvas.cena.elementos.append(
                 {
                     "tipo": "polyline",
