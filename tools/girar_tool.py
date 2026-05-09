@@ -396,7 +396,15 @@ class Ferramenta(FerramentaBase):
             dx, dy = x - pivo.x(), y - pivo.y()
             return (pivo.x() + (dx * ca) - (dy * sa), pivo.y() + (dx * sa) + (dy * ca))
 
-        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro", "distancias_no_perimetro", "marcacoes_perimetro"):
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_referencia",
+            "marcacoes_no_perimetro",
+            "distancias_no_perimetro",
+            "marcacoes_perimetro",
+        ):
             if isinstance(el.get(chave), list):
                 el[chave] = [rot(p) if self._eh_ponto(p) else p for p in el.get(chave, [])]
         for chave in ("fio_origem", "fio_fim", "p0", "p1", "p2"):
@@ -446,7 +454,13 @@ class Ferramenta(FerramentaBase):
 
     def _todos_pontos(self, el: dict) -> list[tuple[float, float]]:
         pts: list[tuple[float, float]] = []
-        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro"):
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "controle_auxiliares",
+            "pontos_controle_referencia",
+            "marcacoes_no_perimetro",
+        ):
             for p in el.get(chave, []) if isinstance(el.get(chave), list) else []:
                 if self._eh_ponto(p):
                     pts.append((float(p[0]), float(p[1])))
