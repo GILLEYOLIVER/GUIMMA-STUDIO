@@ -20,6 +20,8 @@ from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
 class VisualizacaoCanvas(QWidget):
+    LIMITE_DESFAZER = 250
+
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
     snap_changed = Signal(bool)
@@ -37,7 +39,7 @@ class VisualizacaoCanvas(QWidget):
         self._marcacoes_temporarias: list[QPointF] = []
         self._ponto_coordenada_aplicada: QPointF | None = None
         self._cursor_tela = QPointF(0.0, 0.0)
-        self._historico_elementos: list[list[dict]] = [[]]
+        self._historico_elementos: list[list[dict]] = [self._elementos_serializaveis()]
         self._indice_historico = 0
         self._buffer_copia: dict | None = None
         self._offset_colagem = 0
@@ -357,6 +359,7 @@ class VisualizacaoCanvas(QWidget):
         if self._pontos_reta:
             self._desfazer_ponto()
             return
+        self._garantir_estado_atual_no_historico()
         if self._indice_historico == 0:
             return
         self._indice_historico -= 1
@@ -364,6 +367,7 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def refazer_acao(self):
+        self._garantir_estado_atual_no_historico()
         if self._indice_historico >= len(self._historico_elementos) - 1:
             return
         self._indice_historico += 1
@@ -576,8 +580,28 @@ class VisualizacaoCanvas(QWidget):
         snapshot = self._elementos_serializaveis()
         if self._indice_historico < len(self._historico_elementos) - 1:
             self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
+        if self._historico_elementos and self._historico_elementos[-1] == snapshot:
+            self._indice_historico = len(self._historico_elementos) - 1
+            return
         self._historico_elementos.append(snapshot)
-        if len(self._historico_elementos) > 200:
+        if len(self._historico_elementos) > self.LIMITE_DESFAZER + 1:
+            self._historico_elementos.pop(0)
+        self._indice_historico = len(self._historico_elementos) - 1
+
+    def _garantir_estado_atual_no_historico(self) -> None:
+        snapshot = self._elementos_serializaveis()
+        if not self._historico_elementos:
+            self._historico_elementos = [snapshot]
+            self._indice_historico = 0
+            return
+        if not (0 <= self._indice_historico < len(self._historico_elementos)):
+            self._indice_historico = max(0, min(self._indice_historico, len(self._historico_elementos) - 1))
+        if self._historico_elementos[self._indice_historico] == snapshot:
+            return
+        if self._indice_historico < len(self._historico_elementos) - 1:
+            self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
+        self._historico_elementos.append(snapshot)
+        if len(self._historico_elementos) > self.LIMITE_DESFAZER + 1:
             self._historico_elementos.pop(0)
         self._indice_historico = len(self._historico_elementos) - 1
 
