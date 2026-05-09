@@ -546,16 +546,36 @@ class Ferramenta(FerramentaBase):
         origem_aux = self._ponto_qt(aux[controle_idx])
         if origem_aux is None:
             return
+        dx = destino.x() - origem_aux.x()
+        dy = destino.y() - origem_aux.y()
+        if abs(dx) <= 1e-9 and abs(dy) <= 1e-9:
+            return
         aux[controle_idx] = (destino.x(), destino.y())
         el["controle_auxiliares"] = aux
         self._atualizar_espelho_controle(el, "pontos_auxiliares", controle_idx, destino)
+
+        cantos = list(el.get("controle_cantos", []))
+        a_idx, b_idx = self._segmento_controle_mais_proximo(cantos, origem_aux)
+        pontos_para_mover: list[tuple[QPointF, QPointF]] = [(origem_aux, destino)]
+        if a_idx is not None and b_idx is not None:
+            for canto_idx in (a_idx, b_idx):
+                canto = self._ponto_qt(cantos[canto_idx])
+                if canto is None:
+                    continue
+                novo_canto = QPointF(canto.x() + dx, canto.y() + dy)
+                cantos[canto_idx] = (novo_canto.x(), novo_canto.y())
+                self._atualizar_espelho_controle(el, "pontos_controle_principais", canto_idx, novo_canto)
+                pontos_para_mover.append((canto, novo_canto))
+            el["controle_cantos"] = cantos
 
         tol = 10.0 / max(canvas.zoom, 0.001)
         pontos = list(el.get("pontos", []))
         for p_idx, (x, y) in enumerate(pontos):
             pt = QPointF(float(x), float(y))
-            if canvas._dist(pt, origem_aux) <= tol:
-                pontos[p_idx] = (destino.x(), destino.y())
+            for origem, novo in pontos_para_mover:
+                if canvas._dist(pt, origem) <= tol:
+                    pontos[p_idx] = (novo.x(), novo.y())
+                    break
         if len(pontos) >= 2:
             p0 = QPointF(float(pontos[0][0]), float(pontos[0][1]))
             pn = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
