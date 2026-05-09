@@ -154,6 +154,18 @@ class SentidoFioToolTestCase(unittest.TestCase):
         self.assertEqual(molde["fio_fim"], (2.0, 7.0))
         self.assertEqual(molde["fio_angulo"], 90.0)
 
+    def test_realce_usa_apenas_pontos_principais_do_molde(self):
+        ferramenta = FerramentaSentidoFio()
+        molde = {
+            "pontos": [(float(i), float(i % 3)) for i in range(20)],
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+            "controle_auxiliares": [(float(i), 2.0) for i in range(20)],
+        }
+
+        pontos = ferramenta._pontos_realce_principais_molde(molde)
+
+        self.assertEqual([(p.x(), p.y()) for p in pontos], [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)])
+
 
 if __name__ == "__main__":
     unittest.main()

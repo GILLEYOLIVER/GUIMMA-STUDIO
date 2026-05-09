@@ -403,7 +403,7 @@ class Ferramenta(FerramentaBase):
         for ponto in pontos[1:]:
             path.lineTo(canvas._cena_para_tela(ponto))
         painter.drawPath(path)
-        for ponto in self._pontos_snap_molde(el):
+        for ponto in self._pontos_realce_principais_molde(el):
             tela = canvas._cena_para_tela(ponto)
             painter.drawRect(QRectF(tela.x() - 3.0, tela.y() - 3.0, 6.0, 6.0))
         painter.restore()
@@ -486,6 +486,25 @@ class Ferramenta(FerramentaBase):
             if self._eh_ponto(p):
                 pontos.append(QPointF(float(p[0]), float(p[1])))
         return pontos
+
+    def _pontos_realce_principais_molde(self, el: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+
+        for chave in ("controle_cantos", "pontos_controle_principais"):
+            if not isinstance(el.get(chave), list):
+                continue
+            for p in el.get(chave, []):
+                ponto = self._ponto_qt(p)
+                if ponto is not None:
+                    pontos.append(ponto)
+
+        if not pontos:
+            base = [self._ponto_qt(p) for p in el.get("pontos", [])]
+            pontos = [p for p in base if p is not None]
+            if len(pontos) > 8:
+                pontos = [pontos[0], pontos[-1]]
+
+        return self._remover_pontos_duplicados(pontos)
 
     def _segmentos_snap_molde(self, el: dict, incluir_fio: bool = True) -> list[tuple[QPointF, QPointF]]:
         segmentos: list[tuple[QPointF, QPointF]] = []
@@ -584,6 +603,28 @@ class Ferramenta(FerramentaBase):
             return isfinite(float(p[0])) and isfinite(float(p[1]))
         except Exception:
             return False
+
+    def _ponto_qt(self, p) -> QPointF | None:
+        if isinstance(p, dict):
+            try:
+                return QPointF(float(p["x"]), float(p["y"]))
+            except Exception:
+                return None
+        if self._eh_ponto(p):
+            return QPointF(float(p[0]), float(p[1]))
+        return None
+
+    @staticmethod
+    def _remover_pontos_duplicados(pontos: list[QPointF]) -> list[QPointF]:
+        unicos: list[QPointF] = []
+        vistos: set[tuple[float, float]] = set()
+        for ponto in pontos:
+            chave = (round(float(ponto.x()), 6), round(float(ponto.y()), 6))
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            unicos.append(ponto)
+        return unicos
 
     @staticmethod
     def _dist(a: QPointF, b: QPointF) -> float:
