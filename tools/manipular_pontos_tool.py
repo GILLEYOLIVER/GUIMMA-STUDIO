@@ -30,6 +30,7 @@ class Ferramenta(FerramentaBase):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._angulo_info: tuple[QPointF, QPointF, QPointF, float] | None = None
         self._ponto_selecionado: tuple[int, int] | None = None
+        self._controles_selecionados: set[tuple[int, str, int]] = set()
         cls = type(self)
         self._dlg_passo: QDialog | None = cls._dlg_global
         self._edt_dx: QLineEdit | None = cls._edt_dx_global
@@ -47,8 +48,9 @@ class Ferramenta(FerramentaBase):
         self._guia_ponto_poly = None
         self._angulo_info = None
         self._ponto_selecionado = None
+        self._controles_selecionados.clear()
         self._abrir_caixa_passo(canvas)
-        self.set_status(f"{self.nome}: arraste pontos principais ou auxiliares do molde, ou use DX/DY para mover com precisão.")
+        self.set_status(f"{self.nome}: arraste um ponto, use Shift para selecionar vários, ou use DX/DY para mover com precisão.")
 
     def on_deactivate(self, canvas):
         if self._dlg_passo:
@@ -124,23 +126,51 @@ class Ferramenta(FerramentaBase):
     def _modo_discreto(self) -> bool:
         return bool(self._chk_discreto.isChecked()) if self._chk_discreto else False
 
+    def _shift_pressionado(self, event) -> bool:
+        try:
+            return bool(event.modifiers() & Qt.ShiftModifier)
+        except Exception:
+            return False
+
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
+        shift = self._shift_pressionado(event)
 
         controle = self._controle_molde_em_ponto(canvas, pos)
         if controle is not None:
+            if shift:
+                if controle in self._controles_selecionados:
+                    self._controles_selecionados.remove(controle)
+                else:
+                    self._controles_selecionados.add(controle)
+                self._hover_controle_molde = controle
+                self._hover_molde_idx = controle[0]
+                self._ponto_selecionado = None
+                event.accept()
+                canvas.update()
+                return True
+
+            if controle not in self._controles_selecionados:
+                self._controles_selecionados = {controle}
             self._arrastando_controle_molde = controle
             self._hover_controle_molde = controle
             self._hover_molde_idx = controle[0]
             self._ponto_selecionado = None
+            dx, dy = self._ler_delta_configurado()
+            if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                self._mover_controles_por_delta(canvas, self._alvos_controle_para_arraste(controle), dx, -dy)
+                canvas._registrar_historico()
+                self._arrastando_controle_molde = None
             event.accept()
             canvas.update()
             return True
 
         ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
         if ponto_poly is None:
+            if not shift:
+                self._controles_selecionados.clear()
             return False
         idx, p_idx = ponto_poly
         self._arrastando_ponto_poly = (idx, p_idx)
@@ -310,7 +340,12 @@ class Ferramenta(FerramentaBase):
         pos = canvas._ponto_com_snap(event.position())
         if self._arrastando_controle_molde is not None:
             idx, tipo, controle_idx = self._arrastando_controle_molde
-            self._arrastar_controle_molde(canvas, idx, tipo, controle_idx, pos)
+            atual = self._ponto_controle_molde(canvas, idx, tipo, controle_idx)
+            if atual is not None:
+                destino = self._normalizar_destino(pos)
+                dx = destino.x() - atual.x()
+                dy = destino.y() - atual.y()
+                self._mover_controles_por_delta(canvas, self._alvos_controle_para_arraste((idx, tipo, controle_idx)), dx, dy)
             self._hover_controle_molde = self._arrastando_controle_molde
             self._hover_molde_idx = idx
             canvas.update()
@@ -505,12 +540,44 @@ class Ferramenta(FerramentaBase):
             if atualizados:
                 el[chave] = atualizados
 
+    def _alvos_controle_para_arraste(self, controle: tuple[int, str, int]) -> set[tuple[int, str, int]]:
+        if controle in self._controles_selecionados:
+            return set(self._controles_selecionados)
+        return {controle}
+
+    def _normalizar_destino(self, destino: QPointF) -> QPointF:
+        if self._modo_discreto():
+            return QPointF(round(destino.x(), 2), round(destino.y(), 2))
+        return QPointF(destino)
+
+    def _ponto_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> QPointF | None:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return None
+        el = canvas.cena.elementos[idx]
+        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+        controles = el.get(chave, [])
+        if not (0 <= controle_idx < len(controles)):
+            return None
+        return self._ponto_qt(controles[controle_idx])
+
+    def _mover_controles_por_delta(self, canvas, controles: set[tuple[int, str, int]], dx: float, dy: float) -> None:
+        if abs(dx) <= 1e-9 and abs(dy) <= 1e-9:
+            return
+        for idx, tipo, controle_idx in sorted(controles):
+            atual = self._ponto_controle_molde(canvas, idx, tipo, controle_idx)
+            if atual is None:
+                continue
+            destino = QPointF(atual.x() + dx, atual.y() + dy)
+            destino = self._normalizar_destino(destino)
+            self._arrastar_controle_molde(canvas, idx, tipo, controle_idx, destino)
+
     def _arrastar_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int, destino: QPointF):
         if not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
         if el.get("tipo") != "polyline":
             return
+        destino = self._normalizar_destino(destino)
         if tipo == "canto":
             self._arrastar_canto_molde(canvas, el, controle_idx, destino)
         else:
@@ -525,6 +592,10 @@ class Ferramenta(FerramentaBase):
         anterior = self._ponto_qt(cantos[controle_idx])
         if anterior is None:
             return
+        dx = destino.x() - anterior.x()
+        dy = destino.y() - anterior.y()
+        pontos_originais = list(el.get("pontos", []))
+        ponto_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, anterior)
         cantos[controle_idx] = (destino.x(), destino.y())
         el["controle_cantos"] = cantos
         self._atualizar_espelho_controle(el, "pontos_controle_principais", controle_idx, destino)
@@ -540,6 +611,26 @@ class Ferramenta(FerramentaBase):
             if canvas._dist(p0, pn) <= tol:
                 pontos[-1] = pontos[0]
         el["pontos"] = pontos
+        if self._modo_discreto() and ponto_idx is not None:
+            self._redistribuir_molde_por_deslocamentos(canvas, el, pontos_originais, {ponto_idx: (dx, dy)})
+
+    def _indice_ponto_mais_proximo(self, canvas, pontos: list, alvo: QPointF) -> int | None:
+        if not pontos:
+            return None
+        tol = 10.0 / max(canvas.zoom, 0.001)
+        melhor_idx: int | None = None
+        melhor_dist = float("inf")
+        for idx, item in enumerate(pontos):
+            pt = self._ponto_qt(item)
+            if pt is None:
+                continue
+            dist = canvas._dist(pt, alvo)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_idx = idx
+        if melhor_idx is None or melhor_dist > tol:
+            return None
+        return melhor_idx
 
     def _arrastar_auxiliar_molde(self, canvas, el: dict, controle_idx: int, destino: QPointF):
         aux = list(el.get("controle_auxiliares", []))
@@ -560,11 +651,16 @@ class Ferramenta(FerramentaBase):
         cantos = list(el.get("controle_cantos", []))
         a_idx, b_idx = self._segmento_controle_mais_proximo(cantos, origem_aux)
         pontos_para_mover: list[tuple[QPointF, QPointF]] = [(origem_aux, destino)]
+        pontos_originais = list(el.get("pontos", []))
+        indices_principais_movidos: list[int] = []
         if a_idx is not None and b_idx is not None:
             for canto_idx in (a_idx, b_idx):
                 canto = self._ponto_qt(cantos[canto_idx])
                 if canto is None:
                     continue
+                ponto_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, canto)
+                if ponto_idx is not None:
+                    indices_principais_movidos.append(ponto_idx)
                 novo_canto = QPointF(canto.x() + dx, canto.y() + dy)
                 cantos[canto_idx] = (novo_canto.x(), novo_canto.y())
                 self._atualizar_espelho_controle(el, "pontos_controle_principais", canto_idx, novo_canto)
@@ -585,6 +681,76 @@ class Ferramenta(FerramentaBase):
             if canvas._dist(p0, pn) <= tol:
                 pontos[-1] = pontos[0]
         el["pontos"] = pontos
+        if self._modo_discreto():
+            deslocamentos = {ponto_idx: (dx, dy) for ponto_idx in indices_principais_movidos}
+            self._redistribuir_molde_por_deslocamentos(canvas, el, pontos_originais, deslocamentos)
+
+    def _redistribuir_molde_por_deslocamentos(
+        self,
+        canvas,
+        el: dict,
+        pontos_base: list,
+        deslocamentos_principais: dict[int, tuple[float, float]],
+    ) -> bool:
+        if len(pontos_base) < 4 or not deslocamentos_principais:
+            return False
+        fechado = len(pontos_base) >= 2 and canvas._dist(
+            QPointF(float(pontos_base[0][0]), float(pontos_base[0][1])),
+            QPointF(float(pontos_base[-1][0]), float(pontos_base[-1][1])),
+        ) <= 1e-6
+        n = len(pontos_base) - 1 if fechado else len(pontos_base)
+        if n < 2:
+            return False
+
+        principais = sorted(i for i in self._indices_pontos_principais_molde(canvas, el) if 0 <= i < n)
+        if len(principais) < 2:
+            return False
+        deslocamentos = {idx: disp for idx, disp in deslocamentos_principais.items() if idx in principais}
+        if not deslocamentos:
+            return False
+
+        novos = list(pontos_base)
+        for idx, (dx, dy) in deslocamentos.items():
+            x, y = pontos_base[idx]
+            nx = float(x) + dx
+            ny = float(y) + dy
+            if self._modo_discreto():
+                nx = round(nx, 2)
+                ny = round(ny, 2)
+            novos[idx] = (nx, ny)
+
+        pares: list[tuple[int, int]] = []
+        if fechado:
+            for i, a in enumerate(principais):
+                pares.append((a, principais[(i + 1) % len(principais)]))
+        else:
+            pares.extend((a, b) for a, b in zip(principais, principais[1:]))
+
+        for a, b in pares:
+            indices = self._indices_intervalo(a, b, n, fechado)
+            if len(indices) <= 2:
+                continue
+            dxa, dya = deslocamentos.get(a, (0.0, 0.0))
+            dxb, dyb = deslocamentos.get(b, (0.0, 0.0))
+            if abs(dxa) <= 1e-9 and abs(dya) <= 1e-9 and abs(dxb) <= 1e-9 and abs(dyb) <= 1e-9:
+                continue
+            denom = max(1, len(indices) - 1)
+            for pos, idx_local in enumerate(indices[1:-1], start=1):
+                t = max(0.0, min(1.0, pos / float(denom)))
+                ddx = (dxa * (1.0 - t)) + (dxb * t)
+                ddy = (dya * (1.0 - t)) + (dyb * t)
+                x, y = pontos_base[idx_local]
+                nx = float(x) + ddx
+                ny = float(y) + ddy
+                if self._modo_discreto():
+                    nx = round(nx, 2)
+                    ny = round(ny, 2)
+                novos[idx_local] = (nx, ny)
+
+        if fechado and len(novos) >= 2:
+            novos[-1] = novos[0]
+        el["pontos"] = novos
+        return True
 
     def _recravar_auxiliares_no_perimetro(self, el: dict) -> None:
         cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", [])) if p is not None]
@@ -748,6 +914,22 @@ class Ferramenta(FerramentaBase):
                     painter.setPen(QPen(QColor("#2da8ff"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 8), int(pt.y() - 8), 16, 16)
+
+        for idx, tipo, c_idx in self._controles_selecionados:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+            controles = el.get(chave, [])
+            if not (0 <= c_idx < len(controles)):
+                continue
+            controle = self._ponto_qt(controles[c_idx])
+            if controle is None:
+                continue
+            pt = canvas._cena_para_tela(controle)
+            painter.setPen(QPen(QColor("#66d9ff"), 2.0))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(int(pt.x() - 11), int(pt.y() - 11), 22, 22)
 
     def _atualizar_info_angulo(self, canvas, idx: int, p_idx: int, atual: QPointF):
         self._angulo_info = None

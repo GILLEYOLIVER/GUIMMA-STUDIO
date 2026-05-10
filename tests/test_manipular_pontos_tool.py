@@ -23,9 +23,10 @@ else:
 
 
 class _FakeEvent:
-    def __init__(self, button=Qt.LeftButton, pos=None):
+    def __init__(self, button=Qt.LeftButton, pos=None, modifiers=Qt.NoModifier):
         self._button = button
         self._pos = pos or QPointF(0.0, 0.0)
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self):
@@ -33,6 +34,9 @@ class _FakeEvent:
 
     def position(self):
         return self._pos
+
+    def modifiers(self):
+        return self._modifiers
 
     def accept(self):
         self.accepted = True
@@ -158,6 +162,110 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_controle_principais"][0], {"x": 0.0, "y": 2.0})
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 10.0, "y": 2.0})
         self.assertEqual(canvas.historico, 1)
+
+    def test_shift_seleciona_varios_pontos_e_arrasta_juntos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0), modifiers=Qt.ShiftModifier)))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0), modifiers=Qt.ShiftModifier)))
+        self.assertEqual(ferramenta._controles_selecionados, {(0, "canto", 0), (0, "canto", 1)})
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["controle_cantos"][0], (2.0, 1.0))
+        self.assertEqual(molde["controle_cantos"][1], (12.0, 1.0))
+        self.assertEqual(molde["pontos_controle_principais"][0], {"x": 2.0, "y": 1.0})
+        self.assertEqual(molde["pontos_controle_principais"][1], {"x": 12.0, "y": 1.0})
+        self.assertEqual(canvas.historico, 1)
+
+    def test_modo_discreto_reajusta_pontos_curvos_ao_arrastar_canto(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [
+                (0.0, 0.0),
+                (5.0, 2.0),
+                (10.0, 0.0),
+                (10.0, 8.0),
+                (0.0, 0.0),
+            ],
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)],
+            "controle_auxiliares": [(5.0, 2.0), (10.0, 4.0), (5.0, 4.0)],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 8.0},
+            ],
+            "pontos_auxiliares": [
+                {"x": 5.0, "y": 2.0},
+                {"x": 10.0, "y": 4.0},
+                {"x": 5.0, "y": 4.0},
+            ],
+            "fio_origem": (2.0, 1.0),
+            "fio_fim": (8.0, 1.0),
+        }
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+        ferramenta._chk_discreto.setChecked(True)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 2.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["pontos"][0], (2.0, 2.0))
+        self.assertEqual(molde["pontos"][1], (6.0, 3.0))
+        self.assertEqual(molde["pontos"][2], (10.0, 0.0))
+        self.assertEqual(molde["controle_cantos"][0], (2.0, 2.0))
+        self.assertEqual(molde["pontos_controle_principais"][0], {"x": 2.0, "y": 2.0})
+
+    def test_modo_discreto_reajusta_curva_quando_auxiliar_move_trecho(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [
+                (0.0, 0.0),
+                (5.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 8.0),
+                (0.0, 0.0),
+            ],
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)],
+            "controle_auxiliares": [(5.0, 0.0), (10.0, 4.0), (5.0, 4.0)],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 8.0},
+            ],
+            "pontos_auxiliares": [
+                {"x": 5.0, "y": 0.0},
+                {"x": 10.0, "y": 4.0},
+                {"x": 5.0, "y": 4.0},
+            ],
+            "fio_origem": (2.0, 1.0),
+            "fio_fim": (8.0, 1.0),
+        }
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+        ferramenta._chk_discreto.setChecked(True)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["pontos"][0], (0.0, 2.0))
+        self.assertEqual(molde["pontos"][1], (5.0, 2.0))
+        self.assertEqual(molde["pontos"][2], (10.0, 2.0))
+        self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
+        self.assertEqual(molde["controle_cantos"][1], (10.0, 2.0))
 
 
 if __name__ == "__main__":
