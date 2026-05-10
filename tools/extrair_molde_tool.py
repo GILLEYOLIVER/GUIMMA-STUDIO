@@ -1893,11 +1893,13 @@ class Ferramenta(FerramentaBase):
         return indices
 
     def _calcular_auxiliares_no_contorno(self, base: list[tuple[float, float]], indices_cantos: list[int]) -> list[tuple[float, float]]:
-        if len(indices_cantos) < 2:
-            return []
         n = len(base)
-        cantos_set = set(indices_cantos)
+        indices_ordenados = sorted({int(i) for i in indices_cantos if 0 <= int(i) < n})
+        if len(indices_ordenados) < 2:
+            return []
+        cantos_set = set(indices_ordenados)
         aux: list[tuple[float, float]] = []
+        aux_indices: set[int] = set()
         perimetro = 0.0
         for i in range(n):
             perimetro += self._dist_tuple(base[i], base[(i + 1) % n])
@@ -1915,8 +1917,36 @@ class Ferramenta(FerramentaBase):
             if ultimo_idx is not None and self._dist_tuple(base[ultimo_idx], base[i]) < dist_min:
                 continue
             aux.append((float(base[i][0]), float(base[i][1])))
+            aux_indices.add(i)
             ultimo_idx = i
-        return aux
+
+        for pos, inicio in enumerate(indices_ordenados):
+            fim = indices_ordenados[(pos + 1) % len(indices_ordenados)]
+            internos = self._indices_internos_intervalo_contorno(inicio, fim, n)
+            if any(idx in aux_indices for idx in internos):
+                continue
+            if self._dist_tuple(base[inicio], base[fim]) <= 1e-6:
+                continue
+            ax, ay = base[inicio]
+            bx, by = base[fim]
+            aux.append(((float(ax) + float(bx)) / 2.0, (float(ay) + float(by)) / 2.0))
+
+        return self._deduplicar_pontos(aux, tol=1e-4)
+
+    def _indices_internos_intervalo_contorno(self, inicio: int, fim: int, total: int) -> list[int]:
+        if total <= 0:
+            return []
+        indices: list[int] = []
+        atual = int(inicio) % total
+        destino = int(fim) % total
+        while True:
+            atual = (atual + 1) % total
+            if atual == destino:
+                break
+            indices.append(atual)
+            if len(indices) >= total:
+                break
+        return indices
 
     def _dist_tuple(self, a: tuple[float, float], b: tuple[float, float]) -> float:
         return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
