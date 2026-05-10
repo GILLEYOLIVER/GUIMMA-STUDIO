@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 if find_spec("PySide6") is None:
     FerramentaManipularPontos = None
+    FerramentaMoverPonto = None
     QApplication = None
     QPointF = None
     Qt = None
@@ -18,6 +19,7 @@ else:
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
+    from tools.mover_ponto_tool import Ferramenta as FerramentaMoverPonto
 
 
 class _FakeEvent:
@@ -104,6 +106,20 @@ class ManipularPontosToolTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
+
+    def test_manipular_pontos_e_mover_ponto_tem_caixas_separadas(self):
+        canvas = _FakeCanvas()
+        manipular = FerramentaManipularPontos()
+        mover = FerramentaMoverPonto()
+
+        manipular.on_activate(canvas)
+        mover.on_activate(canvas)
+
+        self.assertIsNot(manipular._dlg_passo, mover._dlg_passo)
+        self.assertEqual(manipular._dlg_passo.windowTitle(), "Manipular Pontos")
+        self.assertEqual(manipular._dlg_passo.objectName(), "guimma_manipular_pontos_dialog")
+        self.assertEqual(mover._dlg_passo.windowTitle(), "Mover Ponto")
+        self.assertEqual(mover._dlg_passo.objectName(), "guimma_mover_ponto_dialog")
 
     def test_arrasta_canto_principal_do_molde(self):
         canvas = _FakeCanvas()
