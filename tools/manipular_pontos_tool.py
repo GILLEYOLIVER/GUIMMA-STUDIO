@@ -30,11 +30,12 @@ class Ferramenta(FerramentaBase):
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._angulo_info: tuple[QPointF, QPointF, QPointF, float] | None = None
         self._ponto_selecionado: tuple[int, int] | None = None
-        self._dlg_passo: QDialog | None = Ferramenta._dlg_global
-        self._edt_dx: QLineEdit | None = Ferramenta._edt_dx_global
-        self._edt_dy: QLineEdit | None = Ferramenta._edt_dy_global
-        self._cmb_n_pontos: QComboBox | None = Ferramenta._cmb_n_pontos_global
-        self._chk_discreto: QCheckBox | None = Ferramenta._chk_discreto_global
+        cls = type(self)
+        self._dlg_passo: QDialog | None = cls._dlg_global
+        self._edt_dx: QLineEdit | None = cls._edt_dx_global
+        self._edt_dy: QLineEdit | None = cls._edt_dy_global
+        self._cmb_n_pontos: QComboBox | None = cls._cmb_n_pontos_global
+        self._chk_discreto: QCheckBox | None = cls._chk_discreto_global
 
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
@@ -47,7 +48,7 @@ class Ferramenta(FerramentaBase):
         self._angulo_info = None
         self._ponto_selecionado = None
         self._abrir_caixa_passo(canvas)
-        self.set_status("Mover ponto: ajuste DX/DY, escolha 1 ponto ou N pontos e clique no vértice.")
+        self.set_status(f"{self.nome}: arraste pontos principais ou auxiliares do molde, ou use DX/DY para mover com precisão.")
 
     def on_deactivate(self, canvas):
         if self._dlg_passo:
@@ -57,37 +58,38 @@ class Ferramenta(FerramentaBase):
         self._reposicionar_caixa_passo(canvas)
 
     def _abrir_caixa_passo(self, canvas):
-        if Ferramenta._dlg_global is not None:
+        cls = type(self)
+        if cls._dlg_global is not None:
             try:
-                Ferramenta._dlg_global.isVisible()
+                cls._dlg_global.isVisible()
             except RuntimeError:
-                Ferramenta._dlg_global = None
-                Ferramenta._edt_dx_global = None
-                Ferramenta._edt_dy_global = None
-                Ferramenta._cmb_n_pontos_global = None
-                Ferramenta._chk_discreto_global = None
-        if Ferramenta._dlg_global is None:
-            Ferramenta._dlg_global = QDialog(canvas)
-            Ferramenta._dlg_global.setObjectName("guimma_mover_ponto_dialog")
-            Ferramenta._dlg_global.setWindowTitle("Mover ponto")
-            Ferramenta._dlg_global.setWindowFlags(Qt.Tool)
-            lay = QFormLayout(Ferramenta._dlg_global)
-            Ferramenta._edt_dx_global = QLineEdit("0")
-            Ferramenta._edt_dy_global = QLineEdit("0")
-            Ferramenta._cmb_n_pontos_global = QComboBox()
-            Ferramenta._cmb_n_pontos_global.addItems(["1 ponto", "N pontos"])
-            Ferramenta._chk_discreto_global = QCheckBox("Discreto")
-            lay.addRow("DX (cm)", Ferramenta._edt_dx_global)
-            lay.addRow("DY (cm)", Ferramenta._edt_dy_global)
-            lay.addRow("Nº pontos", Ferramenta._cmb_n_pontos_global)
-            lay.addRow("", Ferramenta._chk_discreto_global)
-            Ferramenta._dlg_global.setFixedWidth(210)
-            instalar_memoria_posicao(Ferramenta._dlg_global, "dialog:manipular_pontos")
-        self._dlg_passo = Ferramenta._dlg_global
-        self._edt_dx = Ferramenta._edt_dx_global
-        self._edt_dy = Ferramenta._edt_dy_global
-        self._cmb_n_pontos = Ferramenta._cmb_n_pontos_global
-        self._chk_discreto = Ferramenta._chk_discreto_global
+                cls._dlg_global = None
+                cls._edt_dx_global = None
+                cls._edt_dy_global = None
+                cls._cmb_n_pontos_global = None
+                cls._chk_discreto_global = None
+        if cls._dlg_global is None:
+            cls._dlg_global = QDialog(canvas)
+            cls._dlg_global.setObjectName(f"guimma_{self.id_ferramenta}_dialog")
+            cls._dlg_global.setWindowTitle(self.nome)
+            cls._dlg_global.setWindowFlags(Qt.Tool)
+            lay = QFormLayout(cls._dlg_global)
+            cls._edt_dx_global = QLineEdit("0")
+            cls._edt_dy_global = QLineEdit("0")
+            cls._cmb_n_pontos_global = QComboBox()
+            cls._cmb_n_pontos_global.addItems(["1 ponto", "N pontos"])
+            cls._chk_discreto_global = QCheckBox("Discreto")
+            lay.addRow("DX (cm)", cls._edt_dx_global)
+            lay.addRow("DY (cm)", cls._edt_dy_global)
+            lay.addRow("Nº pontos", cls._cmb_n_pontos_global)
+            lay.addRow("", cls._chk_discreto_global)
+            cls._dlg_global.setFixedWidth(210)
+            instalar_memoria_posicao(cls._dlg_global, f"dialog:{self.id_ferramenta}")
+        self._dlg_passo = cls._dlg_global
+        self._edt_dx = cls._edt_dx_global
+        self._edt_dy = cls._edt_dy_global
+        self._cmb_n_pontos = cls._cmb_n_pontos_global
+        self._chk_discreto = cls._chk_discreto_global
         if not self._dlg_passo.isVisible():
             self._dlg_passo.show()
         self._reposicionar_caixa_passo(canvas)
@@ -101,7 +103,7 @@ class Ferramenta(FerramentaBase):
                 self._dlg_passo.height(),
                 abaixo_coordenadas=True,
             )
-            restaurar_posicao(self._dlg_passo, "dialog:manipular_pontos", fallback=canvas.mapToGlobal(pos_local))
+            restaurar_posicao(self._dlg_passo, f"dialog:{self.id_ferramenta}", fallback=canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
         try:
