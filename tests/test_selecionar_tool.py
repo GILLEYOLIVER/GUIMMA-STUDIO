@@ -16,9 +16,10 @@ else:
 
 
 class _FakeEvent:
-    def __init__(self, button=Qt.LeftButton, pos=None):
+    def __init__(self, button=Qt.LeftButton, pos=None, modifiers=Qt.NoModifier):
         self._button = button
         self._pos = pos or QPointF(0.0, 0.0)
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self):
@@ -26,6 +27,9 @@ class _FakeEvent:
 
     def position(self):
         return self._pos
+
+    def modifiers(self):
+        return self._modifiers
 
     def accept(self):
         self.accepted = True
@@ -48,6 +52,7 @@ class _FakeCanvas:
             ]
         )
         self._selecionados = set()
+        self._snap_resultado = None
         self.historico = 0
         self.atualizou = False
 
@@ -59,6 +64,9 @@ class _FakeCanvas:
 
     def _indice_molde_em_ponto(self, pos):
         return 0
+
+    def _indices_elementos_em_ponto(self, pos):
+        return [0]
 
     def _registrar_historico(self):
         self.historico += 1
@@ -87,6 +95,35 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 4)
         self.assertTrue(canvas.atualizou)
         self.assertTrue(evento.accepted)
+
+    def test_arrastar_item_ja_selecionado_move_toda_selecao(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "bezier_quadratica",
+                "p0": (20.0, 0.0),
+                "p1": (25.0, 5.0),
+                "p2": (30.0, 0.0),
+            }
+        )
+        canvas._selecionados = {0, 1}
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(1.0, 1.0))))
+        self.assertEqual(canvas._selecionados, {0, 1})
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(4.0, 3.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(4.0, 3.0))))
+
+        molde = canvas.cena.elementos[0]
+        curva = canvas.cena.elementos[1]
+        self.assertEqual(molde["pontos"][0], (3.0, 2.0))
+        self.assertEqual(molde["controle_cantos"][0], (3.0, 2.0))
+        self.assertEqual(molde["fio_origem"], (3.0, 2.0))
+        self.assertEqual(curva["p0"], (23.0, 2.0))
+        self.assertEqual(curva["p1"], (28.0, 7.0))
+        self.assertEqual(curva["p2"], (33.0, 2.0))
+        self.assertEqual(canvas.historico, 1)
 
 
 if __name__ == "__main__":
