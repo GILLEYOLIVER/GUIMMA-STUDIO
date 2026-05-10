@@ -69,7 +69,8 @@ class Ferramenta(FerramentaBase):
                 self._arrastando_selecao = False
                 self._ultimo_ponto_arrasto = None
             else:
-                canvas._selecionados = {selecionado}
+                if selecionado not in canvas._selecionados:
+                    canvas._selecionados = {selecionado}
                 # Inicia arraste já no primeiro clique pressionado sobre o elemento
                 # para evitar exigir um segundo clique para mover.
                 self._arrastando_selecao = True
