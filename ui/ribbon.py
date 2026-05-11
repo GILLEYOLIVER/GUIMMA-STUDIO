@@ -754,14 +754,47 @@ def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:
         for tool_id, tool_data in dados["tools"].items()
     }
 
+    # Ferramenta criada para ajuste automático de textos/fio dos moldes.
+    # Ela é registrada aqui para funcionar mesmo quando o tool_pages_map.json
+    # ainda não foi atualizado no projeto do usuário.
+    tools.setdefault(
+        "ajuste_automatico",
+        ToolDef(
+            tool_id="ajuste_automatico",
+            title="Auto ajuste",
+            module="tools.ajuste_automatico_tool",
+            class_name="Ferramenta",
+            icon="Aa.svg",
+        ),
+    )
+
     tabs: list[TabDef] = []
     for tab in dados["tabs"]:
         groups_data = tab["groups"]
         if tab.get("id") == "inicio":
             groups_data = _normalizar_grupos_inicio(groups_data)
+            groups_data = _garantir_ajuste_automatico_acoes_rapidas(groups_data)
         groups = [GroupDef(title=g["title"], tools=g["tools"]) for g in groups_data]
         tabs.append(TabDef(tab_id=tab["id"], title=tab["title"], groups=groups))
     return tabs, tools
+
+
+def _garantir_ajuste_automatico_acoes_rapidas(groups: list[dict]) -> list[dict]:
+    saida: list[dict] = []
+    inserido = False
+    for g in groups:
+        item = dict(g)
+        titulo = str(item.get("title", ""))
+        ferramentas = list(item.get("tools", []))
+        if titulo == "Ações rápidas":
+            if "ajuste_automatico" not in ferramentas:
+                ferramentas.append("ajuste_automatico")
+            item["tools"] = ferramentas
+            inserido = True
+        saida.append(item)
+    if not inserido:
+        saida.append({"title": "Ações rápidas", "tools": ["ajuste_automatico"]})
+    return saida
 
 
 def _normalizar_grupos_inicio(groups: list[dict]) -> list[dict]:

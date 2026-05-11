@@ -454,6 +454,9 @@ class PropriedadesMoldesDialog(QDialog):
         self.canvas = canvas
         self._mostrar_tab_ferramentas = bool(mostrar_tab_ferramentas)
         self._refs: list[MoldeRef] = []
+        self._itens_molde_por_indice: dict[int, QTreeWidgetItem] = {}
+        self._combos_tecido_por_item: dict[int, QComboBox] = {}
+        self._suspender_combo_tecido_arvore = False
         self._indice_atual: int | None = self._indice_molde_preferencial()
         self._cor_visual = "#ffffff"
         self._graduacao_linhas: list[dict] = []
@@ -761,6 +764,8 @@ class PropriedadesMoldesDialog(QDialog):
         self.cmb_molde = QComboBox()
         self.cmb_molde.setEditable(True)
         self.cmb_molde.currentIndexChanged.connect(self._trocar_molde_pelo_combo)
+        if self.cmb_molde.lineEdit() is not None:
+            self.cmb_molde.lineEdit().textEdited.connect(self._renomear_molde_atual_instantaneo)
 
         self.cmb_tipo_corte = QComboBox()
         self.cmb_tipo_corte.addItems(["Completo", "Par", "Espelhado", "Único"])
@@ -1503,8 +1508,11 @@ class PropriedadesMoldesDialog(QDialog):
         _log_propriedades_debug("recarregar_lista() iniciado")
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
+        self._itens_molde_por_indice = {}
+        self._combos_tecido_por_item = {}
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
         self._suspender_item_changed = True
+        self._suspender_combo_tecido_arvore = True
         self.arvore.clear()
         raiz = QTreeWidgetItem(["Tecidos"])
         icone_tecido = QIcon(str(ICONS_DIR / "tecidos.svg"))
@@ -1514,7 +1522,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
-        tecidos_disponiveis: set[str] = set()
+        tecidos_disponiveis: set[str] = set(self._tecidos_disponiveis())
         for ref in self._refs:
             tecido = str(ref.dados.get("tecido") or "").strip()
             grupo = tecido if tecido else "1"
@@ -1526,18 +1534,24 @@ class PropriedadesMoldesDialog(QDialog):
             return (0, int(txt)) if txt.isdigit() else (1, txt.lower())
 
         referencia_global = self._assinatura_grade_referencia_global()
-        for grupo_nome in sorted(tecidos_disponiveis, key=_ord_tecido):
+        for grupo_nome in sorted(grupos.keys() or tecidos_disponiveis, key=_ord_tecido):
             itens = grupos.get(grupo_nome, [])
             pai = QTreeWidgetItem([grupo_nome])
             pai.setIcon(0, icone_tecido)
-            pai.setFlags(pai.flags() | Qt.ItemIsEditable)
+            pai.setFlags((pai.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable) & ~Qt.ItemIsEditable)
+            try:
+                pai.setData(0, Qt.UserRole + 1, grupo_nome)
+            except Exception:
+                pass
             raiz.addChild(pai)
+            self._instalar_combo_tecido_item(pai, grupo_nome)
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
                 item.setFlags(item.flags() | Qt.ItemIsEditable)
                 item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
                 pai.addChild(item)
+                self._itens_molde_por_indice[int(ref.indice)] = item
 
         raiz.setExpanded(True)
         for i in range(raiz.childCount()):
@@ -1554,6 +1568,7 @@ class PropriedadesMoldesDialog(QDialog):
                 if item.data(0, Qt.UserRole) is not None:
                     escolhido = item
                     break
+        self._suspender_combo_tecido_arvore = False
         if escolhido:
             self.arvore.setCurrentItem(escolhido)
             self._indice_atual = int(escolhido.data(0, Qt.UserRole))
@@ -1566,6 +1581,139 @@ class PropriedadesMoldesDialog(QDialog):
             _log_propriedades_debug("recarregar_lista(): nenhum item escolhido; preenchendo campos vazios")
             self._preencher_campos(None)
         self._suspender_item_changed = False
+
+    def _tecidos_disponiveis(self) -> list[str]:
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        tecidos: set[str] = set()
+        if isinstance(elementos, list):
+            for el in elementos:
+                if isinstance(el, dict) and el.get("molde"):
+                    tecido = str(el.get("tecido") or "").strip()
+                    if tecido:
+                        tecidos.add(tecido)
+        for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
+            tecido = str(chave or "").strip()
+            if tecido:
+                tecidos.add(tecido)
+        if hasattr(self, "ed_tecido"):
+            tecido_atual = self.ed_tecido.currentText().strip()
+            if tecido_atual:
+                tecidos.add(tecido_atual)
+        if not tecidos:
+            tecidos.add("1")
+
+        def _ord_tecido(valor: str):
+            txt = str(valor).strip()
+            return (0, int(txt)) if txt.isdigit() else (1, txt.lower())
+
+        return sorted(tecidos, key=_ord_tecido)
+
+    def _instalar_combo_tecido_item(self, item: QTreeWidgetItem, tecido_atual: str):
+        combo = QComboBox(self.arvore)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+        combo.setMinimumHeight(20)
+        combo.setStyleSheet(
+            "QComboBox { background: transparent; border: none; color:#111111; padding-left:0px; }"
+            "QComboBox::drop-down { width:18px; border: none; }"
+            "QComboBox QAbstractItemView { background:#ffffff; color:#111111; selection-background-color:#2b7cd3; }"
+        )
+        opcoes = self._tecidos_disponiveis()
+        if tecido_atual and tecido_atual not in opcoes:
+            opcoes.append(tecido_atual)
+        combo.addItems(opcoes)
+        combo.setCurrentText(str(tecido_atual or "1"))
+        combo.activated.connect(lambda _=0, it=item, cb=combo: self._alterar_tecido_grupo_pela_arvore(it, cb.currentText()))
+        if combo.lineEdit() is not None:
+            combo.lineEdit().editingFinished.connect(
+                lambda it=item, cb=combo: self._alterar_tecido_grupo_pela_arvore(it, cb.currentText())
+            )
+        self.arvore.setItemWidget(item, 0, combo)
+        self._combos_tecido_por_item[id(item)] = combo
+
+    def _alterar_tecido_grupo_pela_arvore(self, item: QTreeWidgetItem, novo_tecido: str):
+        if self._suspender_combo_tecido_arvore:
+            return
+        novo_tecido = str(novo_tecido or "").strip()
+        if not novo_tecido:
+            return
+        try:
+            tecido_antigo = str(item.data(0, Qt.UserRole + 1) or item.text(0) or "").strip()
+        except Exception:
+            tecido_antigo = str(item.text(0) or "").strip()
+        if novo_tecido == tecido_antigo:
+            return
+
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+
+        indices_afetados: list[int] = []
+        for i in range(item.childCount()):
+            filho = item.child(i)
+            idx = filho.data(0, Qt.UserRole)
+            if idx is None:
+                continue
+            idx_int = int(idx)
+            if 0 <= idx_int < len(elementos):
+                el = elementos[idx_int]
+                if isinstance(el, dict) and el.get("molde"):
+                    el["tecido"] = novo_tecido
+                    el["grupo_molde"] = novo_tecido
+                    indices_afetados.append(idx_int)
+
+        try:
+            item.setData(0, Qt.UserRole + 1, novo_tecido)
+        except Exception:
+            pass
+        item.setText(0, novo_tecido)
+        if self._indice_atual in indices_afetados and hasattr(self, "ed_tecido"):
+            with QSignalBlocker(self.ed_tecido):
+                self.ed_tecido.setCurrentText(novo_tecido)
+            self.preview.set_molde(dict(self._molde_atual() or {}))
+        self._atualizar_opcoes_tecido()
+        self.canvas.update()
+        self.recarregar_lista()
+
+    def _renomear_molde_atual_instantaneo(self, texto: str):
+        if self._suspender_auto_aplicar:
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        novo_nome = str(texto or "").strip()
+        if not novo_nome:
+            return
+        molde["nome_molde"] = novo_nome
+        self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome)
+        self.preview.set_molde(dict(molde))
+        self.canvas.update()
+
+    def _sincronizar_nome_molde_atual_sem_recarregar(self, novo_nome: str | None = None):
+        if self._indice_atual is None:
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        nome = str(novo_nome if novo_nome is not None else molde.get("nome_molde") or f"Molde {self._indice_atual + 1}").strip()
+        if not nome:
+            return
+        item = self._itens_molde_por_indice.get(int(self._indice_atual))
+        if item is not None:
+            self._suspender_item_changed = True
+            item.setText(0, nome)
+            self._suspender_item_changed = False
+        for ref in self._refs:
+            if int(ref.indice) == int(self._indice_atual):
+                ref.nome = nome
+                break
+        if hasattr(self, "cmb_molde"):
+            pos = self.cmb_molde.findData(self._indice_atual)
+            if pos >= 0:
+                with QSignalBlocker(self.cmb_molde):
+                    self.cmb_molde.setItemText(pos, nome)
 
     def _assinatura_grade(self, molde: dict) -> str:
         nome = str(molde.get("graduacao_grade_nome") or "").strip()
@@ -1654,6 +1802,10 @@ class PropriedadesMoldesDialog(QDialog):
                 el = elementos[int(idx)]
                 if isinstance(el, dict) and el.get("molde"):
                     el["nome_molde"] = novo_nome
+                    if int(idx) == self._indice_atual and hasattr(self, "cmb_molde"):
+                        with QSignalBlocker(self.cmb_molde):
+                            self.cmb_molde.setCurrentText(novo_nome)
+                    self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome if int(idx) == self._indice_atual else None)
                     self._atualizar_combo_moldes()
                     self.preview.set_molde(dict(el))
                     self.canvas.update()
@@ -2012,6 +2164,7 @@ class PropriedadesMoldesDialog(QDialog):
         if not molde:
             return
         self._aplicar_formulario_no_molde(molde)
+        self._sincronizar_nome_molde_atual_sem_recarregar(str(molde.get("nome_molde") or ""))
         self._sincronizar_gradacao_no_molde()
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
         self.preview.set_molde(dict(molde))

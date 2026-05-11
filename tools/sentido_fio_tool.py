@@ -78,6 +78,7 @@ class Ferramenta(FerramentaBase):
 
     _dialog_por_canvas: dict[int, SentidoFioDialog] = {}
     ANGULOS_PRINCIPAIS = (0.0, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0, 180.0, 210.0, 225.0, 240.0, 270.0, 300.0, 315.0, 330.0)
+    TOLERANCIA_SNAP_ANGULAR_GRAUS = 5.0
 
     def __init__(self):
         super().__init__()
@@ -252,6 +253,11 @@ class Ferramenta(FerramentaBase):
     def _ponto_final_com_config(self, canvas, inicio: QPointF, pos_mouse: QPointF) -> tuple[QPointF, float]:
         """
         Calcula o ponto final e o angulo do sentido do fio.
+
+        No modo livre da ferramenta, o segundo ponto agora respeita snap angular
+        nos angulos principais usados em modelagem: 0, 30, 45, 60, 90 etc.
+        O snap so entra quando o cursor fica perto do angulo principal, mantendo
+        o mesmo comprimento arrastado pelo mouse.
         """
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
@@ -283,8 +289,13 @@ class Ferramenta(FerramentaBase):
             )
             return fim, angulo
 
-        angulo = self._normalizar_angulo(degrees(atan2(-dy, dx)))
-        return QPointF(pos_mouse), angulo
+        angulo_mouse = self._normalizar_angulo(degrees(atan2(-dy, dx)))
+        if modo in {"Pontos do mouse", "Pontos do molde"} and self._snap_angular_ativo(canvas):
+            fim_snap, angulo_snap, aplicado = self._aplicar_snap_angular_principal(canvas, inicio, comp, angulo_mouse)
+            if aplicado:
+                return fim_snap, angulo_snap
+
+        return QPointF(pos_mouse), angulo_mouse
 
     def _aplicar(self, canvas, idx: int, inicio: QPointF, fim: QPointF, angulo_novo: float) -> None:
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -559,6 +570,44 @@ class Ferramenta(FerramentaBase):
                 pass
         return bool(getattr(canvas, "_snap_ativo", True))
 
+    def _aplicar_snap_angular_principal(
+        self,
+        canvas,
+        inicio: QPointF,
+        comprimento: float,
+        angulo_mouse: float,
+    ) -> tuple[QPointF, float, bool]:
+        """Retorna o fim travado no angulo principal quando o cursor esta perto dele."""
+        if comprimento <= 1e-9:
+            return QPointF(inicio), 0.0, False
+
+        angulo_alvo = self._angulo_principal_mais_proximo(angulo_mouse)
+        diferenca = self._diferenca_angular_abs(angulo_mouse, angulo_alvo)
+
+        # A tecla W, usada no restante do canvas como trava de eixos/principais,
+        # força o encaixe no principal mais proximo. Sem W, o encaixe entra
+        # suavemente apenas quando o cursor estiver perto do angulo.
+        forcar = bool(getattr(canvas, "_tecla_w_trava_principal", False))
+        tolerancia = float(getattr(self, "TOLERANCIA_SNAP_ANGULAR_GRAUS", 5.0))
+        if not forcar and diferenca > tolerancia:
+            return QPointF(inicio.x() + comprimento * cos(radians(angulo_mouse)), inicio.y() - comprimento * sin(radians(angulo_mouse))), angulo_mouse, False
+
+        rad = radians(angulo_alvo)
+        fim = QPointF(
+            inicio.x() + (cos(rad) * comprimento),
+            inicio.y() - (sin(rad) * comprimento),
+        )
+
+        try:
+            snap = SnapResult(ponto=QPointF(fim), tipo=f"angulo {angulo_alvo:g}°", distancia=0.0, elemento_idx=None)
+            canvas._snap_resultado = snap
+            canvas._snap_candidatos = [snap]
+            canvas._snap_indice = 0
+        except Exception:
+            pass
+
+        return fim, self._normalizar_angulo(angulo_alvo), True
+
     def _fechar(self, canvas) -> None:
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Sentido Fio finalizada. Voltando para Selecionar.")
@@ -693,6 +742,11 @@ class Ferramenta(FerramentaBase):
             self.ANGULOS_PRINCIPAIS,
             key=lambda alvo: min(abs(normalizado - alvo), 360.0 - abs(normalizado - alvo)),
         )
+
+    @staticmethod
+    def _diferenca_angular_abs(a: float, b: float) -> float:
+        diferenca = abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+        return abs(diferenca)
 
     def _angulo_fio_snapshot(self, canvas, idx: int) -> float:
         snap = self._snapshot_fio

@@ -107,6 +107,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     ORIGEM_INICIAL_CANVAS_Y = 0.0
     FERRAMENTAS_USUARIO_PADRAO = [
         "selecionar",
+        "ajuste_automatico",
         "reta",
         "curva",
         "retangulo",
@@ -163,6 +164,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.FERRAMENTAS_USUARIO_PADRAO,
         )
         self._ferramentas_usuario_ids: list[str] = list(ferramentas_usuario or self.FERRAMENTAS_USUARIO_PADRAO)
+        self._garantir_ajuste_automatico_na_barra_usuario()
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
         self._barra_usuarios_habilitada = True
@@ -4091,6 +4093,19 @@ class GuimmaStudioMainWindow(QMainWindow):
             visivel = self._barra_usuarios_habilitada or (tab_id == "usuarios")
             self.faixa_usuarios.setVisible(visivel)
 
+    def _lista_usuario_com_ajuste(self, ids: list[str]) -> list[str]:
+        saida = list(ids or [])
+        if "ajuste_automatico" not in saida:
+            saida.insert(1 if saida else 0, "ajuste_automatico")
+        return saida
+
+    def _garantir_ajuste_automatico_na_barra_usuario(self):
+        """Mantém Auto ajuste fixo na barra de Usuário, mesmo ao limpar/trocar perfil."""
+        if not hasattr(self, "_ferramentas_usuario_ids"):
+            return
+        if "ajuste_automatico" not in self._ferramentas_usuario_ids:
+            self._ferramentas_usuario_ids.insert(1 if self._ferramentas_usuario_ids else 0, "ajuste_automatico")
+
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
             self._ferramentas_usuario_ids.append(tool_id)
@@ -4118,14 +4133,19 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _limpar_ferramentas_usuario(self):
         self._ferramentas_usuario_ids.clear()
-        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = []
+        self._garantir_ajuste_automatico_na_barra_usuario()
+        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
         self._sincronizar_perfil_usuario_atual()
         self._atualizar_linha_usuarios()
-        self.lbl_status.setText("Linha Usuários limpa.")
+        self.lbl_status.setText("Linha Usuários limpa. Auto ajuste permanece fixo.")
 
     def _remover_ferramenta_usuario(self, tool_id: str):
+        if tool_id == "ajuste_automatico":
+            self.lbl_status.setText("Auto ajuste é fixo na barra Usuários.")
+            return
         if tool_id in self._ferramentas_usuario_ids:
             self._ferramentas_usuario_ids.remove(tool_id)
+            self._garantir_ajuste_automatico_na_barra_usuario()
             self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
             self._sincronizar_perfil_usuario_atual()
             self._atualizar_linha_usuarios()
@@ -4134,7 +4154,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         perfis = self.projeto_atual.preferencias_usuario.get("perfis_usuarios")
         if isinstance(perfis, dict) and perfis:
             self._perfis_usuarios = {
-                str(nome): list(ids) if ids else list(self.FERRAMENTAS_USUARIO_PADRAO)
+                str(nome): self._lista_usuario_com_ajuste(list(ids) if ids else list(self.FERRAMENTAS_USUARIO_PADRAO))
                 for nome, ids in perfis.items()
             }
         else:
@@ -4144,9 +4164,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._perfil_usuario_atual = perfil_atual
         else:
             self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
-        self._ferramentas_usuario_ids = list(
+        self._ferramentas_usuario_ids = self._lista_usuario_com_ajuste(list(
             self._perfis_usuarios.get(self._perfil_usuario_atual, []) or self.FERRAMENTAS_USUARIO_PADRAO
-        )
+        ))
         cfgs = self.projeto_atual.preferencias_usuario.get("perfis_usuarios_cfg")
         if isinstance(cfgs, dict):
             self._perfis_usuarios_cfg = {str(nome): dict(cfg or {}) for nome, cfg in cfgs.items()}
@@ -4167,6 +4187,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._salvar_preferencias_app()
 
     def _sincronizar_perfil_usuario_atual(self):
+        self._garantir_ajuste_automatico_na_barra_usuario()
         self._perfis_usuarios[self._perfil_usuario_atual] = list(self._ferramentas_usuario_ids)
         self._persistir_perfis_usuarios()
 
@@ -4183,7 +4204,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not nome_perfil or nome_perfil not in self._perfis_usuarios:
             return
         self._perfil_usuario_atual = nome_perfil
-        self._ferramentas_usuario_ids = list(self._perfis_usuarios.get(nome_perfil, []))
+        self._ferramentas_usuario_ids = self._lista_usuario_com_ajuste(list(self._perfis_usuarios.get(nome_perfil, [])))
         self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(nome_perfil, {}))
         self._persistir_perfis_usuarios()
         self._reposicionar_barra_usuarios()
@@ -4237,6 +4258,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.ribbon.aplicar_estilo(getattr(self, "_estilo_desenho_atual", {}))
 
     def _atualizar_linha_usuarios(self):
+        self._garantir_ajuste_automatico_na_barra_usuario()
         self._sincronizar_aba_usuario_ribbon()
         if not hasattr(self, "layout_linha_usuario"):
             return
