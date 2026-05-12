@@ -262,20 +262,58 @@ class Ferramenta(FerramentaBase):
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: AjusteAutomaticoDialog):
-        # Esta caixa deve abrir sempre um pouco abaixo da caixa de Coordenadas.
-        # Não usamos posição antiga salva, porque isso fazia a janela voltar para locais errados.
+        """Abre o Auto Ajuste sempre abaixo da caixa de Coordenadas.
+
+        O diálogo é criado tendo a janela principal como parent, enquanto o painel
+        de coordenadas é filho do canvas. Por isso não podemos usar painel.x()/y()
+        diretamente: essas coordenadas são relativas ao canvas e acabavam colocando
+        o Auto Ajuste em posição errada, por cima/acima da caixa de Coordenadas.
+        Aqui convertemos a posição do painel para o mesmo sistema de coordenadas
+        do parent do diálogo e só então calculamos a posição abaixo.
+        """
         dialog.adjustSize()
-        fallback = QPoint(max(24, canvas.width() - dialog.width() - 36), 48)
+
+        margem = 12
+        parent = dialog.parentWidget()
         painel = getattr(canvas, "painel_coordenadas", None)
+
+        def _limitar_no_parent(pos: QPoint) -> QPoint:
+            if parent is None:
+                return pos
+            largura_parent = max(1, parent.width())
+            altura_parent = max(1, parent.height())
+            x = max(8, min(pos.x(), largura_parent - dialog.width() - 8))
+            y = max(8, min(pos.y(), altura_parent - dialog.height() - 8))
+            return QPoint(x, y)
+
+        # Fallback: canto superior direito do canvas, mas já convertido para o parent.
+        try:
+            origem_canvas_no_parent = canvas.mapTo(parent, QPoint(0, 0)) if parent is not None else QPoint(0, 0)
+        except Exception:
+            origem_canvas_no_parent = QPoint(0, 0)
+        posicao = QPoint(
+            origem_canvas_no_parent.x() + max(24, canvas.width() - dialog.width() - 36),
+            origem_canvas_no_parent.y() + 48,
+        )
+
         try:
             if painel is not None and painel.isVisible():
-                fallback = QPoint(
-                    max(8, painel.x() + painel.width() - dialog.width()),
-                    painel.y() + painel.height() + 12,
+                if parent is not None:
+                    topo_painel = painel.mapTo(parent, QPoint(0, 0))
+                else:
+                    topo_painel = QPoint(painel.x(), painel.y())
+
+                # Alinha a direita do Auto Ajuste com a direita da caixa de Coordenadas
+                # e posiciona logo abaixo dela, como na referência enviada.
+                posicao = QPoint(
+                    topo_painel.x() + painel.width() - dialog.width(),
+                    topo_painel.y() + painel.height() + margem,
                 )
         except Exception:
             pass
-        dialog.move(fallback)
+
+        posicao = _limitar_no_parent(posicao)
+        dialog.move(posicao)
         salvar_posicao(dialog, dialog._chave_posicao)
 
     def _aplicar_e_fechar(self, canvas, dialog: AjusteAutomaticoDialog):
