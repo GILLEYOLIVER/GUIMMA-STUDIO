@@ -263,6 +263,10 @@ class Ferramenta(FerramentaBase):
                 if "fio_fim" in el:
                     fx, fy = el.get("fio_fim", (0.0, 0.0))
                     el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
+                for chave in ("ponto_texto", "seta_origem", "seta_fim"):
+                    if chave in el:
+                        fx, fy = el.get(chave, (0.0, 0.0))
+                        el[chave] = (float(fx) + dx, float(fy) + dy)
                 if "marcacoes_no_perimetro" in el:
                     el["marcacoes_no_perimetro"] = [(x + dx, y + dy) for x, y in el.get("marcacoes_no_perimetro", [])]
                 if "pontos_controle_principais" in el:
@@ -279,6 +283,9 @@ class Ferramenta(FerramentaBase):
                 for chave in ("p0", "p1", "p2"):
                     x, y = el[chave]
                     el[chave] = (x + dx, y + dy)
+            elif el.get("tipo") == "texto" and "pos" in el:
+                fx, fy = el.get("pos", (0.0, 0.0))
+                el["pos"] = (float(fx) + dx, float(fy) + dy)
 
     def _indices_para_mover(self, canvas) -> list[int]:
         indices = set(int(idx) for idx in getattr(canvas, "_selecionados", set()))

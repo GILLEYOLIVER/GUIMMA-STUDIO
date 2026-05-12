@@ -1358,6 +1358,9 @@ class VisualizacaoCanvas(QWidget):
             if idx in self._selecionados:
                 self._desenhar_selecao_molde(painter, base, el)
 
+            if el.get("mostrar_margem", False):
+                self._desenhar_margem_molde(painter, base, el)
+
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
                 if nome:
@@ -1465,6 +1468,7 @@ class VisualizacaoCanvas(QWidget):
                     off_x = (dx / mod) * 11.0
                     off_y = (dy / mod) * 11.0
                     painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
+
                 if self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                     painter.setPen(QPen(QColor("#ff3b30"), 1.0))
@@ -1472,6 +1476,97 @@ class VisualizacaoCanvas(QWidget):
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _desenhar_margem_molde(self, painter: QPainter, base: list[QPointF], el: dict) -> None:
+        if len(base) < 3:
+            return
+        margens = self._margens_por_segmento(el, len(base))
+        if not margens:
+            return
+        sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
+        painter.save()
+        pen = QPen(QColor("#cc3f6a"), 1.2, Qt.SolidLine)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        for seg_idx, margem in margens.items():
+            if margem <= 0:
+                continue
+            a = base[seg_idx % len(base)]
+            b = base[(seg_idx + 1) % len(base)]
+            dx = b.x() - a.x()
+            dy = b.y() - a.y()
+            comp = sqrt((dx * dx) + (dy * dy))
+            if comp <= 1e-9:
+                continue
+            nx = sentido * (-dy / comp)
+            ny = sentido * (dx / comp)
+            off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
+            off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
+            painter.drawLine(self._cena_para_tela(off_a), self._cena_para_tela(off_b))
+            conector_pen = QPen(QColor("#cc3f6a"), 0.8, Qt.DotLine)
+            painter.setPen(conector_pen)
+            painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
+            painter.drawLine(self._cena_para_tela(b), self._cena_para_tela(off_b))
+            painter.setPen(pen)
+        painter.restore()
+
+    def _margens_por_segmento(self, el: dict, total_segmentos: int) -> dict[int, float]:
+        margens: dict[int, float] = {}
+        dados = el.get("margens_molde")
+        if isinstance(dados, list):
+            for item in dados:
+                if not isinstance(item, dict):
+                    continue
+                elemento = str(item.get("elemento") or "").strip()
+                try:
+                    valor = max(0.0, float(item.get("margem") or 0))
+                except (TypeError, ValueError):
+                    valor = 0.0
+                idx = self._indice_segmento_margem(elemento, total_segmentos)
+                if idx is not None and valor > 0:
+                    margens[idx] = valor
+        elif isinstance(dados, dict):
+            for elemento, valor_raw in dados.items():
+                try:
+                    valor = max(0.0, float(valor_raw or 0))
+                except (TypeError, ValueError):
+                    valor = 0.0
+                idx = self._indice_segmento_margem(str(elemento), total_segmentos)
+                if idx is not None and valor > 0:
+                    margens[idx] = valor
+        if not margens:
+            try:
+                margem_unica = max(0.0, float(el.get("margem_molde_cm") or el.get("margem") or 0))
+            except (TypeError, ValueError):
+                margem_unica = 0.0
+            if margem_unica > 0:
+                margens = {idx: margem_unica for idx in range(total_segmentos)}
+        return margens
+
+    @staticmethod
+    def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:
+        partes = str(elemento or "").replace(" ", "").split("-", 1)
+        if len(partes) != 2:
+            return None
+        try:
+            inicio = int(partes[0])
+            fim = int(partes[1])
+        except ValueError:
+            return None
+        if total_segmentos <= 0:
+            return None
+        esperado_fim = (inicio % total_segmentos) + 1
+        if inicio < 1 or inicio > total_segmentos or fim != esperado_fim:
+            return None
+        return inicio - 1
+
+    @staticmethod
+    def _area_assinada_pontos(pontos: list[QPointF]) -> float:
+        area = 0.0
+        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
+            area += (a.x() * b.y()) - (b.x() * a.y())
+        return area / 2.0
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
