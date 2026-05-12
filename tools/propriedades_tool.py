@@ -1336,6 +1336,55 @@ class PropriedadesMoldesDialog(QDialog):
             self.tbl_margem.setItem(i, 0, QTableWidgetItem(a))
             self.tbl_margem.setItem(i, 1, QTableWidgetItem(b))
 
+    def _preencher_tabela_margem(self, molde: dict | None):
+        if not hasattr(self, "tbl_margem"):
+            return
+        self.tbl_margem.blockSignals(True)
+        self.tbl_margem.clearContents()
+        pontos = []
+        if isinstance(molde, dict):
+            try:
+                pontos = [QPointF(float(x), float(y)) for x, y in molde.get("pontos", [])]
+            except Exception:
+                pontos = []
+        base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
+        total = max(1, len(base))
+        total_linhas = max(1, total if total >= 3 else 8)
+        self.tbl_margem.setRowCount(total_linhas)
+        valores_salvos: dict[str, str] = {}
+        if isinstance(molde, dict):
+            for item in molde.get("margens_molde", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                elemento = str(item.get("elemento") or "").strip()
+                if elemento:
+                    valores_salvos[elemento] = str(item.get("margem", 0) or 0)
+        for i in range(total_linhas):
+            elemento = f"{i + 1}-{((i + 1) % total_linhas) + 1}"
+            item_elemento = QTableWidgetItem(elemento)
+            item_elemento.setFlags(item_elemento.flags() & ~Qt.ItemIsEditable)
+            self.tbl_margem.setItem(i, 0, item_elemento)
+            self.tbl_margem.setItem(i, 1, QTableWidgetItem(valores_salvos.get(elemento, "0")))
+        self.tbl_margem.blockSignals(False)
+
+    def _margens_do_formulario(self) -> list[dict]:
+        margens: list[dict] = []
+        if not hasattr(self, "tbl_margem"):
+            return margens
+        for row in range(self.tbl_margem.rowCount()):
+            item_elemento = self.tbl_margem.item(row, 0)
+            item_margem = self.tbl_margem.item(row, 1)
+            elemento = (item_elemento.text() if item_elemento else "").strip()
+            texto_margem = (item_margem.text() if item_margem else "0").strip().replace(",", ".")
+            if not elemento:
+                continue
+            try:
+                valor = max(0.0, float(texto_margem or 0))
+            except ValueError:
+                valor = 0.0
+            margens.append({"elemento": elemento, "margem": valor})
+        return margens
+
     def _criar_tab_cam(self) -> QWidget:
         aba = QWidget()
         layout = QVBoxLayout(aba)
@@ -1722,6 +1771,7 @@ class PropriedadesMoldesDialog(QDialog):
         if molde is None:
             with QSignalBlocker(self.cmb_molde):
                 self.cmb_molde.setCurrentIndex(-1)
+            self._preencher_tabela_margem(None)
             self.ed_descricao.clear()
             self.ed_tecido.setCurrentText("1")
             self.sp_qtd_modelo.setValue(1)
@@ -1776,6 +1826,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
         self.chk_quantidade_visual.setChecked(bool(molde.get("visual_quantidade", False)))
         self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))
+        self._preencher_tabela_margem(molde)
         self.chk_preencher.setChecked(bool(molde.get("visual_preencher", False)))
         self.chk_mostrar_cor_tecidos.blockSignals(True)
         self.chk_mostrar_cor_tecidos.setChecked(bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)))
@@ -2001,7 +2052,13 @@ class PropriedadesMoldesDialog(QDialog):
         molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
         molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
         molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
-        molde["mostrar_margem"] = self.chk_margem_visual.isChecked()
+        margens = self._margens_do_formulario()
+        molde["margens_molde"] = margens
+        tem_margem = any(float(item.get("margem") or 0) > 0 for item in margens)
+        molde["mostrar_margem"] = self.chk_margem_visual.isChecked() or tem_margem
+        if tem_margem and not self.chk_margem_visual.isChecked():
+            with QSignalBlocker(self.chk_margem_visual):
+                self.chk_margem_visual.setChecked(True)
         molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
 
@@ -2472,6 +2529,7 @@ class Ferramenta(FerramentaBase):
         try:
             dialog = self._obter_dialog(canvas)
             _log_propriedades_debug(f"Dialog obtido: {dialog}; visível_antes={dialog.isVisible() if dialog is not None else None}")
+            dialog._indice_atual = dialog._indice_molde_preferencial()
             dialog.recarregar_lista()
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
             dialog.show()
