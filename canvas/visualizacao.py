@@ -1406,7 +1406,9 @@ class VisualizacaoCanvas(QWidget):
                     ys = [p.y() for p in base]
                     largura = max(xs) - min(xs)
                     margem = largura * 0.20
-                    y_fio = sum(ys) / len(ys)
+                    altura = max(ys) - min(ys)
+                    centro_y = sum(ys) / len(ys)
+                    y_fio = min(max(ys) - max(0.15, altura * 0.06), centro_y + max(0.25, altura * 0.08))
                     p1 = QPointF(min(xs) + margem, y_fio)
                     p2 = QPointF(max(xs) - margem, y_fio)
                 bbox_tela = self._bbox_tela_pontos(base)
@@ -1485,7 +1487,7 @@ class VisualizacaoCanvas(QWidget):
             return
         sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
         painter.save()
-        pen = QPen(QColor("#ffffff"), 1.0, Qt.SolidLine)
+        pen = QPen(self._cor_molde_visual(el), 1.0, Qt.SolidLine)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -1503,7 +1505,9 @@ class VisualizacaoCanvas(QWidget):
             if margem_anterior > 0:
                 anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
                 if anterior is not None:
-                    painter.drawLine(self._cena_para_tela(anterior[3]), self._cena_para_tela(off_a))
+                    canto = QPainterPath(self._cena_para_tela(anterior[3]))
+                    canto.quadTo(self._cena_para_tela(a), self._cena_para_tela(off_a))
+                    painter.drawPath(canto)
             else:
                 painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
 
@@ -1511,6 +1515,15 @@ class VisualizacaoCanvas(QWidget):
             if margem_proxima <= 0:
                 painter.drawLine(self._cena_para_tela(off_b), self._cena_para_tela(b))
         painter.restore()
+
+    def _cor_molde_visual(self, el: dict) -> QColor:
+        cor_base = el.get("cor", "#ffffff")
+        if el.get("molde") and self._mostrar_cor_tecidos:
+            tecido = str(el.get("tecido") or "").strip()
+            if tecido and tecido in self._cores_tecidos:
+                cor_base = self._cores_tecidos[tecido]
+        cor = QColor(str(cor_base or "#ffffff"))
+        return cor if cor.isValid() else QColor("#ffffff")
 
     @staticmethod
     def _pontos_offset_segmento(
@@ -1535,28 +1548,22 @@ class VisualizacaoCanvas(QWidget):
 
     def _margens_por_segmento(self, el: dict, total_segmentos: int) -> dict[int, float]:
         margens: dict[int, float] = {}
-        dados = el.get("margens_molde")
-        if isinstance(dados, list):
-            for item in dados:
-                if not isinstance(item, dict):
-                    continue
-                elemento = str(item.get("elemento") or "").strip()
-                try:
-                    valor = max(0.0, float(item.get("margem") or 0))
-                except (TypeError, ValueError):
-                    valor = 0.0
-                idx = self._indice_segmento_margem(elemento, total_segmentos)
-                if idx is not None and valor > 0:
-                    margens[idx] = valor
-        elif isinstance(dados, dict):
-            for elemento, valor_raw in dados.items():
-                try:
-                    valor = max(0.0, float(valor_raw or 0))
-                except (TypeError, ValueError):
-                    valor = 0.0
-                idx = self._indice_segmento_margem(str(elemento), total_segmentos)
-                if idx is not None and valor > 0:
-                    margens[idx] = valor
+        for dados in (el.get("margens_molde"), el.get("margens"), el.get("margem_cm_por_elemento")):
+            if isinstance(dados, list):
+                for item in dados:
+                    if not isinstance(item, dict):
+                        continue
+                    elemento = str(item.get("elemento") or "").strip()
+                    valor = self._valor_margem_float(item.get("margem"))
+                    idx = self._indice_segmento_margem(elemento, total_segmentos)
+                    if idx is not None and valor > 0:
+                        margens[idx] = valor
+            elif isinstance(dados, dict):
+                for elemento, valor_raw in dados.items():
+                    valor = self._valor_margem_float(valor_raw)
+                    idx = self._indice_segmento_margem(str(elemento), total_segmentos)
+                    if idx is not None and valor > 0:
+                        margens[idx] = valor
         if not margens:
             try:
                 margem_unica = max(0.0, float(el.get("margem_molde_cm") or el.get("margem") or 0))
@@ -1565,6 +1572,14 @@ class VisualizacaoCanvas(QWidget):
             if margem_unica > 0:
                 margens = {idx: margem_unica for idx in range(total_segmentos)}
         return margens
+
+    @staticmethod
+    def _valor_margem_float(valor) -> float:
+        try:
+            texto = str(valor).replace("cm", "").replace(",", ".").strip()
+            return max(0.0, float(texto or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
 
     @staticmethod
     def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:

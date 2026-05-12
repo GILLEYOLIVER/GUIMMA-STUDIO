@@ -72,7 +72,9 @@ class AudacesPairImport:
                 cx = sum(xs) / len(xs)
                 cy = sum(ys) / len(ys)
                 largura = max(xs) - min(xs)
+                altura = max(ys) - min(ys)
                 margem = largura * 0.20
+                y_fio = min(max(ys) - max(0.15, altura * 0.06), cy + max(0.25, altura * 0.08))
                 elementos.append({
                     "tipo": "polyline",
                     "pontos": pts,
@@ -82,8 +84,8 @@ class AudacesPairImport:
                     "molde_id": molde.id,
                     "nome_molde": molde.nome,
                     "fio_angulo": 0.0,
-                    "fio_origem": (min(xs) + margem, cy),
-                    "fio_fim": (max(xs) - margem, cy),
+                    "fio_origem": (min(xs) + margem, y_fio),
+                    "fio_fim": (max(xs) - margem, y_fio),
                     "ponto_texto": (cx, cy),
                     "mostrar_nome": True,
                     "mostrar_fio": True,

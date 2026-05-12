@@ -144,7 +144,7 @@ class PreviewMoldeWidget(QWidget):
 
         painter.drawPath(path)
 
-        self._desenhar_margem(painter, base, mapear)
+        self._desenhar_margem(painter, base, mapear, cor_desenho)
         self._desenhar_fio(painter, base, mapear)
         self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
         self._desenhar_controles(painter, mapear)
@@ -160,8 +160,18 @@ class PreviewMoldeWidget(QWidget):
         if not base:
             return None
 
-        xs = [p.x() for p in base]
-        ys = [p.y() for p in base]
+        pontos_enquadramento = list(base)
+        if self._molde.get("mostrar_margem", False):
+            margens = self._margens_por_segmento(self._molde, len(base))
+            if margens:
+                sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
+                for seg_idx, margem in margens.items():
+                    pontos_offset = self._pontos_offset_segmento(base, seg_idx, margem, sentido)
+                    if pontos_offset is not None:
+                        pontos_enquadramento.extend((pontos_offset[2], pontos_offset[3]))
+
+        xs = [p.x() for p in pontos_enquadramento]
+        ys = [p.y() for p in pontos_enquadramento]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
         largura = max(1.0, max_x - min_x)
@@ -220,7 +230,9 @@ class PreviewMoldeWidget(QWidget):
             p2 = mapear(p_fio_fim)
         else:
             margem = (max(xs) - min(xs)) * 0.18
-            y_fio = sum(ys) / len(ys)
+            altura = max(ys) - min(ys)
+            centro_y = sum(ys) / len(ys)
+            y_fio = min(max(ys) - max(0.15, altura * 0.06), centro_y + max(0.25, altura * 0.08))
             p1 = mapear(QPointF(min(xs) + margem, y_fio))
             p2 = mapear(QPointF(max(xs) - margem, y_fio))
 
@@ -256,7 +268,7 @@ class PreviewMoldeWidget(QWidget):
         painter.drawPath(path)
         painter.restore()
 
-    def _desenhar_margem(self, painter: QPainter, base: list[QPointF], mapear):
+    def _desenhar_margem(self, painter: QPainter, base: list[QPointF], mapear, cor_molde: QColor):
         if not self._molde or not self._molde.get("mostrar_margem", False) or len(base) < 3:
             return
         margens = self._margens_por_segmento(self._molde, len(base))
@@ -264,7 +276,7 @@ class PreviewMoldeWidget(QWidget):
             return
         sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
         painter.save()
-        pen = QPen(QColor("#ffffff"), 1.0)
+        pen = QPen(QColor(cor_molde), 1.0)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -282,7 +294,9 @@ class PreviewMoldeWidget(QWidget):
             if margem_anterior > 0:
                 anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
                 if anterior is not None:
-                    painter.drawLine(mapear(anterior[3]), mapear(off_a))
+                    canto = QPainterPath(mapear(anterior[3]))
+                    canto.quadTo(mapear(a), mapear(off_a))
+                    painter.drawPath(canto)
             else:
                 painter.drawLine(mapear(a), mapear(off_a))
 
@@ -293,28 +307,30 @@ class PreviewMoldeWidget(QWidget):
 
     def _margens_por_segmento(self, molde: dict, total_segmentos: int) -> dict[int, float]:
         margens: dict[int, float] = {}
-        dados = molde.get("margens_molde")
-        if isinstance(dados, list):
-            for item in dados:
-                if not isinstance(item, dict):
-                    continue
-                idx = self._indice_segmento_margem(str(item.get("elemento") or ""), total_segmentos)
-                try:
-                    valor = max(0.0, float(item.get("margem") or 0))
-                except (TypeError, ValueError):
-                    valor = 0.0
-                if idx is not None and valor > 0:
-                    margens[idx] = valor
-        elif isinstance(dados, dict):
-            for elemento, valor_raw in dados.items():
-                idx = self._indice_segmento_margem(str(elemento), total_segmentos)
-                try:
-                    valor = max(0.0, float(valor_raw or 0))
-                except (TypeError, ValueError):
-                    valor = 0.0
-                if idx is not None and valor > 0:
-                    margens[idx] = valor
+        for dados in (molde.get("margens_molde"), molde.get("margens"), molde.get("margem_cm_por_elemento")):
+            if isinstance(dados, list):
+                for item in dados:
+                    if not isinstance(item, dict):
+                        continue
+                    idx = self._indice_segmento_margem(str(item.get("elemento") or ""), total_segmentos)
+                    valor = self._valor_margem_float(item.get("margem"))
+                    if idx is not None and valor > 0:
+                        margens[idx] = valor
+            elif isinstance(dados, dict):
+                for elemento, valor_raw in dados.items():
+                    idx = self._indice_segmento_margem(str(elemento), total_segmentos)
+                    valor = self._valor_margem_float(valor_raw)
+                    if idx is not None and valor > 0:
+                        margens[idx] = valor
         return margens
+
+    @staticmethod
+    def _valor_margem_float(valor) -> float:
+        try:
+            texto = str(valor).replace("cm", "").replace(",", ".").strip()
+            return max(0.0, float(texto or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
 
     @staticmethod
     def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:
@@ -1363,6 +1379,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_pique.setChecked(True)
         self.chk_linhas_aux.setChecked(True)
         self.chk_quantidade_visual.setChecked(True)
+        self.chk_margem_visual.setChecked(True)
 
         gvis.addWidget(self.chk_mostrar_nome, 0, 0)
         gvis.addWidget(self.chk_visual_descricao, 0, 2)
@@ -1422,6 +1439,15 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_margem.verticalHeader().setVisible(False)
         self.tbl_margem.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tbl_margem.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl_margem.setSelectionMode(QTableWidget.ExtendedSelection)
+        self.tbl_margem.setSelectionBehavior(QTableWidget.SelectItems)
+        self.tbl_margem.setEditTriggers(
+            QTableWidget.DoubleClicked
+            | QTableWidget.SelectedClicked
+            | QTableWidget.EditKeyPressed
+            | QTableWidget.AnyKeyPressed
+        )
+        self.tbl_margem.itemChanged.connect(self._quando_margem_item_alterado)
         self.tbl_margem.setFixedSize(215, 242)
         self._popular_tabela_margem()
 
@@ -1443,7 +1469,9 @@ class PropriedadesMoldesDialog(QDialog):
     def _popular_tabela_margem(self):
         pares = [("1-2", "0"), ("2-3", "0"), ("3-4", "0"), ("4-5", "0"), ("5-6", "0"), ("6-7", "0"), ("7-8", "0"), ("8-9", "0")]
         for i, (a, b) in enumerate(pares):
-            self.tbl_margem.setItem(i, 0, QTableWidgetItem(a))
+            item_elemento = QTableWidgetItem(a)
+            item_elemento.setFlags(item_elemento.flags() & ~Qt.ItemIsEditable)
+            self.tbl_margem.setItem(i, 0, item_elemento)
             self.tbl_margem.setItem(i, 1, QTableWidgetItem(b))
 
     def _preencher_tabela_margem(self, molde: dict | None):
@@ -1469,6 +1497,10 @@ class PropriedadesMoldesDialog(QDialog):
                 elemento = str(item.get("elemento") or "").strip()
                 if elemento:
                     valores_salvos[elemento] = str(item.get("margem", 0) or 0)
+            for dados in (molde.get("margens"), molde.get("margem_cm_por_elemento")):
+                if isinstance(dados, dict):
+                    for elemento, valor in dados.items():
+                        valores_salvos.setdefault(str(elemento), str(valor))
         for i in range(total_linhas):
             elemento = f"{i + 1}-{((i + 1) % total_linhas) + 1}"
             item_elemento = QTableWidgetItem(elemento)
@@ -1476,6 +1508,39 @@ class PropriedadesMoldesDialog(QDialog):
             self.tbl_margem.setItem(i, 0, item_elemento)
             self.tbl_margem.setItem(i, 1, QTableWidgetItem(valores_salvos.get(elemento, "0")))
         self.tbl_margem.blockSignals(False)
+
+    def _quando_margem_item_alterado(self, item: QTableWidgetItem):
+        if item is None or item.column() != 1:
+            return
+        linhas = self._linhas_margem_selecionadas()
+        if len(linhas) <= 1 or item.row() not in linhas:
+            self._aplicar_imediato_formulario()
+            return
+        texto = item.text()
+        self.tbl_margem.blockSignals(True)
+        try:
+            for row in linhas:
+                if row == item.row():
+                    continue
+                item_valor = self.tbl_margem.item(row, 1)
+                if item_valor is None:
+                    item_valor = QTableWidgetItem()
+                    self.tbl_margem.setItem(row, 1, item_valor)
+                item_valor.setText(texto)
+        finally:
+            self.tbl_margem.blockSignals(False)
+        self._aplicar_imediato_formulario()
+
+    def _linhas_margem_selecionadas(self) -> list[int]:
+        if not hasattr(self, "tbl_margem"):
+            return []
+        linhas: set[int] = set()
+        for faixa in self.tbl_margem.selectedRanges():
+            for row in range(faixa.topRow(), faixa.bottomRow() + 1):
+                linhas.add(row)
+        for indice in self.tbl_margem.selectedIndexes():
+            linhas.add(indice.row())
+        return sorted(row for row in linhas if 0 <= row < self.tbl_margem.rowCount())
 
     def _margens_do_formulario(self) -> list[dict]:
         margens: list[dict] = []
@@ -2311,6 +2376,8 @@ class PropriedadesMoldesDialog(QDialog):
         molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
         margens = self._margens_do_formulario()
         molde["margens_molde"] = margens
+        molde["margens"] = {item["elemento"]: item["margem"] for item in margens}
+        molde["margem_cm_por_elemento"] = dict(molde["margens"])
         tem_margem = any(float(item.get("margem") or 0) > 0 for item in margens)
         molde["mostrar_margem"] = self.chk_margem_visual.isChecked() or tem_margem
         if tem_margem and not self.chk_margem_visual.isChecked():

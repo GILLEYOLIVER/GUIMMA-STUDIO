@@ -27,12 +27,12 @@ from ui.posicao_janelas import instalar_memoria_posicao, salvar_posicao
 class PreviewOrientacaoAa(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._angulo = 90
+        self._angulo = 0
         self.setAlignment(Qt.AlignCenter)
         self.setFixedSize(90, 62)
         self.setStyleSheet("background:#ffffff; border:1px solid #999999;")
         self._pixmap_base = self._carregar_pixmap_base()
-        self.atualizar_angulo(90)
+        self.atualizar_angulo(0)
 
     def _carregar_pixmap_base(self) -> QPixmap:
         caminho = ICONS_DIR / "Aa.svg"
@@ -132,7 +132,7 @@ class AjusteAutomaticoDialog(QDialog):
         self.rb_270 = QRadioButton("270°")
         for valor, rb in ((90, self.rb_90), (180, self.rb_180), (0, self.rb_0), (270, self.rb_270)):
             self.grp_orientacao.addButton(rb, valor)
-        self.rb_90.setChecked(True)
+        self.rb_0.setChecked(True)
         self.preview_orientacao = PreviewOrientacaoAa()
         self.grp_orientacao.buttonClicked.connect(
             lambda *_: self.preview_orientacao.atualizar_angulo(self.grp_orientacao.checkedId())
@@ -378,7 +378,9 @@ class Ferramenta(FerramentaBase):
                 el["nome_angulo"] = float(op.get("orientacao", 90))
 
         if op.get("auto_fio", True):
-            p1, p2, ang = self._calcular_fio(el, pontos, bbox, centro, op)
+            tamanho_nome = float(el.get("tam_nome") or el.get("tamanho_nome") or 0.0)
+            centro_fio = self._centro_fio_abaixo_nome(centro, bbox, tamanho_nome)
+            p1, p2, ang = self._calcular_fio(el, pontos, bbox, centro_fio, op)
             el["fio_origem"] = (float(p1.x()), float(p1.y()))
             el["fio_fim"] = (float(p2.x()), float(p2.y()))
             el["fio_angulo"] = float(ang)
@@ -464,7 +466,10 @@ class Ferramenta(FerramentaBase):
         centro: QPointF,
         op: dict,
     ) -> tuple[QPointF, QPointF, float]:
-        ang = self._angulo_fio_atual(el)
+        if op.get("orientacao_manual", False):
+            ang = float(op.get("orientacao", 0.0)) % 360.0
+        else:
+            ang = self._angulo_fio_atual(el)
         direcao = QPointF(cos(radians(ang)), -sin(radians(ang)))
         extremos = self._intersecoes_linha_poligono(centro, direcao, pontos)
         if len(extremos) >= 2:
@@ -485,6 +490,18 @@ class Ferramenta(FerramentaBase):
         p2 = QPointF(centro.x() + direcao.x() * metade, centro.y() + direcao.y() * metade)
         return p1, p2, ang
 
+    def _centro_fio_abaixo_nome(
+        self,
+        centro: QPointF,
+        bbox: tuple[float, float, float, float],
+        tamanho_nome: float,
+    ) -> QPointF:
+        min_x, min_y, max_x, max_y = bbox
+        altura = max(0.0, max_y - min_y)
+        deslocamento = max(0.25, float(tamanho_nome or 0.0) * 0.55, altura * 0.035)
+        y = min(max_y - max(0.15, altura * 0.06), centro.y() + deslocamento)
+        return QPointF(centro.x(), y)
+
     def _angulo_fio_atual(self, el: dict) -> float:
         try:
             return float(el.get("fio_angulo")) % 360.0
@@ -497,7 +514,7 @@ class Ferramenta(FerramentaBase):
             dy = float(p1[1]) - float(p2[1])
             if abs(dx) > 1e-9 or abs(dy) > 1e-9:
                 return atan2(dy, dx) * 180.0 / 3.141592653589793 % 360.0
-        return 90.0
+        return 0.0
 
     def _linha_por_bbox(self, centro: QPointF, direcao: QPointF, bbox: tuple[float, float, float, float]) -> tuple[QPointF, QPointF]:
         min_x, min_y, max_x, max_y = bbox
