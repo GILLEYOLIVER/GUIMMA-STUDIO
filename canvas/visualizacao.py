@@ -1411,6 +1411,7 @@ class VisualizacaoCanvas(QWidget):
                     y_fio = min(max(ys) - max(0.15, altura * 0.06), centro_y + max(0.25, altura * 0.08))
                     p1 = QPointF(min(xs) + margem, y_fio)
                     p2 = QPointF(max(xs) - margem, y_fio)
+                p1, p2 = self._fio_abaixo_do_nome(painter, base, el, p1, p2)
                 bbox_tela = self._bbox_tela_pontos(base)
                 p1_tela = self._cena_para_tela(p1)
                 p2_tela = self._cena_para_tela(p2)
@@ -1506,7 +1507,10 @@ class VisualizacaoCanvas(QWidget):
                 anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
                 if anterior is not None:
                     canto = QPainterPath(self._cena_para_tela(anterior[3]))
-                    canto.quadTo(self._cena_para_tela(a), self._cena_para_tela(off_a))
+                    controle = self._intersecao_linhas(anterior[2], anterior[3], off_a, off_b)
+                    if controle is None:
+                        controle = QPointF(anterior[3].x() + off_a.x() - a.x(), anterior[3].y() + off_a.y() - a.y())
+                    canto.quadTo(self._cena_para_tela(controle), self._cena_para_tela(off_a))
                     painter.drawPath(canto)
             else:
                 painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
@@ -1545,6 +1549,62 @@ class VisualizacaoCanvas(QWidget):
         off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
         off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
         return a, b, off_a, off_b
+
+    @staticmethod
+    def _intersecao_linhas(p1: QPointF, p2: QPointF, p3: QPointF, p4: QPointF) -> QPointF | None:
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+        x3, y3 = p3.x(), p3.y()
+        x4, y4 = p4.x(), p4.y()
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 1e-9:
+            return None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
+        return QPointF(px, py)
+
+    def _fio_abaixo_do_nome(self, painter: QPainter, base: list[QPointF], el: dict, p1: QPointF, p2: QPointF) -> tuple[QPointF, QPointF]:
+        if not el.get("mostrar_nome", True) or not str(el.get("nome_molde") or "").strip():
+            return p1, p2
+        p1_tela = self._cena_para_tela(p1)
+        p2_tela = self._cena_para_tela(p2)
+        dx = p2_tela.x() - p1_tela.x()
+        dy = p2_tela.y() - p1_tela.y()
+        if abs(dx) <= 1e-6 or abs(dy) > abs(dx) * 0.35:
+            return p1, p2
+
+        nome = str(el.get("nome_molde") or "")
+        pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
+        if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
+            cx = float(pos_nome[0])
+            cy = float(pos_nome[1])
+        else:
+            cx = sum(p.x() for p in base) / len(base)
+            cy = sum(p.y() for p in base) / len(base)
+
+        bbox_tela = self._bbox_tela_pontos(base)
+        margem_nome_px = max(1.0, min(6.0, min(bbox_tela[2] - bbox_tela[0], bbox_tela[3] - bbox_tela[1]) * 0.08))
+        limite_largura_nome = max(1.0, bbox_tela[2] - bbox_tela[0] - (margem_nome_px * 2.0))
+        limite_altura_nome = max(1.0, bbox_tela[3] - bbox_tela[1] - (margem_nome_px * 2.0))
+        tamanho_nome_cm = self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 1.0)
+        tamanho_nome_px = max(1.0, float(tamanho_nome_cm) * max(self.zoom, 0.001))
+        fonte_nome = self._fonte_ajustada_px(painter, nome, tamanho_nome_px, limite_largura_nome, limite_altura_nome)
+        metrics = QFontMetrics(fonte_nome)
+        tela_nome = self._ponto_tela_dentro_bbox(
+            self._cena_para_tela(QPointF(cx, cy)),
+            bbox_tela,
+            metrics.horizontalAdvance(nome),
+            metrics.height(),
+            margem_nome_px,
+        )
+        nome_bottom = tela_nome.y() + (metrics.height() / 3.0) + metrics.descent()
+        alvo_y = min(bbox_tela[3] - 2.0, nome_bottom + max(2.0, metrics.height() * 0.12))
+        y_atual = (p1_tela.y() + p2_tela.y()) / 2.0
+        if y_atual >= alvo_y:
+            return p1, p2
+
+        deslocamento_cena = (alvo_y - y_atual) / max(self.zoom, 0.001)
+        return QPointF(p1.x(), p1.y() + deslocamento_cena), QPointF(p2.x(), p2.y() + deslocamento_cena)
 
     def _margens_por_segmento(self, el: dict, total_segmentos: int) -> dict[int, float]:
         margens: dict[int, float] = {}
