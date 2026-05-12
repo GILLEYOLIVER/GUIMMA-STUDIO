@@ -144,6 +144,7 @@ class PreviewMoldeWidget(QWidget):
 
         painter.drawPath(path)
 
+        self._desenhar_margem(painter, base, mapear)
         self._desenhar_fio(painter, base, mapear)
         self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
         self._desenhar_controles(painter, mapear)
@@ -219,7 +220,7 @@ class PreviewMoldeWidget(QWidget):
             p2 = mapear(p_fio_fim)
         else:
             margem = (max(xs) - min(xs)) * 0.18
-            y_fio = min(ys) + ((max(ys) - min(ys)) * 0.58)
+            y_fio = sum(ys) / len(ys)
             p1 = mapear(QPointF(min(xs) + margem, y_fio))
             p2 = mapear(QPointF(max(xs) - margem, y_fio))
 
@@ -255,6 +256,109 @@ class PreviewMoldeWidget(QWidget):
         painter.drawPath(path)
         painter.restore()
 
+    def _desenhar_margem(self, painter: QPainter, base: list[QPointF], mapear):
+        if not self._molde or not self._molde.get("mostrar_margem", False) or len(base) < 3:
+            return
+        margens = self._margens_por_segmento(self._molde, len(base))
+        if not margens:
+            return
+        sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
+        painter.save()
+        pen = QPen(QColor("#ffffff"), 1.0)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        total = len(base)
+        for seg_idx, margem in margens.items():
+            if margem <= 0:
+                continue
+            pontos_offset = self._pontos_offset_segmento(base, seg_idx, margem, sentido)
+            if pontos_offset is None:
+                continue
+            a, b, off_a, off_b = pontos_offset
+            painter.drawLine(mapear(off_a), mapear(off_b))
+
+            margem_anterior = float(margens.get((seg_idx - 1) % total, 0.0) or 0.0)
+            if margem_anterior > 0:
+                anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
+                if anterior is not None:
+                    painter.drawLine(mapear(anterior[3]), mapear(off_a))
+            else:
+                painter.drawLine(mapear(a), mapear(off_a))
+
+            margem_proxima = float(margens.get((seg_idx + 1) % total, 0.0) or 0.0)
+            if margem_proxima <= 0:
+                painter.drawLine(mapear(off_b), mapear(b))
+        painter.restore()
+
+    def _margens_por_segmento(self, molde: dict, total_segmentos: int) -> dict[int, float]:
+        margens: dict[int, float] = {}
+        dados = molde.get("margens_molde")
+        if isinstance(dados, list):
+            for item in dados:
+                if not isinstance(item, dict):
+                    continue
+                idx = self._indice_segmento_margem(str(item.get("elemento") or ""), total_segmentos)
+                try:
+                    valor = max(0.0, float(item.get("margem") or 0))
+                except (TypeError, ValueError):
+                    valor = 0.0
+                if idx is not None and valor > 0:
+                    margens[idx] = valor
+        elif isinstance(dados, dict):
+            for elemento, valor_raw in dados.items():
+                idx = self._indice_segmento_margem(str(elemento), total_segmentos)
+                try:
+                    valor = max(0.0, float(valor_raw or 0))
+                except (TypeError, ValueError):
+                    valor = 0.0
+                if idx is not None and valor > 0:
+                    margens[idx] = valor
+        return margens
+
+    @staticmethod
+    def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:
+        partes = str(elemento or "").replace(" ", "").split("-", 1)
+        if len(partes) != 2 or total_segmentos <= 0:
+            return None
+        try:
+            inicio = int(partes[0])
+            fim = int(partes[1])
+        except ValueError:
+            return None
+        esperado_fim = (inicio % total_segmentos) + 1
+        if inicio < 1 or inicio > total_segmentos or fim != esperado_fim:
+            return None
+        return inicio - 1
+
+    @staticmethod
+    def _area_assinada_pontos(pontos: list[QPointF]) -> float:
+        area = 0.0
+        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
+            area += (a.x() * b.y()) - (b.x() * a.y())
+        return area / 2.0
+
+    @staticmethod
+    def _pontos_offset_segmento(
+        base: list[QPointF],
+        seg_idx: int,
+        margem: float,
+        sentido: float,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | None:
+        total = len(base)
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-9:
+            return None
+        nx = sentido * (-dy / comp)
+        ny = sentido * (dx / comp)
+        off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
+        off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
+        return a, b, off_a, off_b
+
     def _desenhar_textos(self, painter: QPainter, base: list[QPointF], mapear, min_y: float, max_y: float):
         cx = sum(p.x() for p in base) / len(base)
         cy = sum(p.y() for p in base) / len(base)
@@ -267,7 +371,8 @@ class PreviewMoldeWidget(QWidget):
         if self._molde.get("mostrar_nome", True):
             nome = str(self._molde.get("nome_molde") or "")
             if nome:
-                pos = mapear(QPointF(cx, cy + ((max_y - min_y) * 0.02)))
+                ponto_texto = self._ponto_xy(self._molde.get("ponto_texto")) or QPointF(cx, cy)
+                pos = mapear(ponto_texto)
                 painter.drawText(int(pos.x() - 16), int(pos.y() - 6), 60, 20, Qt.AlignLeft, nome)
 
         if self._molde.get("visual_descricao", False):

@@ -835,7 +835,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._dist(proj_fio, pos_cena) <= (tol_cena * 1.4):
                         self._adicionar_candidato_snap(candidatos, pos_cena, proj_fio, "fio", idx, tol_cena * 1.5)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         self._adicionar_candidato_snap(candidatos, pos_cena, p_nome, "nome", idx, tol_cena * 1.5)
@@ -1364,7 +1364,7 @@ class VisualizacaoCanvas(QWidget):
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
                 if nome:
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         cx = float(pos_nome[0])
                         cy = float(pos_nome[1])
@@ -1405,8 +1405,8 @@ class VisualizacaoCanvas(QWidget):
                     xs = [p.x() for p in base]
                     ys = [p.y() for p in base]
                     largura = max(xs) - min(xs)
-                    margem = largura * 0.12
-                    y_fio = min(ys) + ((max(ys) - min(ys)) * 0.24)
+                    margem = largura * 0.20
+                    y_fio = sum(ys) / len(ys)
                     p1 = QPointF(min(xs) + margem, y_fio)
                     p2 = QPointF(max(xs) - margem, y_fio)
                 bbox_tela = self._bbox_tela_pontos(base)
@@ -1485,31 +1485,53 @@ class VisualizacaoCanvas(QWidget):
             return
         sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
         painter.save()
-        pen = QPen(QColor("#cc3f6a"), 1.2, Qt.SolidLine)
+        pen = QPen(QColor("#ffffff"), 1.0, Qt.SolidLine)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
+        total = len(base)
         for seg_idx, margem in margens.items():
             if margem <= 0:
                 continue
-            a = base[seg_idx % len(base)]
-            b = base[(seg_idx + 1) % len(base)]
-            dx = b.x() - a.x()
-            dy = b.y() - a.y()
-            comp = sqrt((dx * dx) + (dy * dy))
-            if comp <= 1e-9:
+            pontos_offset = self._pontos_offset_segmento(base, seg_idx, margem, sentido)
+            if pontos_offset is None:
                 continue
-            nx = sentido * (-dy / comp)
-            ny = sentido * (dx / comp)
-            off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
-            off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
+            a, b, off_a, off_b = pontos_offset
             painter.drawLine(self._cena_para_tela(off_a), self._cena_para_tela(off_b))
-            conector_pen = QPen(QColor("#cc3f6a"), 0.8, Qt.DotLine)
-            painter.setPen(conector_pen)
-            painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
-            painter.drawLine(self._cena_para_tela(b), self._cena_para_tela(off_b))
-            painter.setPen(pen)
+
+            margem_anterior = float(margens.get((seg_idx - 1) % total, 0.0) or 0.0)
+            if margem_anterior > 0:
+                anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
+                if anterior is not None:
+                    painter.drawLine(self._cena_para_tela(anterior[3]), self._cena_para_tela(off_a))
+            else:
+                painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
+
+            margem_proxima = float(margens.get((seg_idx + 1) % total, 0.0) or 0.0)
+            if margem_proxima <= 0:
+                painter.drawLine(self._cena_para_tela(off_b), self._cena_para_tela(b))
         painter.restore()
+
+    @staticmethod
+    def _pontos_offset_segmento(
+        base: list[QPointF],
+        seg_idx: int,
+        margem: float,
+        sentido: float,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | None:
+        total = len(base)
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-9:
+            return None
+        nx = sentido * (-dy / comp)
+        ny = sentido * (dx / comp)
+        off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
+        off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
+        return a, b, off_a, off_b
 
     def _margens_por_segmento(self, el: dict, total_segmentos: int) -> dict[int, float]:
         margens: dict[int, float] = {}
@@ -2199,7 +2221,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         if self._dist(p_nome, pos) <= (tolerancia * 2.0):

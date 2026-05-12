@@ -66,12 +66,27 @@ class AudacesPairImport:
                     continue
                 if pts[0] != pts[-1]:
                     pts.append(pts[0])
+                base = pts[:-1]
+                xs = [x for x, _ in base]
+                ys = [y for _, y in base]
+                cx = sum(xs) / len(xs)
+                cy = sum(ys) / len(ys)
+                largura = max(xs) - min(xs)
+                margem = largura * 0.20
                 elementos.append({
                     "tipo": "polyline",
                     "pontos": pts,
                     "origem": "audaces_emf_xml_molde_real",
                     "subtipo_audaces": "contorno",
                     "molde": True,
+                    "molde_id": molde.id,
+                    "nome_molde": molde.nome,
+                    "fio_angulo": 0.0,
+                    "fio_origem": (min(xs) + margem, cy),
+                    "fio_fim": (max(xs) - margem, cy),
+                    "ponto_texto": (cx, cy),
+                    "mostrar_nome": True,
+                    "mostrar_fio": True,
                     "metadados": {"origem": "audaces_emf_xml", "importado_como_molde_real": True, "subtipo_audaces": "contorno"},
                     "cor": "#ff7b00",
                     "bloqueado": False,

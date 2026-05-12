@@ -3145,6 +3145,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                     continue
                 if pts[0] != pts[-1]:
                     pts.append(pts[0])
+                base = pts[:-1]
+                xs = [x for x, _ in base]
+                ys = [y for _, y in base]
+                cx = sum(xs) / len(xs)
+                cy = sum(ys) / len(ys)
+                largura = max(xs) - min(xs)
+                margem = largura * 0.20
                 elementos.append({
                     "tipo": "polyline",
                     "pontos": pts,
@@ -3152,6 +3159,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "origem": "molde_real_audaces",
                     "subtipo_audaces": "contorno",
                     "nome_molde": getattr(molde, "nome", "Molde"),
+                    "molde_id": getattr(molde, "id", ""),
+                    "fio_angulo": 0.0,
+                    "fio_origem": (min(xs) + margem, cy),
+                    "fio_fim": (max(xs) - margem, cy),
+                    "ponto_texto": (cx, cy),
+                    "mostrar_nome": True,
+                    "mostrar_fio": True,
                     "cor": "#ff7b00",
                     "bloqueado": False,
                 })
