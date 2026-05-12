@@ -375,7 +375,7 @@ class Ferramenta(FerramentaBase):
             el["tamanho_nome"] = tamanho_cm
             el["fonte_nome"] = tamanho_cm
             if op.get("orientacao_manual", False):
-                el["nome_angulo"] = float(op.get("orientacao", 90))
+                el["nome_angulo"] = float(op.get("orientacao", 0))
 
         if op.get("auto_fio", True):
             tamanho_nome = float(el.get("tam_nome") or el.get("tamanho_nome") or 0.0)

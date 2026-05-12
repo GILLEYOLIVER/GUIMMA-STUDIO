@@ -235,6 +235,7 @@ class PreviewMoldeWidget(QWidget):
             y_fio = min(max(ys) - max(0.15, altura * 0.06), centro_y + max(0.25, altura * 0.08))
             p1 = mapear(QPointF(min(xs) + margem, y_fio))
             p2 = mapear(QPointF(max(xs) - margem, y_fio))
+        p1, p2 = self._fio_preview_abaixo_do_nome(painter, base, mapear, p1, p2)
 
         dx = p2.x() - p1.x()
         dy = p2.y() - p1.y()
@@ -295,7 +296,10 @@ class PreviewMoldeWidget(QWidget):
                 anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
                 if anterior is not None:
                     canto = QPainterPath(mapear(anterior[3]))
-                    canto.quadTo(mapear(a), mapear(off_a))
+                    controle = self._intersecao_linhas(anterior[2], anterior[3], off_a, off_b)
+                    if controle is None:
+                        controle = QPointF(anterior[3].x() + off_a.x() - a.x(), anterior[3].y() + off_a.y() - a.y())
+                    canto.quadTo(mapear(controle), mapear(off_a))
                     painter.drawPath(canto)
             else:
                 painter.drawLine(mapear(a), mapear(off_a))
@@ -374,6 +378,52 @@ class PreviewMoldeWidget(QWidget):
         off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
         off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
         return a, b, off_a, off_b
+
+    @staticmethod
+    def _intersecao_linhas(p1: QPointF, p2: QPointF, p3: QPointF, p4: QPointF) -> QPointF | None:
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+        x3, y3 = p3.x(), p3.y()
+        x4, y4 = p4.x(), p4.y()
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 1e-9:
+            return None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
+        return QPointF(px, py)
+
+    def _fio_preview_abaixo_do_nome(self, painter: QPainter, base: list[QPointF], mapear, p1: QPointF, p2: QPointF) -> tuple[QPointF, QPointF]:
+        if not self._molde or not self._molde.get("mostrar_nome", True):
+            return p1, p2
+        nome = str(self._molde.get("nome_molde") or "").strip()
+        if not nome:
+            return p1, p2
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        if abs(dx) <= 1e-6 or abs(dy) > abs(dx) * 0.35:
+            return p1, p2
+
+        cx = sum(p.x() for p in base) / len(base)
+        cy = sum(p.y() for p in base) / len(base)
+        ponto_texto = self._ponto_xy(self._molde.get("ponto_texto")) or QPointF(cx, cy)
+        pos_nome = mapear(ponto_texto)
+        fonte = QFont(painter.font())
+        fonte.setPointSize(9)
+        painter.save()
+        painter.setFont(fonte)
+        metrics = painter.fontMetrics()
+        painter.restore()
+
+        xs = [mapear(p).x() for p in base]
+        ys = [mapear(p).y() for p in base]
+        bottom = max(ys) - 2.0
+        nome_bottom = pos_nome.y() + (metrics.height() / 3.0) + metrics.descent()
+        alvo_y = min(bottom, nome_bottom + max(2.0, metrics.height() * 0.12))
+        y_atual = (p1.y() + p2.y()) / 2.0
+        if y_atual >= alvo_y:
+            return p1, p2
+        dy_tela = alvo_y - y_atual
+        return QPointF(p1.x(), p1.y() + dy_tela), QPointF(p2.x(), p2.y() + dy_tela)
 
     def _desenhar_textos(self, painter: QPainter, base: list[QPointF], mapear, min_y: float, max_y: float):
         cx = sum(p.x() for p in base) / len(base)
@@ -1680,19 +1730,25 @@ class PropriedadesMoldesDialog(QDialog):
         if not molde or not hasattr(self, "tbl_margem"):
             return
         margens = self._coletar_margens_tabela()
-        self._salvar_margens_no_molde(molde, margens)
+        self._salvar_margens_no_molde(molde, margens, sincronizar_checkbox=True)
         self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
         self.preview.set_molde(dict(molde))
 
-    def _salvar_margens_no_molde(self, molde: dict, margens: dict[str, float]):
+    def _salvar_margens_no_molde(
+        self,
+        molde: dict,
+        margens: dict[str, float],
+        mostrar_margem: bool | None = None,
+        sincronizar_checkbox: bool = False,
+    ):
         tem_margem = any(float(v or 0) > 0 for v in margens.values())
         molde["margens_molde"] = [{"elemento": k, "margem": float(v)} for k, v in margens.items()]
         molde["margens"] = {k: self._formatar_float_margem(v) for k, v in margens.items()}
         molde["margem_cm_por_elemento"] = dict(molde["margens"])
-        molde["mostrar_margem"] = tem_margem
-        if hasattr(self, "chk_margem_visual"):
+        molde["mostrar_margem"] = (tem_margem if mostrar_margem is None else bool(mostrar_margem) and tem_margem)
+        if sincronizar_checkbox and hasattr(self, "chk_margem_visual"):
             with QSignalBlocker(self.chk_margem_visual):
-                self.chk_margem_visual.setChecked(tem_margem)
+                self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))
 
     def _forcar_margem_no_canvas(self, molde: dict, margens: dict[str, float], tem_margem: bool):
         indice = self._indice_atual
@@ -1703,7 +1759,7 @@ class PropriedadesMoldesDialog(QDialog):
         if isinstance(elementos, list) and 0 <= int(indice) < len(elementos):
             alvo = elementos[int(indice)]
             if isinstance(alvo, dict):
-                self._salvar_margens_no_molde(alvo, margens)
+                self._salvar_margens_no_molde(alvo, margens, mostrar_margem=tem_margem)
                 alvo["mostrar_margem"] = bool(tem_margem)
 
         cache = getattr(self.canvas, "_margens_visuais_forcadas", None)
@@ -2456,7 +2512,7 @@ class PropriedadesMoldesDialog(QDialog):
             QMessageBox.information(self, "Margem", "Selecione um molde para aplicar a margem.")
             return
         margens = self._coletar_margens_tabela()
-        self._salvar_margens_no_molde(molde, margens)
+        self._salvar_margens_no_molde(molde, margens, sincronizar_checkbox=True)
         self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
@@ -2473,6 +2529,9 @@ class PropriedadesMoldesDialog(QDialog):
         self._aplicar_formulario_no_molde(molde)
         self._sincronizar_gradacao_no_molde()
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        if hasattr(self, "tbl_margem"):
+            margens = self._coletar_margens_tabela()
+            self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
 
         self.canvas.update()
         if hasattr(self.canvas, "_registrar_historico"):
@@ -2608,15 +2667,8 @@ class PropriedadesMoldesDialog(QDialog):
         molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
         molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
         molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
-        margens = self._margens_do_formulario()
-        molde["margens_molde"] = margens
-        molde["margens"] = {item["elemento"]: item["margem"] for item in margens}
-        molde["margem_cm_por_elemento"] = dict(molde["margens"])
-        tem_margem = any(float(item.get("margem") or 0) > 0 for item in margens)
-        molde["mostrar_margem"] = self.chk_margem_visual.isChecked() or tem_margem
-        if tem_margem and not self.chk_margem_visual.isChecked():
-            with QSignalBlocker(self.chk_margem_visual):
-                self.chk_margem_visual.setChecked(True)
+        margens_dict = self._coletar_margens_tabela()
+        self._salvar_margens_no_molde(molde, margens_dict, mostrar_margem=self.chk_margem_visual.isChecked())
         molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
 
@@ -2630,6 +2682,9 @@ class PropriedadesMoldesDialog(QDialog):
         self._sincronizar_nome_molde_atual_sem_recarregar(str(molde.get("nome_molde") or ""))
         self._sincronizar_gradacao_no_molde()
         self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        if hasattr(self, "tbl_margem"):
+            margens = self._coletar_margens_tabela()
+            self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
         self.preview.set_molde(dict(molde))
         self.canvas.update()
 
