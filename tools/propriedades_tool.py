@@ -7,7 +7,7 @@ from math import sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal, QSignalBlocker
+from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -389,7 +389,32 @@ class PreviewMoldeWidget(QWidget):
             if nome:
                 ponto_texto = self._ponto_xy(self._molde.get("ponto_texto")) or QPointF(cx, cy)
                 pos = mapear(ponto_texto)
-                painter.drawText(int(pos.x() - 16), int(pos.y() - 6), 60, 20, Qt.AlignLeft, nome)
+                largura_molde_px = max(
+                    80,
+                    int(abs(
+                        mapear(QPointF(max(p.x() for p in base), cy)).x()
+                        - mapear(QPointF(min(p.x() for p in base), cy)).x()
+                    ) - 12),
+                )
+                fonte_nome = QFont(fonte)
+                tamanho = 9
+                while tamanho >= 6:
+                    fonte_nome.setPointSize(tamanho)
+                    painter.setFont(fonte_nome)
+                    metric = painter.fontMetrics()
+                    if metric.horizontalAdvance(nome) <= largura_molde_px:
+                        break
+                    tamanho -= 1
+                altura = max(18, painter.fontMetrics().height() + 4)
+                painter.drawText(
+                    int(pos.x() - (largura_molde_px / 2)),
+                    int(pos.y() - (altura / 2)),
+                    int(largura_molde_px),
+                    int(altura),
+                    Qt.AlignCenter,
+                    nome,
+                )
+                painter.setFont(fonte)
 
         if self._molde.get("visual_descricao", False):
             descricao = str(self._molde.get("descricao") or "Descrição")
@@ -920,6 +945,10 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_config_tecido.setFixedSize(24, 24)
         self.btn_config_tecido.setToolTip("Configurar cor do tecido")
         self.btn_config_tecido.clicked.connect(self._abrir_config_cor_tecidos)
+        self.ed_tecido.installEventFilter(self)
+        self.ed_tecido.activated.connect(lambda *_: self._aplicar_tecido_formulario_confirmado())
+        if self.ed_tecido.lineEdit() is not None:
+            self.ed_tecido.lineEdit().editingFinished.connect(self._aplicar_tecido_formulario_confirmado)
 
         self.cmb_espelhar = QComboBox()
         self.cmb_espelhar.addItems(["Nenhum", "Horizontal", "Vertical"])
@@ -1457,7 +1486,7 @@ class PropriedadesMoldesDialog(QDialog):
         v.setContentsMargins(8, 8, 8, 8)
         self.btn_aplicar_margem = QPushButton("Aplicar")
         self.btn_aplicar_margem.setFixedWidth(82)
-        self.btn_aplicar_margem.clicked.connect(self._aplicar)
+        self.btn_aplicar_margem.clicked.connect(self._aplicar_margem_no_molde)
         v.addWidget(self.btn_aplicar_margem, 0, Qt.AlignLeft)
         v.addStretch(1)
 
@@ -1467,54 +1496,74 @@ class PropriedadesMoldesDialog(QDialog):
         return aba
 
     def _popular_tabela_margem(self):
-        pares = [("1-2", "0"), ("2-3", "0"), ("3-4", "0"), ("4-5", "0"), ("5-6", "0"), ("6-7", "0"), ("7-8", "0"), ("8-9", "0")]
-        for i, (a, b) in enumerate(pares):
-            item_elemento = QTableWidgetItem(a)
-            item_elemento.setFlags(item_elemento.flags() & ~Qt.ItemIsEditable)
-            self.tbl_margem.setItem(i, 0, item_elemento)
-            self.tbl_margem.setItem(i, 1, QTableWidgetItem(b))
+        self._preencher_tabela_margem(self._molde_atual() if hasattr(self, "_indice_atual") else None)
+
+    def _elementos_margem_do_molde(self, molde: dict | None) -> list[str]:
+        if not isinstance(molde, dict):
+            return []
+        pontos_raw = molde.get("pontos")
+        if not isinstance(pontos_raw, (list, tuple)):
+            return []
+        pontos: list[QPointF] = []
+        for item in pontos_raw:
+            ponto = self.preview._ponto_xy(item) if hasattr(self, "preview") else None
+            if ponto is not None:
+                pontos.append(ponto)
+        if len(pontos) < 2:
+            return []
+        fechado = len(pontos) >= 3 and self._distancia_pontos_margem(pontos[0], pontos[-1]) <= 1e-6
+        total = len(pontos) - 1 if fechado else len(pontos)
+        if total < 2:
+            return []
+        if fechado:
+            return [f"{i + 1}-{((i + 1) % total) + 1}" for i in range(total)]
+        return [f"{i + 1}-{i + 2}" for i in range(total - 1)]
 
     def _preencher_tabela_margem(self, molde: dict | None):
         if not hasattr(self, "tbl_margem"):
             return
         self.tbl_margem.blockSignals(True)
-        self.tbl_margem.clearContents()
-        pontos = []
-        if isinstance(molde, dict):
-            try:
-                pontos = [QPointF(float(x), float(y)) for x, y in molde.get("pontos", [])]
-            except Exception:
-                pontos = []
-        base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
-        total = max(1, len(base))
-        total_linhas = max(1, total if total >= 3 else 8)
-        self.tbl_margem.setRowCount(total_linhas)
-        valores_salvos: dict[str, str] = {}
-        if isinstance(molde, dict):
-            for item in molde.get("margens_molde", []) or []:
-                if not isinstance(item, dict):
-                    continue
-                elemento = str(item.get("elemento") or "").strip()
-                if elemento:
-                    valores_salvos[elemento] = str(item.get("margem", 0) or 0)
-            for dados in (molde.get("margens"), molde.get("margem_cm_por_elemento")):
-                if isinstance(dados, dict):
-                    for elemento, valor in dados.items():
-                        valores_salvos.setdefault(str(elemento), str(valor))
-        for i in range(total_linhas):
-            elemento = f"{i + 1}-{((i + 1) % total_linhas) + 1}"
-            item_elemento = QTableWidgetItem(elemento)
-            item_elemento.setFlags(item_elemento.flags() & ~Qt.ItemIsEditable)
-            self.tbl_margem.setItem(i, 0, item_elemento)
-            self.tbl_margem.setItem(i, 1, QTableWidgetItem(valores_salvos.get(elemento, "0")))
-        self.tbl_margem.blockSignals(False)
+        try:
+            self.tbl_margem.clearContents()
+            valores_salvos: dict[str, str] = {}
+            if isinstance(molde, dict):
+                for item in molde.get("margens_molde", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    elemento = str(item.get("elemento") or "").strip()
+                    if elemento:
+                        valores_salvos[elemento] = str(item.get("margem", 0) or 0)
+                for dados in (molde.get("margens"), molde.get("margem_cm_por_elemento")):
+                    if isinstance(dados, dict):
+                        for elemento, valor in dados.items():
+                            valores_salvos.setdefault(str(elemento), str(valor))
+
+            elementos = self._elementos_margem_do_molde(molde)
+            if not elementos and valores_salvos:
+                elementos = list(valores_salvos.keys())
+
+            self.tbl_margem.setRowCount(len(elementos))
+            for row, elemento in enumerate(elementos):
+                item_elemento = QTableWidgetItem(elemento)
+                item_elemento.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.tbl_margem.setItem(row, 0, item_elemento)
+
+                item_valor = QTableWidgetItem(str(valores_salvos.get(elemento, "0")))
+                item_valor.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                self.tbl_margem.setItem(row, 1, item_valor)
+
+            altura_linha = self.tbl_margem.verticalHeader().defaultSectionSize()
+            altura = min(242, max(92, 31 + (len(elementos) * max(20, altura_linha))))
+            self.tbl_margem.setFixedHeight(altura)
+        finally:
+            self.tbl_margem.blockSignals(False)
 
     def _quando_margem_item_alterado(self, item: QTableWidgetItem):
         if item is None or item.column() != 1:
             return
         linhas = self._linhas_margem_selecionadas()
         if len(linhas) <= 1 or item.row() not in linhas:
-            self._aplicar_imediato_formulario()
+            self._atualizar_margem_em_tempo_real()
             return
         texto = item.text()
         self.tbl_margem.blockSignals(True)
@@ -1529,7 +1578,7 @@ class PropriedadesMoldesDialog(QDialog):
                 item_valor.setText(texto)
         finally:
             self.tbl_margem.blockSignals(False)
-        self._aplicar_imediato_formulario()
+        self._atualizar_margem_em_tempo_real()
 
     def _linhas_margem_selecionadas(self) -> list[int]:
         if not hasattr(self, "tbl_margem"):
@@ -1543,22 +1592,100 @@ class PropriedadesMoldesDialog(QDialog):
         return sorted(row for row in linhas if 0 <= row < self.tbl_margem.rowCount())
 
     def _margens_do_formulario(self) -> list[dict]:
-        margens: list[dict] = []
+        return [
+            {"elemento": elemento, "margem": valor}
+            for elemento, valor in self._coletar_margens_tabela().items()
+        ]
+
+    def _coletar_margens_tabela(self) -> dict[str, float]:
+        margens: dict[str, float] = {}
         if not hasattr(self, "tbl_margem"):
             return margens
         for row in range(self.tbl_margem.rowCount()):
             item_elemento = self.tbl_margem.item(row, 0)
             item_margem = self.tbl_margem.item(row, 1)
             elemento = (item_elemento.text() if item_elemento else "").strip()
-            texto_margem = (item_margem.text() if item_margem else "0").strip().replace(",", ".")
+            texto = (item_margem.text() if item_margem else "0").replace("cm", "").replace(",", ".").strip()
             if not elemento:
                 continue
             try:
-                valor = max(0.0, float(texto_margem or 0))
+                valor = float(texto or 0)
             except ValueError:
                 valor = 0.0
-            margens.append({"elemento": elemento, "margem": valor})
+            margens[elemento] = max(0.0, valor)
         return margens
+
+    def _formatar_float_margem(self, valor: float) -> str:
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            numero = 0.0
+        if abs(numero - round(numero)) < 1e-9:
+            return str(int(round(numero)))
+        return (f"{numero:.3f}".rstrip("0").rstrip(".")).replace(".", ",")
+
+    def _atualizar_margem_em_tempo_real(self):
+        molde = self._molde_atual()
+        if not molde or not hasattr(self, "tbl_margem"):
+            return
+        margens = self._coletar_margens_tabela()
+        self._salvar_margens_no_molde(molde, margens)
+        self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
+        self.preview.set_molde(dict(molde))
+
+    def _salvar_margens_no_molde(self, molde: dict, margens: dict[str, float]):
+        tem_margem = any(float(v or 0) > 0 for v in margens.values())
+        molde["margens_molde"] = [{"elemento": k, "margem": float(v)} for k, v in margens.items()]
+        molde["margens"] = {k: self._formatar_float_margem(v) for k, v in margens.items()}
+        molde["margem_cm_por_elemento"] = dict(molde["margens"])
+        molde["mostrar_margem"] = tem_margem
+        if hasattr(self, "chk_margem_visual"):
+            with QSignalBlocker(self.chk_margem_visual):
+                self.chk_margem_visual.setChecked(tem_margem)
+
+    def _forcar_margem_no_canvas(self, molde: dict, margens: dict[str, float], tem_margem: bool):
+        indice = self._indice_atual
+        if indice is None:
+            return
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if isinstance(elementos, list) and 0 <= int(indice) < len(elementos):
+            alvo = elementos[int(indice)]
+            if isinstance(alvo, dict):
+                self._salvar_margens_no_molde(alvo, margens)
+                alvo["mostrar_margem"] = bool(tem_margem)
+
+        cache = getattr(self.canvas, "_margens_visuais_forcadas", None)
+        if not isinstance(cache, dict):
+            cache = {}
+        if tem_margem:
+            cache[int(indice)] = {
+                "margens": {k: self._formatar_float_margem(v) for k, v in margens.items()},
+                "mostrar_margem": True,
+            }
+        else:
+            cache.pop(int(indice), None)
+        setattr(self.canvas, "_margens_visuais_forcadas", cache)
+        self._remover_margens_visuais_soltas()
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
+        if hasattr(self.canvas, "repaint"):
+            self.canvas.repaint()
+
+    def _remover_margens_visuais_soltas(self):
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        if isinstance(elementos, list):
+            elementos[:] = [
+                el for el in elementos
+                if not (isinstance(el, dict) and el.get("guimma_margem_linha_canvas"))
+            ]
+
+    def _sincronizar_margem_visual_como_elemento(self, indice_molde: int, pontos_margem: list | None, tem_margem: bool):
+        self._remover_margens_visuais_soltas()
+
+    def _distancia_pontos_margem(self, a: QPointF, b: QPointF) -> float:
+        return sqrt(((a.x() - b.x()) ** 2) + ((a.y() - b.y()) ** 2))
 
     def _criar_tab_cam(self) -> QWidget:
         aba = QWidget()
@@ -1833,6 +1960,7 @@ class PropriedadesMoldesDialog(QDialog):
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.NoInsert)
         combo.setMinimumHeight(20)
+        combo.installEventFilter(self)
         combo.setStyleSheet(
             "QComboBox { background: transparent; border: none; color:#111111; padding-left:0px; }"
             "QComboBox::drop-down { width:18px; border: none; }"
@@ -1850,6 +1978,36 @@ class PropriedadesMoldesDialog(QDialog):
             )
         self.arvore.setItemWidget(item, 0, combo)
         self._combos_tecido_por_item[id(item)] = combo
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if isinstance(obj, QComboBox) and event.type() == QEvent.Wheel:
+            event.ignore()
+            return True
+        if isinstance(obj, QComboBox) and event.type() == QEvent.KeyPress:
+            teclas_navegacao = {Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End}
+            if event.key() in teclas_navegacao and not obj.view().isVisible():
+                obj.showPopup()
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _aplicar_tecido_formulario_confirmado(self):
+        if self._suspender_auto_aplicar:
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        novo_tecido = str(self.ed_tecido.currentText() or "").strip()
+        if not novo_tecido:
+            return
+        tecido_atual = str(molde.get("tecido") or "").strip()
+        if novo_tecido == tecido_atual:
+            return
+        self._aplicar_imediato_formulario()
+        molde["grupo_molde"] = novo_tecido
+        self._atualizar_opcoes_tecido()
+        self.canvas.update()
+        QTimer.singleShot(0, self.recarregar_lista)
 
     def _alterar_tecido_grupo_pela_arvore(self, item: QTreeWidgetItem, novo_tecido: str):
         if self._suspender_combo_tecido_arvore:
@@ -2239,6 +2397,20 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._finalizar_aplicacao_em_lote()
 
+    def _aplicar_margem_no_molde(self):
+        molde = self._molde_atual()
+        if not molde:
+            QMessageBox.information(self, "Margem", "Selecione um molde para aplicar a margem.")
+            return
+        margens = self._coletar_margens_tabela()
+        self._salvar_margens_no_molde(molde, margens)
+        self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
+        if hasattr(self.canvas, "_registrar_historico"):
+            self.canvas._registrar_historico()
+        self.preview.set_molde(dict(molde))
+        self._confirmado_ok = True
+        self.dados_aplicados.emit()
+
     def _aplicar(self) -> bool:
         molde = self._molde_atual()
         if not molde:
@@ -2345,9 +2517,18 @@ class PropriedadesMoldesDialog(QDialog):
         elementos = getattr(cena, "elementos", [])
         if not isinstance(elementos, list):
             return
+        elementos[:] = [
+            el for el in elementos
+            if not (isinstance(el, dict) and el.get("guimma_margem_linha_canvas"))
+        ]
         for idx, el in self._snapshot_moldes.items():
             if 0 <= idx < len(elementos):
                 elementos[idx] = deepcopy(el)
+        if hasattr(self.canvas, "_margens_visuais_forcadas"):
+            try:
+                self.canvas._margens_visuais_forcadas = {}
+            except Exception:
+                pass
         self.canvas._mostrar_cor_tecidos = bool(self._snapshot_mostrar_cor_tecidos)
         self.canvas.update()
 
@@ -2403,7 +2584,6 @@ class PropriedadesMoldesDialog(QDialog):
         sinais = [
             self.cmb_molde.currentTextChanged,
             self.ed_descricao.textChanged,
-            self.ed_tecido.currentTextChanged,
             self.cmb_tipo_corte.currentTextChanged,
             self.cmb_espelhar.currentTextChanged,
             self.cmb_giro.currentTextChanged,
