@@ -835,7 +835,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._dist(proj_fio, pos_cena) <= (tol_cena * 1.4):
                         self._adicionar_candidato_snap(candidatos, pos_cena, proj_fio, "fio", idx, tol_cena * 1.5)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         self._adicionar_candidato_snap(candidatos, pos_cena, p_nome, "nome", idx, tol_cena * 1.5)
@@ -1358,13 +1358,10 @@ class VisualizacaoCanvas(QWidget):
             if idx in self._selecionados:
                 self._desenhar_selecao_molde(painter, base, el)
 
-            if el.get("mostrar_margem", False):
-                self._desenhar_margem_molde(painter, base, el)
-
             if el.get("mostrar_nome", True):
                 nome = str(el.get("nome_molde") or "")
                 if nome:
-                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         cx = float(pos_nome[0])
                         cy = float(pos_nome[1])
@@ -1373,13 +1370,20 @@ class VisualizacaoCanvas(QWidget):
                         cy = sum(p.y() for p in base) / len(base)
                     tela = self._cena_para_tela(QPointF(cx, cy))
                     bbox_tela = self._bbox_tela_pontos(base)
-                    margem_nome_px = max(1.0, min(6.0, min(bbox_tela[2] - bbox_tela[0], bbox_tela[3] - bbox_tela[1]) * 0.08))
-                    limite_largura_nome = max(1.0, bbox_tela[2] - bbox_tela[0] - (margem_nome_px * 2.0))
-                    limite_altura_nome = max(1.0, bbox_tela[3] - bbox_tela[1] - (margem_nome_px * 2.0))
-                    tamanho_nome_cm = self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 1.0)
-                    tamanho_nome_px = max(1.0, float(tamanho_nome_cm) * max(self.zoom, 0.001))
+                    margem_nome_px = 6.0
+                    limite_largura_nome = max(6.0, bbox_tela[2] - bbox_tela[0] - (margem_nome_px * 2.0))
+                    limite_altura_nome = max(6.0, bbox_tela[3] - bbox_tela[1] - (margem_nome_px * 2.0))
+                    tamanho_nome_px = self._tamanho_pixel_molde(
+                        el,
+                        ("nome_tamanho_px", "tam_nome_px", "tamanho_nome_px"),
+                        self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 10.0),
+                    )
                     fonte_nome = self._fonte_ajustada_px(
-                        painter, nome, tamanho_nome_px, limite_largura_nome, limite_altura_nome
+                        painter,
+                        nome,
+                        tamanho_nome_px,
+                        limite_largura_nome,
+                        limite_altura_nome,
                     )
                     painter.setFont(fonte_nome)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
@@ -1405,17 +1409,19 @@ class VisualizacaoCanvas(QWidget):
                     xs = [p.x() for p in base]
                     ys = [p.y() for p in base]
                     largura = max(xs) - min(xs)
-                    margem = largura * 0.20
-                    altura = max(ys) - min(ys)
-                    centro_y = sum(ys) / len(ys)
-                    y_fio = min(max(ys) - max(0.15, altura * 0.06), centro_y + max(0.25, altura * 0.08))
+                    margem = largura * 0.12
+                    y_fio = min(ys) + ((max(ys) - min(ys)) * 0.24)
                     p1 = QPointF(min(xs) + margem, y_fio)
                     p2 = QPointF(max(xs) - margem, y_fio)
-                p1, p2 = self._fio_abaixo_do_nome(painter, base, el, p1, p2)
                 bbox_tela = self._bbox_tela_pontos(base)
-                p1_tela = self._cena_para_tela(p1)
-                p2_tela = self._cena_para_tela(p2)
-                self._desenhar_seta_fio(painter, p1, p2)
+                fio_visual_px = self._valor_float_molde(el, ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"), None)
+                if fio_visual_px is not None:
+                    p1_tela, p2_tela = self._calcular_fio_tela_fixo(p1, p2, bbox_tela, float(fio_visual_px))
+                    self._desenhar_seta_fio_tela(painter, p1_tela, p2_tela)
+                else:
+                    p1_tela = self._cena_para_tela(p1)
+                    p2_tela = self._cena_para_tela(p2)
+                    self._desenhar_seta_fio(painter, p1, p2)
 
                 rotulo_fio = (
                         el.get("fio_rotulo")
@@ -1424,30 +1430,38 @@ class VisualizacaoCanvas(QWidget):
                         or el.get("nome_fio")
                         or ""
                 )
-                tamanho_fio_cm = self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 0.45)
                 if rotulo_fio:
-                    self._desenhar_rotulo_fio(
-                        painter,
-                        p1,
-                        p2,
-                        str(rotulo_fio),
-                        tamanho=tamanho_fio_cm,
-                    )
+                    if fio_visual_px is not None:
+                        self._desenhar_rotulo_fio_tela(
+                            painter,
+                            p1_tela,
+                            p2_tela,
+                            str(rotulo_fio),
+                            tamanho=self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0),
+                        )
+                    else:
+                        self._desenhar_rotulo_fio(
+                            painter,
+                            p1,
+                            p2,
+                            str(rotulo_fio),
+                            tamanho=self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0),
+                        )
                 else:
                     ang = float(el.get("fio_angulo", 90.0))
                     fonte_fio = painter.font()
-                    tamanho_fio_px = max(1, int(round(float(tamanho_fio_cm) * max(self.zoom, 0.001))))
-                    fonte_fio.setPixelSize(tamanho_fio_px)
+                    tamanho_fio_px = self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0)
+                    fonte_fio.setPixelSize(int(max(6, round(tamanho_fio_px))))
                     painter.setFont(fonte_fio)
                     painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     texto_ang = f"{int(round(ang))}°"
                     metrics_fio = QFontMetrics(painter.font())
                     largura_ang = metrics_fio.horizontalAdvance(texto_ang)
                     altura_ang = metrics_fio.height()
-                    x_ang = p2_tela.x() + max(1.0, 0.3 * tamanho_fio_px)
-                    y_ang = p2_tela.y() + max(1.0, 0.2 * tamanho_fio_px)
-                    x_ang = max(bbox_tela[0] + 1.0, min(x_ang, bbox_tela[2] - largura_ang - 1.0))
-                    y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 1.0))
+                    x_ang = p2_tela.x() + 6.0
+                    y_ang = p2_tela.y() + 4.0
+                    x_ang = max(bbox_tela[0] + 2.0, min(x_ang, bbox_tela[2] - largura_ang - 2.0))
+                    y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 2.0))
                     painter.drawText(int(x_ang), int(y_ang), texto_ang)
 
             if el.get("mostrar_controles", True) and idx not in self._selecionados:
@@ -1471,7 +1485,6 @@ class VisualizacaoCanvas(QWidget):
                     off_x = (dx / mod) * 11.0
                     off_y = (dy / mod) * 11.0
                     painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
-
                 if self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                     painter.setPen(QPen(QColor("#ff3b30"), 1.0))
@@ -1479,191 +1492,6 @@ class VisualizacaoCanvas(QWidget):
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
-
-    def _desenhar_margem_molde(self, painter: QPainter, base: list[QPointF], el: dict) -> None:
-        if len(base) < 3:
-            return
-        margens = self._margens_por_segmento(el, len(base))
-        if not margens:
-            return
-        sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
-        painter.save()
-        pen = QPen(self._cor_molde_visual(el), 1.0, Qt.SolidLine)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(pen)
-        total = len(base)
-        for seg_idx, margem in margens.items():
-            if margem <= 0:
-                continue
-            pontos_offset = self._pontos_offset_segmento(base, seg_idx, margem, sentido)
-            if pontos_offset is None:
-                continue
-            a, b, off_a, off_b = pontos_offset
-            painter.drawLine(self._cena_para_tela(off_a), self._cena_para_tela(off_b))
-
-            margem_anterior = float(margens.get((seg_idx - 1) % total, 0.0) or 0.0)
-            if margem_anterior > 0:
-                anterior = self._pontos_offset_segmento(base, (seg_idx - 1) % total, margem_anterior, sentido)
-                if anterior is not None:
-                    canto = QPainterPath(self._cena_para_tela(anterior[3]))
-                    controle = self._intersecao_linhas(anterior[2], anterior[3], off_a, off_b)
-                    if controle is None:
-                        controle = QPointF(anterior[3].x() + off_a.x() - a.x(), anterior[3].y() + off_a.y() - a.y())
-                    canto.quadTo(self._cena_para_tela(controle), self._cena_para_tela(off_a))
-                    painter.drawPath(canto)
-            else:
-                painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
-
-            margem_proxima = float(margens.get((seg_idx + 1) % total, 0.0) or 0.0)
-            if margem_proxima <= 0:
-                painter.drawLine(self._cena_para_tela(off_b), self._cena_para_tela(b))
-        painter.restore()
-
-    def _cor_molde_visual(self, el: dict) -> QColor:
-        cor_base = el.get("cor", "#ffffff")
-        if el.get("molde") and self._mostrar_cor_tecidos:
-            tecido = str(el.get("tecido") or "").strip()
-            if tecido and tecido in self._cores_tecidos:
-                cor_base = self._cores_tecidos[tecido]
-        cor = QColor(str(cor_base or "#ffffff"))
-        return cor if cor.isValid() else QColor("#ffffff")
-
-    @staticmethod
-    def _pontos_offset_segmento(
-        base: list[QPointF],
-        seg_idx: int,
-        margem: float,
-        sentido: float,
-    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | None:
-        total = len(base)
-        a = base[seg_idx % total]
-        b = base[(seg_idx + 1) % total]
-        dx = b.x() - a.x()
-        dy = b.y() - a.y()
-        comp = sqrt((dx * dx) + (dy * dy))
-        if comp <= 1e-9:
-            return None
-        nx = sentido * (-dy / comp)
-        ny = sentido * (dx / comp)
-        off_a = QPointF(a.x() + (nx * margem), a.y() + (ny * margem))
-        off_b = QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
-        return a, b, off_a, off_b
-
-    @staticmethod
-    def _intersecao_linhas(p1: QPointF, p2: QPointF, p3: QPointF, p4: QPointF) -> QPointF | None:
-        x1, y1 = p1.x(), p1.y()
-        x2, y2 = p2.x(), p2.y()
-        x3, y3 = p3.x(), p3.y()
-        x4, y4 = p4.x(), p4.y()
-        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if abs(den) <= 1e-9:
-            return None
-        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
-        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
-        return QPointF(px, py)
-
-    def _fio_abaixo_do_nome(self, painter: QPainter, base: list[QPointF], el: dict, p1: QPointF, p2: QPointF) -> tuple[QPointF, QPointF]:
-        if not el.get("mostrar_nome", True) or not str(el.get("nome_molde") or "").strip():
-            return p1, p2
-        p1_tela = self._cena_para_tela(p1)
-        p2_tela = self._cena_para_tela(p2)
-        dx = p2_tela.x() - p1_tela.x()
-        dy = p2_tela.y() - p1_tela.y()
-        if abs(dx) <= 1e-6 or abs(dy) > abs(dx) * 0.35:
-            return p1, p2
-
-        nome = str(el.get("nome_molde") or "")
-        pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
-        if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
-            cx = float(pos_nome[0])
-            cy = float(pos_nome[1])
-        else:
-            cx = sum(p.x() for p in base) / len(base)
-            cy = sum(p.y() for p in base) / len(base)
-
-        bbox_tela = self._bbox_tela_pontos(base)
-        margem_nome_px = max(1.0, min(6.0, min(bbox_tela[2] - bbox_tela[0], bbox_tela[3] - bbox_tela[1]) * 0.08))
-        limite_largura_nome = max(1.0, bbox_tela[2] - bbox_tela[0] - (margem_nome_px * 2.0))
-        limite_altura_nome = max(1.0, bbox_tela[3] - bbox_tela[1] - (margem_nome_px * 2.0))
-        tamanho_nome_cm = self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 1.0)
-        tamanho_nome_px = max(1.0, float(tamanho_nome_cm) * max(self.zoom, 0.001))
-        fonte_nome = self._fonte_ajustada_px(painter, nome, tamanho_nome_px, limite_largura_nome, limite_altura_nome)
-        metrics = QFontMetrics(fonte_nome)
-        tela_nome = self._ponto_tela_dentro_bbox(
-            self._cena_para_tela(QPointF(cx, cy)),
-            bbox_tela,
-            metrics.horizontalAdvance(nome),
-            metrics.height(),
-            margem_nome_px,
-        )
-        nome_bottom = tela_nome.y() + (metrics.height() / 3.0) + metrics.descent()
-        alvo_y = min(bbox_tela[3] - 2.0, nome_bottom + max(2.0, metrics.height() * 0.12))
-        y_atual = (p1_tela.y() + p2_tela.y()) / 2.0
-        if y_atual >= alvo_y:
-            return p1, p2
-
-        deslocamento_cena = (alvo_y - y_atual) / max(self.zoom, 0.001)
-        return QPointF(p1.x(), p1.y() + deslocamento_cena), QPointF(p2.x(), p2.y() + deslocamento_cena)
-
-    def _margens_por_segmento(self, el: dict, total_segmentos: int) -> dict[int, float]:
-        margens: dict[int, float] = {}
-        for dados in (el.get("margens_molde"), el.get("margens"), el.get("margem_cm_por_elemento")):
-            if isinstance(dados, list):
-                for item in dados:
-                    if not isinstance(item, dict):
-                        continue
-                    elemento = str(item.get("elemento") or "").strip()
-                    valor = self._valor_margem_float(item.get("margem"))
-                    idx = self._indice_segmento_margem(elemento, total_segmentos)
-                    if idx is not None and valor > 0:
-                        margens[idx] = valor
-            elif isinstance(dados, dict):
-                for elemento, valor_raw in dados.items():
-                    valor = self._valor_margem_float(valor_raw)
-                    idx = self._indice_segmento_margem(str(elemento), total_segmentos)
-                    if idx is not None and valor > 0:
-                        margens[idx] = valor
-        if not margens:
-            try:
-                margem_unica = max(0.0, float(el.get("margem_molde_cm") or el.get("margem") or 0))
-            except (TypeError, ValueError):
-                margem_unica = 0.0
-            if margem_unica > 0:
-                margens = {idx: margem_unica for idx in range(total_segmentos)}
-        return margens
-
-    @staticmethod
-    def _valor_margem_float(valor) -> float:
-        try:
-            texto = str(valor).replace("cm", "").replace(",", ".").strip()
-            return max(0.0, float(texto or 0.0))
-        except (TypeError, ValueError):
-            return 0.0
-
-    @staticmethod
-    def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:
-        partes = str(elemento or "").replace(" ", "").split("-", 1)
-        if len(partes) != 2:
-            return None
-        try:
-            inicio = int(partes[0])
-            fim = int(partes[1])
-        except ValueError:
-            return None
-        if total_segmentos <= 0:
-            return None
-        esperado_fim = (inicio % total_segmentos) + 1
-        if inicio < 1 or inicio > total_segmentos or fim != esperado_fim:
-            return None
-        return inicio - 1
-
-    @staticmethod
-    def _area_assinada_pontos(pontos: list[QPointF]) -> float:
-        area = 0.0
-        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
-            area += (a.x() * b.y()) - (b.x() * a.y())
-        return area / 2.0
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
@@ -1883,7 +1711,7 @@ class VisualizacaoCanvas(QWidget):
         nx = -uy
         ny = ux
 
-        margem_px = min(18.0, max(1.0, comp * 0.04))
+        margem_px = min(18.0, max(8.0, comp * 0.02))
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
 
@@ -1892,7 +1720,7 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
 
-        tamanho_seta = min(14.0, max(2.0, comp * 0.10))
+        tamanho_seta = min(14.0, max(7.5, comp * 0.028))
         meia_largura = tamanho_seta * 0.32
 
         self._desenhar_ponta_seta_fechada(
@@ -1966,7 +1794,7 @@ class VisualizacaoCanvas(QWidget):
         fonte = painter.font()
         fonte.setBold(False)
         if tamanho is not None:
-            fonte.setPixelSize(max(1, int(round(float(tamanho) * max(self.zoom, 0.001)))))
+            fonte.setPointSizeF(float(max(6.0, tamanho)))
         painter.setFont(fonte)
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
@@ -1997,10 +1825,10 @@ class VisualizacaoCanvas(QWidget):
             if valor is None:
                 continue
             try:
-                return float(max(0.01, float(valor)))
+                return float(max(6.0, float(valor)))
             except Exception:
                 continue
-        return float(max(0.01, padrao))
+        return float(padrao)
 
     def _cor_realce(self, cor_hex: str) -> str:
         cor = QColor(cor_hex)
@@ -2296,7 +2124,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         if self._dist(p_nome, pos) <= (tolerancia * 2.0):

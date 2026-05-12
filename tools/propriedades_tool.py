@@ -3,11 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from math import sqrt
+from math import atan2, cos, radians, sin, sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal, QSignalBlocker
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -52,6 +52,10 @@ class MoldeRef:
 
 
 class PreviewMoldeWidget(QWidget):
+    manipulacao_alterada = Signal(dict)
+    mensagem_alterada = Signal(str)
+    info_texto_alterada = Signal(str)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._molde: dict | None = None
@@ -63,6 +67,21 @@ class PreviewMoldeWidget(QWidget):
         self._hand_active = False
         self._panning = False
         self._last_pan_pos = QPointF(0.0, 0.0)
+        self._modo_elemento = "Nenhum"
+        self._modo_referencia = "Centro centro"
+        self._modo_alinhamento = "Centro"
+        self._modo_altura_cm = 0.7
+        self._modo_angulo = 0.0
+        self._modo_espaco_linhas = 0.33
+        self._drag_texto = False
+        self._drag_fio = False
+        self._fio_inicio_temp: QPointF | None = None
+        self._fio_fim_temp: QPointF | None = None
+        self._fio_angulo_temp: float | None = None
+        self._mostrar_rotulo_angulo_fio = False
+        self._hover_control_index: int | None = None
+        self._ultimo_info: dict | None = None
+        self.setMouseTracking(True)
 
     def set_molde(self, molde: dict | None):
         self._molde = molde
@@ -74,6 +93,158 @@ class PreviewMoldeWidget(QWidget):
         self._cores_tecidos = dict(cores)
         self._mostrar_cor_tecidos = bool(mostrar)
         self.update()
+
+    def set_modo_manipulacao(
+        self,
+        elemento: str,
+        referencia: str = "Centro centro",
+        alinhamento: str = "Centro",
+        altura_cm: float = 0.7,
+        angulo: float = 0.0,
+        espaco_linhas: float = 0.33,
+    ):
+        self._modo_elemento = str(elemento or "Nenhum")
+        self._modo_referencia = str(referencia or "Centro centro")
+        self._modo_alinhamento = str(alinhamento or "Centro")
+        self._modo_altura_cm = max(0.1, float(altura_cm or 0.7))
+        self._modo_angulo = float(angulo or 0.0)
+        self._modo_espaco_linhas = max(0.0, float(espaco_linhas or 0.0))
+        self._drag_texto = False
+        self._drag_fio = False
+        self._fio_inicio_temp = None
+        self._fio_fim_temp = None
+        self._fio_angulo_temp = None
+        self._mostrar_rotulo_angulo_fio = False
+        self._hover_control_index = None
+        self.info_texto_alterada.emit("")
+        self._atualizar_cursor_modo()
+        self.update()
+
+    def _atualizar_cursor_modo(self):
+        if self._hand_active:
+            self.setCursor(Qt.OpenHandCursor)
+        elif self._modo_elemento in {"Nome", "Descrição", "Observações", "Fio", "Números"}:
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+    def _mapear_molde_para_tela(self, pt: QPointF) -> QPointF | None:
+        info = self._dados_transformacao()
+        if not info:
+            return None
+        return QPointF(
+            self._offset.x() + info["offset_x"] + ((pt.x() - info["min_x"]) * info["escala"] * self._zoom),
+            self._offset.y() + info["offset_y"] + ((pt.y() - info["min_y"]) * info["escala"] * self._zoom),
+        )
+
+    def _mapear_tela_para_molde(self, pt: QPointF) -> QPointF | None:
+        info = self._dados_transformacao()
+        if not info:
+            return None
+        escala = max(1e-9, info["escala"] * self._zoom)
+        return QPointF(
+            ((pt.x() - self._offset.x() - info["offset_x"]) / escala) + info["min_x"],
+            ((pt.y() - self._offset.y() - info["offset_y"]) / escala) + info["min_y"],
+        )
+
+    def _chave_texto_modo(self) -> str | None:
+        mapa = {
+            "Nome": "nome",
+            "Descrição": "descricao",
+            "Observações": "observacoes",
+        }
+        return mapa.get(self._modo_elemento)
+
+    def _texto_modo(self, chave: str) -> str:
+        if not self._molde:
+            return ""
+        if chave == "nome":
+            return str(self._molde.get("nome_molde") or "")
+        if chave == "descricao":
+            return str(self._molde.get("descricao") or "Descrição")
+        return str(self._molde.get("observacoes") or self._molde.get("observacao") or "Observações")
+
+    def _texto_preview_com_indicativo(self, chave: str, texto: str, ativo: bool) -> str:
+        # O indicativo NOME/DESCRIÇÃO/OBSERVAÇÕES não é mais desenhado sobre o molde,
+        # porque isso altera a largura do texto e interfere no posicionamento final.
+        # Ele agora aparece somente na barra fixa de informações abaixo do visualizador.
+        return texto
+
+    def _texto_info_preview(self, chave: str) -> str:
+        texto = self._texto_modo(chave).strip()
+        if not texto:
+            return ""
+        rotulos = {
+            "nome": "NOME",
+            "descricao": "DESCRIÇÃO",
+            "observacoes": "OBSERVAÇÕES",
+        }
+        rotulo = rotulos.get(chave, str(chave or "").upper())
+        return f"({rotulo}) - {texto}"
+
+    def _emitir_info_texto_preview(self, chave: str | None):
+        if not chave:
+            self.info_texto_alterada.emit("")
+            return
+        self.info_texto_alterada.emit(self._texto_info_preview(chave))
+
+    def _ponto_referencia(self, base: list[QPointF], referencia: str) -> QPointF:
+        xs = [p.x() for p in base]
+        ys = [p.y() for p in base]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        ref = str(referencia or "Centro centro").lower()
+        if "esquerda" in ref:
+            x = min_x
+        elif "direita" in ref:
+            x = max_x
+        else:
+            x = (min_x + max_x) / 2.0
+        if "topo" in ref:
+            y = min_y
+        elif "abaixo" in ref:
+            y = max_y
+        else:
+            y = (min_y + max_y) / 2.0
+        return QPointF(x, y)
+
+    def _ponto_texto_configurado(self, chave: str, base: list[QPointF]) -> QPointF:
+        if not self._molde:
+            return self._ponto_referencia(base, "Centro centro")
+        referencia = str(self._molde.get(f"referencia_texto_{chave}") or "Centro centro").strip()
+        valor = self._molde.get(f"ponto_texto_{chave}")
+        if chave == "nome" and valor is None:
+            valor = self._molde.get("ponto_texto")
+        ponto = self._ponto_xy(valor)
+        if referencia.lower() == "livre":
+            if ponto is not None:
+                return ponto
+            return self._ponto_referencia(base, "Centro centro")
+        return self._ponto_referencia(base, referencia)
+
+    def _retangulo_texto_por_referencia(self, largura: float, altura: float, referencia: str) -> QRectF:
+        ref = str(referencia or "Centro centro").strip().lower()
+        if ref == "livre":
+            ref = "centro centro"
+
+        if "esquerda" in ref:
+            x = 0.0
+        elif "direita" in ref:
+            x = -largura
+        else:
+            x = -largura / 2.0
+
+        if "topo" in ref:
+            y = 0.0
+        elif "abaixo" in ref:
+            y = -altura
+        else:
+            y = -altura / 2.0
+        return QRectF(x, y, largura, altura)
+
+    def _emitir_alteracao_molde(self):
+        if self._molde is not None:
+            self.manipulacao_alterada.emit(dict(self._molde))
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -223,8 +394,8 @@ class PreviewMoldeWidget(QWidget):
         fio_fim = self._molde.get("fio_fim")
         xs = [p.x() for p in base]
         ys = [p.y() for p in base]
-        p_fio_origem = self._ponto_xy(fio_origem)
-        p_fio_fim = self._ponto_xy(fio_fim)
+        p_fio_origem = self._fio_inicio_temp or self._ponto_xy(fio_origem)
+        p_fio_fim = self._fio_fim_temp or self._ponto_xy(fio_fim)
         if p_fio_origem and p_fio_fim:
             p1 = mapear(p_fio_origem)
             p2 = mapear(p_fio_fim)
@@ -253,6 +424,81 @@ class PreviewMoldeWidget(QWidget):
         painter.drawLine(a, b)
         self._desenhar_ponta(painter, p1, QPointF(-ux, -uy), QPointF(nx, ny), 9.0, 2.8)
         self._desenhar_ponta(painter, p2, QPointF(ux, uy), QPointF(nx, ny), 9.0, 2.8)
+        if self._drag_fio:
+            self._desenhar_rotulo_angulo_fio(painter, p1, p2)
+        else:
+            self._desenhar_rotulo_angulo_fio_canvas(painter, p1, p2)
+
+    def _normalizar_angulo_graus(self, angulo: float) -> float:
+        valor = ((float(angulo) + 180.0) % 360.0) - 180.0
+        if abs(valor + 180.0) <= 1e-6:
+            return 180.0
+        if abs(valor) <= 1e-6:
+            return 0.0
+        return valor
+
+    def _angulo_segmento_graus(self, p1: QPointF, p2: QPointF) -> float | None:
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        if abs(dx) <= 1e-9 and abs(dy) <= 1e-9:
+            return None
+        return self._normalizar_angulo_graus(atan2(dy, dx) * 180.0 / 3.141592653589793)
+
+    def _texto_angulo_fio(self, angulo: float | None) -> str:
+        if angulo is None:
+            return ""
+        valor = round(float(angulo), 1)
+        if abs(valor - round(valor)) <= 1e-9:
+            return f"{int(round(valor))}°"
+        return f"{valor:.1f}°"
+
+    def _desenhar_rotulo_angulo_fio(self, painter: QPainter, p1: QPointF, p2: QPointF):
+        angulo = self._fio_angulo_temp
+        if angulo is None:
+            angulo = self._angulo_segmento_graus(p1, p2)
+        texto = self._texto_angulo_fio(angulo)
+        if not texto:
+            return
+        meio = QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0)
+        painter.save()
+        fonte = QFont(painter.font())
+        fonte.setPointSize(9)
+        painter.setFont(fonte)
+        metrics = painter.fontMetrics()
+        largura = metrics.horizontalAdvance(texto) + 12
+        altura = metrics.height() + 6
+        rect = QRectF(meio.x() - (largura / 2.0), meio.y() - altura - 8.0, largura, altura)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 185))
+        painter.drawRoundedRect(rect, 5.0, 5.0)
+        painter.setPen(QPen(QColor("#f1e900"), 1.0))
+        painter.drawText(rect, Qt.AlignCenter, texto)
+        painter.restore()
+
+    def _desenhar_rotulo_angulo_fio_canvas(self, painter: QPainter, p1: QPointF, p2: QPointF):
+        """Mostra o grau do fio no preview no mesmo estilo discreto do canvas."""
+        texto = self._texto_angulo_fio(self._angulo_segmento_graus(p1, p2))
+        if not texto:
+            return
+        dx = p2.x() - p1.x()
+        dy = p2.y() - p1.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-6:
+            return
+        ux = dx / comp
+        uy = dy / comp
+        nx = -uy
+        ny = ux
+        pos = QPointF(p2.x() + (ux * 8.0) + (nx * 2.0), p2.y() + (uy * 8.0) + (ny * 2.0))
+        painter.save()
+        fonte = QFont(painter.font())
+        fonte.setPointSize(7)
+        painter.setFont(fonte)
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        metrics = painter.fontMetrics()
+        rect = QRectF(pos.x(), pos.y() - metrics.height() / 2.0, metrics.horizontalAdvance(texto) + 8, metrics.height() + 2)
+        painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, texto)
+        painter.restore()
 
     def _desenhar_ponta(self, painter: QPainter, ponta: QPointF, direcao: QPointF, normal: QPointF, comprimento: float, meia: float):
         base = QPointF(ponta.x() - (direcao.x() * comprimento), ponta.y() - (direcao.y() * comprimento))
@@ -426,67 +672,131 @@ class PreviewMoldeWidget(QWidget):
         return QPointF(p1.x(), p1.y() + dy_tela), QPointF(p2.x(), p2.y() + dy_tela)
 
     def _desenhar_textos(self, painter: QPainter, base: list[QPointF], mapear, min_y: float, max_y: float):
-        cx = sum(p.x() for p in base) / len(base)
-        cy = sum(p.y() for p in base) / len(base)
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-
-        fonte = QFont(painter.font())
-        fonte.setPointSize(9)
-        painter.setFont(fonte)
-
-        if self._molde.get("mostrar_nome", True):
-            nome = str(self._molde.get("nome_molde") or "")
-            if nome:
-                ponto_texto = self._ponto_xy(self._molde.get("ponto_texto")) or QPointF(cx, cy)
-                pos = mapear(ponto_texto)
-                largura_molde_px = max(
-                    80,
-                    int(abs(
-                        mapear(QPointF(max(p.x() for p in base), cy)).x()
-                        - mapear(QPointF(min(p.x() for p in base), cy)).x()
-                    ) - 12),
-                )
-                fonte_nome = QFont(fonte)
-                tamanho = 9
-                while tamanho >= 6:
-                    fonte_nome.setPointSize(tamanho)
-                    painter.setFont(fonte_nome)
-                    metric = painter.fontMetrics()
-                    if metric.horizontalAdvance(nome) <= largura_molde_px:
-                        break
-                    tamanho -= 1
-                altura = max(18, painter.fontMetrics().height() + 4)
-                painter.drawText(
-                    int(pos.x() - (largura_molde_px / 2)),
-                    int(pos.y() - (altura / 2)),
-                    int(largura_molde_px),
-                    int(altura),
-                    Qt.AlignCenter,
-                    nome,
-                )
-                painter.setFont(fonte)
-
-        if self._molde.get("visual_descricao", False):
-            descricao = str(self._molde.get("descricao") or "Descrição")
-            pos = mapear(QPointF(cx, cy + ((max_y - min_y) * 0.18)))
-            painter.drawText(int(pos.x() - 40), int(pos.y()), 120, 18, Qt.AlignCenter, descricao)
+        if not self._molde:
+            return
+        texto_ativo = self._chave_texto_modo()
+        self._desenhar_texto_configurado(painter, base, mapear, "nome", self._molde.get("mostrar_nome", True), texto_ativo == "nome")
+        self._desenhar_texto_configurado(painter, base, mapear, "descricao", self._molde.get("visual_descricao", False), texto_ativo == "descricao")
+        self._desenhar_texto_configurado(painter, base, mapear, "observacoes", self._molde.get("visual_observacoes", False), texto_ativo == "observacoes")
 
         if self._molde.get("visual_quantidade", False):
+            cx = sum(p.x() for p in base) / len(base)
+            cy = sum(p.y() for p in base) / len(base)
             qtd = str(self._molde.get("qtd_modelo", 1) or 1)
             sufixo = " ( Par)" if self._molde.get("par", False) else ""
             pos = mapear(QPointF(cx, cy + ((max_y - min_y) * 0.22)))
+            painter.save()
+            painter.setPen(QPen(QColor("#ffffff"), 1.0))
             painter.drawText(int(pos.x() - 50), int(pos.y() + 16), 140, 18, Qt.AlignCenter, f"Quantidade {qtd}{sufixo}")
+            painter.restore()
+
+    def _desenhar_texto_configurado(self, painter: QPainter, base: list[QPointF], mapear, chave: str, visivel: bool, ativo: bool):
+        if not visivel or not self._molde:
+            return
+        texto = self._texto_modo(chave).strip()
+        if not texto:
+            return
+        texto_draw = self._texto_preview_com_indicativo(chave, texto, ativo)
+        ponto = self._ponto_texto_configurado(chave, base)
+        pos = mapear(ponto)
+        altura_cm = self._float_seguro(self._molde.get(f"texto_{chave}_altura_cm"), 0.7 if chave != "nome" else 0.9)
+        angulo = self._float_seguro(self._molde.get(f"texto_{chave}_angulo"), 0.0)
+        alinhamento = str(self._molde.get(f"alinhamento_texto_{chave}") or "Centro")
+        referencia = str(self._molde.get(f"referencia_texto_{chave}") or "Centro centro")
+        escala = max(1.0, (self._dados_transformacao() or {}).get("escala", 1.0) * self._zoom)
+        tamanho_pt = max(6, min(72, int(round(altura_cm * escala * 0.52))))
+        largura_molde_px = max(
+            80,
+            int(abs(
+                mapear(QPointF(max(p.x() for p in base), ponto.y())).x()
+                - mapear(QPointF(min(p.x() for p in base), ponto.y())).x()
+            ) - 12),
+        )
+        painter.save()
+        fonte = QFont(painter.font())
+        fonte.setPointSize(tamanho_pt)
+        painter.setFont(fonte)
+        metric = painter.fontMetrics()
+        largura_texto = metric.horizontalAdvance(texto_draw) + 22
+        limite_largura = max(largura_molde_px, largura_texto + 4) if (ativo and self._drag_texto) else largura_molde_px
+        largura = max(40, min(max(120, largura_texto), limite_largura))
+        altura = max(metric.height() + 6, int(tamanho_pt * 1.8))
+        flags = Qt.AlignVCenter
+        if alinhamento.lower().startswith("esq"):
+            flags |= Qt.AlignLeft
+        elif alinhamento.lower().startswith("dir"):
+            flags |= Qt.AlignRight
+        else:
+            flags |= Qt.AlignCenter
+        painter.translate(pos)
+        if abs(angulo) > 0.01:
+            painter.rotate(-angulo)
+        cor = QColor("#f1e900") if ativo and (self._drag_texto or chave == self._chave_texto_modo()) else QColor("#ffffff")
+        painter.setPen(QPen(cor, 1.0))
+        rect = self._retangulo_texto_por_referencia(largura, altura, referencia)
+        painter.drawText(rect, flags, texto_draw)
+        painter.restore()
+
+    @staticmethod
+    def _float_seguro(valor, padrao: float = 0.0) -> float:
+        try:
+            return float(str(valor).replace(",", "."))
+        except (TypeError, ValueError):
+            return float(padrao)
 
     def _desenhar_controles(self, painter: QPainter, mapear):
         if not self._molde.get("mostrar_controles", True):
             return
         pontos = self._coletar_pontos(self._molde.get("controle_cantos"))
+        painter.save()
         painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        for i, pt in enumerate(pontos, start=1):
+        inicio = int(self._molde.get("numero_ponto_inicio", 0) or 0)
+        total = max(1, len(pontos))
+        altura_cm = self._float_seguro(self._molde.get("numero_altura_cm"), 0.7)
+        escala = max(1.0, (self._dados_transformacao() or {}).get("escala", 1.0) * self._zoom)
+        fonte = QFont(painter.font())
+        fonte.setPointSize(max(6, min(72, int(round(altura_cm * escala * 0.52)))))
+        painter.setFont(fonte)
+        metrics = painter.fontMetrics()
+        if pontos:
+            centro_x = sum(pt.x() for pt in pontos) / len(pontos)
+            centro_y = sum(pt.y() for pt in pontos) / len(pontos)
+            centro = QPointF(centro_x, centro_y)
+        else:
+            centro = QPointF(0.0, 0.0)
+        for idx, pt in enumerate(pontos):
             tela = mapear(pt)
+            if self._modo_elemento == "Números" and self._hover_control_index == idx:
+                painter.save()
+                painter.setPen(QPen(QColor("#008cff"), 2.0))
+                painter.drawRect(int(tela.x() - 8), int(tela.y() - 8), 16, 16)
+                painter.restore()
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
-            if self._molde.get("mostrar_numeros", False):
-                painter.drawText(int(tela.x() + 4), int(tela.y() - 6), str(i))
+            # No preview de propriedades, os números seguem o mesmo padrão visual do canvas selecionado:
+            # ficam ao redor dos pontos quando os controles do molde estão visíveis.
+            if self._molde.get("mostrar_numeros", False) or self._molde.get("mostrar_controles", True):
+                numero = ((idx - inicio) % total) + 1
+                texto = str(numero)
+                dx = pt.x() - centro.x()
+                dy = pt.y() - centro.y()
+                if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+                    dx, dy = -1.0, -1.0
+                norma = max(1e-9, sqrt((dx * dx) + (dy * dy)))
+                ux = dx / norma
+                uy = dy / norma
+                margem = max(12.0, metrics.height() + 8.0)
+                ancora_x = tela.x() + (ux * margem)
+                ancora_y = tela.y() + (uy * margem)
+                largura = max(12, metrics.horizontalAdvance(texto) + 4)
+                altura = max(12, metrics.height() + 2)
+                rect = QRectF(
+                    ancora_x - (largura / 2.0),
+                    ancora_y - (altura / 2.0),
+                    largura,
+                    altura,
+                )
+                painter.drawText(rect, Qt.AlignCenter, texto)
+        painter.restore()
 
     def _coletar_pontos(self, dados) -> list[QPointF]:
         pontos: list[QPointF] = []
@@ -519,7 +829,7 @@ class PreviewMoldeWidget(QWidget):
 
     def set_hand_active(self, ativo: bool):
         self._hand_active = bool(ativo)
-        self.setCursor(Qt.OpenHandCursor if self._hand_active else Qt.ArrowCursor)
+        self._atualizar_cursor_modo()
 
     def wheelEvent(self, event: QWheelEvent):  # noqa: N802
         delta = event.angleDelta().y()
@@ -529,6 +839,48 @@ class PreviewMoldeWidget(QWidget):
             self._aplicar_zoom(1.0 / 1.1, event.position())
         event.accept()
 
+    def _controle_mais_proximo(self, pos_tela: QPointF) -> tuple[int | None, float]:
+        if not self._molde:
+            return None, 999999.0
+        pontos = self._coletar_pontos(self._molde.get("controle_cantos"))
+        melhor_idx = None
+        melhor_dist = 999999.0
+        for idx, pt in enumerate(pontos):
+            tela = self._mapear_molde_para_tela(pt)
+            if tela is None:
+                continue
+            dx = tela.x() - pos_tela.x()
+            dy = tela.y() - pos_tela.y()
+            dist = sqrt((dx * dx) + (dy * dy))
+            if dist < melhor_dist:
+                melhor_idx = idx
+                melhor_dist = dist
+        return melhor_idx, melhor_dist
+
+    def _ponto_fio_com_angulo_travado(self, origem: QPointF, atual: QPointF) -> QPointF:
+        """Trava o fim do fio nos ângulos principais para desenhar uma linha precisa no preview."""
+        dx = atual.x() - origem.x()
+        dy = atual.y() - origem.y()
+        comprimento = sqrt((dx * dx) + (dy * dy))
+        if comprimento <= 1e-9:
+            return QPointF(atual)
+
+        # Ângulos usados pelos programas de modelagem para guiar o fio:
+        # 0, 30, 45, 60, 90 e equivalentes em todas as direções.
+        angulos_base = (0, 30, 45, 60, 90, 120, 135, 150, 180, -150, -135, -120, -90, -60, -45, -30)
+        angulo_atual = atan2(dy, dx) * 180.0 / 3.141592653589793
+
+        def distancia_angular(a: float, b: float) -> float:
+            return abs(((a - b + 180.0) % 360.0) - 180.0)
+
+        angulo_travado = min(angulos_base, key=lambda alvo: distancia_angular(angulo_atual, alvo))
+        self._fio_angulo_temp = self._normalizar_angulo_graus(float(angulo_travado))
+        rad = radians(float(angulo_travado))
+        return QPointF(
+            origem.x() + (cos(rad) * comprimento),
+            origem.y() + (sin(rad) * comprimento),
+        )
+
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
         if self._hand_active and event.button() == Qt.LeftButton:
             self._panning = True
@@ -536,6 +888,58 @@ class PreviewMoldeWidget(QWidget):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
+
+        if event.button() == Qt.LeftButton and self._molde:
+            pos_molde = self._mapear_tela_para_molde(event.position())
+            if pos_molde is None:
+                super().mousePressEvent(event)
+                return
+            if self._modo_elemento == "Fio":
+                if not self._drag_fio:
+                    # Primeiro clique esquerdo: inicia o fio.
+                    self._drag_fio = True
+                    self._fio_inicio_temp = pos_molde
+                    self._fio_fim_temp = pos_molde
+                    self._fio_angulo_temp = 0.0
+                    self._mostrar_rotulo_angulo_fio = True
+                    self.mensagem_alterada.emit("Fio iniciado. Mova o mouse e dê outro clique esquerdo para finalizar. Ângulo atual: 0°")
+                else:
+                    # Segundo clique esquerdo: finaliza o fio no ponto/ângulo atual.
+                    if self._fio_inicio_temp is not None:
+                        self._fio_fim_temp = self._ponto_fio_com_angulo_travado(self._fio_inicio_temp, pos_molde)
+                    angulo_final = self._fio_angulo_temp
+                    if self._fio_inicio_temp is not None and self._fio_fim_temp is not None:
+                        self._molde["fio_origem"] = [self._fio_inicio_temp.x(), self._fio_inicio_temp.y()]
+                        self._molde["fio_fim"] = [self._fio_fim_temp.x(), self._fio_fim_temp.y()]
+                        self._molde["mostrar_fio"] = True
+                        self._emitir_alteracao_molde()
+                    self._drag_fio = False
+                    self._fio_inicio_temp = None
+                    self._fio_fim_temp = None
+                    self._mostrar_rotulo_angulo_fio = False
+                    self.mensagem_alterada.emit("Fio definido.")
+                self.update()
+                event.accept()
+                return
+            if self._modo_elemento == "Números":
+                idx, dist = self._controle_mais_proximo(event.position())
+                if idx is not None and dist <= 18:
+                    self._molde["numero_ponto_inicio"] = int(idx)
+                    self._molde["numero_altura_cm"] = self._modo_altura_cm
+                    self._molde["mostrar_numeros"] = True
+                    self._emitir_alteracao_molde()
+                    self.update()
+                    event.accept()
+                    return
+            chave = self._chave_texto_modo()
+            if chave:
+                self._drag_texto = True
+                self._aplicar_posicao_texto(chave, pos_molde)
+                self._emitir_info_texto_preview(chave)
+                self.mensagem_alterada.emit("Arraste no visualizador para posicionar o texto no molde")
+                self.update()
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
@@ -547,15 +951,86 @@ class PreviewMoldeWidget(QWidget):
             self.update()
             event.accept()
             return
+
+        if self._molde and self._drag_fio and self._modo_elemento == "Fio":
+            pos_molde = self._mapear_tela_para_molde(event.position())
+            if pos_molde is not None:
+                if self._fio_inicio_temp is not None:
+                    self._fio_fim_temp = self._ponto_fio_com_angulo_travado(self._fio_inicio_temp, pos_molde)
+                else:
+                    self._fio_fim_temp = pos_molde
+                    self._fio_angulo_temp = self._angulo_segmento_graus(self._fio_inicio_temp, self._fio_fim_temp) if self._fio_inicio_temp is not None else None
+                self.mensagem_alterada.emit(f"Mova o mouse e dê outro clique esquerdo para finalizar o fio. Ângulo atual: {self._texto_angulo_fio(self._fio_angulo_temp)}")
+                self.update()
+                event.accept()
+                return
+
+        chave = self._chave_texto_modo()
+        if self._molde and self._drag_texto and chave:
+            pos_molde = self._mapear_tela_para_molde(event.position())
+            if pos_molde is not None:
+                self._aplicar_posicao_texto(chave, pos_molde, emitir=False)
+                self._emitir_info_texto_preview(chave)
+                self.update()
+                event.accept()
+                return
+
+        if self._molde and self._modo_elemento == "Números":
+            idx, dist = self._controle_mais_proximo(event.position())
+            novo_hover = idx if idx is not None and dist <= 18 else None
+            if novo_hover != self._hover_control_index:
+                self._hover_control_index = novo_hover
+                self.update()
+            event.accept()
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
         if self._panning and event.button() == Qt.LeftButton:
             self._panning = False
-            self.setCursor(Qt.OpenHandCursor if self._hand_active else Qt.ArrowCursor)
+            self._atualizar_cursor_modo()
+            event.accept()
+            return
+        if self._molde and self._drag_fio and event.button() == Qt.LeftButton:
+            # O fio agora é finalizado no segundo clique esquerdo dentro de mousePressEvent.
+            # Soltar o botão não deve finalizar, para permitir posicionamento preciso por cliques.
+            event.accept()
+            return
+        if self._molde and self._drag_texto and event.button() == Qt.LeftButton:
+            self._drag_texto = False
+            self.info_texto_alterada.emit("")
+            self._emitir_alteracao_molde()
+            self.update()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        if self._hover_control_index is not None:
+            self._hover_control_index = None
+            self.update()
+        super().leaveEvent(event)
+
+    def _aplicar_posicao_texto(self, chave: str, pos_molde: QPointF, emitir: bool = True):
+        if not self._molde:
+            return
+        self._molde[f"ponto_texto_{chave}"] = [pos_molde.x(), pos_molde.y()]
+        if chave == "nome":
+            self._molde["ponto_texto"] = [pos_molde.x(), pos_molde.y()]
+            self._molde["mostrar_nome"] = True
+        elif chave == "descricao":
+            self._molde["visual_descricao"] = True
+        elif chave == "observacoes":
+            self._molde["visual_observacoes"] = True
+        self._molde[f"texto_{chave}_altura_cm"] = self._modo_altura_cm
+        self._molde[f"texto_{chave}_angulo"] = self._modo_angulo
+        self._molde[f"espaco_linhas_texto_{chave}"] = self._modo_espaco_linhas
+        self._molde[f"referencia_texto_{chave}"] = "Livre"
+        self._molde[f"alinhamento_texto_{chave}"] = self._modo_alinhamento
+        if emitir:
+            self._emitir_alteracao_molde()
+
 
 
 class LegendaStatusMoldeWidget(QFrame):
@@ -901,6 +1376,9 @@ class PropriedadesMoldesDialog(QDialog):
         lay_dir.addWidget(self.tabs, 0)
 
         self.preview = PreviewMoldeWidget()
+        self.preview.manipulacao_alterada.connect(self._quando_preview_manipulado)
+        self.preview.mensagem_alterada.connect(self._mensagem_visualizacao)
+        self.preview.info_texto_alterada.connect(self._info_preview_texto)
         lay_dir.addWidget(self.preview, 1)
 
         barra_preview = QHBoxLayout()
@@ -923,7 +1401,25 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_preview_zoom_menos = self._criar_botao_preview("−", "Afastar")
         self.btn_preview_zoom_menos.clicked.connect(self.preview.zoom_out)
         barra_preview.addWidget(self.btn_preview_zoom_menos, 0, Qt.AlignLeft)
-        barra_preview.addStretch(1)
+
+        self.lbl_info_preview = QLabel("")
+        self.lbl_info_preview.setObjectName("PreviewInfoBar")
+        self.lbl_info_preview.setMinimumHeight(26)
+        self.lbl_info_preview.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.lbl_info_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.lbl_info_preview.setStyleSheet("""
+            QLabel#PreviewInfoBar {
+                background: #eef3f8;
+                border: 1px solid #b9c9d8;
+                border-radius: 4px;
+                color: #12324a;
+                padding-left: 10px;
+                font-weight: 600;
+            }
+        """)
+        self.lbl_info_preview.setVisible(False)
+        barra_preview.addWidget(self.lbl_info_preview, 1)
+        barra_preview.addStretch(0)
         lay_dir.addLayout(barra_preview)
 
         rodape = QHBoxLayout()
@@ -1455,27 +1951,65 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.cmb_elementos_molde = QComboBox()
         self.cmb_elementos_molde.addItems(["Nenhum", "Nome", "Descrição", "Observações", "Fio", "Números"])
-        self.ed_referencia = QLineEdit()
-        self.ed_alinhamento = QLineEdit()
-        self.ed_angulo_texto = QLineEdit()
-        self.ed_altura_texto = QLineEdit()
-        self.ed_espaco_linhas = QLineEdit()
-        for ed in (self.ed_referencia, self.ed_alinhamento, self.ed_angulo_texto, self.ed_altura_texto, self.ed_espaco_linhas):
-            ed.setEnabled(False)
+        self.ed_referencia = QComboBox()
+        self.ed_referencia.addItems([
+            "Livre",
+            "Centro centro",
+            "Topo esquerda",
+            "Centro esquerda",
+            "Abaixo esquerda",
+            "Topo centro",
+            "Abaixo centro",
+            "Topo direita",
+            "Centro direita",
+            "Abaixo direita",
+        ])
+        self.ed_alinhamento = QComboBox()
+        self.ed_alinhamento.addItems(["Esquerda", "Centro", "Direita"])
+        self.ed_angulo_texto = QDoubleSpinBox()
+        self.ed_angulo_texto.setRange(-360.0, 360.0)
+        self.ed_angulo_texto.setDecimals(1)
+        self.ed_angulo_texto.setSingleStep(1.0)
+        self.ed_angulo_texto.setValue(0.0)
+        self.ed_altura_texto = QDoubleSpinBox()
+        self.ed_altura_texto.setRange(0.1, 99.0)
+        self.ed_altura_texto.setDecimals(2)
+        self.ed_altura_texto.setSingleStep(0.1)
+        self.ed_altura_texto.setValue(0.7)
+        self.ed_espaco_linhas = QDoubleSpinBox()
+        self.ed_espaco_linhas.setRange(0.0, 99.0)
+        self.ed_espaco_linhas.setDecimals(2)
+        self.ed_espaco_linhas.setSingleStep(0.1)
+        self.ed_espaco_linhas.setValue(0.33)
 
-        grid.addWidget(QLabel("Elementos do molde"), 0, 0)
+        self.ed_nome_visualizacao = QLineEdit()
+        self.ed_nome_visualizacao.setPlaceholderText("Texto do elemento")
+        self.ed_nome_visualizacao.textEdited.connect(self._editar_texto_visualizacao_instantaneo)
+
+        self.lbl_elementos_molde = QLabel("Elementos do molde")
+        self.lbl_angulo_texto = QLabel("Ângulo do texto")
+        self.lbl_grau_texto = QLabel("°")
+        self.lbl_referencia = QLabel("Referência")
+        self.lbl_altura_texto = QLabel("Altura do texto (cm)")
+        self.lbl_alinhamento = QLabel("Alinhamento")
+        self.lbl_espaco_linhas = QLabel("Espaço entre linhas (cm)")
+        self.lbl_nome_visualizacao = QLabel("Nome do molde")
+
+        grid.addWidget(self.lbl_elementos_molde, 0, 0)
         grid.addWidget(self.cmb_elementos_molde, 0, 1)
-        grid.addWidget(QLabel("Ângulo do texto"), 0, 2)
+        grid.addWidget(self.lbl_angulo_texto, 0, 2)
         grid.addWidget(self.ed_angulo_texto, 0, 3)
-        grid.addWidget(QLabel("°"), 0, 4)
-        grid.addWidget(QLabel("Referência"), 1, 0)
+        grid.addWidget(self.lbl_grau_texto, 0, 4)
+        grid.addWidget(self.lbl_referencia, 1, 0)
         grid.addWidget(self.ed_referencia, 1, 1)
-        grid.addWidget(QLabel("Altura do texto (cm)"), 1, 2)
+        grid.addWidget(self.lbl_altura_texto, 1, 2)
         grid.addWidget(self.ed_altura_texto, 1, 3, 1, 2)
-        grid.addWidget(QLabel("Alinhamento"), 2, 0)
+        grid.addWidget(self.lbl_alinhamento, 2, 0)
         grid.addWidget(self.ed_alinhamento, 2, 1)
-        grid.addWidget(QLabel("Espaço entre linhas (cm)"), 2, 2)
+        grid.addWidget(self.lbl_espaco_linhas, 2, 2)
         grid.addWidget(self.ed_espaco_linhas, 2, 3, 1, 2)
+        grid.addWidget(self.lbl_nome_visualizacao, 3, 0)
+        grid.addWidget(self.ed_nome_visualizacao, 3, 1, 1, 4)
 
         box_vis = QGroupBox("Visualização")
         gvis = QGridLayout(box_vis)
@@ -1539,6 +2073,10 @@ class PropriedadesMoldesDialog(QDialog):
         for linha in range(6):
             gvis.setRowMinimumHeight(linha, 30)
 
+        self.lbl_status_visual = QLabel("Indique posição")
+        self.lbl_status_visual.setStyleSheet("color:#111111;")
+        layout.addWidget(self.lbl_status_visual)
+
         rodape = QHBoxLayout()
         self.btn_aplicar_visual = QPushButton("Aplicar todos")
         self.btn_aplicar_visual.setObjectName("ApplyBlueButton")
@@ -1557,6 +2095,195 @@ class PropriedadesMoldesDialog(QDialog):
         layout.addLayout(rodape)
         layout.addStretch(1)
         return aba
+
+    def _mensagem_visualizacao(self, texto: str):
+        if hasattr(self, "lbl_status_visual"):
+            self.lbl_status_visual.setText(str(texto or ""))
+
+    def _info_preview_texto(self, texto: str):
+        if not hasattr(self, "lbl_info_preview"):
+            return
+        valor = str(texto or "").strip()
+        self.lbl_info_preview.setText(valor)
+        self.lbl_info_preview.setVisible(bool(valor))
+
+    def _valor_spin_visual(self, widget, padrao: float = 0.0) -> float:
+        if hasattr(widget, "value"):
+            return float(widget.value())
+        try:
+            return float(str(widget.text()).replace(",", "."))
+        except Exception:
+            return float(padrao)
+
+    def _float_campo(self, valor, padrao: float = 0.0) -> float:
+        try:
+            return float(str(valor).replace(",", "."))
+        except Exception:
+            return float(padrao)
+
+    def _texto_combo_visual(self, widget, padrao: str = "") -> str:
+        if hasattr(widget, "currentText"):
+            return str(widget.currentText() or padrao)
+        if hasattr(widget, "text"):
+            return str(widget.text() or padrao)
+        return padrao
+
+    def _definir_estado_campo_visual(self, widget, label, ativo: bool):
+        """Habilita/desabilita campos da aba Visualização com aparência levemente apagada."""
+        ativo = bool(ativo)
+        if widget is not None:
+            widget.setEnabled(ativo)
+            widget.setStyleSheet("" if ativo else "background:#eeeeee; color:#777777; border:1px solid #c8c8c8;")
+        if label is not None:
+            label.setEnabled(ativo)
+            label.setStyleSheet("color:#111111;" if ativo else "color:#777777;")
+
+    def _atualizar_estado_manipulacao_visual(self):
+        if not hasattr(self, "preview") or not hasattr(self, "cmb_elementos_molde"):
+            return
+        elemento = self.cmb_elementos_molde.currentText().strip()
+        eh_texto = elemento in {"Nome", "Descrição", "Observações"}
+        eh_nome = elemento == "Nome"
+        eh_texto_longo = elemento in {"Descrição", "Observações"}
+        eh_numero = elemento == "Números"
+        eh_fio = elemento == "Fio"
+
+        self._atualizar_entry_visualizacao_por_elemento()
+
+        # Referência e alinhamento ficam liberados para todos os elementos manipuláveis.
+        # O campo inferior é reaproveitado para Nome, Descrição e Observações.
+        elemento_manipulavel = elemento in {"Nome", "Descrição", "Observações", "Fio", "Números"}
+        self._definir_estado_campo_visual(self.ed_referencia, getattr(self, "lbl_referencia", None), elemento_manipulavel)
+        self._definir_estado_campo_visual(self.ed_alinhamento, getattr(self, "lbl_alinhamento", None), elemento_manipulavel)
+        self._definir_estado_campo_visual(self.ed_angulo_texto, getattr(self, "lbl_angulo_texto", None), eh_texto)
+        self._definir_estado_campo_visual(self.ed_altura_texto, getattr(self, "lbl_altura_texto", None), eh_texto or eh_numero)
+        self._definir_estado_campo_visual(self.ed_espaco_linhas, getattr(self, "lbl_espaco_linhas", None), eh_texto_longo)
+        self._definir_estado_campo_visual(self.ed_nome_visualizacao, getattr(self, "lbl_nome_visualizacao", None), eh_texto)
+        if hasattr(self, "lbl_grau_texto"):
+            self.lbl_grau_texto.setEnabled(eh_texto)
+            self.lbl_grau_texto.setStyleSheet("color:#111111;" if eh_texto else "color:#777777;")
+
+        if eh_fio:
+            mensagem = "Arraste no visualizador para definir o fio; o preview trava em 0°, 30°, 45°, 60°, 90° e equivalentes."
+        elif eh_numero:
+            mensagem = "Passe o mouse nos pontos e clique no ponto inicial da numeração; referência e alinhamento ficam disponíveis."
+        elif eh_texto:
+            if self._texto_combo_visual(self.ed_referencia, "Centro centro").strip().lower() == "livre":
+                mensagem = "Modo livre: clique ou arraste no visualizador para posicionar o texto"
+            else:
+                mensagem = "Escolha a referência ou arraste no visualizador para posicionar livremente"
+        else:
+            mensagem = ""
+        self._mensagem_visualizacao(mensagem)
+        self.preview.set_modo_manipulacao(
+            elemento=elemento,
+            referencia=self._texto_combo_visual(self.ed_referencia, "Centro centro"),
+            alinhamento=self._texto_combo_visual(self.ed_alinhamento, "Centro"),
+            altura_cm=self._valor_spin_visual(self.ed_altura_texto, 0.7),
+            angulo=self._valor_spin_visual(self.ed_angulo_texto, 0.0),
+            espaco_linhas=self._valor_spin_visual(self.ed_espaco_linhas, 0.33),
+        )
+        self._aplicar_imediato_formulario()
+
+    def _chave_visual_atual(self) -> str | None:
+        elemento = self.cmb_elementos_molde.currentText().strip() if hasattr(self, "cmb_elementos_molde") else ""
+        return {"Nome": "nome", "Descrição": "descricao", "Observações": "observacoes"}.get(elemento)
+
+    def _texto_entry_visualizacao(self, molde: dict | None, elemento: str) -> str:
+        if not molde:
+            return ""
+        if elemento == "Nome":
+            return str(molde.get("nome_molde") or "")
+        if elemento == "Descrição":
+            return str(molde.get("descricao") or "")
+        if elemento == "Observações":
+            return str(molde.get("observacoes") or molde.get("observacao") or "")
+        return ""
+
+    def _atualizar_entry_visualizacao_por_elemento(self):
+        if not hasattr(self, "ed_nome_visualizacao") or not hasattr(self, "cmb_elementos_molde"):
+            return
+        elemento = self.cmb_elementos_molde.currentText().strip()
+        rotulos = {
+            "Nome": "Nome do molde",
+            "Descrição": "Descrição",
+            "Observações": "Observações",
+        }
+        texto_rotulo = rotulos.get(elemento, "Texto")
+        if hasattr(self, "lbl_nome_visualizacao"):
+            self.lbl_nome_visualizacao.setText(texto_rotulo)
+        self.ed_nome_visualizacao.setPlaceholderText(texto_rotulo)
+        with QSignalBlocker(self.ed_nome_visualizacao):
+            self.ed_nome_visualizacao.setText(self._texto_entry_visualizacao(self._molde_atual(), elemento))
+
+    def _salvar_config_visual_molde(self, molde: dict):
+        if not hasattr(self, "cmb_elementos_molde"):
+            return
+        elemento = self.cmb_elementos_molde.currentText().strip()
+        chave = self._chave_visual_atual()
+        if chave:
+            molde[f"texto_{chave}_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            molde[f"texto_{chave}_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
+            molde[f"espaco_linhas_texto_{chave}"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
+            referencia = self._texto_combo_visual(self.ed_referencia, "Centro centro")
+            molde[f"referencia_texto_{chave}"] = referencia
+            molde[f"alinhamento_texto_{chave}"] = self._texto_combo_visual(self.ed_alinhamento, "Centro")
+            if referencia.strip().lower() != "livre":
+                pontos = self.preview._coletar_pontos(molde.get("pontos")) if hasattr(self, "preview") else []
+                base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
+                if base:
+                    ponto_ref = self.preview._ponto_referencia(base, referencia) if hasattr(self, "preview") else None
+                    if ponto_ref is not None:
+                        molde[f"ponto_texto_{chave}"] = [ponto_ref.x(), ponto_ref.y()]
+                        if chave == "nome":
+                            molde["ponto_texto"] = [ponto_ref.x(), ponto_ref.y()]
+            if chave == "nome":
+                molde["mostrar_nome"] = True
+            elif chave == "descricao":
+                molde["visual_descricao"] = True
+            elif chave == "observacoes":
+                molde["visual_observacoes"] = True
+        elif elemento == "Números":
+            molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            molde["mostrar_numeros"] = True
+        elif elemento == "Fio":
+            molde["mostrar_fio"] = True
+
+    def _quando_preview_manipulado(self, dados_preview: dict):
+        molde = self._molde_atual()
+        if not molde or not isinstance(dados_preview, dict):
+            return
+        chaves = (
+            "ponto_texto", "ponto_texto_nome", "ponto_texto_descricao", "ponto_texto_observacoes",
+            "texto_nome_altura_cm", "texto_descricao_altura_cm", "texto_observacoes_altura_cm",
+            "texto_nome_angulo", "texto_descricao_angulo", "texto_observacoes_angulo",
+            "espaco_linhas_texto_nome", "espaco_linhas_texto_descricao", "espaco_linhas_texto_observacoes",
+            "referencia_texto_nome", "referencia_texto_descricao", "referencia_texto_observacoes",
+            "alinhamento_texto_nome", "alinhamento_texto_descricao", "alinhamento_texto_observacoes",
+            "fio_origem", "fio_fim", "numero_ponto_inicio", "numero_altura_cm",
+            "mostrar_nome", "mostrar_fio", "mostrar_numeros", "visual_descricao", "visual_observacoes",
+        )
+        for chave in chaves:
+            if chave in dados_preview:
+                molde[chave] = deepcopy(dados_preview[chave])
+        self._suspender_auto_aplicar = True
+        try:
+            self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
+            self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
+            self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", False)))
+            self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
+            chave_visual = self._chave_visual_atual()
+            if chave_visual and hasattr(self, "ed_referencia"):
+                referencia = str(molde.get(f"referencia_texto_{chave_visual}") or "Centro centro")
+                with QSignalBlocker(self.ed_referencia):
+                    self.ed_referencia.setCurrentText(referencia)
+        finally:
+            self._suspender_auto_aplicar = False
+        self.preview.set_molde(dict(molde))
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
+        self._confirmado_ok = True
+        self.dados_aplicados.emit()
 
     def _criar_tab_margem(self) -> QWidget:
         aba = QWidget()
@@ -1975,7 +2702,9 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.addTopLevelItem(raiz)
 
         grupos: dict[str, list[MoldeRef]] = {}
-        tecidos_disponiveis: set[str] = set(self._tecidos_disponiveis())
+        tecidos_disponiveis: set[str] = set()
+        if self._refs:
+            tecidos_disponiveis = set(self._tecidos_disponiveis())
         for ref in self._refs:
             tecido = str(ref.dados.get("tecido") or "").strip()
             grupo = tecido if tecido else "1"
@@ -2039,12 +2768,16 @@ class PropriedadesMoldesDialog(QDialog):
         cena = getattr(self.canvas, "cena", None)
         elementos = getattr(cena, "elementos", [])
         tecidos: set[str] = set()
+        existe_molde = False
         if isinstance(elementos, list):
             for el in elementos:
                 if isinstance(el, dict) and el.get("molde"):
+                    existe_molde = True
                     tecido = str(el.get("tecido") or "").strip()
                     if tecido:
                         tecidos.add(tecido)
+        if not existe_molde:
+            return []
         for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
             tecido = str(chave or "").strip()
             if tecido:
@@ -2177,6 +2910,39 @@ class PropriedadesMoldesDialog(QDialog):
         self.preview.set_molde(dict(molde))
         self.canvas.update()
 
+    def _editar_texto_visualizacao_instantaneo(self, texto: str):
+        if self._suspender_auto_aplicar:
+            return
+        if not hasattr(self, "cmb_elementos_molde"):
+            return
+        molde = self._molde_atual()
+        if not molde:
+            return
+        elemento = self.cmb_elementos_molde.currentText().strip()
+        valor = str(texto or "").strip()
+        if elemento == "Nome":
+            if not valor:
+                return
+            molde["nome_molde"] = valor
+            self._sincronizar_nome_molde_atual_sem_recarregar(valor)
+        elif elemento == "Descrição":
+            molde["descricao"] = valor
+            molde["visual_descricao"] = True
+            if hasattr(self, "ed_descricao"):
+                with QSignalBlocker(self.ed_descricao):
+                    self.ed_descricao.setPlainText(valor)
+            if hasattr(self, "chk_visual_descricao"):
+                with QSignalBlocker(self.chk_visual_descricao):
+                    self.chk_visual_descricao.setChecked(True)
+        elif elemento == "Observações":
+            molde["observacoes"] = valor
+            molde["visual_observacoes"] = True
+        else:
+            return
+        self._salvar_config_visual_molde(molde)
+        self.preview.set_molde(dict(molde))
+        self.canvas.update()
+
     def _sincronizar_nome_molde_atual_sem_recarregar(self, novo_nome: str | None = None):
         if self._indice_atual is None:
             return
@@ -2200,6 +2966,9 @@ class PropriedadesMoldesDialog(QDialog):
             if pos >= 0:
                 with QSignalBlocker(self.cmb_molde):
                     self.cmb_molde.setItemText(pos, nome)
+        if hasattr(self, "ed_nome_visualizacao") and (not hasattr(self, "cmb_elementos_molde") or self.cmb_elementos_molde.currentText().strip() == "Nome"):
+            with QSignalBlocker(self.ed_nome_visualizacao):
+                self.ed_nome_visualizacao.setText(nome)
 
     def _assinatura_grade(self, molde: dict) -> str:
         nome = str(molde.get("graduacao_grade_nome") or "").strip()
@@ -2378,6 +3147,16 @@ class PropriedadesMoldesDialog(QDialog):
             self.chk_reflete_h.setChecked(False)
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
+            if hasattr(self, "ed_nome_visualizacao"):
+                self.ed_nome_visualizacao.clear()
+            if hasattr(self, "cmb_elementos_molde"):
+                self.cmb_elementos_molde.setCurrentText("Nenhum")
+                self.ed_referencia.setCurrentText("Centro centro")
+                self.ed_alinhamento.setCurrentText("Centro")
+                self.ed_angulo_texto.setValue(0.0)
+                self.ed_altura_texto.setValue(0.7)
+                self.ed_espaco_linhas.setValue(0.33)
+                self._atualizar_estado_manipulacao_visual()
             self._atualizar_estado_faixa_giro()
             self._suspender_auto_aplicar = False
             return
@@ -2387,6 +3166,7 @@ class PropriedadesMoldesDialog(QDialog):
             with QSignalBlocker(self.cmb_molde):
                 self.cmb_molde.setCurrentIndex(pos_combo)
         self.ed_descricao.setPlainText(str(molde.get("descricao") or ""))
+        self._atualizar_entry_visualizacao_por_elemento()
         tipo_corte = str(molde.get("tipo_corte") or "Completo")
         idx_tipo_corte = self.cmb_tipo_corte.findText(tipo_corte)
         self.cmb_tipo_corte.setCurrentIndex(idx_tipo_corte if idx_tipo_corte >= 0 else 0)
@@ -2422,6 +3202,18 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_mostrar_cor_tecidos.blockSignals(False)
         self._cor_visual = str(molde.get("cor") or "#ffffff")
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
+        if hasattr(self, "cmb_elementos_molde"):
+            elemento = self.cmb_elementos_molde.currentText().strip() or "Nenhum"
+            chave = {"Nome": "nome", "Descrição": "descricao", "Observações": "observacoes"}.get(elemento)
+            if chave:
+                self.ed_referencia.setCurrentText(str(molde.get(f"referencia_texto_{chave}") or "Centro centro"))
+                self.ed_alinhamento.setCurrentText(str(molde.get(f"alinhamento_texto_{chave}") or "Centro"))
+                self.ed_angulo_texto.setValue(self._float_campo(molde.get(f"texto_{chave}_angulo"), 0.0))
+                self.ed_altura_texto.setValue(self._float_campo(molde.get(f"texto_{chave}_altura_cm"), 0.7 if chave != "nome" else 0.9))
+                self.ed_espaco_linhas.setValue(self._float_campo(molde.get(f"espaco_linhas_texto_{chave}"), 0.33))
+            elif elemento == "Números":
+                self.ed_altura_texto.setValue(self._float_campo(molde.get("numero_altura_cm"), 0.7))
+            self._atualizar_estado_manipulacao_visual()
         grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
         if grade_nome:
             i_grade = self.cmb_grade_tamanhos.findText(grade_nome)
@@ -2646,8 +3438,18 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _aplicar_formulario_no_molde(self, molde: dict):
         nome_combo = self.cmb_molde.currentText().strip()
-        molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
-        molde["descricao"] = self.ed_descricao.toPlainText().strip()
+        elemento_visual = self.cmb_elementos_molde.currentText().strip() if hasattr(self, "cmb_elementos_molde") else ""
+        texto_visual = self.ed_nome_visualizacao.text().strip() if hasattr(self, "ed_nome_visualizacao") else ""
+        if elemento_visual == "Nome" and texto_visual:
+            molde["nome_molde"] = texto_visual
+        else:
+            molde["nome_molde"] = nome_combo or molde.get("nome_molde") or "N22"
+        if elemento_visual == "Descrição":
+            molde["descricao"] = texto_visual
+        else:
+            molde["descricao"] = self.ed_descricao.toPlainText().strip()
+        if elemento_visual == "Observações":
+            molde["observacoes"] = texto_visual
         molde["tecido"] = self.ed_tecido.currentText().strip()
         molde["tipo_corte"] = self.cmb_tipo_corte.currentText().strip()
         molde["espelhar"] = self.cmb_espelhar.currentText().strip()
@@ -2671,6 +3473,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._salvar_margens_no_molde(molde, margens_dict, mostrar_margem=self.chk_margem_visual.isChecked())
         molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
+        self._salvar_config_visual_molde(molde)
 
     def _aplicar_imediato_formulario(self):
         if self._suspender_auto_aplicar:
@@ -2713,11 +3516,26 @@ class PropriedadesMoldesDialog(QDialog):
             self.chk_margem_visual.toggled,
             self.chk_preencher.toggled,
             self.chk_mostrar_cor_tecidos.toggled,
+            self.cmb_elementos_molde.currentTextChanged,
+            self.ed_referencia.currentTextChanged,
+            self.ed_alinhamento.currentTextChanged,
+            self.ed_angulo_texto.valueChanged,
+            self.ed_altura_texto.valueChanged,
+            self.ed_espaco_linhas.valueChanged,
             self.cmb_grade_tamanhos.currentTextChanged,
             self.cmb_aplicar_grade.currentTextChanged,
         ]
         for sinal in sinais:
             sinal.connect(self._aplicar_imediato_formulario)
+        for sinal in (
+            self.cmb_elementos_molde.currentTextChanged,
+            self.ed_referencia.currentTextChanged,
+            self.ed_alinhamento.currentTextChanged,
+            self.ed_angulo_texto.valueChanged,
+            self.ed_altura_texto.valueChanged,
+            self.ed_espaco_linhas.valueChanged,
+        ):
+            sinal.connect(self._atualizar_estado_manipulacao_visual)
 
     def _abrir_config_cor_tecidos(self):
         cena = getattr(self.canvas, "cena", None)
