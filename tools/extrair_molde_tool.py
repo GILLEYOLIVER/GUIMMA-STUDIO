@@ -937,9 +937,11 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("fio_angulo", 0.0)
 
         largura = max(xs) - min(xs)
+        altura = max(ys) - min(ys)
         margem = largura * 0.20
-        molde.setdefault("fio_origem", (min(xs) + margem, cy))
-        molde.setdefault("fio_fim", (max(xs) - margem, cy))
+        y_fio = min(max(ys) - max(0.15, altura * 0.06), cy + max(0.25, altura * 0.08))
+        molde.setdefault("fio_origem", (min(xs) + margem, y_fio))
+        molde.setdefault("fio_fim", (max(xs) - margem, y_fio))
         molde.setdefault("ponto_texto", (cx, cy))
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
