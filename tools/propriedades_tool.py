@@ -724,6 +724,24 @@ class PropriedadesMoldesDialog(QDialog):
             border-color: #b8d0ea;
             min-width: 150px;
         }
+        QPushButton#PreviewToolButton {
+            background: #ffffff;
+            border: 1px solid #c4ccd5;
+            border-radius: 7px;
+            padding: 0px;
+            color: #26384d;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#PreviewToolButton:hover {
+            background: #f2f7ff;
+            border-color: #8fb7df;
+        }
+        QPushButton#PreviewToolButton:pressed, QPushButton#PreviewToolButton:checked {
+            background: #dcecff;
+            border-color: #5794d0;
+            color: #0f4f89;
+        }
         QToolButton {
             background: #f7f7f7;
             border: 1px solid #b7bec5;
@@ -731,9 +749,29 @@ class PropriedadesMoldesDialog(QDialog):
             padding: 2px 6px;
             color: #111111;
         }
+        QToolButton:hover { background: #ffffff; border-color: #8aa9c8; }
+        QToolButton:pressed { background: #e4eef8; }
         QToolButton:disabled {
             color: #777777;
             background: #ebebeb;
+        }
+        QToolButton#FabricManageButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #eef4fb);
+            border: 1px solid #a9b9c9;
+            border-radius: 5px;
+            padding: 0px;
+            color: #64748b;
+            font-size: 15px;
+            font-weight: 700;
+        }
+        QToolButton#FabricManageButton:hover {
+            background: #ffffff;
+            border-color: #6f9fd2;
+            color: #2f6fae;
+        }
+        QToolButton#FabricManageButton:pressed {
+            background: #dfeefa;
+            border-color: #4f86c6;
         }
         QHeaderView::section {
             background: #f1f1f1;
@@ -803,7 +841,11 @@ class PropriedadesMoldesDialog(QDialog):
         self.tabs.addTab(self._criar_tab_graduacao(), "Graduação")
         self.tabs.addTab(self._criar_tab_visualizacao(), "Visualização")
         self.tabs.addTab(self._criar_tab_margem(), "Margem")
-        self.tabs.addTab(self._criar_tab_cam(), "Pontos de CAM")
+        self._idx_tab_cam = self.tabs.addTab(self._criar_tab_cam(), "Pontos de CAM")
+        if hasattr(self.tabs, "setTabVisible"):
+            self.tabs.setTabVisible(self._idx_tab_cam, False)
+        else:
+            self.tabs.setTabEnabled(self._idx_tab_cam, False)
         self._idx_tab_ferramentas = self.tabs.addTab(self._criar_tab_ferramentas(), "Ferramentas")
         self.set_exibir_tab_ferramentas(self._mostrar_tab_ferramentas)
         lay_dir.addWidget(self.tabs, 0)
@@ -813,25 +855,22 @@ class PropriedadesMoldesDialog(QDialog):
 
         barra_preview = QHBoxLayout()
         barra_preview.setContentsMargins(0, 0, 0, 0)
-        barra_preview.setSpacing(6)
-        self.btn_preview_mao = QPushButton("🖐")
+        barra_preview.setSpacing(5)
+
+        self.btn_preview_mao = self._criar_botao_preview("✋", "Mover visualização")
         self.btn_preview_mao.setCheckable(True)
-        self.btn_preview_mao.setFixedSize(26, 22)
         self.btn_preview_mao.toggled.connect(self.preview.set_hand_active)
         barra_preview.addWidget(self.btn_preview_mao, 0, Qt.AlignLeft)
 
-        self.btn_preview_ajustar = QPushButton("⤢")
-        self.btn_preview_ajustar.setFixedSize(26, 22)
+        self.btn_preview_ajustar = self._criar_botao_preview("⌖", "Ajustar molde à área")
         self.btn_preview_ajustar.clicked.connect(self.preview.reset_view)
         barra_preview.addWidget(self.btn_preview_ajustar, 0, Qt.AlignLeft)
 
-        self.btn_preview_zoom_mais = QPushButton("🔍+")
-        self.btn_preview_zoom_mais.setFixedSize(26, 22)
+        self.btn_preview_zoom_mais = self._criar_botao_preview("+", "Aproximar")
         self.btn_preview_zoom_mais.clicked.connect(self.preview.zoom_in)
         barra_preview.addWidget(self.btn_preview_zoom_mais, 0, Qt.AlignLeft)
 
-        self.btn_preview_zoom_menos = QPushButton("🔎")
-        self.btn_preview_zoom_menos.setFixedSize(26, 22)
+        self.btn_preview_zoom_menos = self._criar_botao_preview("−", "Afastar")
         self.btn_preview_zoom_menos.clicked.connect(self.preview.zoom_out)
         barra_preview.addWidget(self.btn_preview_zoom_menos, 0, Qt.AlignLeft)
         barra_preview.addStretch(1)
@@ -855,6 +894,15 @@ class PropriedadesMoldesDialog(QDialog):
         self._atualizar_opcoes_tecido()
         self._ajustar_larguras_campos()
         self._atualizar_estado_faixa_giro()
+
+    def _criar_botao_preview(self, texto: str, tooltip: str) -> QPushButton:
+        botao = QPushButton(texto)
+        botao.setObjectName("PreviewToolButton")
+        botao.setToolTip(tooltip)
+        botao.setFixedSize(30, 26)
+        botao.setCursor(Qt.PointingHandCursor)
+        botao.setFocusPolicy(Qt.NoFocus)
+        return botao
 
     def set_exibir_tab_ferramentas(self, exibir: bool):
         self._mostrar_tab_ferramentas = bool(exibir)
@@ -941,9 +989,12 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_tecido.setInsertPolicy(QComboBox.NoInsert)
         self.ed_tecido.setMinimumWidth(120)
         self.ed_tecido.setMaximumWidth(120)
-        self.btn_config_tecido = QPushButton("⚙")
-        self.btn_config_tecido.setFixedSize(24, 24)
-        self.btn_config_tecido.setToolTip("Configurar cor do tecido")
+        self.btn_config_tecido = QToolButton()
+        self.btn_config_tecido.setObjectName("FabricManageButton")
+        self.btn_config_tecido.setText("⋯")
+        self.btn_config_tecido.setFixedSize(28, 24)
+        self.btn_config_tecido.setCursor(Qt.PointingHandCursor)
+        self.btn_config_tecido.setToolTip("Abrir lista e configurações dos tecidos")
         self.btn_config_tecido.clicked.connect(self._abrir_config_cor_tecidos)
         self.ed_tecido.installEventFilter(self)
         self.ed_tecido.activated.connect(lambda *_: self._aplicar_tecido_formulario_confirmado())
@@ -1962,9 +2013,11 @@ class PropriedadesMoldesDialog(QDialog):
         combo.setMinimumHeight(20)
         combo.installEventFilter(self)
         combo.setStyleSheet(
-            "QComboBox { background: transparent; border: none; color:#111111; padding-left:0px; }"
-            "QComboBox::drop-down { width:18px; border: none; }"
-            "QComboBox QAbstractItemView { background:#ffffff; color:#111111; selection-background-color:#2b7cd3; }"
+            "QComboBox { background:#ffffff; border:1px solid #c4ccd5; border-radius:4px; color:#111111; padding:1px 18px 1px 6px; }"
+            "QComboBox:hover { border-color:#7fa7d7; }"
+            "QComboBox::drop-down { width:18px; border-left:1px solid #d2dae2; background:#f4f8fc; border-top-right-radius:4px; border-bottom-right-radius:4px; }"
+            "QComboBox::down-arrow { width:0px; height:0px; }"
+            "QComboBox QAbstractItemView { background:#ffffff; color:#111111; border:1px solid #9fb4ca; selection-background-color:#d9ecff; selection-color:#111111; outline:0; }"
         )
         opcoes = self._tecidos_disponiveis()
         if tecido_atual and tecido_atual not in opcoes:
