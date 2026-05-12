@@ -141,6 +141,7 @@ class Ferramenta(FerramentaBase):
             xs = [pt.x() for pt in cantos]
             ys = [pt.y() for pt in cantos]
             min_x, max_x = min(xs), max(xs)
+            cx = sum(xs) / len(xs)
             cy = sum(ys) / len(ys)
             largura = max_x - min_x
             margem = largura * 0.20
@@ -169,6 +170,7 @@ class Ferramenta(FerramentaBase):
                     "fio_angulo": 0.0,
                     "fio_origem": (min_x + margem, cy),
                     "fio_fim": (max_x - margem, cy),
+                    "ponto_texto": (cx, cy),
                     "mostrar_nome": True,
                     "mostrar_fio": True,
                     "mostrar_controles": True,

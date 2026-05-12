@@ -940,6 +940,7 @@ class Ferramenta(FerramentaBase):
         margem = largura * 0.20
         molde.setdefault("fio_origem", (min(xs) + margem, cy))
         molde.setdefault("fio_fim", (max(xs) - margem, cy))
+        molde.setdefault("ponto_texto", (cx, cy))
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)
@@ -1533,6 +1534,9 @@ class Ferramenta(FerramentaBase):
                 if "fio_fim" in el:
                     fx, fy = el.get("fio_fim", (0.0, 0.0))
                     el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
+                if "ponto_texto" in el:
+                    fx, fy = el.get("ponto_texto", (0.0, 0.0))
+                    el["ponto_texto"] = (float(fx) + dx, float(fy) + dy)
 
     def _mover_pontos_controle(self, valor, dx: float, dy: float):
         if isinstance(valor, dict):
