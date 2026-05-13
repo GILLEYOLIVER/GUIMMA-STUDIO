@@ -30,6 +30,7 @@ from core.geometry_bridge import (
     polyline_from_element,
 )
 from tools.tool_base import FerramentaBase
+from tools.movimento_utils import mover_elemento_por_delta
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -1521,24 +1522,7 @@ class Ferramenta(FerramentaBase):
                 continue
             el = canvas.cena.elementos[idx]
             if el.get("tipo") == "polyline":
-                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
-                if "controle_cantos" in el:
-                    el["controle_cantos"] = self._mover_pontos_controle(el.get("controle_cantos", []), dx, dy)
-                if "controle_auxiliares" in el:
-                    el["controle_auxiliares"] = self._mover_pontos_controle(el.get("controle_auxiliares", []), dx, dy)
-                if "pontos_controle_principais" in el:
-                    el["pontos_controle_principais"] = self._mover_pontos_controle(el.get("pontos_controle_principais", []), dx, dy)
-                if "pontos_auxiliares" in el:
-                    el["pontos_auxiliares"] = self._mover_pontos_controle(el.get("pontos_auxiliares", []), dx, dy)
-                if "fio_origem" in el:
-                    fx, fy = el.get("fio_origem", (0.0, 0.0))
-                    el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
-                if "fio_fim" in el:
-                    fx, fy = el.get("fio_fim", (0.0, 0.0))
-                    el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
-                if "ponto_texto" in el:
-                    fx, fy = el.get("ponto_texto", (0.0, 0.0))
-                    el["ponto_texto"] = (float(fx) + dx, float(fy) + dy)
+                mover_elemento_por_delta(el, dx, dy)
 
     def _mover_pontos_controle(self, valor, dx: float, dy: float):
         if isinstance(valor, dict):
