@@ -103,7 +103,7 @@ class VisualizacaoCanvas(QWidget):
         self._imagem_cache: dict[str, QPixmap] = {}
         self._mostrar_curva_original_emf = False
 
-        self.setMinimumSize(100, 100)
+        self.setMinimumSize(0, 0)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)

@@ -111,6 +111,7 @@ class AreaDocumentoWidget(QWidget):
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
+        self.setMinimumSize(0, 0)
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)

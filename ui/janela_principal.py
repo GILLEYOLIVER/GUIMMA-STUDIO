@@ -556,6 +556,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                 layout.activate()
         area = self._area_documento_atual()
         if isinstance(area, AreaDocumentoWidget):
+            self.abas_documentos.setMinimumSize(0, 0)
+            area.setMinimumSize(0, 0)
+            area.canvas.setMinimumSize(0, 0)
             area.updateGeometry()
             area._on_zoom_changed(area.canvas.zoom)
             area.canvas.sincronizar_paineis_auxiliares()
@@ -3984,9 +3987,10 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _criar_area_documento(self) -> QWidget:
         area = QWidget()
         area.setStyleSheet("background: #eceff3;")
+        area.setMinimumSize(0, 0)
         layout = QVBoxLayout(area)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.host_barra_usuario_area = QWidget()
         self.host_barra_usuario_area_layout = QVBoxLayout(self.host_barra_usuario_area)
         self.host_barra_usuario_area_layout.setContentsMargins(0, 0, 0, 0)
@@ -3994,6 +3998,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(self.host_barra_usuario_area)
         self._criar_linha_usuarios()
         self.abas_documentos = QTabWidget()
+        self.abas_documentos.setMinimumSize(0, 0)
+        self.abas_documentos.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.abas_documentos.setTabsClosable(False)
         self.abas_documentos.setMovable(True)
         self.abas_documentos.tabBar().setExpanding(False)
@@ -4381,6 +4387,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._contador_sem_nome += 1
             nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
         area_doc = AreaDocumentoWidget(CenaDocumento())
+        area_doc.setMinimumSize(0, 0)
+        area_doc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.snap_changed.connect(self._on_snap_changed)
@@ -4601,6 +4609,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         base_nome_arquivo = self._arquivo_atual.stem if self._arquivo_atual else "(Sem nome)"
         for doc in docs:
             area_doc = AreaDocumentoWidget(CenaDocumento(elementos=doc.get("elementos", [])))
+            area_doc.setMinimumSize(0, 0)
+            area_doc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
             area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.snap_changed.connect(self._on_snap_changed)
