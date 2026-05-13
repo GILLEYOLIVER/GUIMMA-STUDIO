@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <clipPath id="shirtClip">
+      <path d="M48 18H200C223 18 242 37 242 60V67C242 86 254 103 272 111C279 114 287 116 295 116H312C320 116 328 114 335 111C353 103 365 86 365 67V60C365 37 384 18 407 18H464C490 18 512 40 512 66V164C512 190 490 212 464 212H428V466C428 490 408 512 384 512H128C104 512 84 492 84 468V212H48C22 212 0 190 0 164V66C0 40 22 18 48 18Z"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#shirtClip)">
+    <rect x="0" y="0" width="256" height="512" fill="#A9D2F3"/>
+    <rect x="256" y="0" width="256" height="512" fill="#82BDEB"/>
+    <rect x="250" y="0" width="12" height="512" fill="#97C8ED" opacity="0.85"/>
+  </g>
+
+  <g stroke="#000000" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M178 258V198C178 166 204 140 236 140H320C352 140 378 166 378 198V242"/>
+    <path d="M149 344L178 315L207 344"/>
+    <path d="M178 316V388C178 423 206 451 241 451H315C350 451 378 423 378 388V331"/>
+    <path d="M349 213L378 242L407 213"/>
+  </g>
+</svg>

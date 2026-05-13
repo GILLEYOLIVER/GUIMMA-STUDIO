@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <clipPath id="tshirt-clip">
+      <path d="M48 18H200C223 18 242 37 242 60V67C242 86 254 103 272 111C279 114 287 116 295 116H312C320 116 328 114 335 111C353 103 365 86 365 67V60C365 37 384 18 407 18H464C490 18 512 40 512 66V164C512 190 490 212 464 212H428V466C428 490 408 512 384 512H128C104 512 84 492 84 468V212H48C22 212 0 190 0 164V66C0 40 22 18 48 18Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- T-shirt body split in two blue halves -->
+  <g clip-path="url(#tshirt-clip)">
+    <rect x="0" y="0" width="256" height="512" fill="#9FD1F6"/>
+    <rect x="256" y="0" width="256" height="512" fill="#7EBDF0"/>
+    <rect x="254" y="0" width="4" height="512" fill="#8DBFE8" opacity="0.95"/>
+  </g>
+
+  <!-- Neck cutout -->
+  <path d="M212 18H300V18C300 54 280 79 256 79C232 79 212 54 212 18V18Z" fill="white" fill-opacity="0"/>
+
+  <!-- Refresh arrows -->
+  <g stroke="#000000" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M182 256V218C182 186 208 160 240 160H330C362 160 388 186 388 218V228"/>
+    <path d="M330 382H240C208 382 182 356 182 324V312"/>
+  </g>
+
+  <!-- Arrowheads -->
+  <path d="M350 230L389 267L428 230" fill="none" stroke="#000000" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M221 312L182 275L143 312" fill="none" stroke="#000000" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

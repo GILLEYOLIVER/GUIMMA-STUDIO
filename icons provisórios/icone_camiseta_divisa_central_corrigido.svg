@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Ícone camiseta com divisa central e setas">
+  <defs>
+    <clipPath id="shirtClip">
+      <path d="
+        M155 78
+        H356
+        C382 78 404 100 404 126
+        V138
+        C404 199 452 248 512 248
+        C572 248 620 199 620 138
+        V126
+        C620 100 642 78 668 78
+        H869
+        C888 78 906 86 920 100
+        L1002 182
+        C1016 196 1024 214 1024 234
+        V366
+        C1024 404 994 434 956 434
+        H847
+        V887
+        C847 925 816 956 778 956
+        H246
+        C208 956 177 925 177 887
+        V434
+        H68
+        C30 434 0 404 0 366
+        V234
+        C0 214 8 196 22 182
+        L104 100
+        C118 86 136 78 155 78
+        Z" />
+    </clipPath>
+  </defs>
+
+  <!-- fundo transparente -->
+
+  <!-- camiseta dividida ao centro -->
+  <g clip-path="url(#shirtClip)">
+    <rect x="0" y="0" width="512" height="1024" fill="#9BD2F7"/>
+    <rect x="512" y="0" width="512" height="1024" fill="#72BDEE"/>
+    <rect x="505" y="248" width="14" height="708" fill="#8EC8F0"/>
+  </g>
+
+  <!-- setas pretas centralizadas, mais limpas e menores -->
+  <g fill="none" stroke="#000000" stroke-width="86" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M354 478 V410 C354 359 395 318 446 318 H579 C630 318 671 359 671 410 V435"/>
+    <path d="M670 586 V654 C670 705 629 746 578 746 H445 C394 746 353 705 353 654 V629"/>
+    <path d="M625 438 L680 493 L735 438"/>
+    <path d="M399 626 L344 571 L289 626"/>
+  </g>
+</svg>
