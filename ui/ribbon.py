@@ -181,14 +181,18 @@ class _RibbonPageScrollArea(QScrollArea):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         pagina.resize(pagina.sizeHint())
         self.setWidget(pagina)
+        self.setMinimumHeight(self._altura_com_barra_horizontal())
+
+    def _altura_com_barra_horizontal(self) -> int:
+        widget = self.widget()
+        altura_widget = widget.sizeHint().height() if widget is not None else super().sizeHint().height()
+        return int(altura_widget + self.horizontalScrollBar().sizeHint().height() + 2)
 
     def sizeHint(self):  # noqa: N802
-        hint = super().sizeHint()
-        return QSize(0, hint.height())
+        return QSize(0, self._altura_com_barra_horizontal())
 
     def minimumSizeHint(self):  # noqa: N802
-        hint = super().minimumSizeHint()
-        return QSize(0, hint.height())
+        return QSize(0, self._altura_com_barra_horizontal())
 
 
 class ColorControlWidget(QFrame):
@@ -699,12 +703,12 @@ class RibbonWidget(QWidget):
         if index is None:
             return
 
-        titulo = titulo.strip() or "Usuario 1"
+        titulo = titulo.strip() or "1"
         self._tabs[index].title = titulo
         self.tabbar.setTabText(index, titulo)
 
         tools = [self._tools[tid] for tid in tool_ids if tid in self._tools]
-        grupos = [(titulo, tools)] if tools else []
+        grupos = [("Usuario", tools)] if tools else []
         pagina = RibbonPage(grupos, compactar_grupos=False)
         pagina.tool_selected.connect(self._on_tool_selected)
         pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)

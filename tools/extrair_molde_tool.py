@@ -944,6 +944,8 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("fio_origem", (min(xs) + margem, y_fio))
         molde.setdefault("fio_fim", (max(xs) - margem, y_fio))
         molde.setdefault("ponto_texto", (cx, cy))
+        molde.setdefault("texto_nome_altura_cm", 3.0)
+        molde.setdefault("numero_altura_cm", 2.0)
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
         molde.setdefault("mostrar_controles", True)

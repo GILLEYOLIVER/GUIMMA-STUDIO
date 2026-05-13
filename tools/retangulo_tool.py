@@ -177,6 +177,8 @@ class Ferramenta(FerramentaBase):
                     "fio_origem": (min_x + margem, y_fio),
                     "fio_fim": (max_x - margem, y_fio),
                     "ponto_texto": (cx, cy),
+                    "texto_nome_altura_cm": 3.0,
+                    "numero_altura_cm": 2.0,
                     "mostrar_nome": True,
                     "mostrar_fio": True,
                     "mostrar_controles": True,

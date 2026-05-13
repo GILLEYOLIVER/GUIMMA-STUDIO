@@ -43,6 +43,9 @@ from PySide6.QtWidgets import (
 from tools.tool_base import FerramentaBase
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
+TAMANHO_TEXTO_PADRAO_CM = 0.7
+TAMANHO_NOME_PADRAO_CM = 3.0
+TAMANHO_NUMERO_PADRAO_CM = 2.0
 
 # Regra do GUIMMA STUDIO: valores decimais sempre usam ponto.
 # Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
@@ -246,7 +249,7 @@ class PreviewMoldeWidget(QWidget):
         self._modo_elemento = "Nenhum"
         self._modo_referencia = "Centro centro"
         self._modo_alinhamento = "Centro"
-        self._modo_altura_cm = 0.7
+        self._modo_altura_cm = TAMANHO_TEXTO_PADRAO_CM
         self._modo_angulo = 0.0
         self._modo_espaco_linhas = 0.33
         self._drag_texto = False
@@ -275,14 +278,14 @@ class PreviewMoldeWidget(QWidget):
         elemento: str,
         referencia: str = "Centro centro",
         alinhamento: str = "Centro",
-        altura_cm: float = 0.7,
+        altura_cm: float = TAMANHO_TEXTO_PADRAO_CM,
         angulo: float = 0.0,
         espaco_linhas: float = 0.33,
     ):
         self._modo_elemento = str(elemento or "Nenhum")
         self._modo_referencia = str(referencia or "Centro centro")
         self._modo_alinhamento = str(alinhamento or "Centro")
-        self._modo_altura_cm = max(0.1, float(altura_cm or 0.7))
+        self._modo_altura_cm = max(0.1, float(altura_cm or TAMANHO_TEXTO_PADRAO_CM))
         self._modo_angulo = float(angulo or 0.0)
         self._modo_espaco_linhas = max(0.0, float(espaco_linhas or 0.0))
         self._drag_texto = False
@@ -875,7 +878,10 @@ class PreviewMoldeWidget(QWidget):
         texto_draw = self._texto_preview_com_indicativo(chave, texto, ativo)
         ponto = self._ponto_texto_configurado(chave, base)
         pos = mapear(ponto)
-        altura_cm = self._float_seguro(self._molde.get(f"texto_{chave}_altura_cm"), 0.7 if chave != "nome" else 0.9)
+        altura_cm = self._float_seguro(
+            self._molde.get(f"texto_{chave}_altura_cm"),
+            TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
+        )
         angulo = self._float_seguro(self._molde.get(f"texto_{chave}_angulo"), 0.0)
         alinhamento = str(self._molde.get(f"alinhamento_texto_{chave}") or "Centro")
         referencia = str(self._molde.get(f"referencia_texto_{chave}") or "Centro centro")
@@ -928,7 +934,7 @@ class PreviewMoldeWidget(QWidget):
         painter.setPen(QPen(QColor("#ffffff"), 1.0))
         inicio = int(self._molde.get("numero_ponto_inicio", 0) or 0)
         total = max(1, len(pontos))
-        altura_cm = self._float_seguro(self._molde.get("numero_altura_cm"), 0.7)
+        altura_cm = self._float_seguro(self._molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
         escala = max(1.0, (self._dados_transformacao() or {}).get("escala", 1.0) * self._zoom)
         fonte = QFont(painter.font())
         fonte.setPointSize(max(6, min(72, int(round(altura_cm * escala * 0.52)))))
@@ -2161,7 +2167,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_altura_texto.setRange(0.1, 99.0)
         self.ed_altura_texto.setDecimals(2)
         self.ed_altura_texto.setSingleStep(0.1)
-        self.ed_altura_texto.setValue(0.7)
+        self.ed_altura_texto.setValue(TAMANHO_TEXTO_PADRAO_CM)
         self.ed_espaco_linhas = NumeroLimpoDoubleSpinBox()
         self.ed_espaco_linhas.setLocale(QLocale.c())
         self.ed_espaco_linhas.setRange(0.0, 99.0)
@@ -2336,6 +2342,23 @@ class PropriedadesMoldesDialog(QDialog):
         eh_fio = elemento == "Fio"
 
         self._atualizar_entry_visualizacao_por_elemento()
+        if self.sender() is self.cmb_elementos_molde:
+            molde = self._molde_atual()
+            if isinstance(molde, dict):
+                if eh_nome:
+                    valor = self._float_campo(molde.get("texto_nome_altura_cm"), TAMANHO_NOME_PADRAO_CM)
+                elif eh_texto:
+                    chave = self._chave_visual_atual()
+                    valor = self._float_campo(
+                        molde.get(f"texto_{chave}_altura_cm") if chave else None,
+                        TAMANHO_TEXTO_PADRAO_CM,
+                    )
+                elif eh_numero:
+                    valor = self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
+                else:
+                    valor = TAMANHO_TEXTO_PADRAO_CM
+                with QSignalBlocker(self.ed_altura_texto):
+                    self.ed_altura_texto.setValue(valor)
 
         # Números usam apenas altura e ponto inicial; referência/alinhamento não se aplicam.
         elemento_manipulavel = elemento in {"Nome", "Descrição", "Observações", "Fio"}
@@ -2365,7 +2388,7 @@ class PropriedadesMoldesDialog(QDialog):
             elemento=elemento,
             referencia=self._texto_combo_visual(self.ed_referencia, "Centro centro"),
             alinhamento=self._texto_combo_visual(self.ed_alinhamento, "Centro"),
-            altura_cm=self._valor_spin_visual(self.ed_altura_texto, 0.7),
+            altura_cm=self._valor_spin_visual(self.ed_altura_texto, TAMANHO_TEXTO_PADRAO_CM),
             angulo=self._valor_spin_visual(self.ed_angulo_texto, 0.0),
             espaco_linhas=self._valor_spin_visual(self.ed_espaco_linhas, 0.33),
         )
@@ -2408,7 +2431,10 @@ class PropriedadesMoldesDialog(QDialog):
         elemento = self.cmb_elementos_molde.currentText().strip()
         chave = self._chave_visual_atual()
         if chave:
-            molde[f"texto_{chave}_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            molde[f"texto_{chave}_altura_cm"] = self._valor_spin_visual(
+                self.ed_altura_texto,
+                TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
+            )
             molde[f"texto_{chave}_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
             molde[f"espaco_linhas_texto_{chave}"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
             referencia = self._texto_combo_visual(self.ed_referencia, "Centro centro")
@@ -2430,7 +2456,7 @@ class PropriedadesMoldesDialog(QDialog):
             elif chave == "observacoes":
                 molde["visual_observacoes"] = True
         elif elemento == "Números":
-            molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
             molde["mostrar_numeros"] = True
         elif elemento == "Fio":
             molde["mostrar_fio"] = True
@@ -3416,7 +3442,7 @@ class PropriedadesMoldesDialog(QDialog):
                 self.ed_referencia.setCurrentText("Centro centro")
                 self.ed_alinhamento.setCurrentText("Centro")
                 self.ed_angulo_texto.setValue(0.0)
-                self.ed_altura_texto.setValue(0.7)
+                self.ed_altura_texto.setValue(TAMANHO_TEXTO_PADRAO_CM)
                 self.ed_espaco_linhas.setValue(0.33)
                 self._atualizar_estado_manipulacao_visual()
             self._atualizar_estado_faixa_giro()
@@ -3471,10 +3497,17 @@ class PropriedadesMoldesDialog(QDialog):
                 self.ed_referencia.setCurrentText(str(molde.get(f"referencia_texto_{chave}") or "Centro centro"))
                 self.ed_alinhamento.setCurrentText(str(molde.get(f"alinhamento_texto_{chave}") or "Centro"))
                 self.ed_angulo_texto.setValue(self._float_campo(molde.get(f"texto_{chave}_angulo"), 0.0))
-                self.ed_altura_texto.setValue(self._float_campo(molde.get(f"texto_{chave}_altura_cm"), 0.7 if chave != "nome" else 0.9))
+                self.ed_altura_texto.setValue(
+                    self._float_campo(
+                        molde.get(f"texto_{chave}_altura_cm"),
+                        TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
+                    )
+                )
                 self.ed_espaco_linhas.setValue(self._float_campo(molde.get(f"espaco_linhas_texto_{chave}"), 0.33))
             elif elemento == "Números":
-                self.ed_altura_texto.setValue(self._float_campo(molde.get("numero_altura_cm"), 0.7))
+                self.ed_altura_texto.setValue(
+                    self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
+                )
             self._atualizar_estado_manipulacao_visual()
         grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
         if grade_nome:
@@ -3576,7 +3609,10 @@ class PropriedadesMoldesDialog(QDialog):
         if chave:
             dados["elemento_visual"] = elemento
             dados["chave_visual"] = chave
-            dados["texto_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            dados["texto_altura_cm"] = self._valor_spin_visual(
+                self.ed_altura_texto,
+                TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
+            )
             dados["texto_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
             dados["espaco_linhas"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
             dados["referencia_texto"] = self._texto_combo_visual(self.ed_referencia, "Centro centro")
@@ -3589,7 +3625,7 @@ class PropriedadesMoldesDialog(QDialog):
             dados["textos"][chave][f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
         elif elemento == "Números":
             dados["elemento_visual"] = elemento
-            dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
             dados["numeros"]["numero_altura_cm"] = dados["numero_altura_cm"]
             if isinstance(molde_atual, dict):
                 dados["numero_ponto_inicio"] = int(molde_atual.get("numero_ponto_inicio", 0) or 0)

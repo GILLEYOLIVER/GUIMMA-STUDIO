@@ -19,6 +19,8 @@ from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 class VisualizacaoCanvas(QWidget):
     LIMITE_DESFAZER = 250
+    TAMANHO_NOME_PADRAO_CM = 3.0
+    TAMANHO_NUMERO_PADRAO_CM = 2.0
 
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
@@ -1463,7 +1465,7 @@ class VisualizacaoCanvas(QWidget):
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 fonte_num = painter.font()
                 tamanho_num_px = self._tamanho_texto_cm_para_px(
-                    self._altura_texto_config_cm(el, "numero", 0.7),
+                    self._altura_texto_config_cm(el, "numero", self.TAMANHO_NUMERO_PADRAO_CM),
                     minimo_px=7.0,
                     maximo_px=220.0,
                 )
@@ -1635,7 +1637,7 @@ class VisualizacaoCanvas(QWidget):
         return max(0.05, float(valor))
 
     def _tamanho_texto_config_canvas(self, el: dict, chave: str, padrao_px: float = 10.0) -> float:
-        padrao_cm = 0.9 if chave == "nome" else 0.7
+        padrao_cm = self.TAMANHO_NOME_PADRAO_CM if chave == "nome" else 0.7
         valor_cm = self._valor_float_molde_decimal(
             el,
             (f"texto_{chave}_altura_cm", f"altura_texto_{chave}_cm", f"altura_{chave}_cm"),
