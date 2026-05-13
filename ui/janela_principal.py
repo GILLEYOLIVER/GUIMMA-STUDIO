@@ -191,7 +191,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._timer_vigiar_submenu_backstage = QTimer(self)
         self._timer_vigiar_submenu_backstage.setInterval(50)  # 50ms para resposta rápida
         self._timer_vigiar_submenu_backstage.timeout.connect(self._processar_hover_backstage_global)
-        self._pulso_enquadramento_windows_ativo = False
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
@@ -200,9 +199,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
         self._oferecer_recuperacao_pos_falha()
         QTimer.singleShot(0, lambda: self._ativar_ferramenta_global("selecionar"))
-        self.showMaximized()
-        if sys.platform.startswith("win"):
-            QTimer.singleShot(250, self._pulso_enquadramento_windows)
+
+    def exibir_inicial(self):
+        self.setWindowState(self.windowState() | Qt.WindowMaximized)
+        self.show()
+        self._agendar_reencaixe_janela_canvas()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._agendar_reencaixe_janela_canvas()
 
     def _carregar_preferencias_app(self) -> dict:
         try:
@@ -539,27 +544,26 @@ class GuimmaStudioMainWindow(QMainWindow):
         altura_disponivel = max(240, self.height() - y - 40)
         self.backstage.setFixedHeight(min(520, altura_disponivel))
         self.backstage.move(0, y)
-        area = self._area_documento_atual() if hasattr(self, "abas_documentos") else None
+        area = None
+        if hasattr(self, "abas_documentos") and self.abas_documentos.count() > 0:
+            area = self._area_documento_atual()
         if isinstance(area, AreaDocumentoWidget):
             area._on_zoom_changed(area.canvas.zoom)
             area.canvas.sincronizar_paineis_auxiliares()
 
-    def _agendar_reencaixe_janela_canvas(self, pulso_windows: bool = True):
+    def _agendar_reencaixe_janela_canvas(self):
         QTimer.singleShot(0, self._reencaixar_janela_canvas)
         QTimer.singleShot(80, self._reencaixar_janela_canvas)
         QTimer.singleShot(250, self._reencaixar_janela_canvas)
-        if pulso_windows and sys.platform.startswith("win"):
-            QTimer.singleShot(120, self._pulso_enquadramento_windows)
 
     def _reencaixar_janela_canvas(self):
-        self._forcar_janela_maximizada_no_display()
         central = self.centralWidget()
         if central is not None:
             central.updateGeometry()
             layout = central.layout()
             if layout is not None:
                 layout.activate()
-        area = self._area_documento_atual()
+        area = self._area_documento_atual() if self.abas_documentos.count() > 0 else None
         if isinstance(area, AreaDocumentoWidget):
             self.abas_documentos.setMinimumSize(0, 0)
             area.setMinimumSize(0, 0)
@@ -569,26 +573,6 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.sincronizar_paineis_auxiliares()
             area.canvas.update()
         self._atualizar_label_escala()
-
-    def _forcar_janela_maximizada_no_display(self):
-        if not self.isMaximized():
-            self.showMaximized()
-
-    def _pulso_enquadramento_windows(self):
-        if self._pulso_enquadramento_windows_ativo or not sys.platform.startswith("win"):
-            return
-        self._pulso_enquadramento_windows_ativo = True
-        self.showNormal()
-
-        def _restaurar():
-            self.showMaximized()
-            QTimer.singleShot(60, self._reencaixar_janela_canvas)
-            QTimer.singleShot(140, self._finalizar_pulso_enquadramento_windows)
-
-        QTimer.singleShot(80, _restaurar)
-
-    def _finalizar_pulso_enquadramento_windows(self):
-        self._pulso_enquadramento_windows_ativo = False
 
     def _alternar_backstage(self):
         self.backstage.setVisible(not self.backstage.isVisible())
@@ -1930,11 +1914,49 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _centralizar_dialogo_na_janela(self, dialog: QDialog):
         dialog.adjustSize()
+        tela = self.screen() or QApplication.primaryScreen()
+        area_disponivel = tela.availableGeometry() if tela is not None else None
+        if area_disponivel is not None:
+            largura_max = max(320, area_disponivel.width() - 32)
+            altura_max = max(240, area_disponivel.height() - 32)
+            if dialog.width() > largura_max or dialog.height() > altura_max:
+                dialog.resize(min(dialog.width(), largura_max), min(dialog.height(), altura_max))
+
         geo_janela = self.frameGeometry()
         centro_janela = geo_janela.center()
         geo_dialogo = dialog.frameGeometry()
         geo_dialogo.moveCenter(centro_janela)
+        if area_disponivel is not None:
+            if geo_dialogo.left() < area_disponivel.left():
+                geo_dialogo.moveLeft(area_disponivel.left())
+            if geo_dialogo.top() < area_disponivel.top():
+                geo_dialogo.moveTop(area_disponivel.top())
+            if geo_dialogo.right() > area_disponivel.right():
+                geo_dialogo.moveRight(area_disponivel.right())
+            if geo_dialogo.bottom() > area_disponivel.bottom():
+                geo_dialogo.moveBottom(area_disponivel.bottom())
         dialog.move(geo_dialogo.topLeft())
+
+    def _dimensionar_dialogo_para_tela(
+        self,
+        dialog: QDialog,
+        largura_preferida: int,
+        altura_preferida: int,
+        largura_minima: int,
+        altura_minima: int,
+    ):
+        tela = self.screen() or QApplication.primaryScreen()
+        if tela is None:
+            dialog.setMinimumSize(largura_minima, altura_minima)
+            dialog.resize(largura_preferida, altura_preferida)
+            return
+        area = tela.availableGeometry()
+        largura_max = max(640, area.width() - 80)
+        altura_max = max(480, area.height() - 80)
+        largura = min(largura_preferida, largura_max)
+        altura = min(altura_preferida, altura_max)
+        dialog.setMinimumSize(min(largura_minima, largura), min(altura_minima, altura))
+        dialog.resize(largura, altura)
 
     def _centralizar_widget_na_tela(self, widget: QWidget):
         widget.adjustSize()
@@ -2060,8 +2082,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
-        dialog.resize(1320, 820)
-        dialog.setMinimumSize(1180, 740)
+        self._dimensionar_dialogo_para_tela(dialog, 1320, 820, 900, 620)
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
             dialog.setFileMode(QFileDialog.FileMode.AnyFile)
@@ -2075,14 +2096,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._anexar_preview_dialogo_arquivo(dialog)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
-            self._agendar_reencaixe_janela_canvas(pulso_windows=False)
+            self._agendar_reencaixe_janela_canvas()
             return "", ""
-        self._forcar_janela_maximizada_no_display()
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         if caminho:
             self._memorizar_diretorio_arquivo(Path(caminho))
-        self._agendar_reencaixe_janela_canvas(pulso_windows=False)
+        self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter()
 
     def _diretorio_arquivo_inicial(self) -> str:
@@ -4420,6 +4440,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._configurar_botao_fechar_aba(index)
         self.abas_documentos.setCurrentIndex(index)
         QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
+        self._agendar_reencaixe_janela_canvas()
 
     def _limpar_abas_documentos(self):
         while self.abas_documentos.count():

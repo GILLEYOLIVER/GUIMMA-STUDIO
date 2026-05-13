@@ -47,5 +47,5 @@ class GuimmaStudioApp:
         self.qt_app.setPalette(pal)
 
     def run(self) -> int:
-        self.janela_principal.showMaximized()
+        self.janela_principal.exibir_inicial()
         return self.qt_app.exec()

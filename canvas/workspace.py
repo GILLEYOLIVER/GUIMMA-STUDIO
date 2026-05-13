@@ -129,23 +129,13 @@ class AreaDocumentoWidget(QWidget):
 
         self.canvas = VisualizacaoCanvas(cena)
         self.canvas.zoom_changed.connect(self._on_zoom_changed)
-        self.margem_direita = QWidget()
-        self.margem_direita.setFixedWidth(10)
-        self.margem_direita.setStyleSheet("background:#eceff3; border-left:1px solid #cfd6de;")
-        self.margem_inferior = QWidget()
-        self.margem_inferior.setFixedHeight(10)
-        self.margem_inferior.setStyleSheet("background:#eceff3; border-top:1px solid #cfd6de;")
-        self.canto_margem = QWidget()
-        self.canto_margem.setFixedSize(10, 10)
-        self.canto_margem.setStyleSheet("background:#eceff3; border-left:1px solid #cfd6de; border-top:1px solid #cfd6de;")
 
         layout.addWidget(self.canto, 0, 0)
         layout.addWidget(self.regua_h, 0, 1)
         layout.addWidget(self.regua_v, 1, 0)
         layout.addWidget(self.canvas, 1, 1)
-        layout.addWidget(self.margem_direita, 1, 2)
-        layout.addWidget(self.margem_inferior, 2, 1)
-        layout.addWidget(self.canto_margem, 2, 2)
+        layout.setColumnStretch(1, 1)
+        layout.setRowStretch(1, 1)
         self._reguas_visiveis = True
         self.aplicar_config_unidade("cm", 0.5)
 
