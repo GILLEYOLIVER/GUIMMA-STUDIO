@@ -568,6 +568,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area._on_zoom_changed(area.canvas.zoom)
             area.canvas.sincronizar_paineis_auxiliares()
             area.canvas.update()
+        self._atualizar_label_escala()
 
     def _forcar_janela_maximizada_no_display(self):
         if not self.isMaximized():
@@ -4444,13 +4445,13 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _on_zoom_canvas_alterado(self, zoom: float):
         area_atual = self._area_documento_atual()
         if area_atual and self.sender() is area_atual:
-            self.lbl_escala.setText(self._texto_escala(zoom))
+            self._atualizar_label_escala(zoom)
             self._agendar_salvar_estado_silencioso()
 
     def _on_aba_documento_alterada(self, index: int):
         area = self.abas_documentos.widget(index) if index >= 0 else None
         if isinstance(area, AreaDocumentoWidget):
-            self.lbl_escala.setText(self._texto_escala(area.canvas.zoom))
+            self._atualizar_label_escala(area.canvas.zoom)
             self.btn_snap.blockSignals(True)
             self.btn_snap.setChecked(area.canvas.snap_ativo())
             self.btn_snap.blockSignals(False)
@@ -4459,7 +4460,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_coordenadas.blockSignals(False)
             QTimer.singleShot(0, area.canvas.sincronizar_paineis_auxiliares)
         else:
-            self.lbl_escala.setText("Escala --")
+            self._atualizar_label_escala(None)
 
     def _area_documento_atual(self) -> AreaDocumentoWidget | None:
         area = self.abas_documentos.currentWidget()
@@ -5139,6 +5140,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")
+        self.lbl_status.setMinimumWidth(0)
+        self.lbl_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.lbl_status.setStyleSheet("color: white;")
         l.addWidget(self.lbl_status)
         for b in (
             self.btn_snap,
@@ -5157,6 +5161,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 b.vincular_status(self.lbl_status)
         l.addStretch(1)
         self.lbl_escala = QLabel("Escala 100%")
+        self.lbl_escala.setMinimumWidth(150)
+        self.lbl_escala.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_escala.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.lbl_escala.setStyleSheet("color: white; font-weight: 600; padding-right: 2px;")
         l.addWidget(self.lbl_escala)
         self.barra_mensagem = barra
         self.barra_mensagem.setVisible(self.action_barra_mensagem.isChecked())
@@ -5234,6 +5242,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         base = max(self.ZOOM_INICIAL_CANVAS, 1e-9)
         percentual = (zoom / base) * 100.0
         return f"Escala {percentual:.3f}%"
+
+    def _atualizar_label_escala(self, zoom: float | None = None):
+        if not hasattr(self, "lbl_escala"):
+            return
+        if zoom is None:
+            area = self._area_documento_atual()
+            if isinstance(area, AreaDocumentoWidget):
+                zoom = area.canvas.zoom
+        texto = self._texto_escala(float(zoom)) if isinstance(zoom, (int, float)) else "Escala --"
+        self.lbl_escala.setText(texto)
+        self.lbl_escala.setVisible(True)
+        self.lbl_escala.updateGeometry()
+        self.lbl_escala.update()
 
     def _centralizar_area_documento(self, area: AreaDocumentoWidget):
         elementos = area.canvas.cena.elementos
