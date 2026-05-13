@@ -59,6 +59,17 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado: SnapResult | None = None
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
+        self._grid_visivel = False
+        self._cores_canvas = {
+            "desenho": "#ffffff",
+            "fundo": "#000000",
+            "selecao": "#2da8ff",
+            "grade": "#808080",
+            "snap_desenho": "#6f6f6f",
+            "snap_referencia": "#d71313",
+        }
+        self._cores_moldes: dict[str, dict] = {}
+        self._estilo_linha_costura = "dash"
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ffffff"
@@ -223,6 +234,25 @@ class VisualizacaoCanvas(QWidget):
             self._linha_espessura = max(1.0, float(espessura))
         if amplitude is not None:
             self._linha_amplitude = max(0.2, float(amplitude))
+        self.update()
+
+    def set_config_cores_canvas(self, cores: dict | None):
+        if isinstance(cores, dict):
+            for chave in ("desenho", "fundo", "selecao", "grade", "snap_desenho", "snap_referencia"):
+                if chave in cores:
+                    cor = QColor(str(cores.get(chave)))
+                    if cor.isValid():
+                        self._cores_canvas[chave] = cor.name()
+        self.update()
+
+    def set_config_cores_moldes(self, cores: dict | None, estilo_linha_costura: str | None = None):
+        self._cores_moldes = dict(cores or {}) if isinstance(cores, dict) else {}
+        if estilo_linha_costura:
+            self._estilo_linha_costura = str(estilo_linha_costura)
+        self.update()
+
+    def set_grid_visivel(self, visivel: bool):
+        self._grid_visivel = bool(visivel)
         self.update()
 
     def set_modo_curva(self, modo: str):
@@ -1247,8 +1277,9 @@ class VisualizacaoCanvas(QWidget):
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#000000"))
+        painter.fillRect(self.rect(), QColor(self._cores_canvas.get("fundo", "#000000")))
         painter.setRenderHint(QPainter.Antialiasing)
+        self._desenhar_grade_canvas(painter)
 
         # Desenha destaque de reta temporária (para modo paralela/perpendicular)
         if self._destacar_reta_temporaria:
@@ -1262,7 +1293,7 @@ class VisualizacaoCanvas(QWidget):
             if elemento.get("tipo") == "imagem":
                 self._desenhar_imagem_referencia(painter, elemento)
                 continue
-            cor_base = elemento.get("cor", "#d0d0d0")
+            cor_base = elemento.get("cor", self._cores_canvas.get("desenho", "#ffffff"))
             if elemento.get("molde") and self._mostrar_cor_tecidos:
                 tecido = str(elemento.get("tecido") or "").strip()
                 if tecido and tecido in self._cores_tecidos:
@@ -1297,6 +1328,41 @@ class VisualizacaoCanvas(QWidget):
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
         self._desenhar_overlay_snap_ativo(painter)
+
+    def _desenhar_grade_canvas(self, painter: QPainter):
+        if not self._grid_visivel or self.zoom <= 0:
+            return
+        passo_cena = 1.0
+        while passo_cena * self.zoom < 18.0:
+            passo_cena *= 2.0
+        while passo_cena * self.zoom > 72.0 and passo_cena > 0.125:
+            passo_cena /= 2.0
+        if passo_cena <= 0:
+            return
+        cor = QColor(self._cores_canvas.get("grade", "#808080"))
+        cor.setAlpha(90)
+        pen = QPen(cor, 1.0)
+        painter.save()
+        painter.setPen(pen)
+        x0 = self.origem_cena.x()
+        y0 = self.origem_cena.y()
+        x1 = x0 + (self.width() / self.zoom)
+        y1 = y0 + (self.height() / self.zoom)
+        inicio_x = int(x0 // passo_cena) - 1
+        fim_x = int(x1 // passo_cena) + 2
+        inicio_y = int(y0 // passo_cena) - 1
+        fim_y = int(y1 // passo_cena) + 2
+        for ix in range(inicio_x, fim_x):
+            x = ix * passo_cena
+            p1 = self._cena_para_tela(QPointF(x, y0))
+            p2 = self._cena_para_tela(QPointF(x, y1))
+            painter.drawLine(QPointF(p1.x(), 0.0), QPointF(p2.x(), float(self.height())))
+        for iy in range(inicio_y, fim_y):
+            y = iy * passo_cena
+            p1 = self._cena_para_tela(QPointF(x0, y))
+            p2 = self._cena_para_tela(QPointF(x1, y))
+            painter.drawLine(QPointF(0.0, p1.y()), QPointF(float(self.width()), p2.y()))
+        painter.restore()
 
     def _desenhar_imagem_referencia(self, painter: QPainter, elemento: dict):
         imagem_b64 = str(elemento.get("imagem_base64") or "").strip()
@@ -1334,13 +1400,13 @@ class VisualizacaoCanvas(QWidget):
         if not self._snap_ativo or not self._snap_resultado:
             return
         snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
-        cor = QColor("#ffd400")
+        cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
         if self._snap_resultado.tipo == "controle":
-            cor = QColor("#2da8ff")
+            cor = QColor(self._cores_canvas.get("selecao", "#2da8ff"))
         elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
-            cor = QColor("#7df9ff")
+            cor = QColor(self._cores_canvas.get("snap_desenho", "#6f6f6f"))
         elif self._snap_resultado.tipo == "interseção":
-            cor = QColor("#ff62b0")
+            cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
         pen = QPen(cor, 1.6)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -1420,7 +1486,7 @@ class VisualizacaoCanvas(QWidget):
                     tamanho_fio_px = self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0)
                     fonte_fio.setPixelSize(int(max(6, round(tamanho_fio_px))))
                     painter.setFont(fonte_fio)
-                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                    painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
                     texto_ang = f"{int(round(ang))}°"
                     metrics_fio = QFontMetrics(painter.font())
                     largura_ang = metrics_fio.horizontalAdvance(texto_ang)
@@ -1438,7 +1504,7 @@ class VisualizacaoCanvas(QWidget):
                     cy = sum(p.y() for p in cantos) / len(cantos)
                 else:
                     cx, cy = 0.0, 0.0
-                painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                painter.setPen(QPen(QColor(self._cor_molde_config("numeros", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
                 fonte_num = painter.font()
                 fonte_num.setPixelSize(
                     int(max(4, min(96, round(self._altura_cm_para_px(
@@ -1471,8 +1537,9 @@ class VisualizacaoCanvas(QWidget):
                     painter.drawText(rect, Qt.AlignCenter, texto)
                 if self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-                    painter.setPen(QPen(QColor("#ff3b30"), 1.0))
-                    painter.setBrush(QColor("#ff3b30"))
+                    cor_auxiliar = self._cor_molde_config("ponto_controle", "#ff3b30")
+                    painter.setPen(QPen(QColor(cor_auxiliar), 1.0))
+                    painter.setBrush(QColor(cor_auxiliar))
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
@@ -1494,7 +1561,7 @@ class VisualizacaoCanvas(QWidget):
         largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
         altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
 
-        ret_pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        ret_pen = QPen(QColor(self._cores_canvas.get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
         ret_pen.setDashPattern([3.5, 2.5])
         painter.setPen(ret_pen)
         painter.setBrush(Qt.NoBrush)
@@ -1506,8 +1573,8 @@ class VisualizacaoCanvas(QWidget):
         else:
             pontos_controle = [self._cena_para_tela(pt) for pt in base[:4]]
 
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor("#000000"))
+        painter.setPen(QPen(QColor(self._cor_molde_config("ponto_controle", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
+        painter.setBrush(QColor(self._cores_canvas.get("fundo", "#000000")))
         for pt in pontos_controle:
             d = 4
             diamond = QPolygon([
@@ -1538,7 +1605,7 @@ class VisualizacaoCanvas(QWidget):
         y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
         largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
         altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
-        pen = QPen(QColor("#2da8ff"), 1.0, Qt.DashLine)
+        pen = QPen(QColor(self._cores_canvas.get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
         pen.setDashPattern([3.5, 2.5])
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -1654,7 +1721,12 @@ class VisualizacaoCanvas(QWidget):
         painter.translate(pos)
         if abs(float(angulo or 0.0)) > 0.01:
             painter.rotate(-float(angulo))
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        chave_cor = {
+            "nome": "nome_molde",
+            "descricao": "descricao",
+            "observacoes": "observacoes",
+        }.get(chave, "nome_molde")
+        painter.setPen(QPen(QColor(self._cor_molde_config(chave_cor, self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
         painter.drawText(self._retangulo_texto_por_referencia(largura, altura, referencia), flags, texto)
         painter.restore()
 
@@ -1665,9 +1737,10 @@ class VisualizacaoCanvas(QWidget):
         if not margens:
             return
         sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
-        cor = QColor(str(el.get("cor") or "#ffffff"))
+        cor = QColor(str(el.get("cor") or self._cores_canvas.get("desenho", "#ffffff")))
         if not cor.isValid():
-            cor = QColor("#ffffff")
+            cor = QColor(self._cores_canvas.get("desenho", "#ffffff"))
+        cor = QColor(self._cor_molde_config("margem", cor.name()))
         painter.save()
         pen = QPen(cor, 1.0)
         pen.setCapStyle(Qt.RoundCap)
@@ -1877,7 +1950,8 @@ class VisualizacaoCanvas(QWidget):
         margem_px = min(12.0, max(5.0, comp * 0.06))
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
-        pen = QPen(QColor("#ffffff"), 1.15)
+        cor_fio = self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))
+        pen = QPen(QColor(cor_fio), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
@@ -1904,7 +1978,7 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
         painter.drawText(int(round(ancora.x() - largura / 2.0)), int(round(ancora.y() - 4.0)), int(round(largura)), int(round(altura)), Qt.AlignCenter, texto)
         painter.restore()
 
@@ -1926,7 +2000,8 @@ class VisualizacaoCanvas(QWidget):
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
 
-        pen = QPen(QColor("#ffffff"), 1.15)
+        cor_fio = self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))
+        pen = QPen(QColor(cor_fio), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
@@ -1979,7 +2054,7 @@ class VisualizacaoCanvas(QWidget):
         path.closeSubpath()
         painter.save()
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#ffffff"))
+        painter.setBrush(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))))
         painter.drawPath(path)
         painter.restore()
 
@@ -2010,7 +2085,7 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
         painter.drawText(
             int(round(ancora.x() - (largura / 2))),
             int(round(ancora.y() - 4)),
@@ -2367,14 +2442,24 @@ class VisualizacaoCanvas(QWidget):
         if subtipo == "contorno":
             return cor, max(1.35, esp), "solid"
         if subtipo == "costura":
-            return cor, max(0.85, esp * 0.82), "dash"
+            return self._cor_molde_config("costura", cor), max(0.85, esp * 0.82), self._estilo_linha_costura
         if subtipo == "linha_interna":
-            return "#bfbfbf", max(0.75, esp * 0.8), "solid"
-        if subtipo in {"fio", "pique"}:
-            return "#83ffb6", max(0.8, esp * 0.8), "dot"
+            return self._cor_molde_config("linhas_auxiliares", "#bfbfbf"), max(0.75, esp * 0.8), "solid"
+        if subtipo == "fio":
+            return self._cor_molde_config("fio", "#83ffb6"), max(0.8, esp * 0.8), "dot"
+        if subtipo == "pique":
+            return self._cor_molde_config("piques", "#83ffb6"), max(0.8, esp * 0.8), "dot"
         if subtipo in {"texto", "anotacao"}:
-            return "#9a9a9a", max(0.7, esp * 0.7), "dot"
+            return self._cor_molde_config("observacoes", "#9a9a9a"), max(0.7, esp * 0.7), "dot"
         return cor, esp, estilo
+
+    def _cor_molde_config(self, chave: str, fallback: str) -> str:
+        cfg = self._cores_moldes.get(chave)
+        if isinstance(cfg, dict) and bool(cfg.get("ativo", False)):
+            cor = QColor(str(cfg.get("cor", "")))
+            if cor.isValid():
+                return cor.name()
+        return fallback
 
     def _molde_id_elemento(self, elemento: dict) -> str:
         return str(elemento.get("molde_id") or elemento.get("id") or "").strip()

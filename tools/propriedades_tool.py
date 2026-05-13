@@ -4227,6 +4227,8 @@ class ConfigurarDefaultsDialog(QDialog):
 
 
 class ConfigurarCoresTecidosDialog(QDialog):
+    CORES_TECIDOS_PADRAO = {"1": "#ffffff", "2": "#00b050"}
+
     def __init__(self, tecidos: list[str], mapa_cores: dict[str, str], parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Cores dos tecidos")
@@ -4266,7 +4268,8 @@ class ConfigurarCoresTecidosDialog(QDialog):
             }
             """
         )
-        self._mapa: dict[str, str] = dict(mapa_cores)
+        self._mapa: dict[str, str] = dict(self.CORES_TECIDOS_PADRAO)
+        self._mapa.update(dict(mapa_cores or {}))
         self._contador_novos = 0
         self._linha_tecido_atual = -1
         self._construir_ui()
@@ -4313,7 +4316,7 @@ class ConfigurarCoresTecidosDialog(QDialog):
         lay.addLayout(botoes)
 
     def _popular_tecidos(self, tecidos: list[str]):
-        valores = list(dict.fromkeys([*tecidos, *self._mapa.keys()]))
+        valores = list(dict.fromkeys(["1", "2", *tecidos, *self._mapa.keys()]))
         self.tbl.setRowCount(0)
         for tecido in valores:
             self._adicionar_linha(tecido, self._mapa.get(tecido) or self._cor_aleatoria())

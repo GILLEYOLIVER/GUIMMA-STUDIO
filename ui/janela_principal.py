@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QListView,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QTabBar,
     QTabWidget,
@@ -48,6 +50,7 @@ from PySide6.QtWidgets import (
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO, ICONS_DIR
+from core.line_styles import LINE_STYLES
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
@@ -102,6 +105,39 @@ class _BotaoRodapeHover(QPushButton):
 class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
+    CORES_CANVAS_PADRAO = {
+        "desenho": "#ffffff",
+        "fundo": "#000000",
+        "selecao": "#2da8ff",
+        "grade": "#808080",
+        "snap_desenho": "#6f6f6f",
+        "snap_referencia": "#d71313",
+    }
+    CORES_TECIDOS_PADRAO = {
+        "1": "#ffffff",
+        "2": "#00b050",
+    }
+    CORES_MOLDES_PADRAO = {
+        "piques": {"ativo": False, "cor": "#efefef"},
+        "piques_internos": {"ativo": False, "cor": "#efefef"},
+        "fio": {"ativo": False, "cor": "#efefef"},
+        "linhas_auxiliares": {"ativo": False, "cor": "#bfbfbf"},
+        "costura": {"ativo": False, "cor": "#efefef"},
+        "molde_dobrado": {"ativo": False, "cor": "#efefef"},
+        "nome_molde": {"ativo": False, "cor": "#efefef"},
+        "descricao": {"ativo": False, "cor": "#efefef"},
+        "numeros": {"ativo": False, "cor": "#efefef"},
+        "observacoes": {"ativo": False, "cor": "#efefef"},
+        "linha_simetria": {"ativo": False, "cor": "#efefef"},
+        "margem": {"ativo": False, "cor": "#efefef"},
+        "tamanhos_menores": {"ativo": False, "cor": "#efefef"},
+        "tamanho_base": {"ativo": False, "cor": "#efefef"},
+        "tamanhos_maiores": {"ativo": False, "cor": "#efefef"},
+        "ponto_controle": {"ativo": False, "cor": "#efefef"},
+        "ponto_pique": {"ativo": False, "cor": "#efefef"},
+        "ponto_nao_graduado": {"ativo": False, "cor": "#efefef"},
+    }
+    ESTILO_LINHA_COSTURA_PADRAO = "dash"
     ZOOM_INICIAL_CANVAS = 8.760
     ORIGEM_INICIAL_CANVAS_X = 110.0
     ORIGEM_INICIAL_CANVAS_Y = 0.0
@@ -153,9 +189,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._janelas_aux_instrucao: dict[str, QDialog] = {}
         self._chk_aux_retangulo_criar_molde: QCheckBox | None = None
         self._retangulo_criar_molde = bool(self.projeto_atual.preferencias_usuario.get("retangulo_criar_molde", True))
-        self._mostrar_cor_tecidos_global = bool(self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_global", False))
+        self._cores_canvas_global = self._normalizar_cores_canvas(
+            self.projeto_atual.preferencias_usuario.get("cores_canvas_global", {})
+        )
+        self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
+        self._cores_moldes_global = self._normalizar_cores_moldes(
+            self.projeto_atual.preferencias_usuario.get("cores_moldes_global", {})
+        )
+        self._estilo_linha_costura_global = str(
+            self.projeto_atual.preferencias_usuario.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)
+        )
+        self._mostrar_cor_tecidos_global = bool(self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_global", True))
+        self._mostrar_cor_tecidos_menu_global = bool(
+            self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_menu_global", False)
+        )
         cores_cfg = self.projeto_atual.preferencias_usuario.get("cores_tecidos_global", {})
-        self._cores_tecidos_global: dict[str, str] = dict(cores_cfg) if isinstance(cores_cfg, dict) else {}
+        self._cores_tecidos_global: dict[str, str] = self._normalizar_cores_tecidos(cores_cfg)
+        esquemas = self.projeto_atual.preferencias_usuario.get("esquemas_cores_usuario", {})
+        self._esquemas_cores_usuario: dict[str, dict] = dict(esquemas) if isinstance(esquemas, dict) else {}
         self._clipboard_elementos_global: dict | None = None
         self._posicoes_caixas_aux: dict[str, tuple[int, int]] = self._carregar_posicoes_caixas_aux()
         self._painel_coordenadas_pos_global: tuple[int, int] | None = None
@@ -226,6 +277,37 @@ class GuimmaStudioMainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _cor_hex_valida(self, valor: object, padrao: str) -> str:
+        cor = QColor(str(valor or ""))
+        return cor.name() if cor.isValid() else QColor(padrao).name()
+
+    def _normalizar_cores_canvas(self, cores: object) -> dict[str, str]:
+        base = dict(self.CORES_CANVAS_PADRAO)
+        if isinstance(cores, dict):
+            for chave in base:
+                if chave in cores:
+                    base[chave] = self._cor_hex_valida(cores.get(chave), base[chave])
+        return base
+
+    def _normalizar_cores_tecidos(self, cores: object) -> dict[str, str]:
+        base = dict(self.CORES_TECIDOS_PADRAO)
+        if isinstance(cores, dict):
+            for chave, valor in cores.items():
+                nome = str(chave or "").strip()
+                if nome:
+                    base[nome] = self._cor_hex_valida(valor, base.get(nome, "#ffffff"))
+        return base
+
+    def _normalizar_cores_moldes(self, cores: object) -> dict[str, dict]:
+        base = {chave: dict(valor) for chave, valor in self.CORES_MOLDES_PADRAO.items()}
+        if isinstance(cores, dict):
+            for chave, valor in cores.items():
+                if chave not in base or not isinstance(valor, dict):
+                    continue
+                base[chave]["ativo"] = bool(valor.get("ativo", base[chave]["ativo"]))
+                base[chave]["cor"] = self._cor_hex_valida(valor.get("cor"), str(base[chave]["cor"]))
+        return base
+
     def _carregar_opcoes_app(self) -> dict:
         op = self.projeto_atual.preferencias_usuario.get("opcoes_app", {})
         if not isinstance(op, dict):
@@ -274,6 +356,17 @@ class GuimmaStudioMainWindow(QMainWindow):
             "barra_usuarios_habilitada": self._barra_usuarios_habilitada,
             "barra_usuarios_posicao": self._barra_usuarios_posicao,
             "estilo_desenho": dict(self._estilo_desenho_atual),
+            "cores_canvas_global": dict(self._cores_canvas_global),
+            "cores_moldes_global": {chave: dict(valor) for chave, valor in self._cores_moldes_global.items()},
+            "estilo_linha_costura_global": self._estilo_linha_costura_global,
+            "mostrar_cor_tecidos_global": bool(self._mostrar_cor_tecidos_global),
+            "mostrar_cor_tecidos_menu_global": bool(self._mostrar_cor_tecidos_menu_global),
+            "cores_tecidos_global": dict(self._cores_tecidos_global),
+            "esquemas_cores_usuario": {
+                str(nome): dict(cfg)
+                for nome, cfg in self._esquemas_cores_usuario.items()
+                if isinstance(cfg, dict)
+            },
         }
 
     def _aplicar_configuracoes_perfil(self, cfg: dict):
@@ -288,6 +381,30 @@ class GuimmaStudioMainWindow(QMainWindow):
         estilo = cfg.get("estilo_desenho")
         if isinstance(estilo, dict):
             self._estilo_desenho_atual.update(estilo)
+        self._cores_canvas_global = self._normalizar_cores_canvas(cfg.get("cores_canvas_global", self._cores_canvas_global))
+        self._cores_moldes_global = self._normalizar_cores_moldes(cfg.get("cores_moldes_global", self._cores_moldes_global))
+        self._estilo_linha_costura_global = str(
+            cfg.get("estilo_linha_costura_global", self._estilo_linha_costura_global)
+        )
+        self._mostrar_cor_tecidos_global = bool(cfg.get("mostrar_cor_tecidos_global", self._mostrar_cor_tecidos_global))
+        self._mostrar_cor_tecidos_menu_global = bool(
+            cfg.get("mostrar_cor_tecidos_menu_global", self._mostrar_cor_tecidos_menu_global)
+        )
+        self._cores_tecidos_global = self._normalizar_cores_tecidos(
+            cfg.get("cores_tecidos_global", self._cores_tecidos_global)
+        )
+        esquemas = cfg.get("esquemas_cores_usuario")
+        if isinstance(esquemas, dict):
+            self._esquemas_cores_usuario = {
+                str(nome): dict(valor)
+                for nome, valor in esquemas.items()
+                if isinstance(valor, dict)
+            }
+        self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
+        if hasattr(self, "ribbon"):
+            self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
+        if hasattr(self, "abas_documentos"):
+            self._aplicar_config_visualizacao_nos_canvas()
 
     def _configurar_interface(self):
         central = QWidget()
@@ -1736,7 +1853,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._aplicar_intervalo_recovery()
         self.lbl_status.setText("Opções atualizadas.")
 
-    def _abrir_dialogo_cores(self):
+    def _abrir_dialogo_cores_legado(self):
         area = self._area_documento_atual()
         if not area:
             return
@@ -1881,6 +1998,338 @@ class GuimmaStudioMainWindow(QMainWindow):
         btn_ok.clicked.connect(aplicar_e_fechar)
         btn_cancelar.clicked.connect(dialog.reject)
         dialog.exec()
+
+    def _abrir_dialogo_cores(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cores")
+        dialog.resize(640, 760)
+        dialog.setMinimumSize(560, 520)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        raiz = QVBoxLayout(dialog)
+        raiz.setContentsMargins(10, 10, 10, 10)
+        raiz.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        conteudo = QWidget()
+        layout = QVBoxLayout(conteudo)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        scroll.setWidget(conteudo)
+        raiz.addWidget(scroll, 1)
+
+        def atualizar_botao_cor(btn: QPushButton, hex_cor: str):
+            cor = self._cor_hex_valida(hex_cor, "#ffffff")
+            btn.setProperty("cor", cor)
+            btn.setStyleSheet(f"background:{cor}; border:1px solid #8a8a8a; border-radius:2px;")
+
+        def escolher_cor(btn: QPushButton, titulo: str):
+            seletor = QColorDialog(QColor(str(btn.property("cor") or "#ffffff")), dialog)
+            seletor.setWindowTitle(titulo)
+            seletor.setOption(QColorDialog.DontUseNativeDialog, True)
+            seletor.setStyleSheet("QColorDialog { background:#f4f4f4; color:#101010; }")
+            if seletor.exec() == QDialog.Accepted and seletor.selectedColor().isValid():
+                atualizar_botao_cor(btn, seletor.selectedColor().name())
+
+        def botao_cor(hex_cor: str, titulo: str):
+            btn = QPushButton("")
+            btn.setFixedSize(24, 24)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(titulo)
+            atualizar_botao_cor(btn, hex_cor)
+            btn.clicked.connect(lambda _=False, b=btn, t=titulo: escolher_cor(b, t))
+            return btn
+
+        topo = QHBoxLayout()
+        gb_cores = QGroupBox("Cores")
+        gb_cores_lay = QGridLayout(gb_cores)
+        botoes_canvas: dict[str, QPushButton] = {}
+        for chave, titulo, linha, coluna in (
+            ("desenho", "Desenho", 0, 0),
+            ("fundo", "Fundo", 0, 2),
+            ("selecao", "Selecao", 1, 0),
+            ("grade", "Grade", 1, 2),
+        ):
+            botoes_canvas[chave] = botao_cor(self._cores_canvas_global[chave], f"Cor: {titulo}")
+            gb_cores_lay.addWidget(botoes_canvas[chave], linha, coluna)
+            gb_cores_lay.addWidget(QLabel(titulo), linha, coluna + 1)
+        topo.addWidget(gb_cores, 1)
+
+        gb_snap = QGroupBox("Cores do snap")
+        gb_snap_lay = QVBoxLayout(gb_snap)
+        chk_auto_snap = QCheckBox("Usar cores automaticas")
+        chk_auto_snap.setChecked(True)
+        gb_snap_lay.addWidget(chk_auto_snap)
+        botoes_canvas["snap_desenho"] = botao_cor(self._cores_canvas_global["snap_desenho"], "Cor: Desenho do Snap")
+        botoes_canvas["snap_referencia"] = botao_cor(self._cores_canvas_global["snap_referencia"], "Cor: Referencia do Snap")
+        linha_snap_1 = QHBoxLayout()
+        linha_snap_1.addWidget(botoes_canvas["snap_desenho"])
+        linha_snap_1.addWidget(QLabel("Desenho do Snap"))
+        linha_snap_1.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_1)
+        linha_snap_2 = QHBoxLayout()
+        linha_snap_2.addWidget(botoes_canvas["snap_referencia"])
+        linha_snap_2.addWidget(QLabel("Referencia do Snap"))
+        linha_snap_2.addStretch(1)
+        gb_snap_lay.addLayout(linha_snap_2)
+        topo.addWidget(gb_snap, 1)
+        layout.addLayout(topo)
+
+        gb_moldes = QGroupBox("Cores dos moldes")
+        moldes = QGridLayout(gb_moldes)
+        moldes.setHorizontalSpacing(10)
+        moldes.setVerticalSpacing(5)
+        campos_moldes_esq = [
+            ("piques", "Piques"),
+            ("piques_internos", "Piques internos"),
+            ("fio", "Fio"),
+            ("linhas_auxiliares", "Linhas auxiliares"),
+            ("costura", "Costura"),
+            ("molde_dobrado", "Molde dobrado"),
+            ("nome_molde", "Nome molde"),
+            ("descricao", "Descricao"),
+        ]
+        campos_moldes_dir = [
+            ("numeros", "Numeros"),
+            ("observacoes", "Observacoes"),
+            ("linha_simetria", "Linha simetria"),
+            ("margem", "Margem"),
+            ("tamanhos_menores", "Tamanhos menores"),
+            ("tamanho_base", "Tamanho base"),
+            ("tamanhos_maiores", "Tamanhos maiores"),
+        ]
+        widgets_moldes: dict[str, tuple[QCheckBox, QPushButton]] = {}
+
+        def adicionar_item_molde(chave: str, texto: str, linha: int, coluna: int):
+            cfg = self._cores_moldes_global.get(chave, self.CORES_MOLDES_PADRAO[chave])
+            chk = QCheckBox("")
+            chk.setChecked(bool(cfg.get("ativo", False)))
+            btn = botao_cor(str(cfg.get("cor", "#efefef")), f"Cor: {texto}")
+            moldes.addWidget(chk, linha, coluna)
+            moldes.addWidget(btn, linha, coluna + 1)
+            moldes.addWidget(QLabel(texto), linha, coluna + 2)
+            widgets_moldes[chave] = (chk, btn)
+
+        for i, (chave, texto) in enumerate(campos_moldes_esq):
+            adicionar_item_molde(chave, texto, i, 0)
+        for i, (chave, texto) in enumerate(campos_moldes_dir):
+            adicionar_item_molde(chave, texto, i, 3)
+
+        base_row = max(len(campos_moldes_esq), len(campos_moldes_dir)) + 1
+        for idx, (chave, texto, padrao) in enumerate((
+            ("ponto_controle", "Ponto de controle", "Circulo preenchido"),
+            ("ponto_pique", "Ponto de pique", "Quadrado preenchido"),
+            ("ponto_nao_graduado", "Ponto nao graduado", "Losango"),
+        )):
+            adicionar_item_molde(chave, texto, base_row + idx, 0)
+            cmb = QComboBox()
+            cmb.addItems(["Circulo preenchido", "Quadrado preenchido", "Losango"])
+            cmb.setCurrentText(padrao)
+            moldes.addWidget(cmb, base_row + idx, 3, 1, 3)
+        layout.addWidget(gb_moldes)
+
+        layout.addWidget(QCheckBox("Mostrar conforme definicao das ferramentas"))
+
+        cores_tecidos_temp = dict(self._cores_tecidos_global)
+        linha_tecidos = QHBoxLayout()
+        chk_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
+        chk_cor_tecidos.setChecked(bool(self._mostrar_cor_tecidos_global))
+        linha_tecidos.addWidget(chk_cor_tecidos)
+        btn_config = QPushButton("Configurar cor dos tecidos")
+        linha_tecidos.addWidget(btn_config)
+        linha_tecidos.addStretch(1)
+        layout.addLayout(linha_tecidos)
+
+        chk_cor_tecidos_menu = QCheckBox("Mostrar cor dos tecidos no menu de moldes")
+        chk_cor_tecidos_menu.setChecked(bool(self._mostrar_cor_tecidos_menu_global))
+        layout.addWidget(chk_cor_tecidos_menu)
+
+        linha_opacidade = QHBoxLayout()
+        linha_opacidade.addWidget(QLabel("Opacidade das imagens"))
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(0, 100)
+        slider.setValue(100)
+        linha_opacidade.addWidget(slider, 1)
+        lbl_opacidade = QLabel("100 / 100")
+        slider.valueChanged.connect(lambda valor: lbl_opacidade.setText(f"{valor} / 100"))
+        linha_opacidade.addWidget(lbl_opacidade)
+        layout.addLayout(linha_opacidade)
+
+        linha_estilo = QHBoxLayout()
+        linha_estilo.addWidget(QLabel("Estilo linha costura"))
+        cmb_estilo = QComboBox()
+        for estilo_id, titulo in LINE_STYLES:
+            cmb_estilo.addItem(titulo, estilo_id)
+        cmb_estilo.setCurrentIndex(max(0, cmb_estilo.findData(self._estilo_linha_costura_global)))
+        linha_estilo.addWidget(cmb_estilo, 1)
+        layout.addLayout(linha_estilo)
+
+        gb_esquema = QGroupBox("Esquema de cores")
+        esquema_lay = QHBoxLayout(gb_esquema)
+        cmb_esquema = QComboBox()
+        esquema_lay.addWidget(cmb_esquema, 1)
+        btn_salvar_esquema = QPushButton("Salvar esquema de cores")
+        esquema_lay.addWidget(btn_salvar_esquema, 1)
+        layout.addWidget(gb_esquema)
+
+        def config_atual() -> dict:
+            return {
+                "cores_canvas_global": {
+                    chave: str(botao.property("cor") or self.CORES_CANVAS_PADRAO[chave])
+                    for chave, botao in botoes_canvas.items()
+                },
+                "cores_moldes_global": {
+                    chave: {"ativo": chk.isChecked(), "cor": str(btn.property("cor") or "#efefef")}
+                    for chave, (chk, btn) in widgets_moldes.items()
+                },
+                "estilo_linha_costura_global": str(cmb_estilo.currentData() or self.ESTILO_LINHA_COSTURA_PADRAO),
+                "mostrar_cor_tecidos_global": chk_cor_tecidos.isChecked(),
+                "mostrar_cor_tecidos_menu_global": chk_cor_tecidos_menu.isChecked(),
+                "cores_tecidos_global": dict(cores_tecidos_temp),
+            }
+
+        def aplicar_config_na_tela(cfg: dict):
+            cores_canvas = self._normalizar_cores_canvas(cfg.get("cores_canvas_global", {}))
+            for chave, botao in botoes_canvas.items():
+                atualizar_botao_cor(botao, cores_canvas.get(chave, self.CORES_CANVAS_PADRAO[chave]))
+            cores_moldes = self._normalizar_cores_moldes(cfg.get("cores_moldes_global", {}))
+            for chave, (chk, btn) in widgets_moldes.items():
+                item = cores_moldes.get(chave, self.CORES_MOLDES_PADRAO[chave])
+                chk.setChecked(bool(item.get("ativo", False)))
+                atualizar_botao_cor(btn, str(item.get("cor", "#efefef")))
+            cmb_estilo.setCurrentIndex(max(0, cmb_estilo.findData(str(cfg.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)))))
+            chk_cor_tecidos.setChecked(bool(cfg.get("mostrar_cor_tecidos_global", True)))
+            chk_cor_tecidos_menu.setChecked(bool(cfg.get("mostrar_cor_tecidos_menu_global", False)))
+            cores_tecidos_temp.clear()
+            cores_tecidos_temp.update(self._normalizar_cores_tecidos(cfg.get("cores_tecidos_global", cores_tecidos_temp)))
+
+        def popular_esquemas():
+            atual = cmb_esquema.currentText()
+            cmb_esquema.blockSignals(True)
+            cmb_esquema.clear()
+            cmb_esquema.addItem("")
+            cmb_esquema.addItem("Padrao GUIMMA")
+            for nome in sorted(self._esquemas_cores_usuario):
+                cmb_esquema.addItem(nome)
+            if atual:
+                cmb_esquema.setCurrentText(atual)
+            cmb_esquema.blockSignals(False)
+
+        def carregar_esquema(nome: str):
+            if not nome:
+                return
+            if nome == "Padrao GUIMMA":
+                aplicar_config_na_tela(
+                    {
+                        "cores_canvas_global": dict(self.CORES_CANVAS_PADRAO),
+                        "cores_moldes_global": {k: dict(v) for k, v in self.CORES_MOLDES_PADRAO.items()},
+                        "estilo_linha_costura_global": self.ESTILO_LINHA_COSTURA_PADRAO,
+                        "mostrar_cor_tecidos_global": True,
+                        "mostrar_cor_tecidos_menu_global": False,
+                        "cores_tecidos_global": dict(self.CORES_TECIDOS_PADRAO),
+                    }
+                )
+                return
+            cfg = self._esquemas_cores_usuario.get(nome)
+            if isinstance(cfg, dict):
+                aplicar_config_na_tela(cfg)
+
+        def salvar_esquema():
+            nome, ok = QInputDialog.getText(dialog, "Salvar esquema de cores", "Nome do esquema:")
+            nome = nome.strip()
+            if not ok or not nome:
+                return
+            self._esquemas_cores_usuario[nome] = config_atual()
+            self.projeto_atual.preferencias_usuario["esquemas_cores_usuario"] = dict(self._esquemas_cores_usuario)
+            self._sincronizar_perfil_usuario_atual()
+            self._salvar_preferencias_app()
+            popular_esquemas()
+            cmb_esquema.setCurrentText(nome)
+
+        def abrir_config():
+            area = self._area_documento_atual()
+            canvas = area.canvas if area else None
+            tecidos = {"1", "2"}
+            if canvas is not None:
+                tecidos.update(
+                    str(el.get("tecido") or "").strip()
+                    for el in canvas.cena.elementos
+                    if isinstance(el, dict) and el.get("molde") and str(el.get("tecido") or "").strip()
+                )
+            tecidos.update(cores_tecidos_temp.keys())
+            dialog_tecidos = ConfigurarCoresTecidosDialog(sorted(tecidos), dict(cores_tecidos_temp), dialog)
+            if dialog_tecidos.exec() == QDialog.Accepted:
+                cores_tecidos_temp.clear()
+                cores_tecidos_temp.update(self._normalizar_cores_tecidos(dialog_tecidos.cores_tecidos()))
+
+        def aplicar_e_fechar():
+            self._aplicar_config_visualizacao_global(config_atual())
+            dialog.accept()
+
+        btn_config.clicked.connect(abrir_config)
+        btn_salvar_esquema.clicked.connect(salvar_esquema)
+        cmb_esquema.currentTextChanged.connect(carregar_esquema)
+        popular_esquemas()
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        btn_ok = QPushButton("OK")
+        btn_cancelar = QPushButton("Cancelar")
+        rodape.addWidget(btn_ok)
+        rodape.addWidget(btn_cancelar)
+        raiz.addLayout(rodape)
+
+        btn_ok.clicked.connect(aplicar_e_fechar)
+        btn_cancelar.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def _aplicar_config_visualizacao_global(self, cfg: dict):
+        self._cores_canvas_global = self._normalizar_cores_canvas(cfg.get("cores_canvas_global", {}))
+        self._cores_moldes_global = self._normalizar_cores_moldes(cfg.get("cores_moldes_global", {}))
+        self._estilo_linha_costura_global = str(
+            cfg.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)
+        )
+        if self._estilo_linha_costura_global not in {estilo_id for estilo_id, _ in LINE_STYLES}:
+            self._estilo_linha_costura_global = self.ESTILO_LINHA_COSTURA_PADRAO
+        self._mostrar_cor_tecidos_global = bool(cfg.get("mostrar_cor_tecidos_global", True))
+        self._mostrar_cor_tecidos_menu_global = bool(cfg.get("mostrar_cor_tecidos_menu_global", False))
+        self._cores_tecidos_global = self._normalizar_cores_tecidos(cfg.get("cores_tecidos_global", {}))
+        self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
+        if hasattr(self, "ribbon"):
+            self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
+
+        prefs = self.projeto_atual.preferencias_usuario
+        prefs["cores_canvas_global"] = dict(self._cores_canvas_global)
+        prefs["cores_moldes_global"] = {chave: dict(valor) for chave, valor in self._cores_moldes_global.items()}
+        prefs["estilo_linha_costura_global"] = self._estilo_linha_costura_global
+        prefs["mostrar_cor_tecidos_global"] = bool(self._mostrar_cor_tecidos_global)
+        prefs["mostrar_cor_tecidos_menu_global"] = bool(self._mostrar_cor_tecidos_menu_global)
+        prefs["cores_tecidos_global"] = dict(self._cores_tecidos_global)
+        prefs["esquemas_cores_usuario"] = {
+            str(nome): dict(valor)
+            for nome, valor in self._esquemas_cores_usuario.items()
+            if isinstance(valor, dict)
+        }
+        prefs["estilo_desenho"] = dict(self._estilo_desenho_atual)
+        self._aplicar_config_visualizacao_nos_canvas()
+        self._sincronizar_perfil_usuario_atual()
+        self._salvar_preferencias_app()
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setText("Cores do programa atualizadas.")
+
+    def _aplicar_config_visualizacao_nos_canvas(self):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            area.canvas.set_config_cores_canvas(self._cores_canvas_global)
+            area.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+            area.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
+            area.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
+            area.canvas._cores_tecidos = dict(self._cores_tecidos_global)
+            area.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+            area.canvas.update()
 
     def _aplicar_estilo_claro_dialogo(self, dialog: QDialog):
         dialog.setStyleSheet(
@@ -4424,6 +4873,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+        area_doc.canvas.set_config_cores_canvas(self._cores_canvas_global)
+        area_doc.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+        area_doc.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
         area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
@@ -4651,6 +5103,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
             area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
             area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
+            area_doc.canvas.set_config_cores_canvas(self._cores_canvas_global)
+            area_doc.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+            area_doc.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
             area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
@@ -4690,15 +5145,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._mostrar_cor_tecidos_global = bool(mostrar)
             self.projeto_atual.preferencias_usuario["mostrar_cor_tecidos_global"] = self._mostrar_cor_tecidos_global
         if mapa_cores is not None:
-            self._cores_tecidos_global = dict(mapa_cores)
+            self._cores_tecidos_global = self._normalizar_cores_tecidos(mapa_cores)
             self.projeto_atual.preferencias_usuario["cores_tecidos_global"] = dict(self._cores_tecidos_global)
-        for i in range(self.abas_documentos.count()):
-            area = self.abas_documentos.widget(i)
-            if not isinstance(area, AreaDocumentoWidget):
-                continue
-            area.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
-            area.canvas._cores_tecidos = dict(self._cores_tecidos_global)
-            area.canvas.update()
+        self._aplicar_config_visualizacao_nos_canvas()
+        self._sincronizar_perfil_usuario_atual()
         self._salvar_preferencias_app()
 
     def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
@@ -4968,6 +5418,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         area.canvas.set_snap_ativo(ativo)
 
+    def _alternar_grid_canvas(self, ativo: bool):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.canvas.set_grid_visivel(bool(ativo))
+        self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado")
+
     def _on_snap_changed(self, ativo: bool):
         self._snap_ativo_global = bool(ativo)
         self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
@@ -5125,7 +5582,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if icone_grid.exists():
             self.btn_grid.setIcon(QIcon(str(icone_grid)))
             self.btn_grid.setText("")
-        self.btn_grid.toggled.connect(lambda ativo: self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado"))
+        self.btn_grid.toggled.connect(self._alternar_grid_canvas)
         row.addWidget(self.btn_grid)
 
         self.btn_graduacao = _BotaoRodapeHover("⇅", "Mostra ou esconde graduação")
