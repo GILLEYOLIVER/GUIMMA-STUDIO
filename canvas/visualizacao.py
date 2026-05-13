@@ -115,6 +115,7 @@ class VisualizacaoCanvas(QWidget):
         self.lbl_status = None  # Será definido pela janela principal
         self._imagem_cache: dict[str, QPixmap] = {}
         self._mostrar_curva_original_emf = False
+        self._visualizacao_instantanea_elementos: list[dict] | None = None
 
         self.setMinimumSize(0, 0)
         self.setAutoFillBackground(False)
@@ -1333,6 +1334,7 @@ class VisualizacaoCanvas(QWidget):
             for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
                 self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
 
+        self._desenhar_visualizacao_instantanea(painter)
         self._desenhar_overlays_moldes(painter)
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
@@ -1372,6 +1374,63 @@ class VisualizacaoCanvas(QWidget):
             p1 = self._cena_para_tela(QPointF(x0, y))
             p2 = self._cena_para_tela(QPointF(x1, y))
             painter.drawLine(QPointF(0.0, p1.y()), QPointF(float(self.width()), p2.y()))
+        painter.restore()
+
+    def _cor_visualizacao_instantanea(self, elemento: dict) -> QColor:
+        cor = QColor(str(elemento.get("_cor_visualizacao_instantanea") or elemento.get("cor") or "#f2d15b"))
+        if not cor.isValid():
+            cor = QColor("#f2d15b")
+        cor.setAlpha(170)
+        return cor
+
+    def _desenhar_visualizacao_instantanea(self, painter: QPainter):
+        elementos = self._visualizacao_instantanea_elementos
+        if not elementos:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        for elemento in elementos:
+            if not isinstance(elemento, dict):
+                continue
+            cor = self._cor_visualizacao_instantanea(elemento)
+            pen = QPen(cor, max(1.0, float(elemento.get("espessura", 1.0))))
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            tipo = elemento.get("tipo")
+            if tipo == "polyline":
+                pontos = []
+                for pt in elemento.get("pontos", []) or []:
+                    if isinstance(pt, (tuple, list)) and len(pt) >= 2:
+                        try:
+                            pontos.append(QPointF(float(pt[0]), float(pt[1])))
+                        except (TypeError, ValueError):
+                            continue
+                if len(pontos) >= 2:
+                    path = QPainterPath(self._cena_para_tela(pontos[0]))
+                    for pt in pontos[1:]:
+                        path.lineTo(self._cena_para_tela(pt))
+                    painter.drawPath(path)
+            elif tipo == "bezier_quadratica":
+                try:
+                    p0 = QPointF(*elemento["p0"])
+                    p1 = QPointF(*elemento["p1"])
+                    p2 = QPointF(*elemento["p2"])
+                except Exception:
+                    continue
+                pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
+                if pontos:
+                    path = QPainterPath(self._cena_para_tela(pontos[0]))
+                    for pt in pontos[1:]:
+                        path.lineTo(self._cena_para_tela(pt))
+                    painter.drawPath(path)
+            elif tipo in {"circle", "esfera"}:
+                centro = elemento.get("centro")
+                if not (isinstance(centro, (tuple, list)) and len(centro) == 2):
+                    continue
+                raio = max(0.0, float(elemento.get("raio", 0.0)))
+                centro_tela = self._cena_para_tela(QPointF(float(centro[0]), float(centro[1])))
+                painter.drawEllipse(centro_tela, raio * self.zoom, raio * self.zoom)
         painter.restore()
 
     def _desenhar_imagem_referencia(self, painter: QPainter, elemento: dict):
@@ -2527,6 +2586,13 @@ class VisualizacaoCanvas(QWidget):
     def set_mostrar_curva_original_emf(self, ativo: bool):
         self._mostrar_curva_original_emf = bool(ativo)
         self.update()
+
+    def set_visualizacao_instantanea(self, elementos: list[dict] | None):
+        self._visualizacao_instantanea_elementos = deepcopy(elementos) if elementos else None
+        self.update()
+
+    def visualizacao_instantanea_ativa(self) -> bool:
+        return bool(self._visualizacao_instantanea_elementos)
 
     def _pontos_render_elemento(self, elemento: dict) -> list[QPointF]:
         if self._mostrar_curva_original_emf:

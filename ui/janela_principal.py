@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+from copy import deepcopy
 from datetime import datetime
 from importlib import import_module
 from math import ceil, cos, pi, sin, sqrt
@@ -225,6 +226,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = self.PERFIL_USUARIO_PADRAO
         self._indice_layout_organizacao_moldes = 0
+        self._indice_visualizacao_proximo_molde = -1
         self._pendente_centralizar_indicado = False
         self._inicializar_perfis_usuarios()
         self._opcoes_app = self._carregar_opcoes_app()
@@ -4058,14 +4060,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         tipo = el.get("tipo")
         if tipo == "polyline":
             el["pontos"] = [(float(x) + dx, float(y) + dy) for x, y in el.get("pontos", [])]
-            return
-        if tipo == "bezier_quadratica":
+        elif tipo == "bezier_quadratica":
             for chave in ("p0", "p1", "p2"):
                 pt = el.get(chave)
                 if isinstance(pt, (tuple, list)) and len(pt) == 2:
                     el[chave] = (float(pt[0]) + dx, float(pt[1]) + dy)
-            return
-        if tipo in {"circle", "esfera"}:
+        elif tipo in {"circle", "esfera"}:
             centro = el.get("centro")
             if isinstance(centro, (tuple, list)) and len(centro) == 2:
                 el["centro"] = (float(centro[0]) + dx, float(centro[1]) + dy)
@@ -4091,7 +4091,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if chave in el:
                 el[chave] = _shift_pt(el.get(chave))
 
-    def _organizar_moldes_no_canvas(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
+    def _organizar_moldes_no_canvas_legado(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
         moldes: list[dict] = []
         for idx, el in enumerate(canvas.cena.elementos):
             if not el.get("molde"):
@@ -4240,6 +4240,143 @@ class GuimmaStudioMainWindow(QMainWindow):
         canvas.update()
         return n
 
+    def _organizar_moldes_no_canvas(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
+        bbox_por_idx: dict[int, tuple[float, float, float, float]] = {}
+        for idx, el in enumerate(canvas.cena.elementos):
+            if isinstance(el, dict):
+                bb = self._bbox_elemento(el)
+                if bb is not None:
+                    bbox_por_idx[idx] = bb
+
+        moldes_base: list[dict] = []
+        for idx, el in enumerate(canvas.cena.elementos):
+            if not isinstance(el, dict) or not el.get("molde") or idx not in bbox_por_idx:
+                continue
+            chaves = {
+                str(el.get("molde_id") or "").strip(),
+                str(el.get("id_molde") or "").strip(),
+                str(el.get("id") or "").strip(),
+            }
+            chaves.discard("")
+            moldes_base.append({"idx": idx, "bbox": bbox_por_idx[idx], "chaves": chaves, "ordem": len(moldes_base)})
+        if not moldes_base:
+            return 0
+
+        grupos: list[dict] = []
+        dono_por_idx: dict[int, int] = {}
+        for grupo_idx, info in enumerate(moldes_base):
+            idx_molde = int(info["idx"])
+            dono_por_idx[idx_molde] = grupo_idx
+            grupos.append({"molde_idx": idx_molde, "indices": {idx_molde}, "bbox_molde": info["bbox"], "ordem": info["ordem"]})
+
+        for idx, el in enumerate(canvas.cena.elementos):
+            if idx in dono_por_idx or idx not in bbox_por_idx or not isinstance(el, dict) or el.get("molde"):
+                continue
+            referencias = {
+                str(el.get("costura_de_molde_id") or "").strip(),
+                str(el.get("molde_id") or "").strip() if bool(el.get("molde_linha_vinculada")) else "",
+                str(el.get("id_molde") or "").strip(),
+            }
+            referencias.discard("")
+            for grupo_idx, info in enumerate(moldes_base):
+                if referencias and referencias.intersection(info["chaves"]):
+                    grupos[grupo_idx]["indices"].add(idx)
+                    dono_por_idx[idx] = grupo_idx
+                    break
+
+        for idx, el in enumerate(canvas.cena.elementos):
+            if idx in dono_por_idx or idx not in bbox_por_idx or not isinstance(el, dict) or el.get("molde"):
+                continue
+            bb = bbox_por_idx[idx]
+            ecx = (bb[0] + bb[2]) / 2.0
+            ecy = (bb[1] + bb[3]) / 2.0
+            melhor_idx = None
+            melhor_d2 = None
+            for grupo_idx, info in enumerate(moldes_base):
+                mb = info["bbox"]
+                mcx = (mb[0] + mb[2]) / 2.0
+                mcy = (mb[1] + mb[3]) / 2.0
+                diag = max(sqrt((mb[2] - mb[0]) ** 2 + (mb[3] - mb[1]) ** 2), 1.0)
+                d2 = ((ecx - mcx) ** 2) + ((ecy - mcy) ** 2)
+                if d2 <= (diag * 2.5) ** 2 and (melhor_d2 is None or d2 < melhor_d2):
+                    melhor_d2 = d2
+                    melhor_idx = grupo_idx
+            if melhor_idx is not None:
+                grupos[melhor_idx]["indices"].add(idx)
+                dono_por_idx[idx] = melhor_idx
+
+        for grupo in grupos:
+            boxes = [bbox_por_idx[idx] for idx in grupo["indices"] if idx in bbox_por_idx]
+            min_x = min(bb[0] for bb in boxes)
+            min_y = min(bb[1] for bb in boxes)
+            max_x = max(bb[2] for bb in boxes)
+            max_y = max(bb[3] for bb in boxes)
+            grupo["bbox"] = (min_x, min_y, max_x, max_y)
+            grupo["w"] = max(max_x - min_x, 1.0)
+            grupo["h"] = max(max_y - min_y, 1.0)
+            grupo["area"] = grupo["w"] * grupo["h"]
+
+        n = len(grupos)
+        variacao_idx = int(self._indice_layout_organizacao_moldes if variacao is None else variacao) % 3
+        media_w = sum(float(info["w"]) for info in grupos) / n
+        media_h = sum(float(info["h"]) for info in grupos) / n
+        gap = max(6.0, min(30.0, max(media_w, media_h) * 0.18))
+        if variacao_idx == 0:
+            ordenados = sorted(grupos, key=lambda info: (-float(info["h"]), -float(info["area"]), int(info["ordem"])))
+        elif variacao_idx == 1:
+            ordenados = sorted(grupos, key=lambda info: (int(info["ordem"]) % 2, -float(info["area"])))
+        else:
+            ordenados = sorted(grupos, key=lambda info: (float(info["w"]), -float(info["h"]), int(info["ordem"])))
+
+        largura_total_original = max(max(float(g["bbox"][2]) for g in grupos) - min(float(g["bbox"][0]) for g in grupos), 1.0)
+        largura_alvo = max(sqrt(sum(float(g["area"]) for g in grupos)) * 1.35, media_w)
+        largura_alvo = min(max(largura_alvo, media_w), max(largura_total_original * 0.75, media_w))
+
+        posicoes: dict[int, tuple[float, float]] = {}
+        x = 0.0
+        y = 0.0
+        linha_h = 0.0
+        for grupo in ordenados:
+            w = float(grupo["w"])
+            h = float(grupo["h"])
+            if x > 0.0 and x + w > largura_alvo:
+                x = 0.0
+                y += linha_h + gap
+                linha_h = 0.0
+            desloc = min(gap * 0.8, media_w * 0.18) if variacao_idx == 2 and int(y // max(media_h + gap, 1.0)) % 2 else 0.0
+            posicoes[int(grupo["molde_idx"])] = (x + desloc, y)
+            x += w + gap
+            linha_h = max(linha_h, h)
+
+        layout_boxes = []
+        for grupo in grupos:
+            tx, ty = posicoes[int(grupo["molde_idx"])]
+            layout_boxes.append((tx, ty, tx + float(grupo["w"]), ty + float(grupo["h"])))
+        layout_min_x = min(bb[0] for bb in layout_boxes)
+        layout_min_y = min(bb[1] for bb in layout_boxes)
+        layout_max_x = max(bb[2] for bb in layout_boxes)
+        layout_max_y = max(bb[3] for bb in layout_boxes)
+        original_min_x = min(float(g["bbox"][0]) for g in grupos)
+        original_min_y = min(float(g["bbox"][1]) for g in grupos)
+        original_max_x = max(float(g["bbox"][2]) for g in grupos)
+        original_max_y = max(float(g["bbox"][3]) for g in grupos)
+        offset_x = ((original_min_x + original_max_x) / 2.0) - ((layout_min_x + layout_max_x) / 2.0)
+        offset_y = ((original_min_y + original_max_y) / 2.0) - ((layout_min_y + layout_max_y) / 2.0)
+
+        for grupo in grupos:
+            target_x, target_y = posicoes[int(grupo["molde_idx"])]
+            min_x, min_y, _max_x, _max_y = grupo["bbox"]
+            dx = (target_x + offset_x) - float(min_x)
+            dy = (target_y + offset_y) - float(min_y)
+            for idx in sorted(grupo["indices"]):
+                if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
+                    self._transladar_elemento(canvas.cena.elementos[idx], dx, dy)
+        if registrar_historico:
+            canvas._registrar_historico()
+        canvas.elementos_alterados.emit()
+        canvas.update()
+        return n
+
     def _organizar_moldes_canvas_atual(self):
         area = self._area_documento_atual()
         if not area:
@@ -4254,6 +4391,71 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._centralizar_canvas_em_elementos(area.canvas, [el for el in area.canvas.cena.elementos if el.get("molde")])
         area._on_zoom_changed(area.canvas.zoom)
         self.lbl_status.setText(f"{qtd} molde(s) reorganizado(s). Layout #{layout_aplicado} pronto.")
+
+    def _indices_moldes_canvas_atual(self) -> list[int]:
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            return []
+        moldes = self._moldes_do_canvas_atual() if hasattr(self, "cmb_menu_moldes_ordem") else []
+        if moldes:
+            return [int(idx) for idx, _molde in moldes]
+        return [
+            idx
+            for idx, el in enumerate(area.canvas.cena.elementos)
+            if isinstance(el, dict) and el.get("molde") and bool(el.get("menu_moldes_visivel", True))
+        ]
+
+    def _visualizar_proximo_molde(self):
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            self.lbl_status.setText("Nenhum documento ativo para visualizar molde.")
+            return
+        indices = self._indices_moldes_canvas_atual()
+        if not indices:
+            self.lbl_status.setText("Nenhum molde encontrado para visualizar.")
+            return
+        atual = next(iter(getattr(area.canvas, "_selecionados", set()) or []), None)
+        if atual in indices:
+            pos = (indices.index(int(atual)) + 1) % len(indices)
+        else:
+            self._indice_visualizacao_proximo_molde = (self._indice_visualizacao_proximo_molde + 1) % len(indices)
+            pos = self._indice_visualizacao_proximo_molde
+        idx = indices[pos]
+        self._indice_visualizacao_proximo_molde = pos
+        self._selecionar_molde_menu(idx, centralizar=True)
+        nome = str(area.canvas.cena.elementos[idx].get("nome_molde") or f"Molde {idx + 1}").strip()
+        self.lbl_status.setText(f"Visualizando molde: {nome}")
+
+    def _elementos_visualizacao_instantanea(self, canvas) -> list[dict]:
+        elementos = []
+        for el in canvas.cena.elementos:
+            if not isinstance(el, dict):
+                continue
+            item = deepcopy(el)
+            cor = item.get("cor")
+            if item.get("molde") and bool(getattr(canvas, "_mostrar_cor_tecidos", False)):
+                tecido = str(item.get("tecido") or "").strip()
+                cor = getattr(canvas, "_cores_tecidos", {}).get(tecido, cor)
+            item["_cor_visualizacao_instantanea"] = str(cor or self._cores_canvas_global.get("desenho", "#ffffff"))
+            elementos.append(item)
+        return elementos
+
+    def _alternar_visualizacao_instantanea(self, ativo: bool):
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            if hasattr(self, "btn_visualizacao_instantanea"):
+                self.btn_visualizacao_instantanea.blockSignals(True)
+                self.btn_visualizacao_instantanea.setChecked(False)
+                self.btn_visualizacao_instantanea.blockSignals(False)
+            self.lbl_status.setText("Nenhum documento ativo para visualização instantânea.")
+            return
+        if ativo:
+            elementos = self._elementos_visualizacao_instantanea(area.canvas)
+            area.canvas.set_visualizacao_instantanea(elementos)
+            self.lbl_status.setText("Visualização instantânea adicionada.")
+        else:
+            area.canvas.set_visualizacao_instantanea(None)
+            self.lbl_status.setText("Visualização instantânea removida.")
 
     def closeEvent(self, event):  # noqa: N802
         if not self._ha_alteracoes_nao_salvas():
@@ -5998,6 +6200,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_organizar_moldes.clicked.connect(self._organizar_moldes_canvas_atual)
         row.addWidget(self.btn_organizar_moldes)
 
+        self.btn_proximo_molde = _BotaoRodapeHover("▶", "Visualiza próximo molde")
+        self.btn_proximo_molde.setFixedHeight(20)
+        self.btn_proximo_molde.setToolTip("Visualiza próximo molde")
+        self.btn_proximo_molde.setStyleSheet(estilo_botao_icone)
+        self.btn_proximo_molde.clicked.connect(self._visualizar_proximo_molde)
+        row.addWidget(self.btn_proximo_molde)
+
+        self.btn_visualizacao_instantanea = _BotaoRodapeHover("◌", "Adicionar visualização instantânea")
+        self.btn_visualizacao_instantanea.setCheckable(True)
+        self.btn_visualizacao_instantanea.setFixedHeight(20)
+        self.btn_visualizacao_instantanea.setToolTip("Adicionar visualização instantânea")
+        self.btn_visualizacao_instantanea.setStyleSheet(estilo_botao_icone)
+        self.btn_visualizacao_instantanea.toggled.connect(self._alternar_visualizacao_instantanea)
+        row.addWidget(self.btn_visualizacao_instantanea)
+
         row.addStretch(1)
         for btn in atalhos.findChildren(QPushButton):
             if not btn.toolTip():
@@ -6030,6 +6247,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.btn_grid,
             self.btn_graduacao,
             self.btn_organizar_moldes,
+            self.btn_proximo_molde,
+            self.btn_visualizacao_instantanea,
         ):
             if isinstance(b, _BotaoRodapeHover):
                 b.vincular_status(self.lbl_status)
