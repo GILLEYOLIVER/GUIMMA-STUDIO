@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QTabBar,
@@ -168,6 +169,26 @@ class RibbonButton(QToolButton):
         acao = menu.exec(self.mapToGlobal(pos))
         if acao == adicionar:
             self.adicionar_usuario.emit(self.ferramenta.tool_id)
+
+
+class _RibbonPageScrollArea(QScrollArea):
+    def __init__(self, pagina: QWidget, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        pagina.resize(pagina.sizeHint())
+        self.setWidget(pagina)
+
+    def sizeHint(self):  # noqa: N802
+        hint = super().sizeHint()
+        return QSize(0, hint.height())
+
+    def minimumSizeHint(self):  # noqa: N802
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
 
 
 class ColorControlWidget(QFrame):
@@ -605,6 +626,10 @@ class RibbonPage(QWidget):
         espaco.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout.addWidget(espaco)
 
+    def minimumSizeHint(self):  # noqa: N802
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
+
 
 class RibbonWidget(QWidget):
     tool_selected = Signal(str)
@@ -636,7 +661,7 @@ class RibbonWidget(QWidget):
             pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)
             for grupo in pagina.findChildren(RibbonGroup):
                 grupo.estilo_changed.connect(self.estilo_changed.emit)
-            self.paginas.addWidget(pagina)
+            self.paginas.addWidget(self._criar_viewport_pagina(pagina))
 
         if include_tabbar:
             layout.addWidget(self.tabbar)
@@ -690,7 +715,7 @@ class RibbonWidget(QWidget):
         antiga = self.paginas.widget(index)
         self.paginas.removeWidget(antiga)
         antiga.deleteLater()
-        self.paginas.insertWidget(index, pagina)
+        self.paginas.insertWidget(index, self._criar_viewport_pagina(pagina))
         if pagina_atual == index:
             self.paginas.setCurrentIndex(index)
 
@@ -708,11 +733,20 @@ class RibbonWidget(QWidget):
         if 0 <= index < len(self._tabs):
             self.tab_changed.emit(self._tabs[index].tab_id)
         for i in range(self.paginas.count()):
-            pagina = self.paginas.widget(i)
+            pagina = self._pagina_em(i)
             if i == index:
                 pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
             else:
                 pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
+
+    def _criar_viewport_pagina(self, pagina: RibbonPage) -> _RibbonPageScrollArea:
+        return _RibbonPageScrollArea(pagina)
+
+    def _pagina_em(self, index: int) -> QWidget:
+        container = self.paginas.widget(index)
+        if isinstance(container, QScrollArea) and container.widget() is not None:
+            return container.widget()
+        return container
 
     def tab_id_at(self, index: int) -> str | None:
         if 0 <= index < len(self._tabs):
