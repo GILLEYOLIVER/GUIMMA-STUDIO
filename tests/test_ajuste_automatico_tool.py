@@ -33,6 +33,9 @@ class AjusteAutomaticoToolTestCase(unittest.TestCase):
                 "texto_max": 1.0,
                 "orientacao_manual": True,
                 "orientacao": 90,
+                "ajustar_numeros": True,
+                "numero_min": 0.2,
+                "numero_max": 0.8,
                 "auto_fio": True,
                 "fio_min": 0.5,
                 "fio_max": 3.0,
@@ -55,6 +58,9 @@ class AjusteAutomaticoToolTestCase(unittest.TestCase):
         self.assertIn("fio_fim", molde)
         self.assertEqual(molde["fio_angulo"], 90.0)
         self.assertTrue(molde["mostrar_fio"])
+        self.assertTrue(molde["mostrar_numeros"])
+        self.assertGreaterEqual(molde["numero_altura_cm"], 0.2)
+        self.assertLessEqual(molde["numero_altura_cm"], 0.8)
 
 
 if __name__ == "__main__":

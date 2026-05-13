@@ -146,6 +146,22 @@ class AjusteAutomaticoDialog(QDialog):
         lay_textos.setColumnStretch(2, 1)
         raiz.addWidget(gb_textos)
 
+        gb_numeros = QGroupBox("Números")
+        lay_numeros = QGridLayout(gb_numeros)
+        lay_numeros.setHorizontalSpacing(10)
+        lay_numeros.setVerticalSpacing(8)
+        self.chk_ajustar_numeros = QCheckBox("Ajustar tamanho dos números")
+        self.chk_ajustar_numeros.setChecked(True)
+        lay_numeros.addWidget(self.chk_ajustar_numeros, 0, 0, 1, 2)
+        lay_numeros.addWidget(QLabel("Tamanho mínimo (cm)"), 1, 0)
+        self.sp_numero_min = self._spin(0.0, 30.0, 0.2, 0.1)
+        lay_numeros.addWidget(self.sp_numero_min, 1, 1)
+        lay_numeros.addWidget(QLabel("Tamanho máximo (cm)"), 2, 0)
+        self.sp_numero_max = self._spin(0.1, 30.0, 0.8, 0.1)
+        lay_numeros.addWidget(self.sp_numero_max, 2, 1)
+        lay_numeros.setColumnStretch(2, 1)
+        raiz.addWidget(gb_numeros)
+
         gb_fio = QGroupBox("Fio")
         lay_fio = QGridLayout(gb_fio)
         lay_fio.setHorizontalSpacing(10)
@@ -200,10 +216,14 @@ class AjusteAutomaticoDialog(QDialog):
     def opcoes(self) -> dict:
         texto_min_raw = self._ler_numero(self.sp_texto_min, 0.0, 0.0, 30.0)
         texto_max_raw = self._ler_numero(self.sp_texto_max, 2.0, 0.0, 30.0)
+        numero_min_raw = self._ler_numero(self.sp_numero_min, 0.2, 0.0, 30.0)
+        numero_max_raw = self._ler_numero(self.sp_numero_max, 0.8, 0.0, 30.0)
         fio_min_raw = self._ler_numero(self.sp_fio_min, 0.5, 0.0, 1000.0)
         fio_max_raw = self._ler_numero(self.sp_fio_max, 3.0, 0.0, 1000.0)
         texto_min = min(texto_min_raw, texto_max_raw)
         texto_max = max(texto_min_raw, texto_max_raw)
+        numero_min = min(numero_min_raw, numero_max_raw)
+        numero_max = max(numero_min_raw, numero_max_raw)
         fio_min = min(fio_min_raw, fio_max_raw)
         fio_max = max(fio_min_raw, fio_max_raw)
         return {
@@ -212,6 +232,9 @@ class AjusteAutomaticoDialog(QDialog):
             "texto_max": texto_max,
             "orientacao_manual": bool(self.chk_orientacao_manual.isChecked()),
             "orientacao": int(self.grp_orientacao.checkedId()),
+            "ajustar_numeros": bool(self.chk_ajustar_numeros.isChecked()),
+            "numero_min": numero_min,
+            "numero_max": numero_max,
             "auto_fio": bool(self.chk_auto_fio.isChecked()),
             "fio_min": fio_min,
             "fio_max": fio_max,
@@ -390,6 +413,10 @@ class Ferramenta(FerramentaBase):
                     if op.get("orientacao_manual", False):
                         el["nome_angulo"] = float(op.get("orientacao", 0))
 
+        if op.get("ajustar_numeros", True):
+            el["numero_altura_cm"] = self._tamanho_numeros(el, bbox, op)
+            el["mostrar_numeros"] = True
+
         if op.get("auto_fio", True):
             tamanho_texto = max(
                 [float(el.get(f"texto_{chave}_altura_cm") or 0.0) for chave in textos_ativos] or [0.0]
@@ -518,6 +545,22 @@ class Ferramenta(FerramentaBase):
         # Depois o canvas ainda reduz se o texto encostar nos limites do molde.
         por_altura = menor_lado * 0.35
         por_largura = maior_lado / max(2.5, max(1, len(texto)) * 0.62)
+        cm = min(max_cm, por_altura, por_largura)
+        if min_cm > 0:
+            cm = max(min_cm, cm)
+        return max(0.05, min(max_cm if max_cm > 0 else 0.05, cm))
+
+    def _tamanho_numeros(self, el: dict, bbox: tuple[float, float, float, float], op: dict) -> float:
+        min_cm = float(op.get("numero_min", 0.2))
+        max_cm = float(op.get("numero_max", 0.8))
+        largura = max(0.0, bbox[2] - bbox[0])
+        altura = max(0.0, bbox[3] - bbox[1])
+        menor_lado = max(0.1, min(largura, altura))
+        maior_lado = max(0.1, max(largura, altura))
+        total_pontos = max(1, len(el.get("controle_cantos") or el.get("pontos") or []))
+        digitos = max(1, len(str(total_pontos)))
+        por_altura = menor_lado * 0.12
+        por_largura = maior_lado / max(8.0, digitos * 7.0)
         cm = min(max_cm, por_altura, por_largura)
         if min_cm > 0:
             cm = max(min_cm, cm)
