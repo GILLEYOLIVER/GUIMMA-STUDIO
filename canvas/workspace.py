@@ -113,7 +113,7 @@ class AreaDocumentoWidget(QWidget):
         super().__init__(parent)
         self.setMinimumSize(0, 0)
         layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 6, 6)
         layout.setSpacing(0)
 
         self.regua_h = ReguaWidget(horizontal=True)
