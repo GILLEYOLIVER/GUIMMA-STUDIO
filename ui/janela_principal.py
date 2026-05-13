@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QTabBar,
     QTabWidget,
     QToolButton,
@@ -533,7 +534,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.menu_visao.addAction(self.action_barra_mensagem)
 
         self.action_menu_moldes = QAction("Menu de moldes", self)
-        self.action_menu_moldes.triggered.connect(lambda: self.lbl_status.setText("Menu de moldes (em breve)"))
+        self.action_menu_moldes.setCheckable(True)
+        self.action_menu_moldes.setChecked(bool(self.projeto_atual.preferencias_usuario.get("menu_moldes_visivel", False)))
+        self.action_menu_moldes.toggled.connect(self._alternar_menu_moldes)
         self.menu_visao.addAction(self.action_menu_moldes)
 
         self.action_coordenadas = QAction("Coordenadas", self)
@@ -3963,7 +3966,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         canvas.update()
         self._agendar_salvar_estado_silencioso()
 
-    def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict]):
+    def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict], zoom_max: float = 8.0):
         pontos: list[tuple[float, float]] = []
         for el in elementos:
             tipo = el.get("tipo")
@@ -3999,7 +4002,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_w = max(canvas.width() - 40, 1)
         area_h = max(canvas.height() - 40, 1)
         novo_zoom = min(area_w / largura, area_h / altura)
-        canvas.set_zoom(max(0.05, min(novo_zoom, 8.0)))
+        canvas.set_zoom(max(0.05, min(novo_zoom, float(zoom_max))))
 
         cx = (min_x + max_x) / 2.0
         cy = (min_y + max_y) / 2.0
@@ -4492,11 +4495,287 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
             "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
         )
-        layout.addWidget(self.abas_documentos, 1)
+        self.painel_menu_moldes = self._criar_painel_menu_moldes()
+        self.splitter_documentos = QSplitter(Qt.Horizontal)
+        self.splitter_documentos.setChildrenCollapsible(False)
+        self.splitter_documentos.setHandleWidth(4)
+        self.splitter_documentos.addWidget(self.abas_documentos)
+        self.splitter_documentos.addWidget(self.painel_menu_moldes)
+        self.splitter_documentos.setStretchFactor(0, 1)
+        self.splitter_documentos.setStretchFactor(1, 0)
+        self.splitter_documentos.setSizes([1200, 168])
+        self.painel_menu_moldes.setVisible(self.action_menu_moldes.isChecked())
+        layout.addWidget(self.splitter_documentos, 1)
         self._reposicionar_barra_usuarios()
         self._atualizar_linha_usuarios()
+        self._atualizar_menu_moldes()
         self._on_tab_ribbon_alterada(self.ribbon.current_tab_id() or "inicio")
         return area
+
+    def _criar_painel_menu_moldes(self) -> QWidget:
+        painel = QFrame()
+        painel.setObjectName("PainelMenuMoldes")
+        painel.setMinimumWidth(136)
+        painel.setMaximumWidth(220)
+        painel.setStyleSheet(
+            """
+            QFrame#PainelMenuMoldes { background:#f4f4f4; border-left:1px solid #c9cdd2; }
+            QLabel { color:#111111; }
+            QComboBox { background:#ffffff; color:#111111; border:1px solid #b7b7b7; min-height:20px; }
+            QToolButton, QPushButton { background:#ffffff; color:#111111; border:1px solid #c2c7cc; border-radius:2px; }
+            QToolButton:hover, QPushButton:hover { background:#e9f3ff; border-color:#7eb0d8; }
+            """
+        )
+        lay = QVBoxLayout(painel)
+        lay.setContentsMargins(3, 3, 3, 3)
+        lay.setSpacing(3)
+
+        titulo = QLabel("Menu de moldes")
+        titulo.setStyleSheet("font-size:12px; font-weight:600;")
+        lay.addWidget(titulo)
+
+        barra = QHBoxLayout()
+        barra.setContentsMargins(0, 0, 0, 0)
+        barra.setSpacing(2)
+        self.cmb_menu_moldes_ordem = QComboBox()
+        self.cmb_menu_moldes_ordem.addItems(["Ordenar por", "Nome", "Tecido", "Prontos primeiro"])
+        self.cmb_menu_moldes_ordem.currentTextChanged.connect(lambda _=None: self._atualizar_menu_moldes())
+        barra.addWidget(self.cmb_menu_moldes_ordem, 1)
+        btn_tamanho = QToolButton()
+        btn_tamanho.setText("▦")
+        btn_tamanho.setToolTip("Tamanho do painel")
+        menu_tam = QMenu(btn_tamanho)
+        for texto, largura in (("Painel pequeno", 136), ("Painel médio", 168), ("Painel grande", 220)):
+            acao = menu_tam.addAction(texto)
+            acao.triggered.connect(lambda _=False, w=largura: self._definir_largura_menu_moldes(w))
+        btn_tamanho.setMenu(menu_tam)
+        btn_tamanho.setPopupMode(QToolButton.InstantPopup)
+        barra.addWidget(btn_tamanho)
+        lay.addLayout(barra)
+
+        self.scroll_menu_moldes = QScrollArea()
+        self.scroll_menu_moldes.setWidgetResizable(True)
+        self.scroll_menu_moldes.setFrameShape(QFrame.NoFrame)
+        self.conteudo_menu_moldes = QWidget()
+        self.layout_menu_moldes = QVBoxLayout(self.conteudo_menu_moldes)
+        self.layout_menu_moldes.setContentsMargins(0, 0, 0, 0)
+        self.layout_menu_moldes.setSpacing(3)
+        self.scroll_menu_moldes.setWidget(self.conteudo_menu_moldes)
+        lay.addWidget(self.scroll_menu_moldes, 1)
+        return painel
+
+    def _definir_largura_menu_moldes(self, largura: int):
+        if not hasattr(self, "painel_menu_moldes"):
+            return
+        self.painel_menu_moldes.setMinimumWidth(int(largura))
+        self.painel_menu_moldes.setMaximumWidth(int(largura))
+        self.projeto_atual.preferencias_usuario["menu_moldes_largura"] = int(largura)
+        self._salvar_preferencias_app()
+
+    def _alternar_menu_moldes(self, visivel: bool):
+        self.projeto_atual.preferencias_usuario["menu_moldes_visivel"] = bool(visivel)
+        if hasattr(self, "painel_menu_moldes"):
+            self.painel_menu_moldes.setVisible(bool(visivel))
+            if visivel:
+                largura = int(self.projeto_atual.preferencias_usuario.get("menu_moldes_largura", 168) or 168)
+                self._definir_largura_menu_moldes(largura)
+                self._atualizar_menu_moldes()
+        self._salvar_preferencias_app()
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setText("Menu de moldes visível" if visivel else "Menu de moldes oculto")
+
+    def _limpar_layout_menu_moldes(self):
+        if not hasattr(self, "layout_menu_moldes"):
+            return
+        while self.layout_menu_moldes.count():
+            item = self.layout_menu_moldes.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _moldes_do_canvas_atual(self) -> list[tuple[int, dict]]:
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            return []
+        itens = [(idx, el) for idx, el in enumerate(area.canvas.cena.elementos) if isinstance(el, dict) and el.get("molde")]
+        ordem = self.cmb_menu_moldes_ordem.currentText() if hasattr(self, "cmb_menu_moldes_ordem") else ""
+        if ordem == "Nome":
+            itens.sort(key=lambda item: str(item[1].get("nome_molde") or "").lower())
+        elif ordem == "Tecido":
+            itens.sort(key=lambda item: (str(item[1].get("tecido") or ""), str(item[1].get("nome_molde") or "").lower()))
+        elif ordem == "Prontos primeiro":
+            itens.sort(key=lambda item: (not bool(item[1].get("molde_pronto", True)), str(item[1].get("nome_molde") or "").lower()))
+        return itens
+
+    def _atualizar_menu_moldes(self):
+        if not hasattr(self, "painel_menu_moldes") or not self.action_menu_moldes.isChecked():
+            return
+        self._limpar_layout_menu_moldes()
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            self.layout_menu_moldes.addWidget(QLabel("Sem documento ativo."))
+            self.layout_menu_moldes.addStretch(1)
+            return
+        selecionados = set(getattr(area.canvas, "_selecionados", set()) or set())
+        moldes = self._moldes_do_canvas_atual()
+        if not moldes:
+            vazio = QLabel("Sem moldes neste arquivo.")
+            vazio.setStyleSheet("font-size:11px; color:#555555; padding:8px;")
+            self.layout_menu_moldes.addWidget(vazio)
+            self.layout_menu_moldes.addStretch(1)
+            return
+        for idx, molde in moldes:
+            self.layout_menu_moldes.addWidget(self._criar_item_menu_molde(area, idx, molde, idx in selecionados))
+        self.layout_menu_moldes.addStretch(1)
+
+    def _criar_item_menu_molde(self, area: AreaDocumentoWidget, idx: int, molde: dict, selecionado: bool) -> QWidget:
+        row = QFrame()
+        row.setObjectName("ItemMenuMolde")
+        row.setProperty("indice_molde", idx)
+        row.setCursor(Qt.PointingHandCursor)
+        row.setStyleSheet(
+            "QFrame#ItemMenuMolde { background:%s; border:1px solid %s; }"
+            % ("#cceeff" if selecionado else "#ffffff", "#6eb8d8" if selecionado else "#d3d3d3")
+        )
+        lay = QVBoxLayout(row)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
+
+        cab = QHBoxLayout()
+        cab.setContentsMargins(0, 0, 0, 0)
+        chk = QCheckBox()
+        chk.setChecked(bool(molde.get("menu_moldes_visivel", True)))
+        chk.setToolTip("Mostrar este molde no canvas")
+        chk.toggled.connect(lambda marcado, i=idx: self._definir_visibilidade_molde_menu(i, bool(marcado)))
+        cab.addWidget(chk, 0)
+        nome = str(molde.get("nome_molde") or f"Molde {idx + 1}").strip()
+        lbl = QLabel(nome)
+        lbl.setToolTip(nome)
+        lbl.setStyleSheet("font-size:11px; font-weight:600; color:#111111;")
+        cab.addWidget(lbl, 1)
+        lay.addLayout(cab)
+
+        thumb = QLabel()
+        thumb.setAlignment(Qt.AlignCenter)
+        thumb.setMinimumHeight(76)
+        thumb.setPixmap(QPixmap.fromImage(self._gerar_thumbnail_molde_menu(area.canvas, molde, 108, 76)))
+        lay.addWidget(thumb)
+
+        if selecionado:
+            atalhos = QHBoxLayout()
+            atalhos.setContentsMargins(0, 0, 0, 0)
+            atalhos.setSpacing(2)
+            for texto, dica, acao in (
+                ("F", "Centralizar este molde", "foco"),
+                ("P", "Propriedades", "propriedades"),
+                ("Pt", "Manipular pontos", "manipular_pontos"),
+                ("Mv", "Mover", "mover"),
+            ):
+                btn = QToolButton()
+                btn.setText(texto)
+                btn.setToolTip(dica)
+                btn.setFixedSize(24 if len(texto) == 1 else 28, 20)
+                btn.clicked.connect(lambda _=False, i=idx, a=acao: self._atalho_menu_molde(i, a))
+                atalhos.addWidget(btn)
+            atalhos.addStretch(1)
+            lay.addLayout(atalhos)
+
+        def selecionar(_event=None, i=idx):
+            self._selecionar_molde_menu(i, centralizar=True)
+
+        row.mousePressEvent = selecionar
+        thumb.mousePressEvent = selecionar
+        lbl.mousePressEvent = selecionar
+        return row
+
+    def _cor_menu_molde(self, canvas, molde: dict) -> QColor:
+        tecido = str(molde.get("tecido") or "").strip()
+        cor = None
+        if tecido:
+            cor = getattr(canvas, "_cores_tecidos", {}).get(tecido)
+        if not cor:
+            cor = molde.get("cor") or "#ffea00"
+        qcor = QColor(str(cor))
+        return qcor if qcor.isValid() else QColor("#ffea00")
+
+    def _gerar_thumbnail_molde_menu(self, canvas, molde: dict, largura: int, altura: int) -> QImage:
+        img = QImage(int(largura), int(altura), QImage.Format_ARGB32)
+        img.fill(QColor("#f7f7f7"))
+        pontos: list[tuple[float, float]] = []
+        for pt in molde.get("pontos", []) or []:
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                try:
+                    pontos.append((float(pt[0]), float(pt[1])))
+                except (TypeError, ValueError):
+                    continue
+        if len(pontos) < 2:
+            return img
+        xs = [x for x, _ in pontos]
+        ys = [y for _, y in pontos]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        geo_w = max(max_x - min_x, 1.0)
+        geo_h = max(max_y - min_y, 1.0)
+        margem = 7
+        escala = min((largura - margem * 2) / geo_w, (altura - margem * 2) / geo_h)
+        cx = (min_x + max_x) / 2.0
+        cy = (min_y + max_y) / 2.0
+        path = QPainterPath()
+        for i, (x, y) in enumerate(pontos):
+            sx = (x - cx) * escala + (largura / 2)
+            sy = (y - cy) * escala + (altura / 2)
+            if i == 0:
+                path.moveTo(sx, sy)
+            else:
+                path.lineTo(sx, sy)
+        if len(pontos) > 2:
+            path.closeSubpath()
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        cor = self._cor_menu_molde(canvas, molde)
+        painter.setBrush(cor)
+        painter.setPen(QPen(cor.darker(125), 1))
+        painter.drawPath(path)
+        painter.end()
+        return img
+
+    def _selecionar_molde_menu(self, idx: int, centralizar: bool = True):
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget) or not (0 <= idx < len(area.canvas.cena.elementos)):
+            return
+        area.canvas._selecionados = {idx}
+        if centralizar:
+            self._centralizar_canvas_em_elementos(area.canvas, [area.canvas.cena.elementos[idx]], zoom_max=30.0)
+            area._on_zoom_changed(area.canvas.zoom)
+        area.canvas.update()
+        self._atualizar_menu_moldes()
+        self.lbl_status.setText("Clique para visualizar este molde")
+
+    def _definir_visibilidade_molde_menu(self, idx: int, visivel: bool):
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget) or not (0 <= idx < len(area.canvas.cena.elementos)):
+            return
+        molde = area.canvas.cena.elementos[idx]
+        if not isinstance(molde, dict) or not molde.get("molde"):
+            return
+        molde["menu_moldes_visivel"] = bool(visivel)
+        if not visivel:
+            molde["molde_pronto"] = False
+        else:
+            molde["molde_pronto"] = True
+        area.canvas._selecionados.discard(idx)
+        if hasattr(area.canvas, "_registrar_historico"):
+            area.canvas._registrar_historico()
+        area.canvas.update()
+        self._agendar_salvar_estado_silencioso()
+        self._atualizar_menu_moldes()
+
+    def _atalho_menu_molde(self, idx: int, acao: str):
+        self._selecionar_molde_menu(idx, centralizar=(acao == "foco"))
+        if acao == "propriedades":
+            self._abrir_propriedades_diretamente()
+        elif acao in {"manipular_pontos", "mover"}:
+            self._ativar_ferramenta_global(acao)
 
     def _criar_linha_usuarios(self):
         if hasattr(self, "faixa_usuarios"):
@@ -4881,6 +5160,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.snap_changed.connect(self._on_snap_changed)
+        area_doc.canvas.elementos_alterados.connect(self._atualizar_menu_moldes)
         area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
         area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
@@ -4906,6 +5186,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.abas_documentos.setCurrentIndex(index)
         QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self._agendar_reencaixe_janela_canvas()
+        self._atualizar_menu_moldes()
 
     def _limpar_abas_documentos(self):
         while self.abas_documentos.count():
@@ -4945,8 +5226,10 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
             self.action_coordenadas.blockSignals(False)
             QTimer.singleShot(0, area.canvas.sincronizar_paineis_auxiliares)
+            self._atualizar_menu_moldes()
         else:
             self._atualizar_label_escala(None)
+            self._atualizar_menu_moldes()
 
     def _area_documento_atual(self) -> AreaDocumentoWidget | None:
         area = self.abas_documentos.currentWidget()
@@ -5107,6 +5390,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
             area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.snap_changed.connect(self._on_snap_changed)
+            area_doc.canvas.elementos_alterados.connect(self._atualizar_menu_moldes)
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
@@ -5140,6 +5424,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             else:
                 QTimer.singleShot(0, lambda a=area_doc: self._aplicar_viewport_inicial(a))
         self.abas_documentos.setCurrentIndex(self.abas_documentos.count() - 1)
+        self._atualizar_menu_moldes()
 
     def _capturar_estado_documento_canvas(self, area: AreaDocumentoWidget) -> dict:
         return {
