@@ -234,6 +234,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._timer_recovery = QTimer(self)
         self._timer_recovery.timeout.connect(self._salvar_snapshot_recuperacao)
         self._aplicar_intervalo_recovery()
+        self._assinatura_menu_moldes: tuple | None = None
+        self._timer_menu_moldes = QTimer(self)
+        self._timer_menu_moldes.setInterval(250)
+        self._timer_menu_moldes.timeout.connect(self._sincronizar_menu_moldes_ao_vivo)
         self._menu_backstage_hover_aberto: QMenu | None = None
         self._menu_backstage_hover_origem: str | None = None
         self._menu_backstage_hover_botao: QWidget | None = None
@@ -2319,6 +2323,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._aplicar_config_visualizacao_nos_canvas()
         self._sincronizar_perfil_usuario_atual()
         self._salvar_preferencias_app()
+        self._atualizar_menu_moldes()
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText("Cores do programa atualizadas.")
 
@@ -4509,6 +4514,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._ajustar_splitter_menu_moldes(
                 int(self.projeto_atual.preferencias_usuario.get("menu_moldes_largura", 168) or 168)
             )
+            self._iniciar_monitor_menu_moldes()
         layout.addWidget(self.splitter_documentos, 1)
         self._reposicionar_barra_usuarios()
         self._atualizar_linha_usuarios()
@@ -4602,9 +4608,75 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._definir_largura_menu_moldes(largura, salvar=False)
                 self._ajustar_splitter_menu_moldes(largura)
                 self._atualizar_menu_moldes()
+                self._iniciar_monitor_menu_moldes()
+            else:
+                self._parar_monitor_menu_moldes()
         self._salvar_preferencias_app()
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText("Menu de moldes visível" if visivel else "Menu de moldes oculto")
+
+    def _iniciar_monitor_menu_moldes(self):
+        if hasattr(self, "_timer_menu_moldes") and not self._timer_menu_moldes.isActive():
+            self._timer_menu_moldes.start()
+
+    def _parar_monitor_menu_moldes(self):
+        if hasattr(self, "_timer_menu_moldes"):
+            self._timer_menu_moldes.stop()
+        self._assinatura_menu_moldes = None
+
+    def _assinatura_geometria_molde_menu(self, molde: dict) -> tuple:
+        pontos = []
+        for pt in molde.get("pontos", []) or []:
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                try:
+                    pontos.append((round(float(pt[0]), 3), round(float(pt[1]), 3)))
+                except (TypeError, ValueError):
+                    continue
+        return tuple(pontos)
+
+    def _assinatura_estado_menu_moldes(self) -> tuple:
+        if not hasattr(self, "abas_documentos"):
+            return ("sem_abas",)
+        area = self.abas_documentos.currentWidget()
+        if not isinstance(area, AreaDocumentoWidget):
+            return ("sem_documento", self.abas_documentos.currentIndex())
+        canvas = area.canvas
+        selecionados = tuple(sorted(int(i) for i in getattr(canvas, "_selecionados", set()) or []))
+        cores_tecidos = tuple(sorted((str(k), str(v)) for k, v in getattr(canvas, "_cores_tecidos", {}).items()))
+        ordem = self.cmb_menu_moldes_ordem.currentText() if hasattr(self, "cmb_menu_moldes_ordem") else ""
+        moldes = []
+        for idx, molde in enumerate(getattr(canvas.cena, "elementos", []) or []):
+            if not isinstance(molde, dict) or not molde.get("molde"):
+                continue
+            moldes.append(
+                (
+                    idx,
+                    str(molde.get("molde_id") or molde.get("id") or ""),
+                    str(molde.get("nome_molde") or molde.get("nome") or ""),
+                    str(molde.get("tecido") or molde.get("grupo_molde") or ""),
+                    str(molde.get("cor") or ""),
+                    bool(molde.get("menu_moldes_visivel", True)),
+                    bool(molde.get("molde_pronto", True)),
+                    self._assinatura_geometria_molde_menu(molde),
+                )
+            )
+        return (
+            id(area),
+            self.abas_documentos.currentIndex(),
+            ordem,
+            selecionados,
+            bool(getattr(canvas, "_mostrar_cor_tecidos", False)),
+            cores_tecidos,
+            tuple(moldes),
+        )
+
+    def _sincronizar_menu_moldes_ao_vivo(self):
+        if not hasattr(self, "action_menu_moldes") or not self.action_menu_moldes.isChecked():
+            self._parar_monitor_menu_moldes()
+            return
+        assinatura = self._assinatura_estado_menu_moldes()
+        if assinatura != self._assinatura_menu_moldes:
+            self._atualizar_menu_moldes()
 
     def _limpar_layout_menu_moldes(self):
         if not hasattr(self, "layout_menu_moldes"):
@@ -4637,6 +4709,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not isinstance(area, AreaDocumentoWidget):
             self.layout_menu_moldes.addWidget(QLabel("Sem documento ativo."))
             self.layout_menu_moldes.addStretch(1)
+            self._assinatura_menu_moldes = self._assinatura_estado_menu_moldes()
             return
         selecionados = set(getattr(area.canvas, "_selecionados", set()) or set())
         moldes = self._moldes_do_canvas_atual()
@@ -4645,10 +4718,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             vazio.setStyleSheet("font-size:11px; color:#555555; padding:8px;")
             self.layout_menu_moldes.addWidget(vazio)
             self.layout_menu_moldes.addStretch(1)
+            self._assinatura_menu_moldes = self._assinatura_estado_menu_moldes()
             return
         for idx, molde in moldes:
             self.layout_menu_moldes.addWidget(self._criar_item_menu_molde(area, idx, molde, idx in selecionados))
         self.layout_menu_moldes.addStretch(1)
+        self._assinatura_menu_moldes = self._assinatura_estado_menu_moldes()
 
     def _criar_item_menu_molde(self, area: AreaDocumentoWidget, idx: int, molde: dict, selecionado: bool) -> QWidget:
         row = QFrame()
@@ -5470,6 +5545,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._aplicar_config_visualizacao_nos_canvas()
         self._sincronizar_perfil_usuario_atual()
         self._salvar_preferencias_app()
+        self._atualizar_menu_moldes()
 
     def _restaurar_viewport_documento_canvas(self, area: AreaDocumentoWidget, doc: dict) -> bool:
         zoom = doc.get("zoom")
