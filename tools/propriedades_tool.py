@@ -7,9 +7,10 @@ from math import atan2, cos, radians, sin, sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QEvent, QLocale, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
-from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtCore import QEvent, QLocale, QMimeData, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -57,6 +58,89 @@ class NumeroLimpoDoubleSpinBox(QDoubleSpinBox):
         if "." in texto:
             texto = texto.rstrip("0").rstrip(".")
         return "0" if texto in {"", "-0"} else texto
+
+
+class ArvoreTecidosMoldes(QTreeWidget):
+    molde_solto_em_tecido = Signal(int, str)
+    MIME_MOLDE = "application/x-guimma-molde-indice"
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDrop)
+        self.setDefaultDropAction(Qt.MoveAction)
+
+    def startDrag(self, supportedActions):  # noqa: N802
+        item = self.currentItem()
+        indice = self._indice_molde_item(item)
+        if indice is None:
+            return
+        mime = QMimeData()
+        mime.setData(self.MIME_MOLDE, str(int(indice)).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.MoveAction)
+
+    def dragEnterEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(self.MIME_MOLDE):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(self.MIME_MOLDE) and self._tecido_destino_evento(event):
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            return
+        event.ignore()
+
+    def dropEvent(self, event):  # noqa: N802
+        if not event.mimeData().hasFormat(self.MIME_MOLDE):
+            super().dropEvent(event)
+            return
+        tecido = self._tecido_destino_evento(event)
+        if not tecido:
+            event.ignore()
+            return
+        try:
+            indice = int(bytes(event.mimeData().data(self.MIME_MOLDE)).decode("utf-8"))
+        except (TypeError, ValueError, UnicodeDecodeError):
+            event.ignore()
+            return
+        self.molde_solto_em_tecido.emit(indice, tecido)
+        event.setDropAction(Qt.MoveAction)
+        event.accept()
+
+    def _item_evento(self, event) -> QTreeWidgetItem | None:
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        return self.itemAt(pos)
+
+    def _tecido_destino_evento(self, event) -> str | None:
+        return self._tecido_destino_item(self._item_evento(event))
+
+    def _tecido_destino_item(self, item: QTreeWidgetItem | None) -> str | None:
+        if item is None:
+            return None
+        if self._indice_molde_item(item) is not None:
+            item = item.parent()
+        if item is None:
+            return None
+        tecido = str(item.data(0, Qt.UserRole + 1) or "").strip()
+        return tecido or None
+
+    @staticmethod
+    def _indice_molde_item(item: QTreeWidgetItem | None) -> int | None:
+        if item is None:
+            return None
+        indice = item.data(0, Qt.UserRole)
+        if indice is None:
+            return None
+        try:
+            return int(indice)
+        except (TypeError, ValueError):
+            return None
 
 
 @dataclass(slots=True)
@@ -1355,10 +1439,11 @@ class PropriedadesMoldesDialog(QDialog):
         lay_esq.setContentsMargins(0, 0, 0, 0)
         lay_esq.setSpacing(8)
 
-        self.arvore = QTreeWidget()
+        self.arvore = ArvoreTecidosMoldes()
         self.arvore.setHeaderHidden(True)
         self.arvore.itemSelectionChanged.connect(self._quando_troca_selecao)
         self.arvore.itemChanged.connect(self._quando_item_editado)
+        self.arvore.molde_solto_em_tecido.connect(self._alterar_tecido_molde_por_arraste)
         lay_esq.addWidget(self.arvore, 1)
 
         self.btn_excluir_molde = QPushButton("🗑 Excluir molde")
@@ -2714,7 +2799,7 @@ class PropriedadesMoldesDialog(QDialog):
         raiz = QTreeWidgetItem(["Tecidos"])
         icone_tecido = QIcon(str(ICONS_DIR / "tecidos.svg"))
         raiz.setIcon(0, icone_tecido)
-        raiz.setFlags(raiz.flags() & ~Qt.ItemIsEditable)
+        raiz.setFlags((raiz.flags() | Qt.ItemIsEnabled) & ~Qt.ItemIsEditable & ~Qt.ItemIsDropEnabled)
         raiz.setExpanded(True)
         self.arvore.addTopLevelItem(raiz)
 
@@ -2737,7 +2822,7 @@ class PropriedadesMoldesDialog(QDialog):
             itens = grupos.get(grupo_nome, [])
             pai = QTreeWidgetItem([grupo_nome])
             pai.setIcon(0, icone_tecido)
-            pai.setFlags((pai.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable) & ~Qt.ItemIsEditable)
+            pai.setFlags((pai.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled) & ~Qt.ItemIsEditable)
             try:
                 pai.setData(0, Qt.UserRole + 1, grupo_nome)
             except Exception:
@@ -2747,7 +2832,7 @@ class PropriedadesMoldesDialog(QDialog):
             for ref in itens:
                 item = QTreeWidgetItem([ref.nome or f"Molde {ref.indice + 1}"])
                 item.setData(0, Qt.UserRole, ref.indice)
-                item.setFlags(item.flags() | Qt.ItemIsEditable)
+                item.setFlags((item.flags() | Qt.ItemIsEditable | Qt.ItemIsDragEnabled) & ~Qt.ItemIsDropEnabled)
                 item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
                 pai.addChild(item)
                 self._itens_molde_por_indice[int(ref.indice)] = item
@@ -2839,6 +2924,24 @@ class PropriedadesMoldesDialog(QDialog):
         self._combos_tecido_por_item[id(item)] = combo
 
     def eventFilter(self, obj, event):  # noqa: N802
+        if isinstance(obj, QComboBox) and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+            item_tecido = None
+            for item_id, combo in self._combos_tecido_por_item.items():
+                if combo is obj:
+                    item_tecido = next((it for it in self._iter_items(self.arvore.topLevelItem(0)) if id(it) == item_id), None)
+                    break
+            tecido = str(item_tecido.data(0, Qt.UserRole + 1) or "").strip() if item_tecido is not None else ""
+            if tecido and hasattr(event, "mimeData") and event.mimeData().hasFormat(ArvoreTecidosMoldes.MIME_MOLDE):
+                if event.type() == QEvent.Drop:
+                    try:
+                        indice = int(bytes(event.mimeData().data(ArvoreTecidosMoldes.MIME_MOLDE)).decode("utf-8"))
+                    except (TypeError, ValueError, UnicodeDecodeError):
+                        event.ignore()
+                        return True
+                    self._alterar_tecido_molde_por_arraste(indice, tecido)
+                event.setDropAction(Qt.MoveAction)
+                event.accept()
+                return True
         if isinstance(obj, QComboBox) and event.type() == QEvent.Wheel:
             event.ignore()
             return True
@@ -2910,6 +3013,37 @@ class PropriedadesMoldesDialog(QDialog):
                 self.ed_tecido.setCurrentText(novo_tecido)
             self.preview.set_molde(dict(self._molde_atual() or {}))
         self._atualizar_opcoes_tecido()
+        self.canvas.update()
+        self.recarregar_lista()
+
+    def _alterar_tecido_molde_por_arraste(self, indice_molde: int, novo_tecido: str):
+        novo_tecido = str(novo_tecido or "").strip()
+        if not novo_tecido:
+            return
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", [])
+        if not isinstance(elementos, list):
+            return
+        indice = int(indice_molde)
+        if not (0 <= indice < len(elementos)):
+            return
+        molde = elementos[indice]
+        if not isinstance(molde, dict) or not molde.get("molde"):
+            return
+        tecido_atual = str(molde.get("tecido") or "").strip()
+        if tecido_atual == novo_tecido:
+            return
+
+        molde["tecido"] = novo_tecido
+        molde["grupo_molde"] = novo_tecido
+        self._indice_atual = indice
+        if hasattr(self, "ed_tecido"):
+            with QSignalBlocker(self.ed_tecido):
+                self.ed_tecido.setCurrentText(novo_tecido)
+        self.preview.set_molde(dict(molde))
+        self._atualizar_opcoes_tecido()
+        if hasattr(self.canvas, "_registrar_historico"):
+            self.canvas._registrar_historico()
         self.canvas.update()
         self.recarregar_lista()
 
