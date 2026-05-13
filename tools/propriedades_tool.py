@@ -60,6 +60,54 @@ class NumeroLimpoDoubleSpinBox(QDoubleSpinBox):
         return "0" if texto in {"", "-0"} else texto
 
 
+def _ponto_xy_visual(valor) -> tuple[float, float] | None:
+    if isinstance(valor, dict) and "x" in valor and "y" in valor:
+        try:
+            return float(valor["x"]), float(valor["y"])
+        except (TypeError, ValueError):
+            return None
+    if isinstance(valor, (list, tuple)) and len(valor) >= 2:
+        try:
+            return float(valor[0]), float(valor[1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _bbox_visual_molde(molde: dict | None) -> tuple[float, float, float, float] | None:
+    if not isinstance(molde, dict):
+        return None
+    pontos = []
+    for ponto in molde.get("pontos") or []:
+        xy = _ponto_xy_visual(ponto)
+        if xy is not None:
+            pontos.append(xy)
+    if not pontos:
+        return None
+    xs = [p[0] for p in pontos]
+    ys = [p[1] for p in pontos]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _converter_ponto_visual_entre_moldes(valor, bbox_origem, bbox_destino):
+    xy = _ponto_xy_visual(valor)
+    if xy is None or bbox_origem is None or bbox_destino is None:
+        return deepcopy(valor)
+
+    min_x_o, min_y_o, max_x_o, max_y_o = bbox_origem
+    min_x_d, min_y_d, max_x_d, max_y_d = bbox_destino
+    largura_o = max_x_o - min_x_o
+    altura_o = max_y_o - min_y_o
+    largura_d = max_x_d - min_x_d
+    altura_d = max_y_d - min_y_d
+
+    rel_x = ((xy[0] - min_x_o) / largura_o) if abs(largura_o) > 1e-9 else 0.5
+    rel_y = ((xy[1] - min_y_o) / altura_o) if abs(altura_o) > 1e-9 else 0.5
+    destino_x = min_x_d + rel_x * largura_d if abs(largura_d) > 1e-9 else (min_x_d + max_x_d) / 2.0
+    destino_y = min_y_d + rel_y * altura_d if abs(altura_d) > 1e-9 else (min_y_d + max_y_d) / 2.0
+    return [destino_x, destino_y]
+
+
 class ArvoreTecidosMoldes(QTreeWidget):
     molde_solto_em_tecido = Signal(object, str)
     MIME_MOLDE = "application/x-guimma-molde-indice"
@@ -3483,6 +3531,7 @@ class PropriedadesMoldesDialog(QDialog):
     def _dados_visualizacao_formulario(self) -> dict:
         molde_atual = self._molde_atual()
         dados = {
+            "bbox_origem": _bbox_visual_molde(molde_atual) if isinstance(molde_atual, dict) else None,
             "mostrar_nome": self.chk_mostrar_nome.isChecked(),
             "mostrar_fio": self.chk_mostrar_fio.isChecked(),
             "mostrar_numeros": self.chk_mostrar_numeros.isChecked(),
@@ -3556,6 +3605,8 @@ class PropriedadesMoldesDialog(QDialog):
     def _aplicar_visualizacao_em_molde(self, molde: dict, dados: dict):
         if not molde:
             return
+        bbox_origem = dados.get("bbox_origem")
+        bbox_destino = _bbox_visual_molde(molde)
         for chave in (
             "mostrar_nome",
             "mostrar_fio",
@@ -3576,9 +3627,15 @@ class PropriedadesMoldesDialog(QDialog):
             if not isinstance(dados_texto, dict):
                 continue
             for campo, valor in dados_texto.items():
-                molde[campo] = deepcopy(valor)
+                if campo == "ponto_texto" or campo.startswith("ponto_texto_"):
+                    molde[campo] = _converter_ponto_visual_entre_moldes(valor, bbox_origem, bbox_destino)
+                else:
+                    molde[campo] = deepcopy(valor)
         for campo, valor in (dados.get("fio") or {}).items():
-            molde[campo] = deepcopy(valor)
+            if campo in {"fio_origem", "fio_fim"}:
+                molde[campo] = _converter_ponto_visual_entre_moldes(valor, bbox_origem, bbox_destino)
+            else:
+                molde[campo] = deepcopy(valor)
         for campo, valor in (dados.get("numeros") or {}).items():
             molde[campo] = deepcopy(valor)
         chave_visual = dados.get("chave_visual")
