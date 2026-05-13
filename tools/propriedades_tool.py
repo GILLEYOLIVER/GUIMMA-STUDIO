@@ -2087,7 +2087,7 @@ class PropriedadesMoldesDialog(QDialog):
         rodape = QHBoxLayout()
         self.btn_aplicar_visual = QPushButton("Aplicar todos")
         self.btn_aplicar_visual.setObjectName("ApplyBlueButton")
-        self.btn_aplicar_visual.clicked.connect(self._aplicar)
+        self.btn_aplicar_visual.clicked.connect(self._aplicar_visual_todos_moldes)
         rodape.addWidget(self.btn_aplicar_visual, 0, Qt.AlignLeft)
         self.chk_mostrar_cor_tecidos = QCheckBox("Mostrar cor dos tecidos")
         self.chk_mostrar_cor_tecidos.toggled.connect(self._alternar_cor_tecidos_canvas)
@@ -3273,6 +3273,93 @@ class PropriedadesMoldesDialog(QDialog):
         molde["refletido_vertical"] = valores["refletido_vertical"]
         molde["refletido_horizontal"] = valores["refletido_horizontal"]
 
+    def _dados_visualizacao_formulario(self) -> dict:
+        dados = {
+            "mostrar_nome": self.chk_mostrar_nome.isChecked(),
+            "mostrar_fio": self.chk_mostrar_fio.isChecked(),
+            "mostrar_numeros": self.chk_mostrar_numeros.isChecked(),
+            "visual_descricao": self.chk_visual_descricao.isChecked(),
+            "visual_quantidade": self.chk_quantidade_visual.isChecked(),
+            "visual_preencher": self.chk_preencher.isChecked(),
+            "cor": self._cor_visual,
+            "mostrar_margem": self.chk_margem_visual.isChecked(),
+            "margens": self._coletar_margens_tabela(),
+        }
+        elemento = self.cmb_elementos_molde.currentText().strip() if hasattr(self, "cmb_elementos_molde") else ""
+        chave = self._chave_visual_atual()
+        if chave:
+            dados["elemento_visual"] = elemento
+            dados["chave_visual"] = chave
+            dados["texto_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            dados["texto_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
+            dados["espaco_linhas"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
+            dados["referencia_texto"] = self._texto_combo_visual(self.ed_referencia, "Centro centro")
+            dados["alinhamento_texto"] = self._texto_combo_visual(self.ed_alinhamento, "Centro")
+        elif elemento == "Números":
+            dados["elemento_visual"] = elemento
+            dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
+            molde_atual = self._molde_atual()
+            if isinstance(molde_atual, dict):
+                dados["numero_ponto_inicio"] = int(molde_atual.get("numero_ponto_inicio", 0) or 0)
+        elif elemento == "Fio":
+            dados["elemento_visual"] = elemento
+            molde_atual = self._molde_atual()
+            if isinstance(molde_atual, dict):
+                for chave_fio in ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"):
+                    if chave_fio in molde_atual:
+                        dados[chave_fio] = molde_atual.get(chave_fio)
+        return dados
+
+    def _aplicar_visualizacao_em_molde(self, molde: dict, dados: dict):
+        if not molde:
+            return
+        for chave in (
+            "mostrar_nome",
+            "mostrar_fio",
+            "mostrar_numeros",
+            "visual_descricao",
+            "visual_quantidade",
+            "visual_preencher",
+            "cor",
+        ):
+            molde[chave] = dados[chave]
+        self._salvar_margens_no_molde(
+            molde,
+            dict(dados.get("margens") or {}),
+            mostrar_margem=bool(dados.get("mostrar_margem", False)),
+        )
+        chave_visual = dados.get("chave_visual")
+        if chave_visual:
+            chave = str(chave_visual)
+            molde[f"texto_{chave}_altura_cm"] = dados["texto_altura_cm"]
+            molde[f"texto_{chave}_angulo"] = dados["texto_angulo"]
+            molde[f"espaco_linhas_texto_{chave}"] = dados["espaco_linhas"]
+            molde[f"referencia_texto_{chave}"] = dados["referencia_texto"]
+            molde[f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
+            if str(dados["referencia_texto"]).strip().lower() != "livre":
+                pontos = self.preview._coletar_pontos(molde.get("pontos")) if hasattr(self, "preview") else []
+                base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
+                if base:
+                    ponto_ref = self.preview._ponto_referencia(base, str(dados["referencia_texto"]))
+                    molde[f"ponto_texto_{chave}"] = [ponto_ref.x(), ponto_ref.y()]
+                    if chave == "nome":
+                        molde["ponto_texto"] = [ponto_ref.x(), ponto_ref.y()]
+            if chave == "nome":
+                molde["mostrar_nome"] = True
+            elif chave == "descricao":
+                molde["visual_descricao"] = True
+            elif chave == "observacoes":
+                molde["visual_observacoes"] = True
+        elif dados.get("elemento_visual") == "Números":
+            molde["numero_altura_cm"] = dados["numero_altura_cm"]
+            molde["numero_ponto_inicio"] = int(dados.get("numero_ponto_inicio", 0) or 0)
+            molde["mostrar_numeros"] = True
+        elif dados.get("elemento_visual") == "Fio":
+            molde["mostrar_fio"] = True
+            for chave_fio in ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"):
+                if chave_fio in dados:
+                    molde[chave_fio] = dados[chave_fio]
+
     def _finalizar_aplicacao_em_lote(self):
         self.canvas.update()
         self.preview.set_molde(dict(self._molde_atual() or {}))
@@ -3282,9 +3369,36 @@ class PropriedadesMoldesDialog(QDialog):
         if not self._refs:
             QMessageBox.information(self, "Propriedades", "Nenhum molde disponível.")
             return
+        molde_atual = self._molde_atual()
+        if isinstance(molde_atual, dict):
+            self._aplicar_formulario_no_molde(molde_atual)
         valores = self._dados_encaixe_formulario()
+        visual = self._dados_visualizacao_formulario()
         for ref in self._refs:
             self._aplicar_encaixe_em_molde(ref.dados, valores)
+            self._aplicar_visualizacao_em_molde(ref.dados, visual)
+        if hasattr(self.canvas, "_registrar_historico"):
+            self.canvas._registrar_historico()
+        self._confirmado_ok = True
+        self.dados_aplicados.emit()
+        self._finalizar_aplicacao_em_lote()
+
+    def _aplicar_visual_todos_moldes(self):
+        if not self._refs:
+            QMessageBox.information(self, "Propriedades", "Nenhum molde disponível.")
+            return
+        molde_atual = self._molde_atual()
+        if not isinstance(molde_atual, dict):
+            QMessageBox.information(self, "Propriedades", "Selecione um molde.")
+            return
+        self._aplicar_formulario_no_molde(molde_atual)
+        visual = self._dados_visualizacao_formulario()
+        for ref in self._refs:
+            self._aplicar_visualizacao_em_molde(ref.dados, visual)
+        if hasattr(self.canvas, "_registrar_historico"):
+            self.canvas._registrar_historico()
+        self._confirmado_ok = True
+        self.dados_aplicados.emit()
         self._finalizar_aplicacao_em_lote()
 
     def _aplicar_todos_com_mesmo_tecido(self):

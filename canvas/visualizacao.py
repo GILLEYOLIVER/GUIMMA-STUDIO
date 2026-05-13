@@ -7,7 +7,7 @@ from math import acos, atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
     QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
@@ -1355,49 +1355,13 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
+            self._desenhar_margem_molde(painter, base, el)
             if idx in self._selecionados:
                 self._desenhar_selecao_molde(painter, base, el)
 
-            if el.get("mostrar_nome", True):
-                nome = str(el.get("nome_molde") or "")
-                if nome:
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
-                    if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
-                        cx = float(pos_nome[0])
-                        cy = float(pos_nome[1])
-                    else:
-                        cx = sum(p.x() for p in base) / len(base)
-                        cy = sum(p.y() for p in base) / len(base)
-                    tela = self._cena_para_tela(QPointF(cx, cy))
-                    bbox_tela = self._bbox_tela_pontos(base)
-                    margem_nome_px = 6.0
-                    limite_largura_nome = max(6.0, bbox_tela[2] - bbox_tela[0] - (margem_nome_px * 2.0))
-                    limite_altura_nome = max(6.0, bbox_tela[3] - bbox_tela[1] - (margem_nome_px * 2.0))
-                    tamanho_nome_px = self._tamanho_pixel_molde(
-                        el,
-                        ("nome_tamanho_px", "tam_nome_px", "tamanho_nome_px"),
-                        self._tamanho_visual_molde(el, ("tam_nome", "tamanho_nome", "fonte_nome"), 10.0),
-                    )
-                    fonte_nome = self._fonte_ajustada_px(
-                        painter,
-                        nome,
-                        tamanho_nome_px,
-                        limite_largura_nome,
-                        limite_altura_nome,
-                    )
-                    painter.setFont(fonte_nome)
-                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
-                    metrics_nome = QFontMetrics(painter.font())
-                    largura_nome = metrics_nome.horizontalAdvance(nome)
-                    altura_nome = metrics_nome.height()
-                    angulo_nome = float(el.get("nome_angulo", 0.0) or 0.0)
-                    tela = self._ponto_tela_dentro_bbox(tela, bbox_tela, largura_nome, altura_nome, margem_nome_px)
-                    painter.save()
-                    painter.translate(tela)
-                    if abs(angulo_nome) > 1e-6:
-                        painter.rotate(-angulo_nome)
-                    painter.drawText(int(-largura_nome / 2), int(altura_nome / 3), nome)
-                    painter.restore()
+            self._desenhar_texto_molde_configurado(painter, base, el, "nome", el.get("mostrar_nome", True))
+            self._desenhar_texto_molde_configurado(painter, base, el, "descricao", el.get("visual_descricao", False))
+            self._desenhar_texto_molde_configurado(painter, base, el, "observacoes", el.get("visual_observacoes", False))
 
             if el.get("mostrar_fio", True):
                 fio_origem = el.get("fio_origem")
@@ -1448,7 +1412,7 @@ class VisualizacaoCanvas(QWidget):
                             tamanho=self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0),
                         )
                 else:
-                    ang = float(el.get("fio_angulo", 90.0))
+                    ang = atan2(p2.y() - p1.y(), p2.x() - p1.x()) * 180.0 / 3.141592653589793
                     fonte_fio = painter.font()
                     tamanho_fio_px = self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0)
                     fonte_fio.setPixelSize(int(max(6, round(tamanho_fio_px))))
@@ -1464,7 +1428,7 @@ class VisualizacaoCanvas(QWidget):
                     y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 2.0))
                     painter.drawText(int(x_ang), int(y_ang), texto_ang)
 
-            if el.get("mostrar_controles", True) and idx not in self._selecionados:
+            if el.get("mostrar_controles", True):
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 if cantos:
                     cx = sum(p.x() for p in cantos) / len(cantos)
@@ -1473,18 +1437,35 @@ class VisualizacaoCanvas(QWidget):
                     cx, cy = 0.0, 0.0
                 painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 fonte_num = painter.font()
-                fonte_num.setPointSizeF(
-                    self._tamanho_visual_molde(el, ("tam_numero", "tamanho_numero", "fonte_numeracao"), 9.0))
+                fonte_num.setPixelSize(
+                    int(max(4, min(96, round(self._altura_cm_para_px(
+                        self._valor_float_molde(el, ("numero_altura_cm",), None)
+                    )))))
+                )
                 painter.setFont(fonte_num)
+                inicio = int(el.get("numero_ponto_inicio", 0) or 0)
+                total = max(1, len(cantos))
+                metrics_num = QFontMetrics(painter.font())
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     dx = pt.x() - cx
                     dy = pt.y() - cy
                     mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
-                    off_x = (dx / mod) * 11.0
-                    off_y = (dy / mod) * 11.0
-                    painter.drawText(int(pt_tela.x() + off_x), int(pt_tela.y() + off_y), str(i))
+                    margem = max(12.0, metrics_num.height() + 8.0)
+                    off_x = (dx / mod) * margem
+                    off_y = (dy / mod) * margem
+                    numero = ((i - 1 - inicio) % total) + 1
+                    texto = str(numero)
+                    largura = max(12, metrics_num.horizontalAdvance(texto) + 4)
+                    altura = max(12, metrics_num.height() + 2)
+                    rect = QRectF(
+                        pt_tela.x() + off_x - (largura / 2.0),
+                        pt_tela.y() + off_y - (altura / 2.0),
+                        largura,
+                        altura,
+                    )
+                    painter.drawText(rect, Qt.AlignCenter, texto)
                 if self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                     painter.setPen(QPen(QColor("#ff3b30"), 1.0))
@@ -1567,6 +1548,233 @@ class VisualizacaoCanvas(QWidget):
         xs = [p.x() for p in pts]
         ys = [p.y() for p in pts]
         return (min(xs), min(ys), max(xs), max(ys))
+
+    def _altura_cm_para_px(self, altura_cm: float | None, padrao_cm: float = 0.7) -> float:
+        if altura_cm is None:
+            altura_cm = padrao_cm
+        try:
+            valor_cm = max(0.1, float(altura_cm))
+        except (TypeError, ValueError):
+            valor_cm = float(padrao_cm)
+        return max(4.0, min(160.0, valor_cm * max(float(self.zoom), 1.0) * 0.52))
+
+    def _texto_molde_por_chave(self, el: dict, chave: str) -> str:
+        if chave == "nome":
+            return str(el.get("nome_molde") or "")
+        if chave == "descricao":
+            return str(el.get("descricao") or "")
+        return str(el.get("observacoes") or el.get("observacao") or "")
+
+    def _ponto_referencia_texto_molde(self, base: list[QPointF], referencia: str) -> QPointF:
+        xs = [p.x() for p in base]
+        ys = [p.y() for p in base]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        ref = str(referencia or "Centro centro").lower()
+        if "esquerda" in ref:
+            x = min_x
+        elif "direita" in ref:
+            x = max_x
+        else:
+            x = (min_x + max_x) / 2.0
+        if "topo" in ref:
+            y = min_y
+        elif "abaixo" in ref:
+            y = max_y
+        else:
+            y = (min_y + max_y) / 2.0
+        return QPointF(x, y)
+
+    def _ponto_texto_molde(self, el: dict, base: list[QPointF], chave: str) -> QPointF:
+        referencia = str(el.get(f"referencia_texto_{chave}") or "Centro centro").strip()
+        valor = el.get(f"ponto_texto_{chave}")
+        if chave == "nome" and valor is None:
+            valor = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
+        if referencia.lower() == "livre" and isinstance(valor, (list, tuple)) and len(valor) >= 2:
+            try:
+                return QPointF(float(valor[0]), float(valor[1]))
+            except (TypeError, ValueError):
+                pass
+        return self._ponto_referencia_texto_molde(base, referencia)
+
+    def _retangulo_texto_por_referencia(self, largura: float, altura: float, referencia: str) -> QRectF:
+        ref = str(referencia or "Centro centro").strip().lower()
+        if ref == "livre":
+            ref = "centro centro"
+        if "esquerda" in ref:
+            x = 0.0
+        elif "direita" in ref:
+            x = -largura
+        else:
+            x = -largura / 2.0
+        if "topo" in ref:
+            y = 0.0
+        elif "abaixo" in ref:
+            y = -altura
+        else:
+            y = -altura / 2.0
+        return QRectF(x, y, largura, altura)
+
+    def _desenhar_texto_molde_configurado(self, painter: QPainter, base: list[QPointF], el: dict, chave: str, visivel: bool):
+        if not visivel:
+            return
+        texto = self._texto_molde_por_chave(el, chave).strip()
+        if not texto:
+            return
+        referencia = str(el.get(f"referencia_texto_{chave}") or "Centro centro")
+        alinhamento = str(el.get(f"alinhamento_texto_{chave}") or "Centro")
+        angulo = self._valor_float_molde(el, (f"texto_{chave}_angulo", f"{chave}_angulo"), 0.0)
+        altura_padrao = 0.9 if chave == "nome" else 0.7
+        tamanho_px = self._altura_cm_para_px(
+            self._valor_float_molde(el, (f"texto_{chave}_altura_cm", f"{chave}_altura_cm"), None),
+            altura_padrao,
+        )
+        pos = self._cena_para_tela(self._ponto_texto_molde(el, base, chave))
+        bbox_tela = self._bbox_tela_pontos(base)
+        largura_molde_px = max(40.0, bbox_tela[2] - bbox_tela[0] - 12.0)
+
+        painter.save()
+        fonte = painter.font()
+        fonte.setPixelSize(int(max(4, min(160, round(tamanho_px)))))
+        painter.setFont(fonte)
+        metric = QFontMetrics(painter.font())
+        largura_texto = metric.horizontalAdvance(texto) + 22
+        largura = max(40.0, min(max(120.0, float(largura_texto)), max(largura_molde_px, float(largura_texto))))
+        altura = max(float(metric.height() + 6), float(tamanho_px * 1.8))
+        flags = Qt.AlignVCenter
+        if alinhamento.lower().startswith("esq"):
+            flags |= Qt.AlignLeft
+        elif alinhamento.lower().startswith("dir"):
+            flags |= Qt.AlignRight
+        else:
+            flags |= Qt.AlignCenter
+        painter.translate(pos)
+        if abs(float(angulo or 0.0)) > 0.01:
+            painter.rotate(-float(angulo))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.drawText(self._retangulo_texto_por_referencia(largura, altura, referencia), flags, texto)
+        painter.restore()
+
+    def _desenhar_margem_molde(self, painter: QPainter, base: list[QPointF], el: dict):
+        if not el.get("mostrar_margem", False) or len(base) < 3:
+            return
+        margens = self._margens_por_segmento_molde(el, len(base))
+        if not margens:
+            return
+        sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
+        cor = QColor(str(el.get("cor") or "#ffffff"))
+        if not cor.isValid():
+            cor = QColor("#ffffff")
+        painter.save()
+        pen = QPen(cor, 1.0)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        total = len(base)
+        for seg_idx, margem in margens.items():
+            if margem <= 0:
+                continue
+            pontos_offset = self._pontos_offset_segmento_molde(base, seg_idx, margem, sentido)
+            if pontos_offset is None:
+                continue
+            a, b, off_a, off_b = pontos_offset
+            painter.drawLine(self._cena_para_tela(off_a), self._cena_para_tela(off_b))
+            margem_anterior = float(margens.get((seg_idx - 1) % total, 0.0) or 0.0)
+            if margem_anterior > 0:
+                anterior = self._pontos_offset_segmento_molde(base, (seg_idx - 1) % total, margem_anterior, sentido)
+                if anterior is not None:
+                    canto = QPainterPath(self._cena_para_tela(anterior[3]))
+                    controle = self._intersecao_linhas_molde(anterior[2], anterior[3], off_a, off_b)
+                    if controle is None:
+                        controle = QPointF(anterior[3].x() + off_a.x() - a.x(), anterior[3].y() + off_a.y() - a.y())
+                    canto.quadTo(self._cena_para_tela(controle), self._cena_para_tela(off_a))
+                    painter.drawPath(canto)
+            else:
+                painter.drawLine(self._cena_para_tela(a), self._cena_para_tela(off_a))
+            margem_proxima = float(margens.get((seg_idx + 1) % total, 0.0) or 0.0)
+            if margem_proxima <= 0:
+                painter.drawLine(self._cena_para_tela(off_b), self._cena_para_tela(b))
+        painter.restore()
+
+    def _margens_por_segmento_molde(self, el: dict, total_segmentos: int) -> dict[int, float]:
+        margens: dict[int, float] = {}
+        for dados in (el.get("margens_molde"), el.get("margens"), el.get("margem_cm_por_elemento")):
+            if isinstance(dados, list):
+                for item in dados:
+                    if isinstance(item, dict):
+                        idx = self._indice_segmento_margem_molde(str(item.get("elemento") or ""), total_segmentos)
+                        valor = self._valor_margem_molde(item.get("margem"))
+                        if idx is not None and valor > 0:
+                            margens[idx] = valor
+            elif isinstance(dados, dict):
+                for elemento, valor_raw in dados.items():
+                    idx = self._indice_segmento_margem_molde(str(elemento), total_segmentos)
+                    valor = self._valor_margem_molde(valor_raw)
+                    if idx is not None and valor > 0:
+                        margens[idx] = valor
+        return margens
+
+    @staticmethod
+    def _valor_margem_molde(valor) -> float:
+        try:
+            texto = str(valor).replace("cm", "").replace(",", ".").strip()
+            return max(0.0, float(texto or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _indice_segmento_margem_molde(elemento: str, total_segmentos: int) -> int | None:
+        partes = str(elemento or "").replace(" ", "").split("-", 1)
+        if len(partes) != 2 or total_segmentos <= 0:
+            return None
+        try:
+            inicio = int(partes[0])
+            fim = int(partes[1])
+        except ValueError:
+            return None
+        esperado_fim = (inicio % total_segmentos) + 1
+        if inicio < 1 or inicio > total_segmentos or fim != esperado_fim:
+            return None
+        return inicio - 1
+
+    @staticmethod
+    def _area_assinada_pontos(pontos: list[QPointF]) -> float:
+        area = 0.0
+        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
+            area += (a.x() * b.y()) - (b.x() * a.y())
+        return area / 2.0
+
+    @staticmethod
+    def _pontos_offset_segmento_molde(
+            base: list[QPointF],
+            seg_idx: int,
+            margem: float,
+            sentido: float,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | None:
+        total = len(base)
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-9:
+            return None
+        nx = sentido * (-dy / comp)
+        ny = sentido * (dx / comp)
+        return a, b, QPointF(a.x() + (nx * margem), a.y() + (ny * margem)), QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
+
+    @staticmethod
+    def _intersecao_linhas_molde(p1: QPointF, p2: QPointF, p3: QPointF, p4: QPointF) -> QPointF | None:
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+        x3, y3 = p3.x(), p3.y()
+        x4, y4 = p4.x(), p4.y()
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 1e-9:
+            return None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
+        return QPointF(px, py)
 
     def _valor_float_molde(self, el: dict, chaves: tuple[str, ...], padrao):
         for chave in chaves:
