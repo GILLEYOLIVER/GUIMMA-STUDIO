@@ -48,6 +48,17 @@ ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 QLocale.setDefault(QLocale.c())
 
 
+class NumeroLimpoDoubleSpinBox(QDoubleSpinBox):
+    """Mostra 12 em vez de 12.00, mantendo casas quando o valor realmente é decimal."""
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        casas = max(0, int(self.decimals()))
+        texto = f"{float(value):.{casas}f}"
+        if "." in texto:
+            texto = texto.rstrip("0").rstrip(".")
+        return "0" if texto in {"", "-0"} else texto
+
+
 @dataclass(slots=True)
 class MoldeRef:
     indice: int
@@ -1970,19 +1981,19 @@ class PropriedadesMoldesDialog(QDialog):
         ])
         self.ed_alinhamento = QComboBox()
         self.ed_alinhamento.addItems(["Esquerda", "Centro", "Direita"])
-        self.ed_angulo_texto = QDoubleSpinBox()
+        self.ed_angulo_texto = NumeroLimpoDoubleSpinBox()
         self.ed_angulo_texto.setLocale(QLocale.c())
         self.ed_angulo_texto.setRange(-360.0, 360.0)
         self.ed_angulo_texto.setDecimals(1)
         self.ed_angulo_texto.setSingleStep(1.0)
         self.ed_angulo_texto.setValue(0.0)
-        self.ed_altura_texto = QDoubleSpinBox()
+        self.ed_altura_texto = NumeroLimpoDoubleSpinBox()
         self.ed_altura_texto.setLocale(QLocale.c())
         self.ed_altura_texto.setRange(0.1, 99.0)
         self.ed_altura_texto.setDecimals(2)
         self.ed_altura_texto.setSingleStep(0.1)
         self.ed_altura_texto.setValue(0.7)
-        self.ed_espaco_linhas = QDoubleSpinBox()
+        self.ed_espaco_linhas = NumeroLimpoDoubleSpinBox()
         self.ed_espaco_linhas.setLocale(QLocale.c())
         self.ed_espaco_linhas.setRange(0.0, 99.0)
         self.ed_espaco_linhas.setDecimals(2)
@@ -2157,9 +2168,8 @@ class PropriedadesMoldesDialog(QDialog):
 
         self._atualizar_entry_visualizacao_por_elemento()
 
-        # Referência e alinhamento ficam liberados para todos os elementos manipuláveis.
-        # O campo inferior é reaproveitado para Nome, Descrição e Observações.
-        elemento_manipulavel = elemento in {"Nome", "Descrição", "Observações", "Fio", "Números"}
+        # Números usam apenas altura e ponto inicial; referência/alinhamento não se aplicam.
+        elemento_manipulavel = elemento in {"Nome", "Descrição", "Observações", "Fio"}
         self._definir_estado_campo_visual(self.ed_referencia, getattr(self, "lbl_referencia", None), elemento_manipulavel)
         self._definir_estado_campo_visual(self.ed_alinhamento, getattr(self, "lbl_alinhamento", None), elemento_manipulavel)
         self._definir_estado_campo_visual(self.ed_angulo_texto, getattr(self, "lbl_angulo_texto", None), eh_texto)
@@ -2173,7 +2183,7 @@ class PropriedadesMoldesDialog(QDialog):
         if eh_fio:
             mensagem = "Arraste no visualizador para definir o fio; o preview trava em 0°, 30°, 45°, 60°, 90° e equivalentes."
         elif eh_numero:
-            mensagem = "Passe o mouse nos pontos e clique no ponto inicial da numeração; referência e alinhamento ficam disponíveis."
+            mensagem = "Passe o mouse nos pontos e clique no ponto inicial da numeração; referência e alinhamento não se aplicam a números."
         elif eh_texto:
             if self._texto_combo_visual(self.ed_referencia, "Centro centro").strip().lower() == "livre":
                 mensagem = "Modo livre: clique ou arraste no visualizador para posicionar o texto"
@@ -3274,17 +3284,47 @@ class PropriedadesMoldesDialog(QDialog):
         molde["refletido_horizontal"] = valores["refletido_horizontal"]
 
     def _dados_visualizacao_formulario(self) -> dict:
+        molde_atual = self._molde_atual()
         dados = {
             "mostrar_nome": self.chk_mostrar_nome.isChecked(),
             "mostrar_fio": self.chk_mostrar_fio.isChecked(),
             "mostrar_numeros": self.chk_mostrar_numeros.isChecked(),
             "visual_descricao": self.chk_visual_descricao.isChecked(),
+            "visual_observacoes": bool(molde_atual.get("visual_observacoes", False)) if isinstance(molde_atual, dict) else False,
             "visual_quantidade": self.chk_quantidade_visual.isChecked(),
             "visual_preencher": self.chk_preencher.isChecked(),
             "cor": self._cor_visual,
             "mostrar_margem": self.chk_margem_visual.isChecked(),
             "margens": self._coletar_margens_tabela(),
+            "textos": {},
+            "fio": {},
+            "numeros": {},
         }
+        if isinstance(molde_atual, dict):
+            for chave in ("nome", "descricao", "observacoes"):
+                dados_texto = {}
+                for campo in (
+                    f"texto_{chave}_altura_cm",
+                    f"texto_{chave}_angulo",
+                    f"espaco_linhas_texto_{chave}",
+                    f"referencia_texto_{chave}",
+                    f"alinhamento_texto_{chave}",
+                    f"ponto_texto_{chave}",
+                ):
+                    if campo in molde_atual:
+                        dados_texto[campo] = deepcopy(molde_atual.get(campo))
+                if chave == "nome" and "ponto_texto" in molde_atual:
+                    dados_texto["ponto_texto"] = deepcopy(molde_atual.get("ponto_texto"))
+                dados["textos"][chave] = dados_texto
+            for campo in (
+                "fio_origem", "fio_fim", "fio_angulo", "fio_tamanho_px", "tam_fio_px", "tamanho_fio_px",
+                "fio_rotulo", "fio_texto", "titulo_fio", "nome_fio",
+            ):
+                if campo in molde_atual:
+                    dados["fio"][campo] = deepcopy(molde_atual.get(campo))
+            for campo in ("numero_altura_cm", "numero_ponto_inicio"):
+                if campo in molde_atual:
+                    dados["numeros"][campo] = deepcopy(molde_atual.get(campo))
         elemento = self.cmb_elementos_molde.currentText().strip() if hasattr(self, "cmb_elementos_molde") else ""
         chave = self._chave_visual_atual()
         if chave:
@@ -3295,15 +3335,21 @@ class PropriedadesMoldesDialog(QDialog):
             dados["espaco_linhas"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
             dados["referencia_texto"] = self._texto_combo_visual(self.ed_referencia, "Centro centro")
             dados["alinhamento_texto"] = self._texto_combo_visual(self.ed_alinhamento, "Centro")
+            dados["textos"].setdefault(chave, {})
+            dados["textos"][chave][f"texto_{chave}_altura_cm"] = dados["texto_altura_cm"]
+            dados["textos"][chave][f"texto_{chave}_angulo"] = dados["texto_angulo"]
+            dados["textos"][chave][f"espaco_linhas_texto_{chave}"] = dados["espaco_linhas"]
+            dados["textos"][chave][f"referencia_texto_{chave}"] = dados["referencia_texto"]
+            dados["textos"][chave][f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
         elif elemento == "Números":
             dados["elemento_visual"] = elemento
             dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, 0.7)
-            molde_atual = self._molde_atual()
+            dados["numeros"]["numero_altura_cm"] = dados["numero_altura_cm"]
             if isinstance(molde_atual, dict):
                 dados["numero_ponto_inicio"] = int(molde_atual.get("numero_ponto_inicio", 0) or 0)
+                dados["numeros"]["numero_ponto_inicio"] = dados["numero_ponto_inicio"]
         elif elemento == "Fio":
             dados["elemento_visual"] = elemento
-            molde_atual = self._molde_atual()
             if isinstance(molde_atual, dict):
                 for chave_fio in ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"):
                     if chave_fio in molde_atual:
@@ -3318,6 +3364,7 @@ class PropriedadesMoldesDialog(QDialog):
             "mostrar_fio",
             "mostrar_numeros",
             "visual_descricao",
+            "visual_observacoes",
             "visual_quantidade",
             "visual_preencher",
             "cor",
@@ -3328,6 +3375,15 @@ class PropriedadesMoldesDialog(QDialog):
             dict(dados.get("margens") or {}),
             mostrar_margem=bool(dados.get("mostrar_margem", False)),
         )
+        for dados_texto in (dados.get("textos") or {}).values():
+            if not isinstance(dados_texto, dict):
+                continue
+            for campo, valor in dados_texto.items():
+                molde[campo] = deepcopy(valor)
+        for campo, valor in (dados.get("fio") or {}).items():
+            molde[campo] = deepcopy(valor)
+        for campo, valor in (dados.get("numeros") or {}).items():
+            molde[campo] = deepcopy(valor)
         chave_visual = dados.get("chave_visual")
         if chave_visual:
             chave = str(chave_visual)
@@ -3336,7 +3392,11 @@ class PropriedadesMoldesDialog(QDialog):
             molde[f"espaco_linhas_texto_{chave}"] = dados["espaco_linhas"]
             molde[f"referencia_texto_{chave}"] = dados["referencia_texto"]
             molde[f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
-            if str(dados["referencia_texto"]).strip().lower() != "livre":
+            texto_copiado = (dados.get("textos") or {}).get(chave, {})
+            tem_posicao_copiada = isinstance(texto_copiado, dict) and (
+                f"ponto_texto_{chave}" in texto_copiado or (chave == "nome" and "ponto_texto" in texto_copiado)
+            )
+            if not tem_posicao_copiada and str(dados["referencia_texto"]).strip().lower() != "livre":
                 pontos = self.preview._coletar_pontos(molde.get("pontos")) if hasattr(self, "preview") else []
                 base = pontos[:-1] if len(pontos) >= 3 and pontos[0] == pontos[-1] else pontos
                 if base:
