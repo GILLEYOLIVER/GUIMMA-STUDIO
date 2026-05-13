@@ -536,6 +536,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         altura_disponivel = max(240, self.height() - y - 40)
         self.backstage.setFixedHeight(min(520, altura_disponivel))
         self.backstage.move(0, y)
+        area = self._area_documento_atual() if hasattr(self, "abas_documentos") else None
+        if isinstance(area, AreaDocumentoWidget):
+            area._on_zoom_changed(area.canvas.zoom)
+            area.canvas.sincronizar_paineis_auxiliares()
+
+    def _agendar_reencaixe_janela_canvas(self):
+        QTimer.singleShot(0, self._reencaixar_janela_canvas)
+        QTimer.singleShot(80, self._reencaixar_janela_canvas)
+
+    def _reencaixar_janela_canvas(self):
+        if not self.isMaximized():
+            self.showMaximized()
+        area = self._area_documento_atual()
+        if isinstance(area, AreaDocumentoWidget):
+            area.updateGeometry()
+            area._on_zoom_changed(area.canvas.zoom)
+            area.canvas.sincronizar_paineis_auxiliares()
+            area.canvas.update()
 
     def _alternar_backstage(self):
         self.backstage.setVisible(not self.backstage.isVisible())
@@ -3133,6 +3151,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._atualizar_titulo()
         self.backstage.hide()
         self._agendar_salvar_estado_silencioso()
+        self._agendar_reencaixe_janela_canvas()
 
     def _carregar_moldes_reais_no_canvas(self, area, moldes):
         if not area:
@@ -3807,6 +3826,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         caixa.setText("Deseja recuperar arquivo(s) perdido(s)?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         self._traduzir_botoes_padrao_message_box(caixa)
+        self._ordenar_botoes_sim_na_direita(caixa)
         QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
         if caixa.exec() != QMessageBox.Yes:
             self._limpar_arquivo_recuperacao()
@@ -3826,6 +3846,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.update()
         self._ativar_ferramenta_global("selecionar")
         self.lbl_status.setText("Recuperação concluída.")
+        self._agendar_reencaixe_janela_canvas()
 
     def _abrir_projeto(self):
         self.backstage.hide()
@@ -3879,6 +3900,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if area:
             self._marcar_area_como_salva(area)
         self.backstage.hide()
+        self._agendar_reencaixe_janela_canvas()
 
     def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
@@ -4525,6 +4547,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             botao = caixa.button(botao_padrao)
             if botao:
                 botao.setText(texto)
+
+    def _ordenar_botoes_sim_na_direita(self, caixa: QMessageBox):
+        grupo_botoes = caixa.findChild(QDialogButtonBox)
+        if grupo_botoes is None:
+            return
+        grupo_botoes.setLayoutDirection(Qt.RightToLeft)
 
     def _sincronizar_documentos_canvas_no_projeto(self):
         documentos_canvas: list[dict] = []

@@ -28,5 +28,5 @@ class GuimmaStudioApp:
                 return
 
     def run(self) -> int:
-        self.janela_principal.show()
+        self.janela_principal.showMaximized()
         return self.qt_app.exec()
