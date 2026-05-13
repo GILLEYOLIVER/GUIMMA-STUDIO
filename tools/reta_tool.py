@@ -238,7 +238,7 @@ class RetaToolUI(QFrame):
         layout.addWidget(self.btn_aplicar)
 
         dicas = QLabel(
-            "LMB adiciona ponto  •  RMB finaliza / sai  •  Shift trava 45°  •  W trava X/Y  •  Esc cancela"
+            "LMB adiciona ponto  •  RMB finaliza / sai  •  Shift libera ângulo  •  W trava X/Y  •  Esc cancela"
         )
         dicas.setObjectName("hint")
         dicas.setWordWrap(True)
@@ -382,7 +382,7 @@ class Ferramenta(FerramentaBase):
     id_ferramenta = "reta"
     nome = "Reta"
 
-    ANGULOS_PRINCIPAIS = [0, 45, 90, 135, 180, 225, 270, 315]
+    ANGULOS_PRINCIPAIS = [0, 30, 45, 60, 90, 120, 135, 150, 180, 210, 225, 240, 270, 300, 315, 330]
 
     def __init__(self):
         super().__init__()
@@ -412,7 +412,7 @@ class Ferramenta(FerramentaBase):
         if self.ui_flutuante:
             self.ui_flutuante.raise_()
             self.ui_flutuante.reposicionar_no_canto_superior_direito()
-            self.ui_flutuante.atualizar_status_operacao("Ferramenta pronta.")
+            self.ui_flutuante.atualizar_status_operacao("Ferramenta pronta. Trava automática em 30°, 45°, 60°, 90° etc.; segure Shift para ângulo livre.")
 
     def on_canvas_resize(self, canvas: VisualizacaoCanvas):
         if self.ui_flutuante and self.ui_flutuante.isVisible():
@@ -520,7 +520,7 @@ class Ferramenta(FerramentaBase):
         angulo = degrees(atan2(-dy, dx)) % 360.0
         angulo_mais_proximo = min(self.ANGULOS_PRINCIPAIS, key=lambda a: min(abs(angulo - a), 360 - abs(angulo - a)))
         diferenca = min(abs(angulo - angulo_mais_proximo), 360 - abs(angulo - angulo_mais_proximo))
-        if diferenca <= 7.5:
+        if diferenca <= 12.0:
             comprimento = sqrt((dx * dx) + (dy * dy))
             rad = radians(angulo_mais_proximo)
             return QPointF(ponto_anterior.x() + (cos(rad) * comprimento), ponto_anterior.y() - (sin(rad) * comprimento))
@@ -552,8 +552,11 @@ class Ferramenta(FerramentaBase):
                 return QPointF(resultado.x(), ponto_anterior.y())
             return QPointF(ponto_anterior.x(), resultado.y())
 
+        # Shift, nesta ferramenta, libera totalmente a angulação.
+        # Sem Shift, a reta tenta encaixar automaticamente nos ângulos técnicos
+        # principais: 0°, 30°, 45°, 60°, 90° etc.
         if self.tecla_shift:
-            return self._travar_angulo_principal(ponto_anterior, resultado)
+            return resultado
 
         if self.modo == "horizontal":
             return QPointF(resultado.x(), ponto_anterior.y())
@@ -562,6 +565,7 @@ class Ferramenta(FerramentaBase):
             return QPointF(ponto_anterior.x(), resultado.y())
 
         if self.modo == "comprimento":
+            resultado = self._travar_angulo_principal(ponto_anterior, resultado)
             vetor = resultado - ponto_anterior
             comprimento = sqrt((vetor.x() * vetor.x()) + (vetor.y() * vetor.y()))
             if comprimento > 0.0001:
@@ -582,12 +586,15 @@ class Ferramenta(FerramentaBase):
         if self.modo in {"paralela", "perpendicular"} and self.reta_referencia:
             return self._aplicar_modo_referencia(ponto_anterior, resultado)
 
+        if self.modo == "livre":
+            return self._travar_angulo_principal(ponto_anterior, resultado)
+
         return resultado
 
     def _aplicar_pos_processamento(self, origem: QPointF, destino: QPointF) -> QPointF:
         if not self.canvas:
             return destino
-        destino = self.canvas._snap_angular(origem, destino, travar_principais=self.tecla_w)
+        destino = self.canvas._snap_angular(origem, destino, travar_principais=self.tecla_w, liberar_angular=self.tecla_shift)
         destino = self.canvas._aplicar_guia_fechamento(origem, destino)
         destino = self.canvas._aplicar_guias_alinhamento(origem, destino)
         return destino
@@ -773,7 +780,7 @@ class Ferramenta(FerramentaBase):
         if self.tecla_w:
             trava_info.append("W X/Y")
         elif self.tecla_shift:
-            trava_info.append("Shift 45°")
+            trava_info.append("Shift: ângulo livre")
         elif self.modo in {"horizontal", "vertical", "comprimento", "angulo", "comp_ang", "paralela", "perpendicular"}:
             trava_info.append(self.modo)
         if canvas._snap_resultado:
@@ -796,7 +803,9 @@ class Ferramenta(FerramentaBase):
             self.tecla_shift = True
             self.tecla_w = False
             if canvas.lbl_status:
-                canvas.lbl_status.setText("Trava angular em 45° ativada")
+                canvas.lbl_status.setText("Shift pressionado: ângulo livre, sem travar em 30°, 45°, 60°, 90° etc.")
+            if self.ui_flutuante:
+                self.ui_flutuante.atualizar_status_operacao("Shift pressionado: ângulo livre.")
             return False
         if key == Qt.Key_W and not event.isAutoRepeat():
             self.tecla_w = True
@@ -821,7 +830,9 @@ class Ferramenta(FerramentaBase):
         if key == Qt.Key_Shift and not event.isAutoRepeat():
             self.tecla_shift = False
             if canvas.lbl_status and not self.tecla_w:
-                canvas.lbl_status.setText("Trava angular liberada")
+                canvas.lbl_status.setText("Shift solto: trava automática de ângulo reativada em 30°, 45°, 60°, 90° etc.")
+            if self.ui_flutuante:
+                self.ui_flutuante.atualizar_status_operacao("Trava automática de ângulo reativada.")
             return False
         if key == Qt.Key_W and not event.isAutoRepeat():
             self.tecla_w = False

@@ -7,7 +7,7 @@ from math import atan2, cos, radians, sin, sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
+from PySide6.QtCore import QEvent, QLocale, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -42,6 +42,10 @@ from PySide6.QtWidgets import (
 from tools.tool_base import FerramentaBase
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
+
+# Regra do GUIMMA STUDIO: valores decimais sempre usam ponto.
+# Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
+QLocale.setDefault(QLocale.c())
 
 
 @dataclass(slots=True)
@@ -1967,16 +1971,19 @@ class PropriedadesMoldesDialog(QDialog):
         self.ed_alinhamento = QComboBox()
         self.ed_alinhamento.addItems(["Esquerda", "Centro", "Direita"])
         self.ed_angulo_texto = QDoubleSpinBox()
+        self.ed_angulo_texto.setLocale(QLocale.c())
         self.ed_angulo_texto.setRange(-360.0, 360.0)
         self.ed_angulo_texto.setDecimals(1)
         self.ed_angulo_texto.setSingleStep(1.0)
         self.ed_angulo_texto.setValue(0.0)
         self.ed_altura_texto = QDoubleSpinBox()
+        self.ed_altura_texto.setLocale(QLocale.c())
         self.ed_altura_texto.setRange(0.1, 99.0)
         self.ed_altura_texto.setDecimals(2)
         self.ed_altura_texto.setSingleStep(0.1)
         self.ed_altura_texto.setValue(0.7)
         self.ed_espaco_linhas = QDoubleSpinBox()
+        self.ed_espaco_linhas.setLocale(QLocale.c())
         self.ed_espaco_linhas.setRange(0.0, 99.0)
         self.ed_espaco_linhas.setDecimals(2)
         self.ed_espaco_linhas.setSingleStep(0.1)
