@@ -10,7 +10,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -191,6 +191,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._timer_vigiar_submenu_backstage = QTimer(self)
         self._timer_vigiar_submenu_backstage.setInterval(50)  # 50ms para resposta rápida
         self._timer_vigiar_submenu_backstage.timeout.connect(self._processar_hover_backstage_global)
+        self._pulso_enquadramento_windows_ativo = False
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
@@ -541,10 +542,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             area._on_zoom_changed(area.canvas.zoom)
             area.canvas.sincronizar_paineis_auxiliares()
 
-    def _agendar_reencaixe_janela_canvas(self):
+    def _agendar_reencaixe_janela_canvas(self, pulso_windows: bool = True):
         QTimer.singleShot(0, self._reencaixar_janela_canvas)
         QTimer.singleShot(80, self._reencaixar_janela_canvas)
         QTimer.singleShot(250, self._reencaixar_janela_canvas)
+        if pulso_windows and sys.platform.startswith("win"):
+            QTimer.singleShot(120, self._pulso_enquadramento_windows)
 
     def _reencaixar_janela_canvas(self):
         self._forcar_janela_maximizada_no_display()
@@ -565,23 +568,24 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.update()
 
     def _forcar_janela_maximizada_no_display(self):
-        tela = None
-        try:
-            if self.windowHandle() is not None:
-                tela = self.windowHandle().screen()
-        except Exception:
-            tela = None
-        if tela is None:
-            tela = self.screen() or QApplication.primaryScreen()
-        if tela is None:
+        if not self.isMaximized():
             self.showMaximized()
+
+    def _pulso_enquadramento_windows(self):
+        if self._pulso_enquadramento_windows_ativo or not sys.platform.startswith("win"):
             return
-        area_util: QRect = tela.availableGeometry()
-        self.setWindowState(self.windowState() & ~Qt.WindowMinimized & ~Qt.WindowMaximized)
-        self.setGeometry(area_util)
-        self.move(area_util.topLeft())
-        self.setWindowState(self.windowState() | Qt.WindowMaximized)
-        self.showMaximized()
+        self._pulso_enquadramento_windows_ativo = True
+        self.showMinimized()
+
+        def _restaurar():
+            self.showMaximized()
+            QTimer.singleShot(60, self._reencaixar_janela_canvas)
+            QTimer.singleShot(140, self._finalizar_pulso_enquadramento_windows)
+
+        QTimer.singleShot(80, _restaurar)
+
+    def _finalizar_pulso_enquadramento_windows(self):
+        self._pulso_enquadramento_windows_ativo = False
 
     def _alternar_backstage(self):
         self.backstage.setVisible(not self.backstage.isVisible())
@@ -2068,14 +2072,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._anexar_preview_dialogo_arquivo(dialog)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
-            self._agendar_reencaixe_janela_canvas()
+            self._agendar_reencaixe_janela_canvas(pulso_windows=False)
             return "", ""
         self._forcar_janela_maximizada_no_display()
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         if caminho:
             self._memorizar_diretorio_arquivo(Path(caminho))
-        self._agendar_reencaixe_janela_canvas()
+        self._agendar_reencaixe_janela_canvas(pulso_windows=False)
         return caminho, dialog.selectedNameFilter()
 
     def _diretorio_arquivo_inicial(self) -> str:
