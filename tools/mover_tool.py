@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
 
+from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
 
 
@@ -53,41 +54,7 @@ class Ferramenta(FerramentaBase):
             if idx < 0 or idx >= len(canvas.cena.elementos):
                 continue
             el = canvas.cena.elementos[idx]
-            if el.get("tipo") == "polyline":
-                el["pontos"] = [(x + dx, y + dy) for x, y in el.get("pontos", [])]
-                if "controle_cantos" in el:
-                    el["controle_cantos"] = [(x + dx, y + dy) for x, y in el.get("controle_cantos", [])]
-                if "controle_auxiliares" in el:
-                    el["controle_auxiliares"] = [(x + dx, y + dy) for x, y in el.get("controle_auxiliares", [])]
-                if "fio_origem" in el:
-                    fx, fy = el.get("fio_origem", (0.0, 0.0))
-                    el["fio_origem"] = (float(fx) + dx, float(fy) + dy)
-                if "fio_fim" in el:
-                    fx, fy = el.get("fio_fim", (0.0, 0.0))
-                    el["fio_fim"] = (float(fx) + dx, float(fy) + dy)
-                for chave in ("ponto_texto", "seta_origem", "seta_fim"):
-                    if chave in el:
-                        fx, fy = el.get(chave, (0.0, 0.0))
-                        el[chave] = (float(fx) + dx, float(fy) + dy)
-                if "marcacoes_no_perimetro" in el:
-                    el["marcacoes_no_perimetro"] = [(x + dx, y + dy) for x, y in el.get("marcacoes_no_perimetro", [])]
-                if "pontos_controle_principais" in el:
-                    for pt in el.get("pontos_controle_principais", []):
-                        if isinstance(pt, dict) and "x" in pt and "y" in pt:
-                            pt["x"] = float(pt["x"]) + dx
-                            pt["y"] = float(pt["y"]) + dy
-                if "pontos_auxiliares" in el:
-                    for pt in el.get("pontos_auxiliares", []):
-                        if isinstance(pt, dict) and "x" in pt and "y" in pt:
-                            pt["x"] = float(pt["x"]) + dx
-                            pt["y"] = float(pt["y"]) + dy
-            elif el.get("tipo") == "bezier_quadratica":
-                for chave in ("p0", "p1", "p2"):
-                    x, y = el[chave]
-                    el[chave] = (x + dx, y + dy)
-            elif el.get("tipo") == "texto" and "pos" in el:
-                fx, fy = el.get("pos", (0.0, 0.0))
-                el["pos"] = (float(fx) + dx, float(fy) + dy)
+            mover_elemento_por_delta(el, dx, dy)
         self._ultimo_ponto = atual
         self._movido = True
         canvas.update()
