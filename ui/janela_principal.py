@@ -10,7 +10,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -544,16 +544,41 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _agendar_reencaixe_janela_canvas(self):
         QTimer.singleShot(0, self._reencaixar_janela_canvas)
         QTimer.singleShot(80, self._reencaixar_janela_canvas)
+        QTimer.singleShot(250, self._reencaixar_janela_canvas)
 
     def _reencaixar_janela_canvas(self):
-        if not self.isMaximized():
-            self.showMaximized()
+        self._forcar_janela_maximizada_no_display()
+        central = self.centralWidget()
+        if central is not None:
+            central.updateGeometry()
+            layout = central.layout()
+            if layout is not None:
+                layout.activate()
         area = self._area_documento_atual()
         if isinstance(area, AreaDocumentoWidget):
             area.updateGeometry()
             area._on_zoom_changed(area.canvas.zoom)
             area.canvas.sincronizar_paineis_auxiliares()
             area.canvas.update()
+
+    def _forcar_janela_maximizada_no_display(self):
+        tela = None
+        try:
+            if self.windowHandle() is not None:
+                tela = self.windowHandle().screen()
+        except Exception:
+            tela = None
+        if tela is None:
+            tela = self.screen() or QApplication.primaryScreen()
+        if tela is None:
+            self.showMaximized()
+            return
+        area_util: QRect = tela.availableGeometry()
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized & ~Qt.WindowMaximized)
+        self.setGeometry(area_util)
+        self.move(area_util.topLeft())
+        self.setWindowState(self.windowState() | Qt.WindowMaximized)
+        self.showMaximized()
 
     def _alternar_backstage(self):
         self.backstage.setVisible(not self.backstage.isVisible())
@@ -2040,11 +2065,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._anexar_preview_dialogo_arquivo(dialog)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
+            self._agendar_reencaixe_janela_canvas()
             return "", ""
+        self._forcar_janela_maximizada_no_display()
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         if caminho:
             self._memorizar_diretorio_arquivo(Path(caminho))
+        self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter()
 
     def _diretorio_arquivo_inicial(self) -> str:
