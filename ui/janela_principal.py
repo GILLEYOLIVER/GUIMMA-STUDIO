@@ -201,6 +201,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._oferecer_recuperacao_pos_falha()
         QTimer.singleShot(0, lambda: self._ativar_ferramenta_global("selecionar"))
         self.showMaximized()
+        if sys.platform.startswith("win"):
+            QTimer.singleShot(250, self._pulso_enquadramento_windows)
 
     def _carregar_preferencias_app(self) -> dict:
         try:
@@ -575,7 +577,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if self._pulso_enquadramento_windows_ativo or not sys.platform.startswith("win"):
             return
         self._pulso_enquadramento_windows_ativo = True
-        self.showMinimized()
+        self.showNormal()
 
         def _restaurar():
             self.showMaximized()
