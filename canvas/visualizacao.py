@@ -27,6 +27,7 @@ class VisualizacaoCanvas(QWidget):
     snap_changed = Signal(bool)
     painel_coordenadas_changed = Signal(bool)
     painel_posicao_changed = Signal(int, int)
+    elementos_alterados = Signal()
 
     def __init__(self, cena: CenaDocumento, parent: QWidget | None = None):
         super().__init__(parent)
@@ -365,6 +366,7 @@ class VisualizacaoCanvas(QWidget):
         self._indice_historico -= 1
         self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
         self.update()
+        self.elementos_alterados.emit()
 
     def refazer_acao(self):
         self._garantir_estado_atual_no_historico()
@@ -373,6 +375,7 @@ class VisualizacaoCanvas(QWidget):
         self._indice_historico += 1
         self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
         self.update()
+        self.elementos_alterados.emit()
 
     def copiar(self):
         if self._selecionados:
