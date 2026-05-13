@@ -525,7 +525,10 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def selecionar_moldes(self):
-        self._selecionados = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        self._selecionados = {
+            idx for idx, el in enumerate(self.cena.elementos)
+            if el.get("molde") and self._elemento_visivel_no_menu_moldes(el)
+        }
         self.update()
 
     def inverter_selecao(self):
@@ -534,7 +537,10 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def inverter_selecao_moldes(self):
-        moldes = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
+        moldes = {
+            idx for idx, el in enumerate(self.cena.elementos)
+            if el.get("molde") and self._elemento_visivel_no_menu_moldes(el)
+        }
         self._selecionados = moldes - (set(self._selecionados) & moldes)
         self.update()
 
@@ -1292,6 +1298,8 @@ class VisualizacaoCanvas(QWidget):
             painter.drawLine(p1_tela, p2_tela)
 
         for idx, elemento in enumerate(self.cena.elementos):
+            if not self._elemento_visivel_no_menu_moldes(elemento):
+                continue
             if elemento.get("tipo") == "imagem":
                 self._desenhar_imagem_referencia(painter, elemento)
                 continue
@@ -1419,6 +1427,8 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_overlays_moldes(self, painter: QPainter):
         for idx, el in enumerate(self.cena.elementos):
             if not el.get("molde"):
+                continue
+            if not self._elemento_visivel_no_menu_moldes(el):
                 continue
             pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             if len(pontos) < 3:
@@ -2392,6 +2402,8 @@ class VisualizacaoCanvas(QWidget):
         candidatos: list[int] = []
         for idx in range(len(self.cena.elementos) - 1, -1, -1):
             el = self.cena.elementos[idx]
+            if not self._elemento_visivel_no_menu_moldes(el):
+                continue
             if el.get("tipo") == "polyline":
                 pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                 if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
@@ -2463,6 +2475,24 @@ class VisualizacaoCanvas(QWidget):
             if cor.isValid():
                 return cor.name()
         return fallback
+
+    def _elemento_visivel_no_menu_moldes(self, elemento: dict) -> bool:
+        if not isinstance(elemento, dict):
+            return True
+        if elemento.get("molde"):
+            return bool(elemento.get("menu_moldes_visivel", True))
+        vinculo = str(elemento.get("costura_de_molde_id") or "").strip()
+        if not vinculo and bool(elemento.get("molde_linha_vinculada")):
+            vinculo = str(elemento.get("molde_id") or "").strip()
+        if not vinculo:
+            return True
+        for molde in self.cena.elementos:
+            if not isinstance(molde, dict) or not molde.get("molde"):
+                continue
+            molde_id = str(molde.get("molde_id") or molde.get("id") or "").strip()
+            if molde_id == vinculo:
+                return bool(molde.get("menu_moldes_visivel", True))
+        return True
 
     def _molde_id_elemento(self, elemento: dict) -> str:
         return str(elemento.get("molde_id") or elemento.get("id") or "").strip()
