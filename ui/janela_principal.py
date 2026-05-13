@@ -105,6 +105,7 @@ class _BotaoRodapeHover(QPushButton):
 class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
+    PERFIL_USUARIO_PADRAO = "1"
     CORES_CANVAS_PADRAO = {
         "desenho": "#ffffff",
         "fundo": "#000000",
@@ -221,7 +222,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._barra_usuarios_habilitada = True
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
-        self._perfil_usuario_atual = "Usuário 1"
+        self._perfil_usuario_atual = self.PERFIL_USUARIO_PADRAO
         self._indice_layout_organizacao_moldes = 0
         self._pendente_centralizar_indicado = False
         self._inicializar_perfis_usuarios()
@@ -3692,6 +3693,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "fio_origem": (min(xs) + margem, y_fio),
                     "fio_fim": (max(xs) - margem, y_fio),
                     "ponto_texto": (cx, cy),
+                    "texto_nome_altura_cm": 3.0,
+                    "numero_altura_cm": 2.0,
                     "mostrar_nome": True,
                     "mostrar_fio": True,
                     "cor": "#ff7b00",
@@ -4705,19 +4708,29 @@ class GuimmaStudioMainWindow(QMainWindow):
                 str(nome): self._lista_usuario_com_ajuste(list(ids) if ids else list(self.FERRAMENTAS_USUARIO_PADRAO))
                 for nome, ids in perfis.items()
             }
+            if "Usuário 1" in self._perfis_usuarios and self.PERFIL_USUARIO_PADRAO not in self._perfis_usuarios:
+                self._perfis_usuarios[self.PERFIL_USUARIO_PADRAO] = self._perfis_usuarios.pop("Usuário 1")
         else:
-            self._perfis_usuarios = {"Usuário 1": list(self._ferramentas_usuario_ids)}
+            self._perfis_usuarios = {self.PERFIL_USUARIO_PADRAO: list(self._ferramentas_usuario_ids)}
         perfil_atual = self.projeto_atual.preferencias_usuario.get("perfil_usuario_atual")
+        if perfil_atual == "Usuário 1":
+            perfil_atual = self.PERFIL_USUARIO_PADRAO
         if isinstance(perfil_atual, str) and perfil_atual in self._perfis_usuarios:
             self._perfil_usuario_atual = perfil_atual
         else:
-            self._perfil_usuario_atual = next(iter(self._perfis_usuarios.keys()))
+            self._perfil_usuario_atual = (
+                self.PERFIL_USUARIO_PADRAO
+                if self.PERFIL_USUARIO_PADRAO in self._perfis_usuarios
+                else next(iter(self._perfis_usuarios.keys()))
+            )
         self._ferramentas_usuario_ids = self._lista_usuario_com_ajuste(list(
             self._perfis_usuarios.get(self._perfil_usuario_atual, []) or self.FERRAMENTAS_USUARIO_PADRAO
         ))
         cfgs = self.projeto_atual.preferencias_usuario.get("perfis_usuarios_cfg")
         if isinstance(cfgs, dict):
             self._perfis_usuarios_cfg = {str(nome): dict(cfg or {}) for nome, cfg in cfgs.items()}
+            if "Usuário 1" in self._perfis_usuarios_cfg and self.PERFIL_USUARIO_PADRAO not in self._perfis_usuarios_cfg:
+                self._perfis_usuarios_cfg[self.PERFIL_USUARIO_PADRAO] = self._perfis_usuarios_cfg.pop("Usuário 1")
         else:
             self._perfis_usuarios_cfg = {}
         self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(self._perfil_usuario_atual, {}))
