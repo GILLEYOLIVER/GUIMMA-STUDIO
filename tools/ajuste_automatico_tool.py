@@ -159,7 +159,7 @@ class AjusteAutomaticoDialog(QDialog):
         lay_fio.addWidget(QLabel("Tamanho máximo (cm)"), 2, 0)
         self.sp_fio_max = self._spin(0.1, 1000.0, 3.0, 0.1)
         lay_fio.addWidget(self.sp_fio_max, 2, 1)
-        self.chk_centralizar = QCheckBox("Centralizar nome e fio dentro do molde")
+        self.chk_centralizar = QCheckBox("Centralizar textos e fio dentro do molde")
         self.chk_centralizar.setChecked(True)
         lay_fio.addWidget(self.chk_centralizar, 3, 0, 1, 2)
         lay_fio.setColumnStretch(2, 1)
@@ -355,6 +355,7 @@ class Ferramenta(FerramentaBase):
             return
         bbox = self._bbox(pontos)
         centro = self._ponto_central_interno(pontos, bbox)
+        textos_ativos = self._textos_ativos(el)
 
         # Remove as chaves antigas em pixel que faziam letras/fio ficarem enormes
         # quando o molde estava com pouco zoom. A unidade correta desta ferramenta
@@ -365,21 +366,35 @@ class Ferramenta(FerramentaBase):
         ):
             el.pop(chave, None)
 
-        if op.get("centralizar", True):
-            el["nome_posicao"] = (float(centro.x()), float(centro.y()))
-            el["nome_centro"] = (float(centro.x()), float(centro.y()))
-
         if op.get("ajustar_textos", True):
-            tamanho_cm = self._tamanho_texto(el, bbox, op)
-            el["tam_nome"] = tamanho_cm
-            el["tamanho_nome"] = tamanho_cm
-            el["fonte_nome"] = tamanho_cm
-            if op.get("orientacao_manual", False):
-                el["nome_angulo"] = float(op.get("orientacao", 0))
+            tamanhos_textos = {
+                chave: self._tamanho_texto(el, bbox, op, chave)
+                for chave in textos_ativos
+            }
+            if op.get("centralizar", True) and textos_ativos:
+                posicoes = self._posicoes_textos_centralizados(centro, bbox, textos_ativos, tamanhos_textos)
+                for chave, ponto in posicoes.items():
+                    self._aplicar_posicao_texto(el, chave, ponto)
+            for chave in textos_ativos:
+                tamanho_cm = tamanhos_textos[chave]
+                el[f"texto_{chave}_altura_cm"] = tamanho_cm
+                if op.get("centralizar", True):
+                    el[f"referencia_texto_{chave}"] = "Livre"
+                    el[f"alinhamento_texto_{chave}"] = "Centro"
+                if op.get("orientacao_manual", False):
+                    el[f"texto_{chave}_angulo"] = float(op.get("orientacao", 0))
+                if chave == "nome":
+                    el["tam_nome"] = tamanho_cm
+                    el["tamanho_nome"] = tamanho_cm
+                    el["fonte_nome"] = tamanho_cm
+                    if op.get("orientacao_manual", False):
+                        el["nome_angulo"] = float(op.get("orientacao", 0))
 
         if op.get("auto_fio", True):
-            tamanho_nome = float(el.get("tam_nome") or el.get("tamanho_nome") or 0.0)
-            centro_fio = self._centro_fio_abaixo_nome(centro, bbox, tamanho_nome)
+            tamanho_texto = max(
+                [float(el.get(f"texto_{chave}_altura_cm") or 0.0) for chave in textos_ativos] or [0.0]
+            )
+            centro_fio = self._centro_fio_abaixo_textos(centro, bbox, el, textos_ativos, tamanho_texto)
             p1, p2, ang = self._calcular_fio(el, pontos, bbox, centro_fio, op)
             el["fio_origem"] = (float(p1.x()), float(p1.y()))
             el["fio_fim"] = (float(p2.x()), float(p2.y()))
@@ -389,6 +404,56 @@ class Ferramenta(FerramentaBase):
             el["tam_fio"] = max(0.15, min(0.8, tamanho_fio_cm * 0.18))
             el["tamanho_fio"] = el["tam_fio"]
             el["fonte_fio"] = el["tam_fio"]
+
+    def _textos_ativos(self, el: dict) -> list[str]:
+        ativos: list[str] = []
+        if str(el.get("nome_molde") or "").strip() or el.get("mostrar_nome", True):
+            ativos.append("nome")
+        if str(el.get("descricao") or "").strip() or el.get("visual_descricao", False):
+            ativos.append("descricao")
+        if str(el.get("observacoes") or el.get("observacao") or "").strip() or el.get("visual_observacoes", False):
+            ativos.append("observacoes")
+        return ativos
+
+    def _texto_molde(self, el: dict, chave: str) -> str:
+        if chave == "nome":
+            return str(el.get("nome_molde") or "").strip()
+        if chave == "descricao":
+            return str(el.get("descricao") or "").strip()
+        return str(el.get("observacoes") or el.get("observacao") or "").strip()
+
+    def _posicoes_textos_centralizados(
+        self,
+        centro: QPointF,
+        bbox: tuple[float, float, float, float],
+        textos: list[str],
+        tamanhos: dict[str, float],
+    ) -> dict[str, QPointF]:
+        altura_molde = max(0.1, bbox[3] - bbox[1])
+        passo_minimo = max(0.25, altura_molde * 0.08)
+        alturas = [max(0.05, float(tamanhos.get(chave, 0.0))) for chave in textos]
+        espacos = [max(passo_minimo, altura * 1.15) for altura in alturas]
+        altura_total = sum(espacos)
+        y = centro.y() - (altura_total / 2.0)
+        posicoes: dict[str, QPointF] = {}
+        for chave, espaco in zip(textos, espacos):
+            y += espaco / 2.0
+            posicoes[chave] = QPointF(centro.x(), y)
+            y += espaco / 2.0
+        return posicoes
+
+    def _aplicar_posicao_texto(self, el: dict, chave: str, ponto: QPointF) -> None:
+        valor = (float(ponto.x()), float(ponto.y()))
+        el[f"ponto_texto_{chave}"] = valor
+        if chave == "nome":
+            el["ponto_texto"] = valor
+            el["nome_posicao"] = valor
+            el["nome_centro"] = valor
+            el["mostrar_nome"] = True
+        elif chave == "descricao":
+            el["visual_descricao"] = True
+        elif chave == "observacoes":
+            el["visual_observacoes"] = True
 
     def _pontos_molde(self, el: dict) -> list[QPointF]:
         pontos: list[QPointF] = []
@@ -441,8 +506,8 @@ class Ferramenta(FerramentaBase):
                     melhor_dist = dist
         return QPointF(melhor)
 
-    def _tamanho_texto(self, el: dict, bbox: tuple[float, float, float, float], op: dict) -> float:
-        nome = str(el.get("nome_molde") or "").strip()
+    def _tamanho_texto(self, el: dict, bbox: tuple[float, float, float, float], op: dict, chave: str = "nome") -> float:
+        texto = self._texto_molde(el, chave)
         min_cm = float(op.get("texto_min", 0.0))
         max_cm = float(op.get("texto_max", 2.0))
         largura = max(0.0, bbox[2] - bbox[0])
@@ -452,7 +517,7 @@ class Ferramenta(FerramentaBase):
         # Mantém o tamanho em centímetros de cena para acompanhar o zoom junto com o molde.
         # Depois o canvas ainda reduz se o texto encostar nos limites do molde.
         por_altura = menor_lado * 0.35
-        por_largura = maior_lado / max(2.5, len(nome) * 0.62)
+        por_largura = maior_lado / max(2.5, max(1, len(texto)) * 0.62)
         cm = min(max_cm, por_altura, por_largura)
         if min_cm > 0:
             cm = max(min_cm, cm)
@@ -490,16 +555,29 @@ class Ferramenta(FerramentaBase):
         p2 = QPointF(centro.x() + direcao.x() * metade, centro.y() + direcao.y() * metade)
         return p1, p2, ang
 
-    def _centro_fio_abaixo_nome(
+    def _centro_fio_abaixo_textos(
         self,
         centro: QPointF,
         bbox: tuple[float, float, float, float],
-        tamanho_nome: float,
+        el: dict,
+        textos: list[str],
+        tamanho_texto: float,
     ) -> QPointF:
         min_x, min_y, max_x, max_y = bbox
         altura = max(0.0, max_y - min_y)
-        deslocamento = max(0.25, float(tamanho_nome or 0.0) * 0.55, altura * 0.035)
-        y = min(max_y - max(0.15, altura * 0.06), centro.y() + deslocamento)
+        y_base = centro.y()
+        pontos_textos = []
+        for chave in textos:
+            valor = el.get(f"ponto_texto_{chave}")
+            if isinstance(valor, (list, tuple)) and len(valor) >= 2:
+                try:
+                    pontos_textos.append(QPointF(float(valor[0]), float(valor[1])))
+                except Exception:
+                    pass
+        if pontos_textos:
+            y_base = max(p.y() for p in pontos_textos)
+        deslocamento = max(0.25, float(tamanho_texto or 0.0) * 0.85, altura * 0.045)
+        y = min(max_y - max(0.15, altura * 0.06), y_base + deslocamento)
         return QPointF(centro.x(), y)
 
     def _angulo_fio_atual(self, el: dict) -> float:
