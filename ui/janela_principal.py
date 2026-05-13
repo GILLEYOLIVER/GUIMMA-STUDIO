@@ -4505,6 +4505,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.splitter_documentos.setStretchFactor(1, 0)
         self.splitter_documentos.setSizes([1200, 168])
         self.painel_menu_moldes.setVisible(self.action_menu_moldes.isChecked())
+        if self.action_menu_moldes.isChecked():
+            self._ajustar_splitter_menu_moldes(
+                int(self.projeto_atual.preferencias_usuario.get("menu_moldes_largura", 168) or 168)
+            )
         layout.addWidget(self.splitter_documentos, 1)
         self._reposicionar_barra_usuarios()
         self._atualizar_linha_usuarios()
@@ -4564,13 +4568,30 @@ class GuimmaStudioMainWindow(QMainWindow):
         lay.addWidget(self.scroll_menu_moldes, 1)
         return painel
 
-    def _definir_largura_menu_moldes(self, largura: int):
+    def _ajustar_splitter_menu_moldes(self, largura: int):
+        if not hasattr(self, "splitter_documentos") or not hasattr(self, "painel_menu_moldes"):
+            return
+        largura = max(136, min(260, int(largura or 168)))
+        tamanhos = self.splitter_documentos.sizes()
+        total = sum(tamanhos)
+        if total <= 0:
+            total = max(self.splitter_documentos.width(), self.width(), largura + 640)
+        esquerda = max(320, total - largura)
+        self.splitter_documentos.setSizes([esquerda, largura])
+        self.painel_menu_moldes.setVisible(True)
+        self.painel_menu_moldes.raise_()
+
+    def _definir_largura_menu_moldes(self, largura: int, salvar: bool = True):
         if not hasattr(self, "painel_menu_moldes"):
             return
-        self.painel_menu_moldes.setMinimumWidth(int(largura))
-        self.painel_menu_moldes.setMaximumWidth(int(largura))
-        self.projeto_atual.preferencias_usuario["menu_moldes_largura"] = int(largura)
-        self._salvar_preferencias_app()
+        largura = max(136, min(260, int(largura or 168)))
+        self.painel_menu_moldes.setMinimumWidth(largura)
+        self.painel_menu_moldes.setMaximumWidth(largura)
+        if self.action_menu_moldes.isChecked():
+            self._ajustar_splitter_menu_moldes(largura)
+        self.projeto_atual.preferencias_usuario["menu_moldes_largura"] = largura
+        if salvar:
+            self._salvar_preferencias_app()
 
     def _alternar_menu_moldes(self, visivel: bool):
         self.projeto_atual.preferencias_usuario["menu_moldes_visivel"] = bool(visivel)
@@ -4578,7 +4599,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.painel_menu_moldes.setVisible(bool(visivel))
             if visivel:
                 largura = int(self.projeto_atual.preferencias_usuario.get("menu_moldes_largura", 168) or 168)
-                self._definir_largura_menu_moldes(largura)
+                self._definir_largura_menu_moldes(largura, salvar=False)
+                self._ajustar_splitter_menu_moldes(largura)
                 self._atualizar_menu_moldes()
         self._salvar_preferencias_app()
         if hasattr(self, "lbl_status"):
