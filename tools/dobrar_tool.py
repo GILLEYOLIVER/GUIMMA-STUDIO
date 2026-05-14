@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QVBoxLayout
 
+from config import ICONS_DIR
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -19,6 +20,7 @@ class DobrarDialog(QDialog):
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
         self.setFixedWidth(280)
+        check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         self.setStyleSheet(
             """
             QDialog { background:#efefef; color:#111111; }
@@ -31,10 +33,12 @@ class DobrarDialog(QDialog):
                 background:#ffffff;
             }
             QCheckBox::indicator:checked {
-                background:#0b7fb8;
+                image:url(__CHECK_ICON__);
+                background:#ffffff;
                 border:1px solid #075f8c;
             }
             """
+            .replace("__CHECK_ICON__", check_icon)
         )
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(8, 8, 8, 8)
@@ -84,6 +88,10 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
+            if self._confirmacao_pendente(canvas):
+                self._cancelar_operacao(canvas)
+                event.accept()
+                return True
             agora = monotonic()
             if agora - self._ultimo_direito <= 0.45:
                 self._fechar(canvas)
@@ -463,7 +471,7 @@ class Ferramenta(FerramentaBase):
         unido = caminhos[0]
         for path in caminhos[1:]:
             unido = unido.united(path)
-        poligono = unido.toFillPolygon()
+        poligono = unido.simplified().toFillPolygon()
         return self._limpar_pontos_repetidos([QPointF(p) for p in poligono])
 
     def _limpar_pontos_repetidos(self, pontos: list[QPointF]) -> list[QPointF]:
@@ -553,6 +561,23 @@ class Ferramenta(FerramentaBase):
     def _resetar_linha(self):
         self._linha_p1 = None
         self._linha_p2 = None
+
+    def _confirmacao_pendente(self, canvas) -> bool:
+        indices = self._indices_moldes(canvas)
+        if not indices:
+            return False
+        dialog = self._obter_dialog(canvas)
+        if dialog.cmb_modo.currentText() == "Dobrar na linha":
+            return self._linha_p1 is not None or self._linha_p2 is not None
+        return bool(self._lado_preview)
+
+    def _cancelar_operacao(self, canvas) -> None:
+        self._lado_preview = 0
+        self._preview_pos = None
+        self._resetar_linha()
+        canvas._selecionados = set()
+        canvas.update()
+        self._status(canvas, "Dobrar cancelado. Clique em um molde para começar novamente.")
 
     def _fechar(self, canvas):
         canvas.set_ferramenta_ativa("selecionar")

@@ -2484,6 +2484,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.update()
 
     def _aplicar_estilo_claro_dialogo(self, dialog: QDialog):
+        check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         dialog.setStyleSheet(
             """
             QDialog { background: #efefef; color: #111111; }
@@ -2498,9 +2499,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             }
             QCheckBox::indicator:hover { border: 1px solid #0b7fb8; }
             QCheckBox::indicator:checked {
-                background: #0b7fb8;
+                image: url(__CHECK_ICON__);
+                background: #ffffff;
                 border: 1px solid #075f8c;
-                image: none;
             }
             QPushButton, QComboBox, QLineEdit {
                 background: #ffffff;
@@ -2523,6 +2524,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 padding: 3px;
             }
             """
+            .replace("__CHECK_ICON__", check_icon)
         )
 
     def _centralizar_dialogo_na_janela(self, dialog: QDialog):

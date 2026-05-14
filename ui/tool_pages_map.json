@@ -140,7 +140,8 @@
             "encolhimento",
             "linha_simetria",
             "bainha",
-            "dobrar"
+            "dobrar",
+            "desdobrar"
           ]
         },
         {
@@ -525,6 +526,12 @@
       "module": "tools/dobrar_tool.py",
       "class": "Ferramenta",
       "icon": "dobrar.svg"
+    },
+    "desdobrar": {
+      "title": "Desdobrar",
+      "module": "tools/desdobrar_tool.py",
+      "class": "Ferramenta",
+      "icon": "desdobrar.svg"
     },
     "costura": {
       "title": "Costura",
