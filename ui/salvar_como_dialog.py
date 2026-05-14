@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex, QStandardPaths, Qt, QUrl
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTreeView,
     QVBoxLayout,
     QStyledItemDelegate,
+    QStyle,
 )
 from config import EXTENSAO_PROJETO
 
@@ -50,6 +51,7 @@ class SalvarComoDialog(QDialog):
         self.setWindowTitle("Salvar como...")
         self.setMinimumSize(760, 520)
         self._pasta = Path(pasta_inicial or Path.home())
+        self._atalhos_pastas = self._criar_atalhos_pastas()
         self.setObjectName("SalvarComoDialog")
         self.setStyleSheet(
             """
@@ -118,7 +120,36 @@ class SalvarComoDialog(QDialog):
         self.lst_arquivos_existentes = QListWidget()
         self.lst_arquivos_existentes.setMinimumHeight(110)
         self.lst_arquivos_existentes.itemClicked.connect(self._usar_nome_arquivo_existente)
-        g.addWidget(self.lst_arquivos_existentes, 1, 0, 1, 2)
+        self.lst_locais = QListWidget()
+        self.lst_locais.setFixedWidth(150)
+        self.lst_locais.setSpacing(4)
+        self.lst_locais.itemClicked.connect(self._selecionar_local_rapido)
+        self.lst_locais.setStyleSheet(
+            """
+            QListWidget {
+                background: #f7fafc;
+                border: 1px solid #cfd6df;
+                outline: none;
+            }
+            QListWidget::item {
+                min-height: 34px;
+                padding: 4px 8px;
+            }
+            QListWidget::item:selected {
+                background: #d7ecfb;
+                color: #102030;
+            }
+            QListWidget::item:disabled {
+                color: #8a939c;
+            }
+            """
+        )
+        self._popular_locais_rapidos()
+        area_arquivos = QHBoxLayout()
+        area_arquivos.setSpacing(8)
+        area_arquivos.addWidget(self.lst_locais)
+        area_arquivos.addWidget(self.lst_arquivos_existentes, 1)
+        g.addLayout(area_arquivos, 1, 0, 1, 2)
 
         self.edt_nome = QLineEdit(nome_inicial)
         self.cmb_tipo = QComboBox()
@@ -170,6 +201,10 @@ class SalvarComoDialog(QDialog):
         dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, "Selecionar")
         dialog.setLabelText(QFileDialog.DialogLabel.Reject, "Cancelar")
+        try:
+            dialog.setSidebarUrls(self._urls_laterais_dialogo())
+        except Exception:
+            pass
         self._traduzir_textos_internos_dialogo_arquivo(dialog)
         for arvore in dialog.findChildren(QTreeView):
             try:
@@ -187,7 +222,74 @@ class SalvarComoDialog(QDialog):
         if pasta:
             self._pasta = Path(pasta)
             self.edt_pasta.setText(str(self._pasta))
+            self._marcar_local_rapido_atual()
             self._atualizar_lista_arquivos_existentes()
+
+    def _criar_atalhos_pastas(self) -> list[tuple[str, Path | None, QStyle.StandardPixmap]]:
+        home = Path.home()
+
+        def _standard_path(tipo: QStandardPaths.StandardLocation, fallback: Path) -> Path:
+            caminho = QStandardPaths.writableLocation(tipo)
+            return Path(caminho) if caminho else fallback
+
+        desktop = _standard_path(QStandardPaths.StandardLocation.DesktopLocation, home / "Desktop")
+        documentos = _standard_path(QStandardPaths.StandardLocation.DocumentsLocation, home / "Documents")
+        downloads = _standard_path(QStandardPaths.StandardLocation.DownloadLocation, home / "Downloads")
+        unidade = Path(home.anchor) if home.anchor else home
+        return [
+            ("Início", home, QStyle.StandardPixmap.SP_DirHomeIcon),
+            ("Área de Trabalho", desktop, QStyle.StandardPixmap.SP_DesktopIcon),
+            ("Documentos", documentos, QStyle.StandardPixmap.SP_DirIcon),
+            ("Downloads", downloads, QStyle.StandardPixmap.SP_DirIcon),
+            ("Bibliotecas", home, QStyle.StandardPixmap.SP_DirIcon),
+            ("Este Computador", unidade, QStyle.StandardPixmap.SP_ComputerIcon),
+            ("Rede", None, QStyle.StandardPixmap.SP_DriveNetIcon),
+        ]
+
+    def _popular_locais_rapidos(self):
+        self.lst_locais.clear()
+        for nome, pasta, icone_padrao in self._atalhos_pastas:
+            item = QListWidgetItem(self.style().standardIcon(icone_padrao), nome)
+            item.setData(Qt.UserRole, str(pasta) if pasta else "")
+            if pasta is None or not pasta.exists():
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+            self.lst_locais.addItem(item)
+        self._marcar_local_rapido_atual()
+
+    def _marcar_local_rapido_atual(self):
+        atual = str(self._pasta.resolve()).lower() if self._pasta.exists() else str(self._pasta).lower()
+        for i in range(self.lst_locais.count()):
+            item = self.lst_locais.item(i)
+            pasta = str(item.data(Qt.UserRole) or "")
+            if pasta and pasta.lower() == atual:
+                self.lst_locais.setCurrentItem(item)
+                return
+        self.lst_locais.setCurrentRow(-1)
+
+    def _selecionar_local_rapido(self, item: QListWidgetItem):
+        pasta = str(item.data(Qt.UserRole) or "").strip()
+        if not pasta:
+            return
+        caminho = Path(pasta)
+        if not caminho.exists():
+            return
+        self._pasta = caminho
+        self.edt_pasta.setText(str(self._pasta))
+        self._atualizar_lista_arquivos_existentes()
+        self._marcar_local_rapido_atual()
+
+    def _urls_laterais_dialogo(self) -> list[QUrl]:
+        urls: list[QUrl] = []
+        vistos: set[str] = set()
+        for _, pasta, _ in self._atalhos_pastas:
+            if pasta is None or not pasta.exists():
+                continue
+            chave = str(pasta.resolve()).lower()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            urls.append(QUrl.fromLocalFile(str(pasta)))
+        return urls
 
     def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
         mapa_botoes = {
@@ -263,6 +365,7 @@ class SalvarComoDialog(QDialog):
         self.lst_arquivos_existentes.clear()
         if not self._pasta.exists():
             return
+        self._marcar_local_rapido_atual()
         arquivos = sorted(self._pasta.glob(f"*{EXTENSAO_PROJETO}"), key=lambda p: p.name.lower())
         for caminho in arquivos:
             item = QListWidgetItem(caminho.name)
