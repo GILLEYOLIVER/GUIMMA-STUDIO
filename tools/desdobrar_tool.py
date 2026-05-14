@@ -47,7 +47,7 @@ class DesdobrarDialog(QDialog):
         self.chk_automatico.setChecked(True)
         raiz.addWidget(self.chk_automatico)
         self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
-        self.chk_fio_meio.setChecked(False)
+        self.chk_fio_meio.setChecked(True)
         raiz.addWidget(self.chk_fio_meio)
 
 
@@ -64,6 +64,8 @@ class Ferramenta(_DobrarBase):
         self._molde_idx: int | None = None
         self._hover_idx = None
         self._confirmar_ref = None
+        self._manual_p1: QPointF | None = None
+        self._manual_p2: QPointF | None = None
         self._ultimo_direito = 0.0
 
     def on_activate(self, canvas):
@@ -85,6 +87,9 @@ class Ferramenta(_DobrarBase):
         if event.button() == Qt.RightButton:
             if self._confirmar_ref is not None:
                 self._confirmar_ref = None
+                self._manual_p1 = None
+                self._manual_p2 = None
+                self._hover_idx = None
                 self._status(canvas, "Prévia cancelada. Escolha novamente o trecho do perímetro.")
                 canvas.update()
                 event.accept()
@@ -117,9 +122,15 @@ class Ferramenta(_DobrarBase):
             canvas._selecionados = {self._molde_idx}
             self._hover_idx = None
             canvas.update()
-            self._status(canvas, "Molde selecionado. Passe o mouse sobre um trecho do perímetro entre pontos principais.")
+            if self._automatico_ativo(canvas):
+                self._status(canvas, "Molde selecionado. Passe o mouse sobre um trecho do perímetro entre pontos principais.")
+            else:
+                self._status(canvas, "Molde selecionado. Clique o primeiro ponto da reta de desdobrar.")
             event.accept()
             return True
+
+        if not self._automatico_ativo(canvas):
+            return self._clique_modo_manual(canvas, event, pos)
 
         alvo = self._hover_idx
         if alvo is None:
@@ -143,15 +154,25 @@ class Ferramenta(_DobrarBase):
         if self._molde_idx is None:
             return False
         pos = canvas._ponto_com_snap(event.position())
-        if self._confirmar_ref is None:
+        if not self._automatico_ativo(canvas):
+            if self._manual_p1 is not None and self._manual_p2 is None:
+                self._hover_idx = {
+                    "tipo": "polyline",
+                    "pontos": [(self._manual_p1.x(), self._manual_p1.y()), (pos.x(), pos.y())],
+                    "origem_desdobrar": "manual",
+                }
+        elif self._confirmar_ref is None:
             self._hover_idx = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
         canvas.update()
         return True
 
     def on_paint_overlay(self, canvas, painter):
-        if self._molde_idx is None or self._hover_idx is None:
+        if self._molde_idx is None:
             return
-        el = self._elemento_linha_ref(canvas, self._hover_idx)
+        ref = self._confirmar_ref if self._confirmar_ref is not None else self._hover_idx
+        if ref is None:
+            return
+        el = self._elemento_linha_ref(canvas, ref)
         if el is None:
             return
         pontos = self._pontos_para_preview_linha(el)
@@ -169,6 +190,37 @@ class Ferramenta(_DobrarBase):
                 for a, b in zip(preview, preview[1:]):
                     painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
+
+    def _clique_modo_manual(self, canvas, event, pos: QPointF) -> bool:
+        if self._manual_p1 is None:
+            self._manual_p1 = QPointF(pos)
+            self._manual_p2 = None
+            self._confirmar_ref = None
+            self._hover_idx = None
+            self._status(canvas, "Primeiro ponto marcado. Clique o segundo ponto da reta de desdobrar.")
+            canvas.update()
+            event.accept()
+            return True
+        if self._manual_p2 is None:
+            if self._dist(self._manual_p1, pos) <= 1e-6:
+                self._status(canvas, "A reta de desdobrar precisa de dois pontos diferentes.")
+                event.accept()
+                return True
+            self._manual_p2 = QPointF(pos)
+            linha = {
+                "tipo": "polyline",
+                "pontos": [(self._manual_p1.x(), self._manual_p1.y()), (self._manual_p2.x(), self._manual_p2.y())],
+                "origem_desdobrar": "manual",
+            }
+            self._hover_idx = linha
+            self._confirmar_ref = linha
+            self._status(canvas, "Reta marcada. Clique novamente para confirmar ou botão direito para escolher outra reta.")
+            canvas.update()
+            event.accept()
+            return True
+        self._aplicar_desdobrar(canvas, self._molde_idx, self._confirmar_ref)
+        event.accept()
+        return True
 
     def _aplicar_desdobrar(self, canvas, molde_idx: int, linha_ref) -> None:
         if not (0 <= molde_idx < len(canvas.cena.elementos)):
@@ -500,6 +552,11 @@ class Ferramenta(_DobrarBase):
         chk = getattr(dialog, "chk_fio_meio", None) if dialog is not None else None
         return bool(chk is not None and chk.isChecked())
 
+    def _automatico_ativo(self, canvas) -> bool:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        chk = getattr(dialog, "chk_automatico", None) if dialog is not None else None
+        return bool(chk is None or chk.isChecked())
+
     def _preparar_contorno_resultado(self, pontos: list[QPointF], eixo) -> list[QPointF]:
         base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
         base = self._inserir_pontos_no_contorno(base, list(self._pontos_eixo(eixo)))
@@ -662,6 +719,8 @@ class Ferramenta(_DobrarBase):
         self._molde_idx = None
         self._hover_idx = None
         self._confirmar_ref = None
+        self._manual_p1 = None
+        self._manual_p2 = None
         if limpar_selecao:
             canvas._selecionados = set()
         canvas.update()

@@ -2476,7 +2476,7 @@ class VisualizacaoCanvas(QWidget):
         cor = self._cor_molde_config("molde_dobrado", self._cores_canvas.get("selecao", "#2da8ff"))
         for contorno in contornos:
             if isinstance(contorno, dict):
-                contorno = contorno.get("pontos") or contorno.get("contorno_pontilhado") or contorno.get("metade_movida")
+                contorno = contorno.get("contorno_pontilhado") or contorno.get("metade_movida") or contorno.get("pontos")
             if not isinstance(contorno, list) or len(contorno) < 2:
                 continue
             pontos = []
