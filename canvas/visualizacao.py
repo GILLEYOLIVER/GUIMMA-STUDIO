@@ -5,7 +5,7 @@ from copy import deepcopy
 from importlib import import_module
 from math import acos, atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
     QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
@@ -115,6 +115,9 @@ class VisualizacaoCanvas(QWidget):
         self.lbl_status = None  # Será definido pela janela principal
         self._imagem_cache: dict[str, QPixmap] = {}
         self._mostrar_curva_original_emf = False
+        self._piscando_ponto_restauracao_indices: set[int] = set()
+        self._piscando_ponto_restauracao_visivel = False
+        self._piscando_ponto_restauracao_geracao = 0
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -703,6 +706,35 @@ class VisualizacaoCanvas(QWidget):
                 return
             parent = parent.parentWidget()
 
+    def _executar_ferramenta_canvas_direta(self, tool_id: str):
+        """Executa uma ferramenta simples diretamente no canvas.
+
+        Usado pelo menu de contexto para ações que não precisam abrir página do
+        ribbon. Assim o ponto de restauração funciona mesmo quando o botão ainda
+        não estiver exposto na barra.
+        """
+        try:
+            module = import_module(f"tools.{tool_id}_tool")
+            tool_cls = getattr(module, "Ferramenta")
+            tool = tool_cls()
+            if hasattr(tool, "on_activate"):
+                tool.on_activate(self)
+                return
+            if hasattr(tool, "ativar"):
+                mensagem = tool.ativar()
+                if getattr(self, "lbl_status", None) is not None:
+                    self.lbl_status.setText(str(mensagem or ""))
+        except Exception as exc:
+            try:
+                if getattr(self, "lbl_status", None) is not None:
+                    self.lbl_status.setText(f"Falha ao executar {tool_id}: {exc}")
+            except Exception:
+                pass
+
+    def _tem_ponto_restauracao_disponivel(self) -> bool:
+        store = getattr(self, "_guimma_pontos_restauracao_moldes", None)
+        return isinstance(store, dict) and bool(store)
+
     def _abrir_menu_contexto_canvas(self, pos_global: QPoint):
         pos_local = self.mapFromGlobal(pos_global)
         pos_cena = self._ponto_com_snap(QPointF(float(pos_local.x()), float(pos_local.y())))
@@ -727,12 +759,22 @@ class VisualizacaoCanvas(QWidget):
         a_restaurar_copia = menu.addAction("Restaura ponto de restauração com cópia")
 
         tem_sel = bool(self._selecionados)
+        tem_molde_alvo = bool(
+            molde_no_cursor is not None
+            or any(
+                0 <= int(idx) < len(self.cena.elementos)
+                and isinstance(self.cena.elementos[int(idx)], dict)
+                and self.cena.elementos[int(idx)].get("molde")
+                for idx in self._selecionados
+            )
+        )
+        tem_ponto_restauracao = self._tem_ponto_restauracao_disponivel()
         a_excluir.setEnabled(tem_sel)
         a_recortar.setEnabled(tem_sel)
         a_copiar.setEnabled(tem_sel)
-        a_criar_restore.setEnabled(False)
-        a_restaurar.setEnabled(False)
-        a_restaurar_copia.setEnabled(False)
+        a_criar_restore.setEnabled(tem_molde_alvo)
+        a_restaurar.setEnabled(tem_ponto_restauracao)
+        a_restaurar_copia.setEnabled(tem_ponto_restauracao)
 
         escolhido: QAction | None = menu.exec(pos_global)
         if escolhido is None:
@@ -763,6 +805,59 @@ class VisualizacaoCanvas(QWidget):
             self.inverter_selecao()
         elif escolhido is a_inv_sel_moldes:
             self.inverter_selecao_moldes()
+        elif escolhido is a_criar_restore:
+            if molde_no_cursor is not None and molde_no_cursor not in self._selecionados:
+                self._selecionados = {molde_no_cursor}
+                self.update()
+            self._executar_ferramenta_canvas_direta("ponto_restauracao")
+        elif escolhido is a_restaurar or escolhido is a_restaurar_copia:
+            if molde_no_cursor is not None and molde_no_cursor not in self._selecionados:
+                self._selecionados = {molde_no_cursor}
+                self.update()
+            self._executar_ferramenta_canvas_direta("restaurar_copia")
+
+    def piscar_ponto_restauracao(self, indices, vezes: int = 4, intervalo_ms: int = 140):
+        """Pisca em azul os moldes que acabaram de receber ponto de restauração."""
+        elementos = list(getattr(self.cena, "elementos", []) or [])
+        alvos: set[int] = set()
+        try:
+            iter_indices = list(indices or [])
+        except TypeError:
+            iter_indices = [indices]
+        for idx in iter_indices:
+            try:
+                idx_int = int(idx)
+            except Exception:
+                continue
+            if 0 <= idx_int < len(elementos):
+                elemento = elementos[idx_int]
+                if isinstance(elemento, dict) and elemento.get("molde"):
+                    alvos.add(idx_int)
+        if not alvos:
+            return
+
+        self._piscando_ponto_restauracao_geracao += 1
+        geracao = self._piscando_ponto_restauracao_geracao
+        self._piscando_ponto_restauracao_indices = set(alvos)
+        self._piscando_ponto_restauracao_visivel = True
+        self.update()
+
+        total_passos = max(1, int(vezes)) * 2
+        intervalo = max(60, int(intervalo_ms))
+
+        def alternar(passos_restantes: int):
+            if geracao != getattr(self, "_piscando_ponto_restauracao_geracao", None):
+                return
+            if passos_restantes <= 0:
+                self._piscando_ponto_restauracao_indices.clear()
+                self._piscando_ponto_restauracao_visivel = False
+                self.update()
+                return
+            self._piscando_ponto_restauracao_visivel = not self._piscando_ponto_restauracao_visivel
+            self.update()
+            QTimer.singleShot(intervalo, lambda: alternar(passos_restantes - 1))
+
+        QTimer.singleShot(intervalo, lambda: alternar(total_passos - 1))
 
     # ========== Métodos internos ==========
 
@@ -1704,6 +1799,9 @@ class VisualizacaoCanvas(QWidget):
             if self._deve_desenhar_eixo_dobra_salvo():
                 self._desenhar_eixo_dobra_salvo(painter, el)
 
+            if idx in getattr(self, "_piscando_ponto_restauracao_indices", set()) and getattr(self, "_piscando_ponto_restauracao_visivel", False):
+                self._desenhar_piscar_ponto_restauracao(painter, base)
+
             if idx in self._selecionados:
                 self._desenhar_selecao_molde(painter, base, el)
 
@@ -2011,6 +2109,29 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawLine(self._cena_para_tela(p1), self._cena_para_tela(p2))
+        painter.restore()
+
+    def _desenhar_piscar_ponto_restauracao(self, painter: QPainter, base: list[QPointF]):
+        if len(base) < 3:
+            return
+        cor = QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff"))
+        if not cor.isValid():
+            cor = QColor("#2da8ff")
+        painter.save()
+        path = QPainterPath(self._cena_para_tela(base[0]))
+        for pt in base[1:]:
+            path.lineTo(self._cena_para_tela(pt))
+        path.closeSubpath()
+        preenchimento = QColor(cor)
+        preenchimento.setAlpha(70)
+        contorno = QColor(cor)
+        contorno.setAlpha(235)
+        pen = QPen(contorno, 3.0)
+        pen.setJoinStyle(Qt.RoundJoin)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(preenchimento)
+        painter.drawPath(path)
         painter.restore()
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):

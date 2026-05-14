@@ -244,6 +244,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         "desdobrar",
         "inserir_pique",
         "remover_costura",
+        "ponto_restauracao",
         "restaurar_copia",
         "graduar_curva",
         "agrupar",
@@ -5445,7 +5446,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         return saida
 
     def _garantir_ajuste_automatico_na_barra_usuario(self):
-        """Mantém Auto ajuste fixo na barra de Usuário, mesmo ao limpar/trocar perfil."""
+        """Mantém ferramentas fixas na barra de Usuário, mesmo ao limpar/trocar perfil."""
         if not hasattr(self, "_ferramentas_usuario_ids"):
             return
         if "ajuste_automatico" not in self._ferramentas_usuario_ids:
@@ -5454,6 +5455,14 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._ferramentas_usuario_ids.insert(indice_refazer + 1, "ajuste_automatico")
             except ValueError:
                 self._ferramentas_usuario_ids.append("ajuste_automatico")
+        if "ponto_restauracao" not in self._ferramentas_usuario_ids:
+            try:
+                indice_restaurar = self._ferramentas_usuario_ids.index("restaurar_copia")
+                self._ferramentas_usuario_ids.insert(indice_restaurar, "ponto_restauracao")
+            except ValueError:
+                self._ferramentas_usuario_ids.append("ponto_restauracao")
+        if "restaurar_copia" not in self._ferramentas_usuario_ids:
+            self._ferramentas_usuario_ids.append("restaurar_copia")
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
