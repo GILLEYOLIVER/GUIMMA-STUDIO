@@ -4,7 +4,7 @@ from math import isfinite, sqrt
 from time import monotonic
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
@@ -151,7 +151,7 @@ class Ferramenta(FerramentaBase):
                 pontos = self._pontos_elemento(el)
                 if len(pontos) < 2:
                     continue
-                pontos_preview = [self._espelhar_ponto(p, eixo_el) if self._lado_ponto(p, eixo_el) == self._lado_preview else QPointF(p) for p in pontos]
+                pontos_preview = self._pontos_dobrados_preview(pontos, eixo_el, self._lado_preview, fechado=True)
                 self._desenhar_polilinha_tela(canvas, painter, pontos_preview)
         painter.restore()
 
@@ -253,8 +253,9 @@ class Ferramenta(FerramentaBase):
                 continue
             el = canvas.cena.elementos[idx]
             original = self._pontos_elemento(el)
+            lado_movido = -self._lado_preview
             if manter and len(original) >= 2:
-                metade = [(p.x(), p.y()) for p in original if self._lado_ponto(p, eixo_el) == self._lado_preview]
+                metade = [(p.x(), p.y()) for p in original if self._lado_ponto(p, eixo_el) == lado_movido]
                 if len(metade) >= 2:
                     el.setdefault("contornos_dobra_original", []).append(metade)
             self._dobrar_elemento(el, eixo_el, self._lado_preview)
@@ -343,14 +344,23 @@ class Ferramenta(FerramentaBase):
         return min(p.x() for p in pontos), min(p.y() for p in pontos), max(p.x() for p in pontos), max(p.y() for p in pontos)
 
     def _dobrar_elemento(self, el: dict, eixo, lado: int) -> None:
+        lado_movido = -int(lado)
+        dobrados_contorno: list[QPointF] = []
+
         def conv(p):
             pt = QPointF(float(p[0]), float(p[1]))
-            if self._lado_ponto(pt, eixo) == lado:
+            if self._lado_ponto(pt, eixo) == lado_movido:
                 pt = self._espelhar_ponto(pt, eixo)
             return (pt.x(), pt.y())
 
+        if isinstance(el.get("pontos"), list):
+            pontos = self._pontos_elemento(el)
+            dobrados = self._pontos_dobrados_preview(pontos, eixo, lado, fechado=bool(el.get("molde")))
+            if len(dobrados) >= 2:
+                dobrados_contorno = [QPointF(p) for p in dobrados]
+                el["pontos"] = [(p.x(), p.y()) for p in dobrados]
+
         for chave in (
-            "pontos",
             "controle_cantos",
             "controle_auxiliares",
             "pontos_controle_referencia",
@@ -370,6 +380,110 @@ class Ferramenta(FerramentaBase):
                         x, y = conv((item["x"], item["y"]))
                         item["x"] = x
                         item["y"] = y
+        if el.get("molde") and len(dobrados_contorno) >= 3:
+            cantos = dobrados_contorno[:-1] if self._pontos_mesmos(dobrados_contorno[0], dobrados_contorno[-1]) else dobrados_contorno
+            el["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
+            el["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+
+    def _pontos_dobrados_preview(
+        self,
+        pontos: list[QPointF],
+        eixo,
+        lado_destino: int,
+        fechado: bool | None = None,
+    ) -> list[QPointF]:
+        if len(pontos) < 2 or not lado_destino:
+            return [QPointF(p) for p in pontos]
+        fechado = self._contorno_fechado(pontos) if fechado is None else bool(fechado)
+        if not fechado:
+            lado_movido = -int(lado_destino)
+            return [
+                self._espelhar_ponto(p, eixo) if self._lado_ponto(p, eixo) == lado_movido else QPointF(p)
+                for p in pontos
+            ]
+
+        base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
+        mantido = self._recortar_poligono_lado(base, eixo, int(lado_destino))
+        movido = self._recortar_poligono_lado(base, eixo, -int(lado_destino))
+        movido_espelhado = [self._espelhar_ponto(p, eixo) for p in movido]
+        unidos = self._unir_poligonos(mantido, movido_espelhado)
+        if len(unidos) < 3:
+            unidos = mantido or movido_espelhado
+        if len(unidos) >= 3 and not self._pontos_mesmos(unidos[0], unidos[-1]):
+            unidos.append(QPointF(unidos[0]))
+        return unidos
+
+    def _recortar_poligono_lado(self, pontos: list[QPointF], eixo, lado: int) -> list[QPointF]:
+        if len(pontos) < 3 or not lado:
+            return []
+
+        def valor(pt: QPointF) -> float:
+            return self._valor_lado(pt, eixo) * float(lado)
+
+        entrada = list(pontos)
+        saida = []
+        eps = 1e-9
+        anterior = entrada[-1]
+        valor_anterior = valor(anterior)
+        anterior_dentro = valor_anterior >= -eps
+        for atual in entrada:
+            valor_atual = valor(atual)
+            atual_dentro = valor_atual >= -eps
+            if atual_dentro != anterior_dentro:
+                inter = self._intersecao_segmento_eixo(anterior, atual, eixo)
+                if inter is not None:
+                    saida.append(inter)
+            if atual_dentro:
+                saida.append(QPointF(atual))
+            anterior = atual
+            valor_anterior = valor_atual
+            anterior_dentro = atual_dentro
+        return self._limpar_pontos_repetidos(saida)
+
+    def _intersecao_segmento_eixo(self, a: QPointF, b: QPointF, eixo) -> QPointF | None:
+        va = self._valor_lado(a, eixo)
+        vb = self._valor_lado(b, eixo)
+        denom = va - vb
+        if abs(denom) <= 1e-12:
+            return None
+        t = max(0.0, min(1.0, va / denom))
+        return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+
+    def _unir_poligonos(self, a: list[QPointF], b: list[QPointF]) -> list[QPointF]:
+        caminhos = []
+        for pontos in (a, b):
+            if len(pontos) < 3:
+                continue
+            path = QPainterPath()
+            path.addPolygon(QPolygonF(pontos))
+            path.closeSubpath()
+            caminhos.append(path)
+        if not caminhos:
+            return []
+        unido = caminhos[0]
+        for path in caminhos[1:]:
+            unido = unido.united(path)
+        poligono = unido.toFillPolygon()
+        return self._limpar_pontos_repetidos([QPointF(p) for p in poligono])
+
+    def _limpar_pontos_repetidos(self, pontos: list[QPointF]) -> list[QPointF]:
+        saida: list[QPointF] = []
+        for p in pontos:
+            if saida and self._pontos_mesmos(saida[-1], p):
+                continue
+            saida.append(QPointF(p))
+        if len(saida) > 1 and self._pontos_mesmos(saida[0], saida[-1]):
+            saida.pop()
+        return saida
+
+    def _contorno_fechado(self, pontos: list[QPointF]) -> bool:
+        if len(pontos) < 4:
+            return False
+        return self._pontos_mesmos(pontos[0], pontos[-1])
+
+    @staticmethod
+    def _pontos_mesmos(a: QPointF, b: QPointF) -> bool:
+        return abs(a.x() - b.x()) <= 1e-7 and abs(a.y() - b.y()) <= 1e-7
 
     def _pontos_elemento(self, el: dict) -> list[QPointF]:
         pontos: list[QPointF] = []
