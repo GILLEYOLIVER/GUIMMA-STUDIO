@@ -7,7 +7,7 @@ from math import atan2, cos, radians, sin, sqrt
 from pathlib import Path
 from random import randint
 
-from PySide6.QtCore import QEvent, QLocale, QMimeData, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
+from PySide6.QtCore import QEvent, QLocale, QMimeData, QPoint, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -1321,6 +1321,9 @@ class PropriedadesMoldesDialog(QDialog):
         self._suspender_item_changed = False
         self._alerta_piscando = False
         self._alerta_passos_restantes = 0
+        self._alerta_tremendo = False
+        self._alerta_tremor_passos = 0
+        self._alerta_pos_original: QPoint | None = None
         self._linha_gradacao_atual = 0
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
@@ -1354,6 +1357,7 @@ class PropriedadesMoldesDialog(QDialog):
             pass
         self.raise_()
         self.activateWindow()
+        self._iniciar_tremor()
         if self._alerta_piscando:
             self._alerta_passos_restantes = max(self._alerta_passos_restantes, 6)
             return
@@ -1379,6 +1383,30 @@ class PropriedadesMoldesDialog(QDialog):
             self.setStyleSheet(self._stylesheet())
         self._alerta_passos_restantes -= 1
         QTimer.singleShot(150, self._alternar_alerta_visual)
+
+    def _iniciar_tremor(self):
+        if self._alerta_tremendo:
+            self._alerta_tremor_passos = max(self._alerta_tremor_passos, 12)
+            return
+        self._alerta_tremendo = True
+        self._alerta_tremor_passos = 12
+        self._alerta_pos_original = QPoint(self.pos())
+        self._executar_tremor()
+
+    def _executar_tremor(self):
+        if self._alerta_tremor_passos <= 0 or not self.isVisible():
+            if self._alerta_pos_original is not None:
+                self.move(self._alerta_pos_original)
+            self._alerta_tremendo = False
+            self._alerta_tremor_passos = 0
+            self._alerta_pos_original = None
+            return
+        origem = self._alerta_pos_original or QPoint(self.pos())
+        deslocamentos = [0, 9, -9, 7, -7, 5, -5, 4, -4, 3, -3, 0]
+        idx = min(len(deslocamentos) - 1, len(deslocamentos) - self._alerta_tremor_passos)
+        self.move(origem + QPoint(deslocamentos[idx], 0))
+        self._alerta_tremor_passos -= 1
+        QTimer.singleShot(28, self._executar_tremor)
 
     def _stylesheet(self) -> str:
         return """
