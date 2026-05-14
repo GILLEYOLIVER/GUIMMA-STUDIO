@@ -45,7 +45,7 @@ from tools.tool_base import FerramentaBase
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 TAMANHO_TEXTO_PADRAO_CM = 0.7
 TAMANHO_NOME_PADRAO_CM = 3.0
-TAMANHO_NUMERO_PADRAO_CM = 2.0
+TAMANHO_NUMERO_PADRAO_CM = 0.7
 
 # Regra do GUIMMA STUDIO: valores decimais sempre usam ponto.
 # Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
@@ -938,6 +938,7 @@ class PreviewMoldeWidget(QWidget):
         escala = max(1.0, (self._dados_transformacao() or {}).get("escala", 1.0) * self._zoom)
         fonte = QFont(painter.font())
         fonte.setPointSize(max(6, min(72, int(round(altura_cm * escala * 0.52)))))
+        fonte.setBold(False)
         painter.setFont(fonte)
         metrics = painter.fontMetrics()
         if pontos:
@@ -955,7 +956,7 @@ class PreviewMoldeWidget(QWidget):
                 painter.restore()
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
             # No preview de propriedades, os números seguem o mesmo liga/desliga do canvas.
-            if self._molde.get("mostrar_numeros", False):
+            if self._molde.get("mostrar_numeros", True):
                 numero = ((idx - inicio) % total) + 1
                 texto = str(numero)
                 dx = pt.x() - centro.x()
@@ -2255,7 +2256,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.chk_mostrar_nome.setChecked(True)
         self.chk_mostrar_fio.setChecked(True)
-        self.chk_mostrar_numeros.setChecked(False)
+        self.chk_mostrar_numeros.setChecked(True)
         self.chk_pique.setChecked(True)
         self.chk_linhas_aux.setChecked(True)
         self.chk_quantidade_visual.setChecked(True)
@@ -2504,7 +2505,7 @@ class PropriedadesMoldesDialog(QDialog):
         try:
             self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
             self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
-            self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", False)))
+            self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", True)))
             self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
             chave_visual = self._chave_visual_atual()
             if chave_visual and hasattr(self, "ed_referencia"):
@@ -3501,7 +3502,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.cmb_giro.setCurrentIndex(idx_giro if idx_giro >= 0 else 0)
         self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
         self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
-        self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", False)))
+        self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", True)))
         self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
         self.chk_quantidade_visual.setChecked(bool(molde.get("visual_quantidade", False)))
         self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))

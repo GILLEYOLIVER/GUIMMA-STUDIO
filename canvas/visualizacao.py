@@ -20,7 +20,7 @@ from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 class VisualizacaoCanvas(QWidget):
     LIMITE_DESFAZER = 250
     TAMANHO_NOME_PADRAO_CM = 3.0
-    TAMANHO_NUMERO_PADRAO_CM = 2.0
+    TAMANHO_NUMERO_PADRAO_CM = 0.7
 
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
@@ -1814,7 +1814,7 @@ class VisualizacaoCanvas(QWidget):
                     maximo_px=220.0,
                 )
                 fonte_num.setPixelSize(int(round(tamanho_num_px)))
-                fonte_num.setBold(True)
+                fonte_num.setBold(False)
                 painter.setFont(fonte_num)
                 metrics_num = QFontMetrics(painter.font())
                 afastamento = max(10.0, tamanho_num_px * 0.95)

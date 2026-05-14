@@ -3884,9 +3884,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "fio_fim": (max(xs) - margem, y_fio),
                     "ponto_texto": (cx, cy),
                     "texto_nome_altura_cm": 3.0,
-                    "numero_altura_cm": 2.0,
+                    "numero_altura_cm": 0.7,
                     "mostrar_nome": True,
                     "mostrar_fio": True,
+                    "mostrar_numeros": True,
                     "cor": "#ff7b00",
                     "bloqueado": False,
                 })
