@@ -24,8 +24,10 @@ class Ferramenta(FerramentaBase):
         super().__init__()
         self._arrastando_ponto_poly: tuple[int, int] | None = None
         self._arrastando_controle_molde: tuple[int, str, int] | None = None
+        self._arrastando_dobra_pontilhada: tuple[int, int, int] | None = None
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._hover_controle_molde: tuple[int, str, int] | None = None
+        self._hover_dobra_pontilhada: tuple[int, int, int] | None = None
         self._hover_elemento_idx: int | None = None
         self._hover_molde_idx: int | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
@@ -44,8 +46,10 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
+        self._arrastando_dobra_pontilhada = None
         self._hover_ponto_poly = None
         self._hover_controle_molde = None
+        self._hover_dobra_pontilhada = None
         self._hover_elemento_idx = None
         self._hover_molde_idx = None
         self._guia_ponto_poly = None
@@ -142,6 +146,16 @@ class Ferramenta(FerramentaBase):
             return False
         pos = canvas._ponto_com_snap(event.position())
         shift = self._shift_pressionado(event)
+
+        dobra_pontilhada = self._dobra_pontilhada_em_ponto(canvas, pos)
+        if dobra_pontilhada is not None:
+            self._arrastando_dobra_pontilhada = dobra_pontilhada
+            self._hover_dobra_pontilhada = dobra_pontilhada
+            self._hover_controle_molde = None
+            self._hover_ponto_poly = None
+            event.accept()
+            canvas.update()
+            return True
 
         controle = self._controle_molde_em_ponto(canvas, pos)
         if controle is not None:
@@ -347,6 +361,13 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
+        if self._arrastando_dobra_pontilhada is not None:
+            self._atualizar_dobra_pontilhada(canvas, self._arrastando_dobra_pontilhada, self._normalizar_destino(pos))
+            self._hover_dobra_pontilhada = self._arrastando_dobra_pontilhada
+            canvas.update()
+            event.accept()
+            return True
+
         if self._arrastando_controle_molde is not None:
             idx, tipo, controle_idx = self._arrastando_controle_molde
             estado = self._estado_arraste_controle
@@ -393,6 +414,7 @@ class Ferramenta(FerramentaBase):
 
         self._hover_ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
         self._hover_controle_molde = self._controle_molde_em_ponto(canvas, pos)
+        self._hover_dobra_pontilhada = self._dobra_pontilhada_em_ponto(canvas, pos)
         self._hover_molde_idx = self._hover_controle_molde[0] if self._hover_controle_molde is not None else None
         self._hover_elemento_idx = self._elemento_em_hover(canvas, pos)
         canvas.update()
@@ -402,10 +424,11 @@ class Ferramenta(FerramentaBase):
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        if self._arrastando_ponto_poly is None and self._arrastando_controle_molde is None:
+        if self._arrastando_ponto_poly is None and self._arrastando_controle_molde is None and self._arrastando_dobra_pontilhada is None:
             return False
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
+        self._arrastando_dobra_pontilhada = None
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
         self._guia_ponto_poly = None
@@ -419,7 +442,93 @@ class Ferramenta(FerramentaBase):
         self._desenhar_controles_molde_hover(canvas, painter)
         self._desenhar_guia(canvas, painter)
         self._desenhar_hover(canvas, painter)
+        self._desenhar_hover_dobra_pontilhada(canvas, painter)
         self._desenhar_angulo(canvas, painter)
+
+    def _dobra_pontilhada_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, int, int] | None:
+        tolerancia = 8.0 / max(canvas.zoom, 0.001)
+        melhor: tuple[int, int, int] | None = None
+        melhor_dist = float("inf")
+        candidatos = sorted(canvas._selecionados) if canvas._selecionados else list(range(len(canvas.cena.elementos)))
+        for idx in candidatos:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            registros = el.get("contornos_dobra_original")
+            if not isinstance(registros, list):
+                continue
+            for reg_idx, registro in enumerate(registros):
+                if not isinstance(registro, dict):
+                    continue
+                pontos = registro.get("contorno_pontilhado") or registro.get("metade_movida")
+                if not isinstance(pontos, list):
+                    continue
+                limite = len(pontos)
+                if limite >= 2 and self._pontos_lista_mesmos(pontos[0], pontos[-1]):
+                    limite -= 1
+                for p_idx in range(limite):
+                    pt = self._ponto_qt(pontos[p_idx])
+                    if pt is None:
+                        continue
+                    dist = canvas._dist(pt, ponto)
+                    if dist <= tolerancia and dist < melhor_dist:
+                        melhor = (idx, reg_idx, p_idx)
+                        melhor_dist = dist
+        return melhor
+
+    def _atualizar_dobra_pontilhada(self, canvas, alvo: tuple[int, int, int], destino: QPointF) -> None:
+        idx, reg_idx, p_idx = alvo
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        registros = canvas.cena.elementos[idx].get("contornos_dobra_original")
+        if not isinstance(registros, list) or not (0 <= reg_idx < len(registros)):
+            return
+        registro = registros[reg_idx]
+        if not isinstance(registro, dict):
+            return
+        for chave in ("contorno_pontilhado", "metade_movida"):
+            pontos = list(registro.get(chave) or [])
+            if not (0 <= p_idx < len(pontos)):
+                continue
+            fechado = len(pontos) >= 2 and self._pontos_lista_mesmos(pontos[0], pontos[-1])
+            pontos[p_idx] = (destino.x(), destino.y())
+            if fechado:
+                if p_idx == 0:
+                    pontos[-1] = pontos[0]
+                elif p_idx == len(pontos) - 1:
+                    pontos[0] = pontos[-1]
+            registro[chave] = pontos
+
+    def _pontos_lista_mesmos(self, a, b) -> bool:
+        pa = self._ponto_qt(a)
+        pb = self._ponto_qt(b)
+        if pa is None or pb is None:
+            return False
+        return abs(pa.x() - pb.x()) <= 1e-7 and abs(pa.y() - pb.y()) <= 1e-7
+
+    def _desenhar_hover_dobra_pontilhada(self, canvas, painter) -> None:
+        alvo = self._arrastando_dobra_pontilhada or self._hover_dobra_pontilhada
+        if alvo is None:
+            return
+        idx, reg_idx, p_idx = alvo
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        registros = canvas.cena.elementos[idx].get("contornos_dobra_original")
+        if not isinstance(registros, list) or not (0 <= reg_idx < len(registros)):
+            return
+        registro = registros[reg_idx]
+        if not isinstance(registro, dict):
+            return
+        pontos = registro.get("contorno_pontilhado") or registro.get("metade_movida")
+        if not isinstance(pontos, list) or not (0 <= p_idx < len(pontos)):
+            return
+        pt = self._ponto_qt(pontos[p_idx])
+        if pt is None:
+            return
+        tela = canvas._cena_para_tela(pt)
+        painter.setPen(QPen(QColor("#66d9ff"), 2.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(int(tela.x() - 11), int(tela.y() - 11), 22, 22)
 
     def _ponto_polilinha_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)

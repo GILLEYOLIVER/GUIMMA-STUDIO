@@ -2490,6 +2490,12 @@ class VisualizacaoCanvas(QWidget):
                 if len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) > 1e-7:
                     pontos.append(QPointF(pontos[0]))
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.0, estilo="dot")
+                painter.setPen(QPen(QColor(cor), 1.0))
+                painter.setBrush(QColor(cor))
+                limite = len(pontos) - 1 if len(pontos) >= 2 and self._dist(pontos[0], pontos[-1]) <= 1e-7 else len(pontos)
+                for pt in pontos[:limite]:
+                    tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
