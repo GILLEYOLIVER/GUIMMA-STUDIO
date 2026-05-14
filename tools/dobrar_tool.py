@@ -264,8 +264,15 @@ class Ferramenta(FerramentaBase):
             lado_movido = -self._lado_preview
             if manter and len(original) >= 2:
                 metade = [(p.x(), p.y()) for p in original if self._lado_ponto(p, eixo_el) == lado_movido]
-                if len(metade) >= 2:
-                    el.setdefault("contornos_dobra_original", []).append(metade)
+                if len(metade) >= 2 or len(original) >= 3:
+                    el.setdefault("contornos_dobra_original", []).append(
+                        {
+                            "pontos": [(p.x(), p.y()) for p in original],
+                            "metade_movida": metade,
+                            "eixo": self._serializar_eixo(eixo_el),
+                            "lado_destino": int(self._lado_preview),
+                        }
+                    )
             self._dobrar_elemento(el, eixo_el, self._lado_preview)
             el["molde_dobrado"] = True
             if eixo_el[0] == "h":
@@ -551,6 +558,17 @@ class Ferramenta(FerramentaBase):
     def _desenhar_polilinha_tela(self, canvas, painter, pontos: list[QPointF]) -> None:
         for a, b in zip(pontos, pontos[1:]):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+
+    def _serializar_eixo(self, eixo) -> dict:
+        if eixo[0] == "h":
+            return {"tipo": "h", "valor": float(eixo[1])}
+        if eixo[0] == "v":
+            return {"tipo": "v", "valor": float(eixo[1])}
+        return {
+            "tipo": "line",
+            "p1": (float(eixo[1].x()), float(eixo[1].y())),
+            "p2": (float(eixo[2].x()), float(eixo[2].y())),
+        }
 
     def _resetar_operacao(self):
         self._lado_preview = 0
