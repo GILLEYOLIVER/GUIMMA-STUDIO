@@ -12,6 +12,7 @@ if find_spec("PySide6") is None:
     QWidget = None
     QPointF = None
     FerramentaDobrar = None
+    FerramentaManipularPontos = None
     DesdobrarDialog = None
 else:
     from PySide6.QtCore import QPointF
@@ -19,6 +20,7 @@ else:
 
     from tools.dobrar_tool import DobrarDialog, Ferramenta as FerramentaDobrar
     from tools.desdobrar_tool import DesdobrarDialog
+    from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
 
 class _FakeCanvas(QWidget):
@@ -68,6 +70,13 @@ class DobrarToolTestCase(unittest.TestCase):
         self.assertFalse(hasattr(dialog, "chk_inserir_pique"))
         dialog.deleteLater()
 
+    def test_dobra_meio_respeita_ponto_medio_da_reta_maior(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDobrar()
+
+        self.assertEqual(ferramenta._eixo(canvas, [0], "Horizontal"), ("h", 4.0))
+        self.assertEqual(ferramenta._eixo(canvas, [0], "Vertical"), ("v", 5.0))
+
     def test_dobrar_mantem_contorno_pontilhado_fechado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaDobrar()
@@ -86,6 +95,23 @@ class DobrarToolTestCase(unittest.TestCase):
         self.assertEqual(pontilhado[0], pontilhado[-1])
         self.assertTrue(molde["molde_dobrado"])
         self.assertEqual(canvas.historico, 1)
+
+    def test_manipular_pontos_edita_contorno_pontilhado_da_dobra(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["contornos_dobra_original"] = [
+            {
+                "contorno_pontilhado": [(0.0, 0.0), (5.0, 0.0), (5.0, 4.0), (0.0, 0.0)],
+                "metade_movida": [(0.0, 0.0), (5.0, 0.0), (5.0, 4.0), (0.0, 0.0)],
+            }
+        ]
+        ferramenta = FerramentaManipularPontos()
+
+        ferramenta._atualizar_dobra_pontilhada(canvas, (0, 0, 1), QPointF(6.0, 1.0))
+
+        registro = molde["contornos_dobra_original"][0]
+        self.assertEqual(registro["contorno_pontilhado"][1], (6.0, 1.0))
+        self.assertEqual(registro["metade_movida"][1], (6.0, 1.0))
 
 
 if __name__ == "__main__":

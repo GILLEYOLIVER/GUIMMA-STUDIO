@@ -954,9 +954,8 @@ class PreviewMoldeWidget(QWidget):
                 painter.drawRect(int(tela.x() - 8), int(tela.y() - 8), 16, 16)
                 painter.restore()
             painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
-            # No preview de propriedades, os números seguem o mesmo padrão visual do canvas selecionado:
-            # ficam ao redor dos pontos quando os controles do molde estão visíveis.
-            if self._molde.get("mostrar_numeros", False) or self._molde.get("mostrar_controles", True):
+            # No preview de propriedades, os números seguem o mesmo liga/desliga do canvas.
+            if self._molde.get("mostrar_numeros", False):
                 numero = ((idx - inicio) % total) + 1
                 texto = str(numero)
                 dx = pt.x() - centro.x()
@@ -1108,7 +1107,6 @@ class PreviewMoldeWidget(QWidget):
                 if idx is not None and dist <= 18:
                     self._molde["numero_ponto_inicio"] = int(idx)
                     self._molde["numero_altura_cm"] = self._modo_altura_cm
-                    self._molde["mostrar_numeros"] = True
                     self._emitir_alteracao_molde()
                     self.update()
                     event.accept()
@@ -2257,7 +2255,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.chk_mostrar_nome.setChecked(True)
         self.chk_mostrar_fio.setChecked(True)
-        self.chk_mostrar_numeros.setChecked(True)
+        self.chk_mostrar_numeros.setChecked(False)
         self.chk_pique.setChecked(True)
         self.chk_linhas_aux.setChecked(True)
         self.chk_quantidade_visual.setChecked(True)
@@ -3727,7 +3725,6 @@ class PropriedadesMoldesDialog(QDialog):
         elif dados.get("elemento_visual") == "Números":
             molde["numero_altura_cm"] = dados["numero_altura_cm"]
             molde["numero_ponto_inicio"] = int(dados.get("numero_ponto_inicio", 0) or 0)
-            molde["mostrar_numeros"] = True
         elif dados.get("elemento_visual") == "Fio":
             molde["mostrar_fio"] = True
             for chave_fio in ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"):

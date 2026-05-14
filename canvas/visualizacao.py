@@ -1604,7 +1604,7 @@ class VisualizacaoCanvas(QWidget):
                     y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 2.0))
                     painter.drawText(int(x_ang), int(y_ang), texto_ang)
 
-            if el.get("mostrar_controles", True):
+            if el.get("mostrar_numeros", False):
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 if cantos:
                     cx = sum(p.x() for p in cantos) / len(cantos)
@@ -2490,6 +2490,12 @@ class VisualizacaoCanvas(QWidget):
                 if len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) > 1e-7:
                     pontos.append(QPointF(pontos[0]))
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.0, estilo="dot")
+                painter.setPen(QPen(QColor(cor), 1.0))
+                painter.setBrush(QColor(cor))
+                limite = len(pontos) - 1 if len(pontos) >= 2 and self._dist(pontos[0], pontos[-1]) <= 1e-7 else len(pontos)
+                for pt in pontos[:limite]:
+                    tela = self._cena_para_tela(pt)
+                    painter.drawEllipse(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
