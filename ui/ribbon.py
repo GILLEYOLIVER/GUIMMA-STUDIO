@@ -488,6 +488,12 @@ class RibbonGroup(QFrame):
             "por_coordenada",
             "por_intersecao",
             "por_raio",
+            "modificar",
+            "editar",
+            "elemento_paralelo",
+            "espelhar",
+            "definir_curva",
+            "simplificar_contorno",
         }
 
         if compactar and len(tools) > 4:

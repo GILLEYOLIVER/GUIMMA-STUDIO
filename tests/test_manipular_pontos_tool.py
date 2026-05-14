@@ -267,6 +267,24 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
         self.assertEqual(molde["controle_cantos"][1], (10.0, 2.0))
 
+    def test_arraste_auxiliar_recalcula_a_partir_do_estado_inicial(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, -20.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
+        self.assertEqual(molde["controle_cantos"][1], (10.0, 2.0))
+        self.assertEqual(molde["pontos"][0], (0.0, 2.0))
+        self.assertEqual(molde["pontos"][1], (5.0, 2.0))
+        self.assertEqual(molde["pontos"][2], (10.0, 2.0))
+        self.assertEqual(molde["controle_auxiliares"][0], (5.0, 2.0))
+
 
 if __name__ == "__main__":
     unittest.main()

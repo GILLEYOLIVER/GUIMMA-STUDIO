@@ -52,7 +52,7 @@ class DobrarDialog(QDialog):
         raiz.addLayout(form)
 
         self.chk_manter_dimensoes = QCheckBox("Manter dimensoes originais")
-        self.chk_manter_dimensoes.setChecked(False)
+        self.chk_manter_dimensoes.setChecked(True)
         raiz.addWidget(self.chk_manter_dimensoes)
 
 
@@ -267,10 +267,12 @@ class Ferramenta(FerramentaBase):
                 base_original = original[:-1] if len(original) > 2 and self._pontos_mesmos(original[0], original[-1]) else list(original)
                 metade_original = self._recortar_poligono_lado(base_original, eixo_el, lado_movido)
                 if len(metade_original) >= 3:
+                    contorno_pontilhado = self._fechar_contorno(metade_original)
                     el.setdefault("contornos_dobra_original", []).append(
                         {
                             "pontos": [(p.x(), p.y()) for p in original],
                             "metade_movida": [(p.x(), p.y()) for p in metade_original],
+                            "contorno_pontilhado": [(p.x(), p.y()) for p in contorno_pontilhado],
                             "eixo": self._serializar_eixo(eixo_el),
                             "lado_destino": int(self._lado_preview),
                         }
@@ -491,6 +493,12 @@ class Ferramenta(FerramentaBase):
             saida.append(QPointF(p))
         if len(saida) > 1 and self._pontos_mesmos(saida[0], saida[-1]):
             saida.pop()
+        return saida
+
+    def _fechar_contorno(self, pontos: list[QPointF]) -> list[QPointF]:
+        saida = [QPointF(p) for p in pontos]
+        if len(saida) >= 2 and not self._pontos_mesmos(saida[0], saida[-1]):
+            saida.append(QPointF(saida[0]))
         return saida
 
     def _contorno_fechado(self, pontos: list[QPointF]) -> bool:
