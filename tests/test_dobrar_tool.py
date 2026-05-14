@@ -12,11 +12,13 @@ if find_spec("PySide6") is None:
     QWidget = None
     QPointF = None
     FerramentaDobrar = None
+    DesdobrarDialog = None
 else:
     from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.dobrar_tool import DobrarDialog, Ferramenta as FerramentaDobrar
+    from tools.desdobrar_tool import DesdobrarDialog
 
 
 class _FakeCanvas(QWidget):
@@ -54,6 +56,16 @@ class DobrarToolTestCase(unittest.TestCase):
     def test_manter_dimensoes_inicia_marcado(self):
         dialog = DobrarDialog()
         self.assertTrue(dialog.chk_manter_dimensoes.isChecked())
+        self.assertEqual(dialog.chk_manter_dimensoes.text(), "Manter dobra")
+        self.assertEqual([dialog.cmb_modo.itemText(i) for i in range(dialog.cmb_modo.count())], ["Horizontal", "Vertical", "Linha"])
+        self.assertFalse(dialog.chk_fio_meio.isChecked())
+        dialog.deleteLater()
+
+    def test_desdobrar_dialog_fluxo_padrao(self):
+        dialog = DesdobrarDialog()
+        self.assertTrue(dialog.chk_automatico.isChecked())
+        self.assertFalse(dialog.chk_fio_meio.isChecked())
+        self.assertFalse(hasattr(dialog, "chk_inserir_pique"))
         dialog.deleteLater()
 
     def test_dobrar_mantem_contorno_pontilhado_fechado(self):
@@ -63,7 +75,7 @@ class DobrarToolTestCase(unittest.TestCase):
         ferramenta._dialog_por_canvas[id(canvas)].chk_manter_dimensoes.setChecked(True)
         ferramenta._lado_preview = 1
 
-        ferramenta._aplicar(canvas, "Dobrar horizontal")
+        ferramenta._aplicar(canvas, "Horizontal")
 
         molde = canvas.cena.elementos[0]
         registros = molde.get("contornos_dobra_original")
