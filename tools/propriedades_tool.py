@@ -1316,6 +1316,13 @@ class PropriedadesMoldesDialog(QDialog):
         self._contador_novos_tamanhos = 0
         self._snapshot_moldes: dict[int, dict] = self._criar_snapshot_moldes()
         self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._snapshot_cores_tecidos = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
+        # Edição em rascunho: a janela de Propriedades não altera o canvas real
+        # enquanto o usuário não confirmar no botão OK. Cancelar ou fechar no X
+        # descarta esta cópia temporária.
+        self._elementos_rascunho: list = self._criar_rascunho_elementos()
+        self._mostrar_cor_tecidos_rascunho = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._cores_tecidos_rascunho = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
         self._confirmado_ok = False
         self._suspender_auto_aplicar = False
         self._suspender_item_changed = False
@@ -1685,7 +1692,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_ok.clicked.connect(self._ok)
         self.btn_cancelar = QPushButton("✕ Cancelar")
         self.btn_cancelar.setObjectName("CancelButton")
-        self.btn_cancelar.clicked.connect(self.close)
+        self.btn_cancelar.clicked.connect(self._cancelar)
         rodape.addWidget(self.btn_ok)
         rodape.addWidget(self.btn_cancelar)
         lay_dir.addLayout(rodape)
@@ -2169,10 +2176,7 @@ class PropriedadesMoldesDialog(QDialog):
         return [ref.dados for ref in self._refs if isinstance(ref.dados, dict)]
 
     def _atualizar_opcoes_tecido(self):
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
-        if not isinstance(elementos, list):
-            elementos = []
+        elementos = self._elementos_edicao()
         tecidos = {
             str(el.get("tecido") or "").strip()
             for el in elementos
@@ -2180,7 +2184,7 @@ class PropriedadesMoldesDialog(QDialog):
         }
         tecidos.update({
             str(chave).strip()
-            for chave in getattr(self.canvas, "_cores_tecidos", {}).keys()
+            for chave in getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})).keys()
             if str(chave).strip()
         })
         tecidos.discard("")
@@ -2583,10 +2587,6 @@ class PropriedadesMoldesDialog(QDialog):
         finally:
             self._suspender_auto_aplicar = False
         self.preview.set_molde(dict(molde))
-        if hasattr(self.canvas, "update"):
-            self.canvas.update()
-        self._confirmado_ok = True
-        self.dados_aplicados.emit()
 
     def _criar_tab_margem(self) -> QWidget:
         aba = QWidget()
@@ -2781,33 +2781,9 @@ class PropriedadesMoldesDialog(QDialog):
                 self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))
 
     def _forcar_margem_no_canvas(self, molde: dict, margens: dict[str, float], tem_margem: bool):
-        indice = self._indice_atual
-        if indice is None:
-            return
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", None)
-        if isinstance(elementos, list) and 0 <= int(indice) < len(elementos):
-            alvo = elementos[int(indice)]
-            if isinstance(alvo, dict):
-                self._salvar_margens_no_molde(alvo, margens, mostrar_margem=tem_margem)
-                alvo["mostrar_margem"] = bool(tem_margem)
-
-        cache = getattr(self.canvas, "_margens_visuais_forcadas", None)
-        if not isinstance(cache, dict):
-            cache = {}
-        if tem_margem:
-            cache[int(indice)] = {
-                "margens": {k: self._formatar_float_margem(v) for k, v in margens.items()},
-                "mostrar_margem": True,
-            }
-        else:
-            cache.pop(int(indice), None)
-        setattr(self.canvas, "_margens_visuais_forcadas", cache)
-        self._remover_margens_visuais_soltas()
-        if hasattr(self.canvas, "update"):
-            self.canvas.update()
-        if hasattr(self.canvas, "repaint"):
-            self.canvas.repaint()
+        # Durante a edição em Propriedades a margem fica somente no rascunho/preview.
+        # O canvas real só é atualizado quando o usuário confirma em OK.
+        return
 
     def _remover_margens_visuais_soltas(self):
         cena = getattr(self.canvas, "cena", None)
@@ -2902,7 +2878,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_extra.setChecked(True)
         btn_aplicar = QPushButton("Aplicar todos")
         btn_aplicar.setObjectName("ApplyBlueButton")
-        btn_aplicar.clicked.connect(self._aplicar)
+        btn_aplicar.clicked.connect(self._aplicar_imediato_formulario)
         grid.addWidget(self.cmb_extra1, 6, 0, 1, 2)
         grid.addWidget(self.cmb_extra2, 6, 2)
         grid.addWidget(self.btn_cor_extra, 6, 3)
@@ -3074,8 +3050,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._suspender_item_changed = False
 
     def _tecidos_disponiveis(self) -> list[str]:
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
+        elementos = self._elementos_edicao()
         tecidos: set[str] = set()
         existe_molde = False
         if isinstance(elementos, list):
@@ -3087,7 +3062,7 @@ class PropriedadesMoldesDialog(QDialog):
                         tecidos.add(tecido)
         if not existe_molde:
             return []
-        for chave in getattr(self.canvas, "_cores_tecidos", {}).keys():
+        for chave in getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})).keys():
             tecido = str(chave or "").strip()
             if tecido:
                 tecidos.add(tecido)
@@ -3174,7 +3149,6 @@ class PropriedadesMoldesDialog(QDialog):
         self._aplicar_imediato_formulario()
         molde["grupo_molde"] = novo_tecido
         self._atualizar_opcoes_tecido()
-        self.canvas.update()
         QTimer.singleShot(0, self.recarregar_lista)
 
     def _alterar_tecido_grupo_pela_arvore(self, item: QTreeWidgetItem, novo_tecido: str):
@@ -3190,8 +3164,7 @@ class PropriedadesMoldesDialog(QDialog):
         if novo_tecido == tecido_antigo:
             return
 
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return
 
@@ -3219,15 +3192,13 @@ class PropriedadesMoldesDialog(QDialog):
                 self.ed_tecido.setCurrentText(novo_tecido)
             self.preview.set_molde(dict(self._molde_atual() or {}))
         self._atualizar_opcoes_tecido()
-        self.canvas.update()
         self.recarregar_lista()
 
     def _alterar_tecido_molde_por_arraste(self, indices_molde, novo_tecido: str):
         novo_tecido = str(novo_tecido or "").strip()
         if not novo_tecido:
             return
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return
         if isinstance(indices_molde, int):
@@ -3254,24 +3225,22 @@ class PropriedadesMoldesDialog(QDialog):
             return
 
         self._indice_atual = alterados[0]
-        if hasattr(self.canvas, "_selecionados"):
-            try:
-                self.canvas._selecionados = set(alterados)
-            except Exception:
-                pass
         if hasattr(self, "ed_tecido"):
             with QSignalBlocker(self.ed_tecido):
                 self.ed_tecido.setCurrentText(novo_tecido)
         self.preview.set_molde(dict(elementos[self._indice_atual]))
         self._atualizar_opcoes_tecido()
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
-        self.canvas.update()
         self.recarregar_lista()
 
     def _quando_canvas_elementos_alterados(self):
+        if self._confirmado_ok:
+            return
         self._snapshot_moldes = self._criar_snapshot_moldes()
         self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._snapshot_cores_tecidos = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
+        self._elementos_rascunho = self._criar_rascunho_elementos()
+        self._mostrar_cor_tecidos_rascunho = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._cores_tecidos_rascunho = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
         self._indice_atual = self._indice_molde_preferencial()
         self.recarregar_lista()
 
@@ -3287,7 +3256,6 @@ class PropriedadesMoldesDialog(QDialog):
         molde["nome_molde"] = novo_nome
         self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome)
         self.preview.set_molde(dict(molde))
-        self.canvas.update()
 
     def _editar_texto_visualizacao_instantaneo(self, texto: str):
         if self._suspender_auto_aplicar:
@@ -3320,7 +3288,6 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._salvar_config_visual_molde(molde)
         self.preview.set_molde(dict(molde))
-        self.canvas.update()
 
     def _sincronizar_nome_molde_atual_sem_recarregar(self, novo_nome: str | None = None):
         if self._indice_atual is None:
@@ -3383,8 +3350,7 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _coletar_moldes(self) -> list[MoldeRef]:
         refs: list[MoldeRef] = []
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", None)
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return refs
         for idx, el in enumerate(elementos):
@@ -3399,8 +3365,7 @@ class PropriedadesMoldesDialog(QDialog):
         selecionados = getattr(self.canvas, "_selecionados", set())
         if not isinstance(selecionados, (set, list, tuple)):
             return None
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", None)
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return None
         for idx in selecionados:
@@ -3430,8 +3395,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
         idx = item.data(0, Qt.UserRole)
         if idx is not None:
-            cena = getattr(self.canvas, "cena", None)
-            elementos = getattr(cena, "elementos", [])
+            elementos = self._elementos_edicao()
             if isinstance(elementos, list) and 0 <= int(idx) < len(elementos):
                 el = elementos[int(idx)]
                 if isinstance(el, dict) and el.get("molde"):
@@ -3442,13 +3406,11 @@ class PropriedadesMoldesDialog(QDialog):
                     self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome if int(idx) == self._indice_atual else None)
                     self._atualizar_combo_moldes()
                     self.preview.set_molde(dict(el))
-                    self.canvas.update()
             return
         parent = item.parent()
         if parent is None:
             return
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return
         for i in range(item.childCount()):
@@ -3461,14 +3423,12 @@ class PropriedadesMoldesDialog(QDialog):
                 if isinstance(el, dict) and el.get("molde"):
                     el["tecido"] = novo_nome
                     el["grupo_molde"] = novo_nome
-        self.canvas.update()
 
     def _molde_atual(self) -> dict | None:
         if self._indice_atual is None:
             _log_propriedades_debug("_molde_atual(): indice_atual é None")
             return None
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", None)
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             _log_propriedades_debug(f"_molde_atual(): elementos inválido: {type(elementos).__name__}")
             return None
@@ -3501,8 +3461,8 @@ class PropriedadesMoldesDialog(QDialog):
     def _preencher_campos(self, molde: dict | None):
         self._suspender_auto_aplicar = True
         self.preview.set_config_cores_tecidos(
-            getattr(self.canvas, "_cores_tecidos", {}),
-            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+            getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})),
+            bool(getattr(self, "_mostrar_cor_tecidos_rascunho", getattr(self.canvas, "_mostrar_cor_tecidos", False))),
         )
         self.preview.set_molde(molde)
         if molde is None:
@@ -3577,7 +3537,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._preencher_tabela_margem(molde)
         self.chk_preencher.setChecked(bool(molde.get("visual_preencher", False)))
         self.chk_mostrar_cor_tecidos.blockSignals(True)
-        self.chk_mostrar_cor_tecidos.setChecked(bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)))
+        self.chk_mostrar_cor_tecidos.setChecked(bool(getattr(self, "_mostrar_cor_tecidos_rascunho", getattr(self.canvas, "_mostrar_cor_tecidos", False))))
         self.chk_mostrar_cor_tecidos.blockSignals(False)
         self._cor_visual = str(molde.get("cor") or "#ffffff")
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
@@ -3801,7 +3761,8 @@ class PropriedadesMoldesDialog(QDialog):
                     molde[chave_fio] = dados[chave_fio]
 
     def _finalizar_aplicacao_em_lote(self):
-        self.canvas.update()
+        # Atualiza apenas a lista/preview internos da janela.
+        # Não redesenha nem altera o canvas real antes do OK.
         self.preview.set_molde(dict(self._molde_atual() or {}))
         self.recarregar_lista()
 
@@ -3817,10 +3778,6 @@ class PropriedadesMoldesDialog(QDialog):
         for ref in self._refs:
             self._aplicar_encaixe_em_molde(ref.dados, valores)
             self._aplicar_visualizacao_em_molde(ref.dados, visual)
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
-        self._confirmado_ok = True
-        self.dados_aplicados.emit()
         self._finalizar_aplicacao_em_lote()
 
     def _aplicar_visual_todos_moldes(self):
@@ -3835,10 +3792,6 @@ class PropriedadesMoldesDialog(QDialog):
         visual = self._dados_visualizacao_formulario()
         for ref in self._refs:
             self._aplicar_visualizacao_em_molde(ref.dados, visual)
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
-        self._confirmado_ok = True
-        self.dados_aplicados.emit()
         self._finalizar_aplicacao_em_lote()
 
     def _aplicar_todos_com_mesmo_tecido(self):
@@ -3867,11 +3820,7 @@ class PropriedadesMoldesDialog(QDialog):
         margens = self._coletar_margens_tabela()
         self._salvar_margens_no_molde(molde, margens, sincronizar_checkbox=True)
         self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
         self.preview.set_molde(dict(molde))
-        self._confirmado_ok = True
-        self.dados_aplicados.emit()
 
     def _aplicar(self) -> bool:
         molde = self._molde_atual()
@@ -3881,14 +3830,16 @@ class PropriedadesMoldesDialog(QDialog):
 
         self._aplicar_formulario_no_molde(molde)
         self._sincronizar_gradacao_no_molde()
-        self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        self._mostrar_cor_tecidos_rascunho = self.chk_mostrar_cor_tecidos.isChecked()
         if hasattr(self, "tbl_margem"):
             margens = self._coletar_margens_tabela()
-            self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
+            self._salvar_margens_no_molde(molde, margens, mostrar_margem=self.chk_margem_visual.isChecked())
 
-        self.canvas.update()
+        self._aplicar_rascunho_no_canvas()
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
         self.preview.set_molde(dict(molde))
         self.recarregar_lista()
         self._confirmado_ok = True
@@ -3899,6 +3850,10 @@ class PropriedadesMoldesDialog(QDialog):
         if self._aplicar():
             self.close()
 
+    def _cancelar(self):
+        self._confirmado_ok = False
+        self.close()
+
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._ok()
@@ -3908,21 +3863,16 @@ class PropriedadesMoldesDialog(QDialog):
 
     def closeEvent(self, event):
         if not self._confirmado_ok:
-            self._restaurar_snapshot_moldes()
+            self._descartar_edicao_temporaria()
         super().closeEvent(event)
 
     def _excluir_molde_atual(self):
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", None)
+        elementos = self._elementos_edicao()
         if self._indice_atual is None or not isinstance(elementos, list):
             return
         if not (0 <= self._indice_atual < len(elementos)):
             return
         del elementos[self._indice_atual]
-        if hasattr(self.canvas, "_registrar_historico"):
-            self.canvas._registrar_historico()
-        if hasattr(self.canvas, "update"):
-            self.canvas.update()
         self._indice_atual = None
         self.recarregar_lista()
 
@@ -3955,16 +3905,101 @@ class PropriedadesMoldesDialog(QDialog):
         return QColor()
 
     def _alternar_cor_tecidos_canvas(self, ativo: bool):
-        janela = self.parent()
-        if janela is not None and hasattr(janela, "aplicar_config_cores_tecidos_global"):
-            janela.aplicar_config_cores_tecidos_global(mostrar=bool(ativo))
-        else:
-            self.canvas._mostrar_cor_tecidos = bool(ativo)
-            self.canvas.update()
+        # Apenas rascunho/preview. O canvas real recebe esta opção somente no OK.
+        self._mostrar_cor_tecidos_rascunho = bool(ativo)
         self.preview.set_config_cores_tecidos(
-            getattr(self.canvas, "_cores_tecidos", {}),
-            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+            getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})),
+            bool(self._mostrar_cor_tecidos_rascunho),
         )
+        self.preview.set_molde(dict(self._molde_atual() or {}))
+
+    def _elementos_canvas_reais(self) -> list:
+        cena = getattr(self.canvas, "cena", None)
+        elementos = getattr(cena, "elementos", None)
+        return elementos if isinstance(elementos, list) else []
+
+    def _criar_rascunho_elementos(self) -> list:
+        return deepcopy(self._elementos_canvas_reais())
+
+    def _iniciar_sessao_edicao(self):
+        """Reabre Propriedades sempre partindo do estado real do canvas.
+
+        Isso impede que alterações descartadas por Cancelar/X fiquem presas
+        no rascunho interno e reapareçam quando a janela for aberta novamente.
+        """
+        self._confirmado_ok = False
+        self._snapshot_moldes = self._criar_snapshot_moldes()
+        self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._snapshot_cores_tecidos = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
+        self._elementos_rascunho = self._criar_rascunho_elementos()
+        self._mostrar_cor_tecidos_rascunho = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._cores_tecidos_rascunho = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
+        self._refs = []
+        self._itens_molde_por_indice = {}
+        self._combos_tecido_por_item = {}
+        self._indice_atual = self._indice_molde_preferencial()
+        self._alerta_piscando = False
+        self._alerta_passos_restantes = 0
+        self._alerta_tremendo = False
+        self._alerta_tremor_passos = 0
+        self._alerta_pos_original = None
+
+    def _limpar_preview_temporario(self):
+        try:
+            self.preview.set_molde(None)
+            self.preview.set_modo_manipulacao("Nenhum")
+        except Exception:
+            pass
+        if hasattr(self, "lbl_info_preview"):
+            self.lbl_info_preview.setText("")
+            self.lbl_info_preview.setVisible(False)
+        if hasattr(self, "lbl_status_visual"):
+            self.lbl_status_visual.setText("Indique posição")
+
+    def _descartar_edicao_temporaria(self):
+        """Cancela tudo que estava sendo editado e limpa visualizações temporárias."""
+        self._restaurar_snapshot_moldes()
+        self._elementos_rascunho = self._criar_rascunho_elementos()
+        self._mostrar_cor_tecidos_rascunho = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
+        self._cores_tecidos_rascunho = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
+        self._refs = []
+        self._itens_molde_por_indice = {}
+        self._combos_tecido_por_item = {}
+        self._indice_atual = None
+        self._suspender_item_changed = False
+        self._suspender_combo_tecido_arvore = False
+        self._limpar_preview_temporario()
+        try:
+            self.arvore.clear()
+        except Exception:
+            pass
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
+
+    def _elementos_edicao(self) -> list:
+        elementos = getattr(self, "_elementos_rascunho", None)
+        if isinstance(elementos, list):
+            return elementos
+        return self._elementos_canvas_reais()
+
+    def _aplicar_rascunho_no_canvas(self):
+        elementos_reais = self._elementos_canvas_reais()
+        if isinstance(elementos_reais, list):
+            elementos_reais[:] = deepcopy(self._elementos_edicao())
+        try:
+            self.canvas._mostrar_cor_tecidos = bool(getattr(self, "_mostrar_cor_tecidos_rascunho", False))
+        except Exception:
+            pass
+        try:
+            self.canvas._cores_tecidos = dict(getattr(self, "_cores_tecidos_rascunho", {}) or {})
+        except Exception:
+            pass
+        if hasattr(self.canvas, "_margens_visuais_forcadas"):
+            try:
+                self.canvas._margens_visuais_forcadas = {}
+            except Exception:
+                pass
+        self._remover_margens_visuais_soltas()
 
     def _criar_snapshot_moldes(self) -> dict[int, dict]:
         snapshot: dict[int, dict] = {}
@@ -3994,8 +4029,16 @@ class PropriedadesMoldesDialog(QDialog):
                 self.canvas._margens_visuais_forcadas = {}
             except Exception:
                 pass
-        self.canvas._mostrar_cor_tecidos = bool(self._snapshot_mostrar_cor_tecidos)
-        self.canvas.update()
+        try:
+            self.canvas._mostrar_cor_tecidos = bool(self._snapshot_mostrar_cor_tecidos)
+        except Exception:
+            pass
+        try:
+            self.canvas._cores_tecidos = dict(getattr(self, "_snapshot_cores_tecidos", {}) or {})
+        except Exception:
+            pass
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
 
     def _aplicar_formulario_no_molde(self, molde: dict):
         nome_combo = self.cmb_molde.currentText().strip()
@@ -4045,12 +4088,15 @@ class PropriedadesMoldesDialog(QDialog):
         self._aplicar_formulario_no_molde(molde)
         self._sincronizar_nome_molde_atual_sem_recarregar(str(molde.get("nome_molde") or ""))
         self._sincronizar_gradacao_no_molde()
-        self.canvas._mostrar_cor_tecidos = self.chk_mostrar_cor_tecidos.isChecked()
+        self._mostrar_cor_tecidos_rascunho = self.chk_mostrar_cor_tecidos.isChecked()
         if hasattr(self, "tbl_margem"):
             margens = self._coletar_margens_tabela()
-            self._forcar_margem_no_canvas(molde, margens, bool(molde.get("mostrar_margem", False)))
+            self._salvar_margens_no_molde(molde, margens, mostrar_margem=self.chk_margem_visual.isChecked())
+        self.preview.set_config_cores_tecidos(
+            getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})),
+            bool(getattr(self, "_mostrar_cor_tecidos_rascunho", False)),
+        )
         self.preview.set_molde(dict(molde))
-        self.canvas.update()
 
     def _conectar_auto_aplicacao(self):
         sinais = [
@@ -4099,8 +4145,7 @@ class PropriedadesMoldesDialog(QDialog):
             sinal.connect(self._atualizar_estado_manipulacao_visual)
 
     def _abrir_config_cor_tecidos(self):
-        cena = getattr(self.canvas, "cena", None)
-        elementos = getattr(cena, "elementos", [])
+        elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             elementos = []
         tecidos = sorted({
@@ -4108,23 +4153,18 @@ class PropriedadesMoldesDialog(QDialog):
             for el in elementos
             if isinstance(el, dict) and el.get("molde") and str(el.get("tecido") or "").strip()
         })
-        mapa = dict(getattr(self.canvas, "_cores_tecidos", {}))
+        mapa = dict(getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})))
         dialog = ConfigurarCoresTecidosDialog(tecidos, mapa, self)
         if dialog.exec() != QDialog.Accepted:
             return
-        novo_mapa = dialog.cores_tecidos()
-        janela = self.parent()
-        if janela is not None and hasattr(janela, "aplicar_config_cores_tecidos_global"):
-            janela.aplicar_config_cores_tecidos_global(mapa_cores=novo_mapa)
-        else:
-            self.canvas._cores_tecidos = novo_mapa
+        self._cores_tecidos_rascunho = dialog.cores_tecidos()
         self._atualizar_opcoes_tecido()
-        if hasattr(self.canvas, "update"):
-            self.canvas.update()
         self.preview.set_config_cores_tecidos(
-            getattr(self.canvas, "_cores_tecidos", {}),
-            bool(getattr(self.canvas, "_mostrar_cor_tecidos", False)),
+            getattr(self, "_cores_tecidos_rascunho", {}),
+            bool(getattr(self, "_mostrar_cor_tecidos_rascunho", False)),
         )
+        self.preview.set_molde(dict(self._molde_atual() or {}))
+
 
 class ConfigurarFerramentasDialog(QDialog):
     def __init__(self, parent: QWidget | None = None):
@@ -4524,17 +4564,22 @@ class Ferramenta(FerramentaBase):
         try:
             dialog = self._obter_dialog(canvas)
             _log_propriedades_debug(f"Dialog obtido: {dialog}; visível_antes={dialog.isVisible() if dialog is not None else None}")
+            dialog._iniciar_sessao_edicao()
             dialog._indice_atual = dialog._indice_molde_preferencial()
             dialog.recarregar_lista()
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
+            if dialog._indice_atual is None:
+                try:
+                    dialog.hide()
+                except Exception:
+                    pass
+                self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
+                return
             dialog.show()
             dialog.raise_()
             dialog.activateWindow()
             _log_propriedades_debug(f"Dialog visível_depois={dialog.isVisible()}; geometria={dialog.geometry().getRect()}")
-            if dialog._indice_atual is None:
-                self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
-            else:
-                self.set_status("Janela de propriedades do molde aberta.")
+            self.set_status("Janela de propriedades do molde aberta.")
         except Exception as exc:
             _log_propriedades_debug(f"Falha ao abrir Propriedades: {type(exc).__name__}: {exc}")
             print(f"Falha ao abrir Propriedades: {type(exc).__name__}: {exc}")
