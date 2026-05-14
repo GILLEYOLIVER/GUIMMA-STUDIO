@@ -267,6 +267,16 @@ class Ferramenta(FerramentaBase):
         passo_u = dialog.passo_unidade()
         passo = canvas.converter_para_cena(passo_u) if hasattr(canvas, "converter_para_cena") else passo_u * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
         self._pontos_preview = self._pontos_por_progresso(self._inicio_dist, self._progresso_assinado, passo)
+        progresso_abs = abs(self._progresso_assinado)
+        prog_u = canvas.formatar_valor_unidade(progresso_abs) if hasattr(canvas, "formatar_valor_unidade") else f"{progresso_abs:.2f}"
+        per_u = canvas.formatar_valor_unidade(total) if hasattr(canvas, "formatar_valor_unidade") else f"{total:.2f}"
+        unidade = getattr(canvas, "_unidade_sigla", "cm")
+        txt = (
+            f"No perímetro (prévia): percurso {prog_u} ({unidade}) | "
+            f"perímetro {per_u} ({unidade}) | marcas {len(self._pontos_preview)}"
+        )
+        self.set_status(txt)
+        mensagem_status(canvas, txt)
         canvas.update()
         return True
 
