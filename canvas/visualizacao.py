@@ -1199,6 +1199,7 @@ class VisualizacaoCanvas(QWidget):
             "cortar",
             "sentido_fio",
             "dobrar",
+            "desdobrar",
         }
         runtime_ja_processado = False
         if (
