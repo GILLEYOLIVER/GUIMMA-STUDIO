@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QVBoxLayout
 
+from canvas.snap import SnapResult
 from config import ICONS_DIR
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -263,12 +264,13 @@ class Ferramenta(FerramentaBase):
             original = self._pontos_elemento(el)
             lado_movido = -self._lado_preview
             if manter and len(original) >= 2:
-                metade = [(p.x(), p.y()) for p in original if self._lado_ponto(p, eixo_el) == lado_movido]
-                if len(metade) >= 2 or len(original) >= 3:
+                base_original = original[:-1] if len(original) > 2 and self._pontos_mesmos(original[0], original[-1]) else list(original)
+                metade_original = self._recortar_poligono_lado(base_original, eixo_el, lado_movido)
+                if len(metade_original) >= 3:
                     el.setdefault("contornos_dobra_original", []).append(
                         {
                             "pontos": [(p.x(), p.y()) for p in original],
-                            "metade_movida": metade,
+                            "metade_movida": [(p.x(), p.y()) for p in metade_original],
                             "eixo": self._serializar_eixo(eixo_el),
                             "lado_destino": int(self._lado_preview),
                         }
@@ -600,6 +602,44 @@ class Ferramenta(FerramentaBase):
     def _fechar(self, canvas):
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Dobrar finalizada. Voltando para Selecionar.")
+
+    def obter_candidatos_snap(self, canvas, cursor: QPointF):
+        if self._linha_p1 is None:
+            return []
+        pontos = [QPointF(self._linha_p1)]
+        if self._linha_p2 is not None:
+            pontos.append(QPointF(self._linha_p2))
+        elif self._preview_pos is not None:
+            pontos.append(QPointF(self._preview_pos))
+        if len(pontos) < 2:
+            return []
+
+        tolerancia = canvas._tolerancia_snap_px() / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        candidatos: list[SnapResult] = []
+        for ponto in pontos:
+            dist = self._dist(cursor, ponto)
+            if dist <= tolerancia:
+                candidatos.append(SnapResult(QPointF(ponto), "nó", dist, None))
+        inicio, fim = pontos[0], pontos[-1]
+        meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
+        dist_meio = self._dist(cursor, meio)
+        if dist_meio <= tolerancia:
+            candidatos.append(SnapResult(meio, "ponto médio", dist_meio, None))
+        proj = self._projetar_em_segmento(cursor, inicio, fim)
+        dist_borda = self._dist(cursor, proj)
+        if dist_borda <= tolerancia:
+            candidatos.append(SnapResult(proj, "borda", dist_borda, None))
+        return candidatos
+
+    def _projetar_em_segmento(self, ponto: QPointF, inicio: QPointF, fim: QPointF) -> QPointF:
+        vx = fim.x() - inicio.x()
+        vy = fim.y() - inicio.y()
+        denom = (vx * vx) + (vy * vy)
+        if denom <= 1e-12:
+            return QPointF(inicio)
+        t = ((ponto.x() - inicio.x()) * vx + (ponto.y() - inicio.y()) * vy) / denom
+        t = max(0.0, min(1.0, t))
+        return QPointF(inicio.x() + (vx * t), inicio.y() + (vy * t))
 
     def _status(self, canvas, texto: str) -> None:
         self.set_status(texto)

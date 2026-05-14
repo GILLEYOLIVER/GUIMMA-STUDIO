@@ -60,6 +60,7 @@ class Ferramenta(_DobrarBase):
         super().__init__()
         self._molde_idx: int | None = None
         self._hover_idx = None
+        self._confirmar_ref = None
         self._ultimo_direito = 0.0
 
     def on_activate(self, canvas):
@@ -79,6 +80,12 @@ class Ferramenta(_DobrarBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
+            if self._confirmar_ref is not None:
+                self._confirmar_ref = None
+                self._status(canvas, "Prévia cancelada. Escolha novamente o trecho do perímetro.")
+                canvas.update()
+                event.accept()
+                return True
             if self._molde_idx is not None:
                 self._resetar_desdobrar(canvas, limpar_selecao=True)
                 self._status(canvas, "Desdobrar cancelado. Clique em um molde para começar novamente.")
@@ -118,6 +125,13 @@ class Ferramenta(_DobrarBase):
             self._status(canvas, "Passe o mouse sobre um trecho do perímetro entre pontos principais e clique para desdobrar.")
             event.accept()
             return True
+        if self._confirmar_ref is None:
+            self._confirmar_ref = alvo
+            self._hover_idx = alvo
+            self._status(canvas, "Prévia do desdobrar pronta. Clique novamente para confirmar ou botão direito para escolher outro trecho.")
+            canvas.update()
+            event.accept()
+            return True
         self._aplicar_desdobrar(canvas, self._molde_idx, alvo)
         event.accept()
         return True
@@ -126,7 +140,8 @@ class Ferramenta(_DobrarBase):
         if self._molde_idx is None:
             return False
         pos = canvas._ponto_com_snap(event.position())
-        self._hover_idx = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
+        if self._confirmar_ref is None:
+            self._hover_idx = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
         canvas.update()
         return True
 
@@ -144,6 +159,12 @@ class Ferramenta(_DobrarBase):
         painter.setPen(QPen(cor, 2.2, Qt.SolidLine))
         for a, b in zip(pontos, pontos[1:]):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+        if self._confirmar_ref is not None and self._molde_idx is not None:
+            preview = self._preview_desdobrar(canvas, self._molde_idx, self._confirmar_ref)
+            if len(preview) >= 2:
+                painter.setPen(QPen(cor, 1.8, Qt.DashLine))
+                for a, b in zip(preview, preview[1:]):
+                    painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
 
     def _aplicar_desdobrar(self, canvas, molde_idx: int, linha_ref) -> None:
@@ -160,17 +181,10 @@ class Ferramenta(_DobrarBase):
             return
         if self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
             return
-        pontos = self._pontos_elemento(molde)
-        if len(pontos) < 3:
-            self._status(canvas, "Molde sem contorno suficiente para desdobrar.")
-            return
-        base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
-        espelhado = [self._espelhar_ponto(p, eixo) for p in base]
-        unidos = self._unir_poligonos(base, espelhado)
+        unidos = self._resultado_desdobrar(molde, linha, eixo)
         if len(unidos) < 3:
             self._status(canvas, "Não foi possível formar o contorno desdobrado.")
             return
-        unidos = self._preparar_contorno_resultado(unidos, eixo)
         cantos = self._controles_resultado_desdobrar(molde, unidos, eixo)
         self._sincronizar_piques_resultado(molde, unidos, eixo, inserir=self._inserir_pique_ativo(canvas))
         molde["pontos"] = [(p.x(), p.y()) for p in unidos]
@@ -187,6 +201,57 @@ class Ferramenta(_DobrarBase):
         canvas._selecionados = {molde_idx}
         canvas.update()
         self._status(canvas, "Molde desdobrado pela linha escolhida. A ferramenta continua ativa.")
+
+    def _preview_desdobrar(self, canvas, molde_idx: int, linha_ref) -> list[QPointF]:
+        if not (0 <= molde_idx < len(canvas.cena.elementos)):
+            return []
+        molde = canvas.cena.elementos[molde_idx]
+        linha = self._elemento_linha_ref(canvas, linha_ref)
+        if linha is None:
+            return []
+        eixo = self._eixo_linha(linha)
+        if eixo is None:
+            return []
+        return self._resultado_desdobrar(molde, linha, eixo)
+
+    def _resultado_desdobrar(self, molde: dict, linha: dict, eixo) -> list[QPointF]:
+        pontos = self._pontos_elemento(molde)
+        if len(pontos) < 3:
+            return []
+        base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
+        base = self._remover_auxiliares_trecho_dobra(base, linha)
+        espelhado = [self._espelhar_ponto(p, eixo) for p in base]
+        unidos = self._unir_poligonos(base, espelhado)
+        if len(unidos) < 3:
+            return []
+        return self._preparar_contorno_resultado(unidos, eixo)
+
+    def _remover_auxiliares_trecho_dobra(self, base: list[QPointF], linha: dict) -> list[QPointF]:
+        if str(linha.get("origem_desdobrar") or "") != "perimetro_principal":
+            return base
+        if len(linha.get("pontos") or []) <= 2:
+            return base
+        try:
+            inicio = int(linha.get("indice_inicio"))
+            fim = int(linha.get("indice_fim"))
+        except Exception:
+            return base
+        total = len(base)
+        if total < 3:
+            return base
+        remover: set[int] = set()
+        atual = inicio % total
+        destino = fim % total
+        limite = total + 1
+        while atual != destino and limite > 0:
+            atual = (atual + 1) % total
+            if atual != destino:
+                remover.add(atual)
+            limite -= 1
+        if not remover:
+            return base
+        filtrado = [QPointF(p) for idx, p in enumerate(base) if idx not in remover]
+        return filtrado if len(filtrado) >= 3 else base
 
     def _restaurar_dobra_original(self, canvas, molde_idx: int, molde: dict, linha: dict, eixo_atual) -> bool:
         registros = molde.get("contornos_dobra_original")
@@ -227,6 +292,12 @@ class Ferramenta(_DobrarBase):
 
     def _pontos_restauracao_original(self, registro, pontos_atuais: list[QPointF]) -> list[QPointF]:
         if isinstance(registro, dict):
+            metade_movida = registro.get("metade_movida")
+            if isinstance(metade_movida, list) and metade_movida:
+                metade = self._pontos_registro_original({"pontos": metade_movida})
+                base_atual = pontos_atuais[:-1] if len(pontos_atuais) > 2 and self._pontos_mesmos(pontos_atuais[0], pontos_atuais[-1]) else list(pontos_atuais)
+                unidos = self._unir_poligonos(base_atual, metade)
+                return unidos if len(unidos) >= 3 else base_atual
             return self._pontos_registro_original(registro)
         metade_antiga = self._pontos_registro_original(registro)
         if len(metade_antiga) < 2:
@@ -577,6 +648,7 @@ class Ferramenta(_DobrarBase):
     def _resetar_desdobrar(self, canvas, limpar_selecao: bool) -> None:
         self._molde_idx = None
         self._hover_idx = None
+        self._confirmar_ref = None
         if limpar_selecao:
             canvas._selecionados = set()
         canvas.update()
