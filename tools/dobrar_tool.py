@@ -51,7 +51,7 @@ class DobrarDialog(QDialog):
         form.addRow("Modo da dobra", self.cmb_modo)
         raiz.addLayout(form)
 
-        self.chk_manter_dimensoes = QCheckBox("Manter dobra")
+        self.chk_manter_dimensoes = QCheckBox("Manter assimetria")
         self.chk_manter_dimensoes.setChecked(True)
         raiz.addWidget(self.chk_manter_dimensoes)
         self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")

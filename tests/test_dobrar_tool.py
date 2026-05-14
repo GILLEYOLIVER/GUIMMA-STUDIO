@@ -56,7 +56,7 @@ class DobrarToolTestCase(unittest.TestCase):
     def test_manter_dimensoes_inicia_marcado(self):
         dialog = DobrarDialog()
         self.assertTrue(dialog.chk_manter_dimensoes.isChecked())
-        self.assertEqual(dialog.chk_manter_dimensoes.text(), "Manter dobra")
+        self.assertEqual(dialog.chk_manter_dimensoes.text(), "Manter assimetria")
         self.assertEqual([dialog.cmb_modo.itemText(i) for i in range(dialog.cmb_modo.count())], ["Horizontal", "Vertical", "Linha"])
         self.assertFalse(dialog.chk_fio_meio.isChecked())
         dialog.deleteLater()
@@ -64,7 +64,7 @@ class DobrarToolTestCase(unittest.TestCase):
     def test_desdobrar_dialog_fluxo_padrao(self):
         dialog = DesdobrarDialog()
         self.assertTrue(dialog.chk_automatico.isChecked())
-        self.assertFalse(dialog.chk_fio_meio.isChecked())
+        self.assertTrue(dialog.chk_fio_meio.isChecked())
         self.assertFalse(hasattr(dialog, "chk_inserir_pique"))
         dialog.deleteLater()
 
