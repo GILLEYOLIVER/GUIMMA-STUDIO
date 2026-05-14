@@ -109,6 +109,8 @@ class Ferramenta(_DobrarBase):
         if eixo is None:
             self._status(canvas, "A linha escolhida não tem extremidades válidas para desdobrar.")
             return
+        if self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
+            return
         pontos = self._pontos_elemento(molde)
         if len(pontos) < 3:
             self._status(canvas, "Molde sem contorno suficiente para desdobrar.")
@@ -137,8 +139,104 @@ class Ferramenta(_DobrarBase):
         canvas.update()
         self._status(canvas, "Molde desdobrado pela linha escolhida. A ferramenta continua ativa.")
 
+    def _restaurar_dobra_original(self, canvas, molde_idx: int, molde: dict, linha: dict, eixo_atual) -> bool:
+        registros = molde.get("contornos_dobra_original")
+        if not isinstance(registros, list) or not registros:
+            return False
+        pontos_atuais = self._pontos_elemento(molde)
+        melhor = None
+        melhor_dist = float("inf")
+        for registro in reversed(registros):
+            pontos = self._pontos_restauracao_original(registro, pontos_atuais)
+            if len(pontos) < 3:
+                continue
+            eixo_reg = self._eixo_registro_original(registro)
+            dist = self._distancia_eixos(eixo_atual, eixo_reg) if eixo_reg is not None else 0.0
+            if dist < melhor_dist:
+                melhor = pontos
+                melhor_dist = dist
+        if not melhor:
+            return False
+        if not self._pontos_mesmos(melhor[0], melhor[-1]):
+            melhor.append(QPointF(melhor[0]))
+        molde["pontos"] = [(p.x(), p.y()) for p in melhor]
+        cantos = melhor[:-1] if self._pontos_mesmos(melhor[0], melhor[-1]) else melhor
+        molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
+        molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+        molde["molde_dobrado"] = False
+        molde["dobra_horizontal"] = False
+        molde["dobra_vertical"] = False
+        molde.pop("contornos_dobra_original", None)
+        molde.setdefault("metadados", {})["ultima_transformacao"] = "desdobrar_original"
+        canvas._selecionados = {molde_idx}
+        canvas._registrar_historico()
+        self._resetar_desdobrar(canvas, limpar_selecao=False)
+        canvas._selecionados = {molde_idx}
+        canvas.update()
+        self._status(canvas, "Molde restaurado ao contorno original da dobra.")
+        return True
+
+    def _pontos_restauracao_original(self, registro, pontos_atuais: list[QPointF]) -> list[QPointF]:
+        if isinstance(registro, dict):
+            return self._pontos_registro_original(registro)
+        metade_antiga = self._pontos_registro_original(registro)
+        if len(metade_antiga) < 2:
+            return []
+        base_atual = pontos_atuais[:-1] if len(pontos_atuais) > 2 and self._pontos_mesmos(pontos_atuais[0], pontos_atuais[-1]) else list(pontos_atuais)
+        metade = metade_antiga[:-1] if len(metade_antiga) > 2 and self._pontos_mesmos(metade_antiga[0], metade_antiga[-1]) else metade_antiga
+        unidos = self._unir_poligonos(base_atual, metade)
+        return unidos if len(unidos) >= 3 else metade_antiga
+
+    def _pontos_registro_original(self, registro) -> list[QPointF]:
+        origem = registro.get("pontos") if isinstance(registro, dict) else registro
+        if not isinstance(origem, list):
+            return []
+        pontos: list[QPointF] = []
+        for p in origem:
+            if self._eh_ponto(p):
+                pontos.append(QPointF(float(p[0]), float(p[1])))
+        return pontos
+
+    def _eixo_registro_original(self, registro):
+        if not isinstance(registro, dict):
+            return None
+        eixo = registro.get("eixo")
+        if not isinstance(eixo, dict):
+            return None
+        tipo = str(eixo.get("tipo") or "")
+        if tipo == "h":
+            return ("h", float(eixo.get("valor", 0.0)))
+        if tipo == "v":
+            return ("v", float(eixo.get("valor", 0.0)))
+        p1 = eixo.get("p1")
+        p2 = eixo.get("p2")
+        if self._eh_ponto(p1) and self._eh_ponto(p2):
+            return ("line", QPointF(float(p1[0]), float(p1[1])), QPointF(float(p2[0]), float(p2[1])))
+        return None
+
+    def _distancia_eixos(self, atual, salvo) -> float:
+        if salvo is None:
+            return 0.0
+        a1, a2 = self._pontos_eixo(atual)
+        b1, b2 = self._pontos_eixo(salvo)
+        return min(
+            self._dist(a1, b1) + self._dist(a2, b2),
+            self._dist(a1, b2) + self._dist(a2, b1),
+        )
+
+    def _pontos_eixo(self, eixo) -> tuple[QPointF, QPointF]:
+        if eixo[0] == "h":
+            y = float(eixo[1])
+            return QPointF(0.0, y), QPointF(1.0, y)
+        if eixo[0] == "v":
+            x = float(eixo[1])
+            return QPointF(x, 0.0), QPointF(x, 1.0)
+        return QPointF(eixo[1]), QPointF(eixo[2])
+
     def _linha_interna_em_ponto(self, canvas, molde_idx: int, pos: QPointF) -> int | None:
         candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
+        if not candidatos:
+            candidatos = self._indices_linhas_internas_proximas(canvas, molde_idx, pos)
         for idx in candidatos:
             if idx == molde_idx or not (0 <= idx < len(canvas.cena.elementos)):
                 continue
@@ -146,6 +244,17 @@ class Ferramenta(_DobrarBase):
             if self._eh_linha_interna_do_molde(canvas, molde_idx, el):
                 return int(idx)
         return None
+
+    def _indices_linhas_internas_proximas(self, canvas, molde_idx: int, pos: QPointF) -> list[int]:
+        tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        encontrados: list[int] = []
+        for idx, el in enumerate(canvas.cena.elementos):
+            if idx == molde_idx or not self._eh_linha_interna_do_molde(canvas, molde_idx, el):
+                continue
+            pontos = self._pontos_para_preview_linha(el)
+            if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
+                encontrados.append(idx)
+        return encontrados
 
     def _eh_linha_interna_do_molde(self, canvas, molde_idx: int, el: dict) -> bool:
         if not isinstance(el, dict) or el.get("molde"):
@@ -165,7 +274,14 @@ class Ferramenta(_DobrarBase):
         pontos = self._pontos_para_preview_linha(el)
         if not pontos:
             return False
-        return any(self._ponto_dentro_molde(molde, p) for p in pontos)
+        if any(self._ponto_dentro_molde(molde, p) for p in pontos):
+            return True
+        bbox = self._bbox_pontos(self._pontos_elemento(molde))
+        if bbox is None:
+            return False
+        min_x, min_y, max_x, max_y = bbox
+        margem = max(max_x - min_x, max_y - min_y, 1.0) * 0.02
+        return any((min_x - margem) <= p.x() <= (max_x + margem) and (min_y - margem) <= p.y() <= (max_y + margem) for p in pontos)
 
     def _eixo_linha(self, el: dict):
         if el.get("tipo") == "bezier_quadratica":
@@ -215,6 +331,23 @@ class Ferramenta(_DobrarBase):
         if limpar_selecao:
             canvas._selecionados = set()
         canvas.update()
+
+    def _bbox_pontos(self, pontos: list[QPointF]) -> tuple[float, float, float, float] | None:
+        if not pontos:
+            return None
+        return min(p.x() for p in pontos), min(p.y() for p in pontos), max(p.x() for p in pontos), max(p.y() for p in pontos)
+
+    def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        apx = p.x() - a.x()
+        apy = p.y() - a.y()
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 1e-12:
+            return self._dist(a, p)
+        t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / denom))
+        proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+        return self._dist(proj, p)
 
     @staticmethod
     def _bezier(p0: QPointF, p1: QPointF, p2: QPointF, t: float) -> QPointF:
