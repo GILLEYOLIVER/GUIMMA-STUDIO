@@ -11,6 +11,7 @@ from PySide6.QtCore import QEvent, QLocale, QMimeData, QPointF, QRectF, Qt, QTim
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -1318,6 +1319,8 @@ class PropriedadesMoldesDialog(QDialog):
         self._confirmado_ok = False
         self._suspender_auto_aplicar = False
         self._suspender_item_changed = False
+        self._alerta_piscando = False
+        self._alerta_passos_restantes = 0
         self._linha_gradacao_atual = 0
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
@@ -1339,6 +1342,43 @@ class PropriedadesMoldesDialog(QDialog):
         except Exception as exc:
             _log_propriedades_debug(f"Falha ao carregar lista de moldes no __init__: {type(exc).__name__}: {exc}")
             print(f"Falha ao carregar lista de moldes: {type(exc).__name__}: {exc}")
+
+    def alertar_atencao(self):
+        """Chama a atenção quando o usuário clica fora da janela aberta."""
+        if not self.isVisible():
+            return
+        try:
+            QApplication.beep()
+            QApplication.alert(self, 0)
+        except Exception:
+            pass
+        self.raise_()
+        self.activateWindow()
+        if self._alerta_piscando:
+            self._alerta_passos_restantes = max(self._alerta_passos_restantes, 6)
+            return
+        self._alerta_piscando = True
+        self._alerta_passos_restantes = 6
+        self._alternar_alerta_visual()
+
+    def _alternar_alerta_visual(self):
+        if self._alerta_passos_restantes <= 0 or not self.isVisible():
+            self._alerta_piscando = False
+            self._alerta_passos_restantes = 0
+            self.setStyleSheet(self._stylesheet())
+            return
+        alerta = """
+        QDialog#PropriedadesMoldesDialog {
+            border: 3px solid #ffb000;
+            background: #fff7df;
+        }
+        """
+        if self._alerta_passos_restantes % 2 == 0:
+            self.setStyleSheet(self._stylesheet() + alerta)
+        else:
+            self.setStyleSheet(self._stylesheet())
+        self._alerta_passos_restantes -= 1
+        QTimer.singleShot(150, self._alternar_alerta_visual)
 
     def _stylesheet(self) -> str:
         return """

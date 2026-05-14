@@ -819,6 +819,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         tipo_evento = event.type()
 
         if (
+            tipo_evento == QEvent.MouseButtonPress
+            and hasattr(event, "globalPosition")
+            and self._alertar_propriedades_aberta_se_clique_fora(event.globalPosition().toPoint())
+        ):
+            return super().eventFilter(watched, event)
+
+        if (
             self._pendente_centralizar_indicado
             and tipo_evento == QEvent.MouseButtonPress
             and hasattr(watched, "_indices_elementos_em_ponto")
@@ -877,6 +884,29 @@ class GuimmaStudioMainWindow(QMainWindow):
         if isinstance(watched, QDialog) and tipo_evento in (QEvent.Close, QEvent.Hide):
             self._garantir_selecionar_apos_fechar_janela()
         return super().eventFilter(watched, event)
+
+    def _alertar_propriedades_aberta_se_clique_fora(self, pos_global: QPoint) -> bool:
+        app = QApplication.instance()
+        if app is None:
+            return False
+        alertou = False
+        for widget in app.topLevelWidgets():
+            if widget is self or widget.objectName() != "PropriedadesMoldesDialog" or not widget.isVisible():
+                continue
+            if widget.geometry().contains(pos_global):
+                continue
+            try:
+                if hasattr(widget, "alertar_atencao"):
+                    widget.alertar_atencao()
+                else:
+                    QApplication.beep()
+                    QApplication.alert(widget, 0)
+                    widget.raise_()
+                    widget.activateWindow()
+                alertou = True
+            except Exception:
+                pass
+        return alertou
 
     def _garantir_selecionar_apos_fechar_janela(self):
         def _ativar():
