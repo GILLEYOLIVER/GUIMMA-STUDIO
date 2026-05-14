@@ -1889,41 +1889,72 @@ class Ferramenta(FerramentaBase):
         indices_ordenados = sorted({int(i) for i in indices_cantos if 0 <= int(i) < n})
         if len(indices_ordenados) < 2:
             return []
-        cantos_set = set(indices_ordenados)
         aux: list[tuple[float, float]] = []
-        aux_indices: set[int] = set()
-        perimetro = 0.0
-        for i in range(n):
-            perimetro += self._dist_tuple(base[i], base[(i + 1) % n])
-        dist_min = max(0.8, perimetro * 0.03)
-        ultimo_idx: int | None = None
-        for i in range(n):
-            if i in cantos_set:
-                continue
-            a = QPointF(*base[i - 1])
-            b = QPointF(*base[i])
-            c = QPointF(*base[(i + 1) % n])
-            ang = self._angulo_interno(a, b, c)
-            if ang < 132.0:
-                continue
-            if ultimo_idx is not None and self._dist_tuple(base[ultimo_idx], base[i]) < dist_min:
-                continue
-            aux.append((float(base[i][0]), float(base[i][1])))
-            aux_indices.add(i)
-            ultimo_idx = i
-
         for pos, inicio in enumerate(indices_ordenados):
             fim = indices_ordenados[(pos + 1) % len(indices_ordenados)]
-            internos = self._indices_internos_intervalo_contorno(inicio, fim, n)
-            if any(idx in aux_indices for idx in internos):
+            trecho = self._pontos_intervalo_contorno(base, inicio, fim)
+            if len(trecho) < 3:
                 continue
-            if self._dist_tuple(base[inicio], base[fim]) <= 1e-6:
-                continue
-            ax, ay = base[inicio]
-            bx, by = base[fim]
-            aux.append(((float(ax) + float(bx)) / 2.0, (float(ay) + float(by)) / 2.0))
+            selecionados = self._auxiliares_para_trecho_curvo(trecho)
+            aux.extend(selecionados)
 
         return self._deduplicar_pontos(aux, tol=1e-4)
+
+    def _pontos_intervalo_contorno(self, base: list[tuple[float, float]], inicio: int, fim: int) -> list[tuple[float, float]]:
+        n = len(base)
+        if n <= 0:
+            return []
+        pontos = [base[int(inicio) % n]]
+        atual = int(inicio) % n
+        destino = int(fim) % n
+        while atual != destino:
+            atual = (atual + 1) % n
+            pontos.append(base[atual])
+            if len(pontos) > n + 1:
+                break
+        return pontos
+
+    def _auxiliares_para_trecho_curvo(self, trecho: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(trecho) < 3:
+            return []
+        a = QPointF(*trecho[0])
+        b = QPointF(*trecho[-1])
+        corda = self._dist(a, b)
+        if corda <= 1e-6:
+            return []
+        desvios = [self._distancia_ponto_segmento_tuple(p, trecho[0], trecho[-1]) for p in trecho[1:-1]]
+        desvio_max = max(desvios, default=0.0)
+        tolerancia_curva = max(0.25, corda * 0.015)
+        if desvio_max <= tolerancia_curva:
+            return []
+        comprimento = sum(self._dist_tuple(x, y) for x, y in zip(trecho, trecho[1:]))
+        quantidade = 1 if comprimento <= corda * 1.35 else 2
+        if desvio_max > corda * 0.20 and len(trecho) >= 7:
+            quantidade = 3
+        saida: list[tuple[float, float]] = []
+        for passo in range(1, quantidade + 1):
+            alvo = passo / float(quantidade + 1)
+            idx = max(1, min(len(trecho) - 2, round(alvo * (len(trecho) - 1))))
+            saida.append((float(trecho[idx][0]), float(trecho[idx][1])))
+        return self._deduplicar_pontos(saida, tol=1e-4)
+
+    def _distancia_ponto_segmento_tuple(
+        self,
+        ponto: tuple[float, float],
+        inicio: tuple[float, float],
+        fim: tuple[float, float],
+    ) -> float:
+        ax, ay = float(inicio[0]), float(inicio[1])
+        bx, by = float(fim[0]), float(fim[1])
+        px, py = float(ponto[0]), float(ponto[1])
+        abx = bx - ax
+        aby = by - ay
+        denom = (abx * abx) + (aby * aby)
+        if denom <= 1e-12:
+            return self._dist_tuple((ax, ay), (px, py))
+        t = max(0.0, min(1.0, (((px - ax) * abx) + ((py - ay) * aby)) / denom))
+        proj = (ax + (abx * t), ay + (aby * t))
+        return self._dist_tuple(proj, (px, py))
 
     def _indices_internos_intervalo_contorno(self, inicio: int, fim: int, total: int) -> list[int]:
         if total <= 0:
