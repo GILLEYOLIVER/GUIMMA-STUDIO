@@ -21,6 +21,7 @@ class VisualizacaoCanvas(QWidget):
     LIMITE_DESFAZER = 250
     TAMANHO_NOME_PADRAO_CM = 3.0
     TAMANHO_NUMERO_PADRAO_CM = 0.7
+    DISTANCIA_NUMERO_PADRAO_CM = 0.4
 
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
@@ -1379,19 +1380,6 @@ class VisualizacaoCanvas(QWidget):
                 self.ferramenta_padrao_solicitada.emit("selecionar")
                 event.accept()
                 return
-            if not (event.modifiers() & Qt.ControlModifier):
-                pos_cena_bruta = self._tela_para_cena(event.position())
-                molde_alvo = self._indice_molde_em_ponto(pos_cena_bruta)
-                if molde_alvo is None and self._snap_resultado is not None and self._snap_resultado.elemento_idx is not None:
-                    idx_snap = int(self._snap_resultado.elemento_idx)
-                    if 0 <= idx_snap < len(self.cena.elementos) and self.cena.elementos[idx_snap].get("molde"):
-                        molde_alvo = idx_snap
-                if molde_alvo is not None:
-                    self._selecionados = {molde_alvo}
-                    self.update()
-                    self._ativar_ferramenta_janela_principal("propriedades")
-                    event.accept()
-                    return
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
         if not runtime_ja_processado and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
@@ -1403,6 +1391,9 @@ class VisualizacaoCanvas(QWidget):
             if molde_alvo is not None:
                 self._selecionados = {molde_alvo}
                 self.update()
+                if not (event.modifiers() & Qt.ControlModifier):
+                    event.accept()
+                    return
             if event.modifiers() & Qt.ControlModifier:
                 if self._selecionar_proximo_em_ponto(pos):
                     event.accept()
@@ -1433,6 +1424,20 @@ class VisualizacaoCanvas(QWidget):
                 self._runtime_tool.on_mouse_double_click(self, event)
             event.accept()
             return
+        if event.button() == Qt.RightButton and not (event.modifiers() & Qt.ControlModifier):
+            pos_cena_bruta = self._tela_para_cena(event.position())
+            molde_alvo = self._indice_molde_em_ponto(pos_cena_bruta)
+            if molde_alvo is None and self._snap_resultado is not None and self._snap_resultado.elemento_idx is not None:
+                idx_snap = int(self._snap_resultado.elemento_idx)
+                if 0 <= idx_snap < len(self.cena.elementos) and self.cena.elementos[idx_snap].get("molde"):
+                    molde_alvo = idx_snap
+            if molde_alvo is not None:
+                self._sequencia_clique_direito = 0
+                self._selecionados = {molde_alvo}
+                self.update()
+                self._ativar_ferramenta_janela_principal("propriedades")
+                event.accept()
+                return
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_double_click"):
             if self._runtime_tool.on_mouse_double_click(self, event):
                 return
@@ -1817,7 +1822,12 @@ class VisualizacaoCanvas(QWidget):
                 fonte_num.setBold(False)
                 painter.setFont(fonte_num)
                 metrics_num = QFontMetrics(painter.font())
-                afastamento = max(10.0, tamanho_num_px * 0.95)
+                distancia_num_cm = self._valor_float_molde_decimal(
+                    el,
+                    ("numero_distancia_cm", "distancia_numero_cm", "afastamento_numero_cm"),
+                    self.DISTANCIA_NUMERO_PADRAO_CM,
+                )
+                afastamento = max(2.0, float(distancia_num_cm) * max(float(getattr(self, "zoom", 1.0)), 0.01))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
