@@ -216,25 +216,49 @@ class GuimmaStudioMainWindow(QMainWindow):
     ORIGEM_INICIAL_CANVAS_X = 110.0
     ORIGEM_INICIAL_CANVAS_Y = 0.0
     FERRAMENTAS_USUARIO_PADRAO = [
-        "selecionar",
-        "ajuste_automatico",
-        "reta",
+        "inverter_moldes",
+        "espiral_e_curvas",
         "curva",
+        "reta",
+        "cadastrar_curva",
+        "manipular_pontos",
+        "mover_ponto",
+        "selecionar_tudo",
+        "elemento_paralelo",
+        "copiar",
+        "colar",
+        "desfazer",
+        "refazer",
+        "ajuste_automatico",
+        "excluir",
         "retangulo",
-        "por_coordenada",
+        "cores",
+        "cortar",
+        "salvar",
+        "salvar_como",
+        "imprimir",
+        "plotar",
         "extrair_molde",
         "criar_molde",
-        "sentido_fio",
-        "costura",
-        "remover_costura",
+        "dobrar",
+        "desdobrar",
         "inserir_pique",
-        "manipular_pontos",
+        "remover_costura",
+        "restaurar_copia",
+        "graduar_curva",
+        "agrupar",
         "mover",
-        "redefinir_perimetro",
-        "cortar",
-        "unir",
         "espelhar",
+        "costura",
+        "remover_pique",
+        "unir",
+        "sentido_fio",
+        "bainha",
+        "relacionamento_piques",
+        "pique_texto",
+        "autor",
         "conferir",
+        "conferir_multiplos",
     ]
 
     def __init__(self):
@@ -243,6 +267,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         prefs_app = self._carregar_preferencias_app()
         if prefs_app:
             self.projeto_atual.preferencias_usuario.update(prefs_app)
+        self.projeto_atual.preferencias_usuario["menu_moldes_visivel"] = False
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
         # Regra de inicialização: sempre abrir com Selecionar ativo.
@@ -5381,7 +5406,11 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _lista_usuario_com_ajuste(self, ids: list[str]) -> list[str]:
         saida = list(ids or [])
         if "ajuste_automatico" not in saida:
-            saida.insert(1 if saida else 0, "ajuste_automatico")
+            try:
+                indice_refazer = saida.index("refazer")
+                saida.insert(indice_refazer + 1, "ajuste_automatico")
+            except ValueError:
+                saida.append("ajuste_automatico")
         return saida
 
     def _garantir_ajuste_automatico_na_barra_usuario(self):
@@ -5389,7 +5418,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not hasattr(self, "_ferramentas_usuario_ids"):
             return
         if "ajuste_automatico" not in self._ferramentas_usuario_ids:
-            self._ferramentas_usuario_ids.insert(1 if self._ferramentas_usuario_ids else 0, "ajuste_automatico")
+            try:
+                indice_refazer = self._ferramentas_usuario_ids.index("refazer")
+                self._ferramentas_usuario_ids.insert(indice_refazer + 1, "ajuste_automatico")
+            except ValueError:
+                self._ferramentas_usuario_ids.append("ajuste_automatico")
 
     def _adicionar_ferramenta_usuario(self, tool_id: str):
         if tool_id not in self._ferramentas_usuario_ids:
@@ -5462,6 +5495,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             }
             if "Usuário 1" in self._perfis_usuarios and self.PERFIL_USUARIO_PADRAO not in self._perfis_usuarios:
                 self._perfis_usuarios[self.PERFIL_USUARIO_PADRAO] = self._perfis_usuarios.pop("Usuário 1")
+            self._perfis_usuarios[self.PERFIL_USUARIO_PADRAO] = self._lista_usuario_com_ajuste(
+                list(self.FERRAMENTAS_USUARIO_PADRAO)
+            )
         else:
             self._perfis_usuarios = {self.PERFIL_USUARIO_PADRAO: list(self._ferramentas_usuario_ids)}
         perfil_atual = self.projeto_atual.preferencias_usuario.get("perfil_usuario_atual")
