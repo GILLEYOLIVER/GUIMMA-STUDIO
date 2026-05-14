@@ -230,8 +230,9 @@
             "manipular_pontos",
             "mover",
             "mover_ponto",
+            "manipulacao_rapida",
             "redefinir_perimetro",
-            "dividir_curva"
+            "dividir_elementos"
           ]
         },
         {
@@ -240,23 +241,28 @@
             "elemento_paralelo",
             "girar",
             "copiar",
+            "dimensionar",
             "espelhar"
           ]
         },
         {
-          "title": "Curva",
+          "title": "Cerca",
           "tools": [
-            "cadastrar_curva",
-            "inserir_ponto",
-            "excluir_ponto"
+            "definir_cerca",
+            "mover_cerca"
           ]
         },
         {
           "title": "Manipular molde",
           "tools": [
+            "definir_curva",
+            "inserir_ponto",
+            "excluir_ponto",
+            "transformar_em_elementos",
             "alinhar",
-            "substituir",
-            "arredondar_ou_chanfrar"
+            "copiar_ou_trocar_elemento",
+            "arredondar_ou_chanfrar",
+            "simplificar_contorno"
           ]
         }
       ]
@@ -701,6 +707,12 @@
       "class": "Ferramenta",
       "icon": "manipular_pontos.svg"
     },
+    "manipulacao_rapida": {
+      "title": "Manipulação rápida",
+      "module": "tools/manipulacao_rapida_tool.py",
+      "class": "Ferramenta",
+      "icon": "manipulacao_rapida.svg"
+    },
     "mover": {
       "title": "Mover",
       "module": "tools/mover_tool.py",
@@ -719,6 +731,12 @@
       "class": "Ferramenta",
       "icon": "redefinir_perimetro.svg"
     },
+    "dividir_elementos": {
+      "title": "Dividir elementos",
+      "module": "tools/dividir_elementos_tool.py",
+      "class": "Ferramenta",
+      "icon": "dividir_elementos.svg"
+    },
     "elemento_paralelo": {
       "title": "Elemento Paralelo",
       "module": "tools/elemento_paralelo_tool.py",
@@ -731,11 +749,35 @@
       "class": "Ferramenta",
       "icon": "girar.svg"
     },
+    "dimensionar": {
+      "title": "Dimensionar",
+      "module": "tools/dimensionar_tool.py",
+      "class": "Ferramenta",
+      "icon": "dimensionar.svg"
+    },
     "espelhar": {
       "title": "Espelhar",
       "module": "tools/espelhar_tool.py",
       "class": "Ferramenta",
       "icon": "espelhar.svg"
+    },
+    "definir_cerca": {
+      "title": "Definir cerca",
+      "module": "tools/definir_cerca_tool.py",
+      "class": "Ferramenta",
+      "icon": "definir_cerca.svg"
+    },
+    "mover_cerca": {
+      "title": "Mover cerca",
+      "module": "tools/mover_cerca_tool.py",
+      "class": "Ferramenta",
+      "icon": "mover_cerca.svg"
+    },
+    "definir_curva": {
+      "title": "Definir curva",
+      "module": "tools/definir_curva_tool.py",
+      "class": "Ferramenta",
+      "icon": "definir_curva.svg"
     },
     "inserir_ponto": {
       "title": "Inserir Ponto",
@@ -749,11 +791,29 @@
       "class": "Ferramenta",
       "icon": "excluir_ponto.svg"
     },
+    "transformar_em_elementos": {
+      "title": "Transformar em elementos",
+      "module": "tools/transformar_em_elementos_tool.py",
+      "class": "Ferramenta",
+      "icon": "transformar_em_elementos.svg"
+    },
+    "copiar_ou_trocar_elemento": {
+      "title": "Copiar ou trocar elemento",
+      "module": "tools/copiar_ou_trocar_elemento_tool.py",
+      "class": "Ferramenta",
+      "icon": "copiar_ou_trocar_elemento.svg"
+    },
     "arredondar_ou_chanfrar": {
       "title": "Arredondar Ou Chanfrar",
       "module": "tools/arredondar_ou_chanfrar_tool.py",
       "class": "Ferramenta",
       "icon": "arredondar_ou_chanfrar.svg"
+    },
+    "simplificar_contorno": {
+      "title": "Simplificar contorno",
+      "module": "tools/simplificar_contorno_tool.py",
+      "class": "Ferramenta",
+      "icon": "simplificar_contorno.svg"
     },
     "conferir": {
       "title": "Conferir",

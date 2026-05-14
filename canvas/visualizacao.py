@@ -2471,7 +2471,7 @@ class VisualizacaoCanvas(QWidget):
         cor = self._cor_molde_config("molde_dobrado", self._cores_canvas.get("selecao", "#2da8ff"))
         for contorno in contornos:
             if isinstance(contorno, dict):
-                contorno = contorno.get("metade_movida") or contorno.get("pontos")
+                contorno = contorno.get("contorno_pontilhado") or contorno.get("metade_movida") or contorno.get("pontos")
             if not isinstance(contorno, list) or len(contorno) < 2:
                 continue
             pontos = []
@@ -2482,6 +2482,8 @@ class VisualizacaoCanvas(QWidget):
                     except Exception:
                         continue
             if len(pontos) >= 2:
+                if len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) > 1e-7:
+                    pontos.append(QPointF(pontos[0]))
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.0, estilo="dot")
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
