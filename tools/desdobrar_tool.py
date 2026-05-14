@@ -3,17 +3,58 @@ from __future__ import annotations
 from math import isfinite
 from time import monotonic
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPen
+from PySide6.QtWidgets import QCheckBox, QDialog, QVBoxLayout
 
+from config import ICONS_DIR
 from tools.dobrar_tool import Ferramenta as _DobrarBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+
+
+class DesdobrarDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._chave_posicao = "dialog:desdobrar"
+        self.setWindowTitle("Desdobrar")
+        self.setWindowFlag(Qt.Tool, True)
+        self.setModal(False)
+        self.setFixedWidth(220)
+        check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
+        self.setStyleSheet(
+            """
+            QDialog { background:#efefef; color:#111111; }
+            QCheckBox { color:#111111; }
+            QCheckBox::indicator {
+                width:14px;
+                height:14px;
+                border:1px solid #6c7480;
+                background:#ffffff;
+            }
+            QCheckBox::indicator:checked {
+                image:url(__CHECK_ICON__);
+                background:#ffffff;
+                border:1px solid #075f8c;
+            }
+            """
+            .replace("__CHECK_ICON__", check_icon)
+        )
+
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(8, 8, 8, 8)
+        raiz.setSpacing(6)
+        self.chk_inserir_pique = QCheckBox("Inserir pique")
+        self.chk_inserir_pique.setChecked(False)
+        raiz.addWidget(self.chk_inserir_pique)
 
 
 class Ferramenta(_DobrarBase):
     id_ferramenta = "desdobrar"
     nome = "Desdobrar"
     usa_painel_auxiliar = False
-    descricao_painel = "Desdobra um molde usando uma linha interna como eixo."
+    descricao_painel = "Desdobra um molde usando um segmento do perímetro como eixo."
+
+    _dialog_por_canvas: dict[int, DesdobrarDialog] = {}
 
     def __init__(self):
         super().__init__()
@@ -23,9 +64,16 @@ class Ferramenta(_DobrarBase):
 
     def on_activate(self, canvas):
         self._resetar_desdobrar(canvas, limpar_selecao=False)
-        self._status(canvas, "Desdobrar: clique em um molde. Depois passe o mouse em uma linha interna e clique para desdobrar.")
+        dialog = self._obter_dialog(canvas)
+        self._restaurar_dialog(canvas, dialog)
+        dialog.show()
+        dialog.raise_()
+        self._status(canvas, "Desdobrar: clique em um molde. Depois passe o mouse no perímetro e clique para desdobrar.")
 
     def on_deactivate(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.hide()
         self._resetar_desdobrar(canvas, limpar_selecao=False)
         canvas.update()
 
@@ -59,7 +107,7 @@ class Ferramenta(_DobrarBase):
             canvas._selecionados = {self._molde_idx}
             self._hover_idx = None
             canvas.update()
-            self._status(canvas, "Molde selecionado. Passe o mouse sobre uma linha interna para escolher o eixo.")
+            self._status(canvas, "Molde selecionado. Passe o mouse sobre o perímetro para escolher o eixo.")
             event.accept()
             return True
 
@@ -67,7 +115,7 @@ class Ferramenta(_DobrarBase):
         if alvo is None:
             alvo = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
         if alvo is None:
-            self._status(canvas, "Passe o mouse sobre uma linha interna do molde e clique para desdobrar.")
+            self._status(canvas, "Passe o mouse sobre um segmento do perímetro e clique para desdobrar.")
             event.accept()
             return True
         self._aplicar_desdobrar(canvas, self._molde_idx, alvo)
@@ -124,8 +172,11 @@ class Ferramenta(_DobrarBase):
             return
         if not self._pontos_mesmos(unidos[0], unidos[-1]):
             unidos.append(QPointF(unidos[0]))
-        molde["pontos"] = [(p.x(), p.y()) for p in unidos]
         cantos = unidos[:-1] if self._pontos_mesmos(unidos[0], unidos[-1]) else unidos
+        self._garantir_pontos_controle_eixo(cantos, eixo)
+        if self._inserir_pique_ativo(canvas):
+            self._inserir_piques_eixo(molde, eixo)
+        molde["pontos"] = [(p.x(), p.y()) for p in unidos]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
         molde["molde_dobrado"] = False
@@ -160,8 +211,11 @@ class Ferramenta(_DobrarBase):
             return False
         if not self._pontos_mesmos(melhor[0], melhor[-1]):
             melhor.append(QPointF(melhor[0]))
-        molde["pontos"] = [(p.x(), p.y()) for p in melhor]
         cantos = melhor[:-1] if self._pontos_mesmos(melhor[0], melhor[-1]) else melhor
+        self._garantir_pontos_controle_eixo(cantos, eixo_atual)
+        if self._inserir_pique_ativo(canvas):
+            self._inserir_piques_eixo(molde, eixo_atual)
+        molde["pontos"] = [(p.x(), p.y()) for p in melhor]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
         molde["molde_dobrado"] = False
@@ -235,21 +289,7 @@ class Ferramenta(_DobrarBase):
         return QPointF(eixo[1]), QPointF(eixo[2])
 
     def _linha_interna_em_ponto(self, canvas, molde_idx: int, pos: QPointF):
-        interna_molde = self._linha_do_proprio_molde_em_ponto(canvas, molde_idx, pos)
-        if interna_molde is not None:
-            return interna_molde
-        candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
-        candidatos = list(candidatos)
-        for extra in self._indices_linhas_internas_proximas(canvas, molde_idx, pos):
-            if extra not in candidatos:
-                candidatos.append(extra)
-        for idx in candidatos:
-            if idx == molde_idx or not (0 <= idx < len(canvas.cena.elementos)):
-                continue
-            el = canvas.cena.elementos[idx]
-            if self._eh_linha_interna_do_molde(canvas, molde_idx, el):
-                return int(idx)
-        return None
+        return self._linha_do_proprio_molde_em_ponto(canvas, molde_idx, pos)
 
     def _elemento_linha_ref(self, canvas, ref) -> dict | None:
         if isinstance(ref, int):
@@ -281,33 +321,56 @@ class Ferramenta(_DobrarBase):
 
     def _linhas_do_proprio_molde(self, molde: dict) -> list[dict]:
         linhas: list[dict] = []
-        fio_origem = molde.get("fio_origem")
-        fio_fim = molde.get("fio_fim")
-        if self._eh_ponto(fio_origem) and self._eh_ponto(fio_fim):
+        pontos = self._pontos_elemento(molde)
+        base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+        for a, b in zip(base, base[1:] + base[:1]):
+            if self._dist(a, b) <= 1e-9:
+                continue
             linhas.append(
                 {
                     "tipo": "polyline",
-                    "pontos": [
-                        (float(fio_origem[0]), float(fio_origem[1])),
-                        (float(fio_fim[0]), float(fio_fim[1])),
-                    ],
-                    "origem_desdobrar": "fio",
+                    "pontos": [(a.x(), a.y()), (b.x(), b.y())],
+                    "origem_desdobrar": "perimetro_molde",
                 }
             )
-        if bool(molde.get("molde_dobrado")) or bool(molde.get("contornos_dobra_original")):
-            pontos = self._pontos_elemento(molde)
-            base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
-            for a, b in zip(base, base[1:] + base[:1]):
-                if self._dist(a, b) <= 1e-9:
-                    continue
-                linhas.append(
-                    {
-                        "tipo": "polyline",
-                        "pontos": [(a.x(), a.y()), (b.x(), b.y())],
-                        "origem_desdobrar": "segmento_contorno_dobrado",
-                    }
-                )
         return linhas
+
+    def _obter_dialog(self, canvas) -> DesdobrarDialog:
+        chave = id(canvas)
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        dialog = self._dialog_por_canvas.get(chave)
+        if dialog is None or dialog.parentWidget() is not parent:
+            dialog = DesdobrarDialog(parent)
+            self._dialog_por_canvas[chave] = dialog
+            instalar_memoria_posicao(dialog, dialog._chave_posicao)
+        return dialog
+
+    def _restaurar_dialog(self, canvas, dialog: DesdobrarDialog) -> None:
+        fallback = None
+        if hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 128))
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
+
+    def _inserir_pique_ativo(self, canvas) -> bool:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        return bool(dialog is not None and dialog.chk_inserir_pique.isChecked())
+
+    def _garantir_pontos_controle_eixo(self, cantos: list[QPointF], eixo) -> None:
+        for ponto in self._pontos_eixo(eixo):
+            if not any(self._dist(ponto, existente) <= 1e-6 for existente in cantos):
+                cantos.append(QPointF(ponto))
+
+    def _inserir_piques_eixo(self, molde: dict, eixo) -> None:
+        marcacoes = list(molde.get("marcacoes_no_perimetro", []) or [])
+        for ponto in self._pontos_eixo(eixo):
+            existe = any(
+                self._eh_ponto(item)
+                and self._dist(ponto, QPointF(float(item[0]), float(item[1]))) <= 1e-6
+                for item in marcacoes
+            )
+            if not existe:
+                marcacoes.append((ponto.x(), ponto.y()))
+        molde["marcacoes_no_perimetro"] = marcacoes
 
     def _indices_linhas_internas_proximas(self, canvas, molde_idx: int, pos: QPointF) -> list[int]:
         tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
