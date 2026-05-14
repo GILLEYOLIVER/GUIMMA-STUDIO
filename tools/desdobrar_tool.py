@@ -68,7 +68,7 @@ class Ferramenta(_DobrarBase):
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Desdobrar: clique em um molde. Depois passe o mouse no perímetro e clique para desdobrar.")
+        self._status(canvas, "Desdobrar: clique em um molde. Depois escolha um trecho do perímetro entre pontos principais.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -107,7 +107,7 @@ class Ferramenta(_DobrarBase):
             canvas._selecionados = {self._molde_idx}
             self._hover_idx = None
             canvas.update()
-            self._status(canvas, "Molde selecionado. Passe o mouse sobre o perímetro para escolher o eixo.")
+            self._status(canvas, "Molde selecionado. Passe o mouse sobre um trecho do perímetro entre pontos principais.")
             event.accept()
             return True
 
@@ -115,7 +115,7 @@ class Ferramenta(_DobrarBase):
         if alvo is None:
             alvo = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
         if alvo is None:
-            self._status(canvas, "Passe o mouse sobre um segmento do perímetro e clique para desdobrar.")
+            self._status(canvas, "Passe o mouse sobre um trecho do perímetro entre pontos principais e clique para desdobrar.")
             event.accept()
             return True
         self._aplicar_desdobrar(canvas, self._molde_idx, alvo)
@@ -170,12 +170,9 @@ class Ferramenta(_DobrarBase):
         if len(unidos) < 3:
             self._status(canvas, "Não foi possível formar o contorno desdobrado.")
             return
-        if not self._pontos_mesmos(unidos[0], unidos[-1]):
-            unidos.append(QPointF(unidos[0]))
-        cantos = unidos[:-1] if self._pontos_mesmos(unidos[0], unidos[-1]) else unidos
-        self._garantir_pontos_controle_eixo(cantos, eixo)
-        if self._inserir_pique_ativo(canvas):
-            self._inserir_piques_eixo(molde, eixo)
+        unidos = self._preparar_contorno_resultado(unidos, eixo)
+        cantos = self._controles_resultado_desdobrar(molde, unidos, eixo)
+        self._sincronizar_piques_resultado(molde, unidos, eixo, inserir=self._inserir_pique_ativo(canvas))
         molde["pontos"] = [(p.x(), p.y()) for p in unidos]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
@@ -209,12 +206,9 @@ class Ferramenta(_DobrarBase):
                 melhor_dist = dist
         if not melhor:
             return False
-        if not self._pontos_mesmos(melhor[0], melhor[-1]):
-            melhor.append(QPointF(melhor[0]))
-        cantos = melhor[:-1] if self._pontos_mesmos(melhor[0], melhor[-1]) else melhor
-        self._garantir_pontos_controle_eixo(cantos, eixo_atual)
-        if self._inserir_pique_ativo(canvas):
-            self._inserir_piques_eixo(molde, eixo_atual)
+        melhor = self._preparar_contorno_resultado(melhor, eixo_atual)
+        cantos = self._controles_resultado_desdobrar(molde, melhor, eixo_atual)
+        self._sincronizar_piques_resultado(molde, melhor, eixo_atual, inserir=self._inserir_pique_ativo(canvas))
         molde["pontos"] = [(p.x(), p.y()) for p in melhor]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
@@ -323,17 +317,84 @@ class Ferramenta(_DobrarBase):
         linhas: list[dict] = []
         pontos = self._pontos_elemento(molde)
         base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+        if len(base) < 2:
+            return linhas
+        indices_principais = self._indices_pontos_principais(base, molde)
+        if len(indices_principais) >= 2:
+            total = len(base)
+            for pos, inicio in enumerate(indices_principais):
+                fim = indices_principais[(pos + 1) % len(indices_principais)]
+                trecho = self._trecho_contorno(base, inicio, fim)
+                if self._comprimento_trecho(trecho) <= 1e-9:
+                    continue
+                linhas.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(p.x(), p.y()) for p in trecho],
+                        "origem_desdobrar": "perimetro_principal",
+                        "indice_inicio": inicio,
+                        "indice_fim": fim,
+                    }
+                )
+                if len(linhas) > total:
+                    break
+            return linhas
         for a, b in zip(base, base[1:] + base[:1]):
-            if self._dist(a, b) <= 1e-9:
-                continue
-            linhas.append(
-                {
-                    "tipo": "polyline",
-                    "pontos": [(a.x(), a.y()), (b.x(), b.y())],
-                    "origem_desdobrar": "perimetro_molde",
-                }
-            )
+            if self._dist(a, b) > 1e-9:
+                linhas.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(a.x(), a.y()), (b.x(), b.y())],
+                        "origem_desdobrar": "perimetro_molde",
+                    }
+                )
         return linhas
+
+    def _indices_pontos_principais(self, base: list[QPointF], molde: dict) -> list[int]:
+        indices: list[int] = []
+        for ponto in self._pontos_principais_molde(molde):
+            idx = min(range(len(base)), key=lambda i, p=ponto: self._dist(base[i], p))
+            if idx not in indices:
+                indices.append(idx)
+        indices.sort()
+        return indices
+
+    def _pontos_principais_molde(self, molde: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for chave in ("controle_cantos", "pontos_controle_referencia"):
+            origem = molde.get(chave)
+            if not isinstance(origem, list):
+                continue
+            for p in origem:
+                if self._eh_ponto(p):
+                    pontos.append(QPointF(float(p[0]), float(p[1])))
+            if pontos:
+                return pontos
+        origem = molde.get("pontos_controle_principais")
+        if isinstance(origem, list):
+            for item in origem:
+                if isinstance(item, dict) and "x" in item and "y" in item:
+                    try:
+                        pontos.append(QPointF(float(item["x"]), float(item["y"])))
+                    except Exception:
+                        continue
+        return pontos
+
+    def _trecho_contorno(self, base: list[QPointF], inicio: int, fim: int) -> list[QPointF]:
+        if not base:
+            return []
+        total = len(base)
+        trecho = [QPointF(base[inicio % total])]
+        idx = inicio % total
+        limite = total + 1
+        while idx != (fim % total) and limite > 0:
+            idx = (idx + 1) % total
+            trecho.append(QPointF(base[idx]))
+            limite -= 1
+        return trecho
+
+    def _comprimento_trecho(self, pontos: list[QPointF]) -> float:
+        return sum(self._dist(a, b) for a, b in zip(pontos, pontos[1:]))
 
     def _obter_dialog(self, canvas) -> DesdobrarDialog:
         chave = id(canvas)
@@ -355,22 +416,83 @@ class Ferramenta(_DobrarBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         return bool(dialog is not None and dialog.chk_inserir_pique.isChecked())
 
-    def _garantir_pontos_controle_eixo(self, cantos: list[QPointF], eixo) -> None:
-        for ponto in self._pontos_eixo(eixo):
-            if not any(self._dist(ponto, existente) <= 1e-6 for existente in cantos):
-                cantos.append(QPointF(ponto))
+    def _preparar_contorno_resultado(self, pontos: list[QPointF], eixo) -> list[QPointF]:
+        base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
+        base = self._inserir_pontos_no_contorno(base, list(self._pontos_eixo(eixo)))
+        if len(base) >= 2 and not self._pontos_mesmos(base[0], base[-1]):
+            base.append(QPointF(base[0]))
+        return base
 
-    def _inserir_piques_eixo(self, molde: dict, eixo) -> None:
-        marcacoes = list(molde.get("marcacoes_no_perimetro", []) or [])
-        for ponto in self._pontos_eixo(eixo):
-            existe = any(
-                self._eh_ponto(item)
-                and self._dist(ponto, QPointF(float(item[0]), float(item[1]))) <= 1e-6
-                for item in marcacoes
-            )
-            if not existe:
+    def _inserir_pontos_no_contorno(self, base: list[QPointF], pontos: list[QPointF]) -> list[QPointF]:
+        saida = [QPointF(p) for p in base]
+        if len(saida) < 2:
+            return saida
+        tolerancia = self._tolerancia_contorno(saida)
+        for ponto in pontos:
+            if any(self._dist(ponto, existente) <= tolerancia for existente in saida):
+                continue
+            melhor_idx = None
+            melhor_dist = tolerancia
+            for idx, a in enumerate(saida):
+                b = saida[(idx + 1) % len(saida)]
+                dist = self._distancia_ponto_segmento(a, b, ponto)
+                if dist <= melhor_dist:
+                    melhor_idx = idx + 1
+                    melhor_dist = dist
+            if melhor_idx is not None:
+                saida.insert(melhor_idx, QPointF(ponto))
+        return saida
+
+    def _controles_resultado_desdobrar(self, molde: dict, contorno: list[QPointF], eixo) -> list[QPointF]:
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else contorno
+        candidatos: list[QPointF] = []
+        for ponto in self._pontos_principais_molde(molde):
+            candidatos.append(QPointF(ponto))
+            candidatos.append(self._espelhar_ponto(ponto, eixo))
+        candidatos.extend(QPointF(p) for p in self._pontos_eixo(eixo))
+        controles: list[QPointF] = []
+        tolerancia = self._tolerancia_contorno(base)
+        for ponto in base:
+            if any(self._dist(ponto, cand) <= tolerancia for cand in candidatos):
+                if not any(self._dist(ponto, existente) <= tolerancia for existente in controles):
+                    controles.append(QPointF(ponto))
+        return controles if len(controles) >= 2 else [QPointF(p) for p in base]
+
+    def _sincronizar_piques_resultado(self, molde: dict, contorno: list[QPointF], eixo, inserir: bool) -> None:
+        marcacoes = []
+        tolerancia = self._tolerancia_contorno(contorno)
+        for item in molde.get("marcacoes_no_perimetro", []) or []:
+            if not self._eh_ponto(item):
+                continue
+            ponto = QPointF(float(item[0]), float(item[1]))
+            if self._ponto_no_contorno(ponto, contorno, tolerancia=tolerancia):
                 marcacoes.append((ponto.x(), ponto.y()))
+        if inserir:
+            for ponto in self._pontos_eixo(eixo):
+                if not self._ponto_no_contorno(ponto, contorno, tolerancia=tolerancia):
+                    continue
+                existe = any(
+                    self._dist(ponto, QPointF(float(item[0]), float(item[1]))) <= tolerancia
+                    for item in marcacoes
+                )
+                if not existe:
+                    marcacoes.append((ponto.x(), ponto.y()))
         molde["marcacoes_no_perimetro"] = marcacoes
+
+    def _ponto_no_contorno(self, ponto: QPointF, contorno: list[QPointF], tolerancia: float | None = None) -> bool:
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else contorno
+        if len(base) < 2:
+            return False
+        tolerancia = self._tolerancia_contorno(base) if tolerancia is None else float(tolerancia)
+        return any(self._distancia_ponto_segmento(a, b, ponto) <= tolerancia for a, b in zip(base, base[1:] + base[:1]))
+
+    def _tolerancia_contorno(self, pontos: list[QPointF]) -> float:
+        bbox = self._bbox_pontos(pontos)
+        if bbox is None:
+            return 1e-6
+        min_x, min_y, max_x, max_y = bbox
+        escala = max(max_x - min_x, max_y - min_y, 1.0)
+        return max(1e-6, escala * 1e-7)
 
     def _indices_linhas_internas_proximas(self, canvas, molde_idx: int, pos: QPointF) -> list[int]:
         tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
