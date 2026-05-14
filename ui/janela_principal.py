@@ -11,8 +11,8 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO, ICONS_DIR
-from core.line_styles import LINE_STYLES
+from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
@@ -102,6 +102,77 @@ class _BotaoRodapeHover(QPushButton):
         super().enterEvent(event)
         if self._status_label is not None and self._mensagem_hover:
             self._status_label.setText(self._mensagem_hover)
+
+
+class _BotaoFerramentaUsuario(QToolButton):
+    MIME_TOOL_ID = "application/x-guimma-user-tool-id"
+
+    def __init__(self, tool_id: str, parent=None):
+        super().__init__(parent)
+        self.tool_id = tool_id
+        self._drag_start: QPoint | None = None
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        if not (event.buttons() & Qt.LeftButton) or self._drag_start is None:
+            super().mouseMoveEvent(event)
+            return
+        distancia = (event.position().toPoint() - self._drag_start).manhattanLength()
+        if distancia < QApplication.startDragDistance():
+            super().mouseMoveEvent(event)
+            return
+        mime = QMimeData()
+        mime.setData(self.MIME_TOOL_ID, self.tool_id.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(self._drag_start)
+        drag.exec(Qt.MoveAction)
+
+
+class _LinhaUsuarioDropArea(QWidget):
+    def __init__(self, janela: "GuimmaStudioMainWindow"):
+        super().__init__()
+        self._janela = janela
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(_BotaoFerramentaUsuario.MIME_TOOL_ID):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(_BotaoFerramentaUsuario.MIME_TOOL_ID):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):  # noqa: N802
+        if not event.mimeData().hasFormat(_BotaoFerramentaUsuario.MIME_TOOL_ID):
+            super().dropEvent(event)
+            return
+        tool_id = bytes(event.mimeData().data(_BotaoFerramentaUsuario.MIME_TOOL_ID)).decode("utf-8")
+        self._janela._reordenar_ferramenta_usuario(tool_id, self._indice_drop(event.position().toPoint()))
+        event.acceptProposedAction()
+
+    def _indice_drop(self, pos: QPoint) -> int:
+        layout = self.layout()
+        if layout is None:
+            return 0
+        indice = 0
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if not isinstance(widget, _BotaoFerramentaUsuario):
+                continue
+            if pos.x() < widget.geometry().center().x():
+                return indice
+            indice += 1
+        return indice
 
 
 class GuimmaStudioMainWindow(QMainWindow):
@@ -2169,8 +2240,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         linha_estilo = QHBoxLayout()
         linha_estilo.addWidget(QLabel("Estilo linha costura"))
         cmb_estilo = QComboBox()
+        cmb_estilo.setIconSize(QSize(132, 20))
+        cmb_estilo.view().setIconSize(QSize(132, 20))
         for estilo_id, titulo in LINE_STYLES:
-            cmb_estilo.addItem(titulo, estilo_id)
+            cmb_estilo.addItem(QIcon(self._icone_preview_linha(estilo_id)), titulo, estilo_id)
         cmb_estilo.setCurrentIndex(max(0, cmb_estilo.findData(self._estilo_linha_costura_global)))
         linha_estilo.addWidget(cmb_estilo, 1)
         layout.addLayout(linha_estilo)
@@ -2329,6 +2402,74 @@ class GuimmaStudioMainWindow(QMainWindow):
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText("Cores do programa atualizadas.")
 
+    def _icone_preview_linha(self, estilo: str, amplitude: float = 1.0, cor: str = "#111111") -> QPixmap:
+        pix = QPixmap(132, 20)
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            pen = QPen(QColor(cor), 2)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            amp_scale = max(0.2, float(amplitude))
+            if is_geometric_line_style(estilo):
+                path = QPainterPath()
+                path.moveTo(6, 10)
+                if estilo.startswith("zigzag"):
+                    amp = (2.0 if estilo == "zigzag_soft" else 4.0) * amp_scale
+                    passo = 10.0 if estilo == "zigzag_soft" else 12.0
+                    x = 6.0
+                    sentido = 1.0
+                    while x < 126.0:
+                        x = min(126.0, x + passo)
+                        path.lineTo(x, 10 + (amp * sentido))
+                        sentido *= -1.0
+                    path.lineTo(126, 10)
+                elif estilo.startswith("wave"):
+                    amp = (2.0 if estilo == "wave_soft" else 4.0) * amp_scale
+                    passo = 12.0 if estilo == "wave_soft" else 14.0
+                    for i in range(1, 48):
+                        t = i / 47.0
+                        x = 6.0 + (120.0 * t)
+                        y = 10.0 + (amp * sin((2.0 * pi * (x - 6.0)) / passo))
+                        path.lineTo(x, y)
+                else:
+                    amp = (3.0 if estilo == "half_moon" else 2.6) * amp_scale
+                    passo = 16.0 if estilo == "half_moon" else 18.0
+                    if estilo == "half_moon":
+                        ciclos = max(1, round(120.0 / passo))
+                        passo = 120.0 / ciclos
+                    x = 6.0
+                    while x < 126.0:
+                        restante = 126.0 - x
+                        if restante < (passo * 0.7):
+                            path.lineTo(126.0, 10.0)
+                            break
+                        fim = min(126.0, x + passo)
+                        for i in range(11):
+                            t = i / 10.0
+                            px = x + ((fim - x) * t)
+                            py = 10.0 - (amp * sin(pi * t))
+                            path.lineTo(px, py)
+                        if estilo != "half_moon":
+                            gap = 7.0 if estilo == "dash_half_moon" else 4.0
+                            x = fim + gap
+                            path.moveTo(min(126.0, x), 10.0)
+                        else:
+                            x = fim
+                painter.drawPath(path)
+            else:
+                pen.setStyle(pen_style_for_line(estilo))
+                padrao = dash_pattern_for_line(estilo)
+                if padrao:
+                    pen.setDashPattern(padrao)
+                painter.setPen(pen)
+                painter.drawLine(6, 10, 126, 10)
+        finally:
+            painter.end()
+        return pix
+
     def _aplicar_config_visualizacao_nos_canvas(self):
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
@@ -2346,9 +2487,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog.setStyleSheet(
             """
             QDialog { background: #efefef; color: #111111; }
-            QGroupBox { border: 1px solid #c8c8c8; margin-top: 10px; background: #f5f5f5; }
-            QGroupBox::title { left: 6px; padding: 0 2px; }
+            QGroupBox { border: 1px solid #c8c8c8; margin-top: 18px; background: #f5f5f5; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; top: 1px; padding: 0 4px; background: #efefef; color: #111111; }
             QLabel, QCheckBox { color: #111111; }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #6c7480;
+                background: #ffffff;
+            }
+            QCheckBox::indicator:hover { border: 1px solid #0b7fb8; }
+            QCheckBox::indicator:checked {
+                background: #0b7fb8;
+                border: 1px solid #075f8c;
+                image: none;
+            }
             QPushButton, QComboBox, QLineEdit {
                 background: #ffffff;
                 color: #111111;
@@ -5126,7 +5279,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             """
         )
 
-        self.linha_usuario = QWidget()
+        self.linha_usuario = _LinhaUsuarioDropArea(self)
         self.layout_linha_usuario = QHBoxLayout(self.linha_usuario)
         self.layout_linha_usuario.setContentsMargins(4, 0, 4, 0)
         self.layout_linha_usuario.setSpacing(3)
@@ -5279,6 +5432,24 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._sincronizar_perfil_usuario_atual()
             self._atualizar_linha_usuarios()
 
+    def _reordenar_ferramenta_usuario(self, tool_id: str, indice_destino: int):
+        if tool_id not in self._ferramentas_usuario_ids:
+            return
+        indice_origem = self._ferramentas_usuario_ids.index(tool_id)
+        indice_destino = max(0, min(int(indice_destino), len(self._ferramentas_usuario_ids)))
+        if indice_destino > indice_origem:
+            indice_destino -= 1
+        if indice_destino == indice_origem:
+            return
+        self._ferramentas_usuario_ids.pop(indice_origem)
+        self._ferramentas_usuario_ids.insert(indice_destino, tool_id)
+        self.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(self._ferramentas_usuario_ids)
+        self._sincronizar_perfil_usuario_atual()
+        self._atualizar_linha_usuarios()
+        tool = self.ribbon.tool_def(tool_id) if hasattr(self, "ribbon") else None
+        nome = tool.title if tool else tool_id
+        self.lbl_status.setText(f"{nome} reposicionada na barra Usuários.")
+
     def _inicializar_perfis_usuarios(self):
         perfis = self.projeto_atual.preferencias_usuario.get("perfis_usuarios")
         if isinstance(perfis, dict) and perfis:
@@ -5416,7 +5587,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             tool = self.ribbon.tool_def(tool_id)
             if not tool:
                 continue
-            btn = QToolButton()
+            btn = _BotaoFerramentaUsuario(tool_id)
             btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
             btn.setIcon(QIcon(str(ICONS_DIR / tool.icon)))
             btn.setIconSize(QSize(28, 28))

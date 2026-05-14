@@ -1198,6 +1198,7 @@ class VisualizacaoCanvas(QWidget):
             "recortar",
             "cortar",
             "sentido_fio",
+            "dobrar",
         }
         runtime_ja_processado = False
         if (
@@ -1328,6 +1329,7 @@ class VisualizacaoCanvas(QWidget):
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)),
                                                  destacar_controles=(idx in self._selecionados))
+            self._desenhar_contornos_dobra_original(painter, elemento)
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
@@ -2432,6 +2434,24 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() - tamanho), int(pt.x() + tamanho), int(pt.y() + tamanho))
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
+
+    def _desenhar_contornos_dobra_original(self, painter: QPainter, elemento: dict):
+        contornos = elemento.get("contornos_dobra_original")
+        if not isinstance(contornos, list):
+            return
+        cor = self._cor_molde_config("molde_dobrado", self._cores_canvas.get("selecao", "#2da8ff"))
+        for contorno in contornos:
+            if not isinstance(contorno, list) or len(contorno) < 2:
+                continue
+            pontos = []
+            for p in contorno:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    try:
+                        pontos.append(QPointF(float(p[0]), float(p[1])))
+                    except Exception:
+                        continue
+            if len(pontos) >= 2:
+                self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.0, estilo="dot")
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
