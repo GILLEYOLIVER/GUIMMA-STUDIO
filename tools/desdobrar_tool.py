@@ -19,7 +19,7 @@ class DesdobrarDialog(QDialog):
         self.setWindowTitle("Desdobrar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.setFixedWidth(220)
+        self.setFixedWidth(280)
         check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         self.setStyleSheet(
             """
@@ -43,9 +43,19 @@ class DesdobrarDialog(QDialog):
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(8, 8, 8, 8)
         raiz.setSpacing(6)
-        self.chk_automatico = QCheckBox("Automático")
+        self.chk_automatico = QCheckBox("Automático: usar dobra original, linha interna ou perímetro")
         self.chk_automatico.setChecked(True)
         raiz.addWidget(self.chk_automatico)
+        self.chk_copiar_contorno_dobrado = QCheckBox("Copiar contorno exato do lado dobrado")
+        self.chk_copiar_contorno_dobrado.setChecked(False)
+        self.chk_copiar_contorno_dobrado.setToolTip(
+            "Quando marcado, o desdobrar não restaura a assimetria antiga: "
+            "ele espelha o contorno dobrado/visível para criar o outro lado igual."
+        )
+        raiz.addWidget(self.chk_copiar_contorno_dobrado)
+        self.chk_inserir_pique = QCheckBox("Criar pique nas pontas da dobra")
+        self.chk_inserir_pique.setChecked(False)
+        raiz.addWidget(self.chk_inserir_pique)
         self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
         self.chk_fio_meio.setChecked(True)
         raiz.addWidget(self.chk_fio_meio)
@@ -55,7 +65,7 @@ class Ferramenta(_DobrarBase):
     id_ferramenta = "desdobrar"
     nome = "Desdobrar"
     usa_painel_auxiliar = False
-    descricao_painel = "Desdobra um molde usando um segmento do perímetro como eixo."
+    descricao_painel = "Desdobra ou abre uma dobra preservada, aceitando eixo original, linha interna, perímetro ou reta manual."
 
     _dialog_por_canvas: dict[int, DesdobrarDialog] = {}
 
@@ -74,12 +84,15 @@ class Ferramenta(_DobrarBase):
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Desdobrar: clique em um molde. Depois escolha um trecho do perímetro entre pontos principais.")
+        self._status(canvas, "Desdobrar: clique no molde. Se houver dobra preservada, ela será sugerida; senão escolha linha interna, perímetro ou reta manual.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
             dialog.hide()
+        # Fechou Desdobrar: limpa apenas guias temporárias. Se o molde ainda
+        # estiver dobrado, o pontilhado do lado dobrado continua visível.
+        self._ocultar_marcacoes_dobra(canvas)
         self._resetar_desdobrar(canvas, limpar_selecao=False)
         canvas.update()
 
@@ -121,9 +134,18 @@ class Ferramenta(_DobrarBase):
             self._molde_idx = int(molde_idx)
             canvas._selecionados = {self._molde_idx}
             self._hover_idx = None
+            if self._automatico_ativo(canvas):
+                ref_original = self._linha_ref_dobra_original(canvas.cena.elementos[self._molde_idx])
+                if ref_original is not None:
+                    self._hover_idx = ref_original
+                    self._confirmar_ref = ref_original
+                    canvas.update()
+                    self._status(canvas, "Dobra original encontrada. Prévia pronta: clique novamente para abrir/desdobrar ou botão direito para cancelar.")
+                    event.accept()
+                    return True
             canvas.update()
             if self._automatico_ativo(canvas):
-                self._status(canvas, "Molde selecionado. Passe o mouse sobre um trecho do perímetro entre pontos principais.")
+                self._status(canvas, "Molde selecionado. Passe o mouse sobre uma linha interna ou trecho do perímetro entre pontos principais.")
             else:
                 self._status(canvas, "Molde selecionado. Clique o primeiro ponto da reta de desdobrar.")
             event.accept()
@@ -146,7 +168,7 @@ class Ferramenta(_DobrarBase):
             canvas.update()
             event.accept()
             return True
-        self._aplicar_desdobrar(canvas, self._molde_idx, alvo)
+        self._aplicar_desdobrar(canvas, self._molde_idx, self._confirmar_ref)
         event.accept()
         return True
 
@@ -234,9 +256,14 @@ class Ferramenta(_DobrarBase):
         if eixo is None:
             self._status(canvas, "A linha escolhida não tem extremidades válidas para desdobrar.")
             return
-        if self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
+        copiar_contorno = self._copiar_contorno_dobrado_ativo(canvas)
+        if not copiar_contorno and self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
             return
-        unidos = self._resultado_desdobrar(molde, linha, eixo)
+        if copiar_contorno:
+            unidos = self._resultado_desdobrar_copia_exata(molde, eixo)
+        else:
+            unidos = self._resultado_desdobrar(molde, linha, eixo)
+        unidos = self._garantir_pontos_controle_no_desdobrado(molde, unidos, eixo)
         if len(unidos) < 3:
             self._status(canvas, "Não foi possível formar o contorno desdobrado.")
             return
@@ -248,6 +275,10 @@ class Ferramenta(_DobrarBase):
         molde["molde_dobrado"] = False
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
+        molde.pop("dobra_eixo", None)
+        if isinstance(molde.get("estado_dobra"), dict):
+            molde["estado_dobra"]["ativo"] = False
+            molde["estado_dobra"]["contorno_aberto"] = [(p.x(), p.y()) for p in unidos]
         molde.pop("contornos_dobra_original", None)
         if self._fio_meio_ativo(canvas):
             self._centralizar_fio_no_molde(molde, eixo)
@@ -257,7 +288,10 @@ class Ferramenta(_DobrarBase):
         self._resetar_desdobrar(canvas, limpar_selecao=False)
         canvas._selecionados = {molde_idx}
         canvas.update()
-        self._status(canvas, "Molde desdobrado pela linha escolhida. A ferramenta continua ativa.")
+        if copiar_contorno:
+            self._status(canvas, "Molde desdobrado copiando exatamente o contorno do lado dobrado.")
+        else:
+            self._status(canvas, "Molde desdobrado pela linha escolhida. A ferramenta continua ativa.")
 
     def _preview_desdobrar(self, canvas, molde_idx: int, linha_ref) -> list[QPointF]:
         if not (0 <= molde_idx < len(canvas.cena.elementos)):
@@ -269,7 +303,27 @@ class Ferramenta(_DobrarBase):
         eixo = self._eixo_linha(linha)
         if eixo is None:
             return []
+        if self._copiar_contorno_dobrado_ativo(canvas):
+            return self._resultado_desdobrar_copia_exata(molde, eixo)
         return self._resultado_desdobrar(molde, linha, eixo)
+
+    def _resultado_desdobrar_copia_exata(self, molde: dict, eixo) -> list[QPointF]:
+        """Desdobra espelhando o contorno dobrado/visível, sem restaurar assimetria antiga.
+
+        É o equivalente a abrir um molde dobrado usando o lado que está por cima
+        como matriz: o lado novo vira uma cópia espelhada do contorno atual.
+        Os registros antigos de dobra continuam servindo como referência do eixo,
+        mas o contorno original salvo não é usado neste modo.
+        """
+        pontos = self._pontos_elemento(molde)
+        if len(pontos) < 3:
+            return []
+        base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
+        espelhado = [self._espelhar_ponto(p, eixo) for p in base]
+        unidos = self._unir_poligonos(base, espelhado)
+        if len(unidos) < 3:
+            unidos = base + list(reversed(espelhado))
+        return self._preparar_contorno_resultado(unidos, eixo)
 
     def _resultado_desdobrar(self, molde: dict, linha: dict, eixo) -> list[QPointF]:
         pontos = self._pontos_elemento(molde)
@@ -315,19 +369,23 @@ class Ferramenta(_DobrarBase):
         if not isinstance(registros, list) or not registros:
             return False
         pontos_atuais = self._pontos_elemento(molde)
+        offset_salvo = self._offset_dobra_salva_para_molde_atual(molde, pontos_atuais)
         melhor = None
         melhor_dist = float("inf")
         for registro in reversed(registros):
             pontos = self._pontos_restauracao_original(registro, pontos_atuais)
+            pontos = self._aplicar_offset_pontos(pontos, offset_salvo)
             if len(pontos) < 3:
                 continue
             eixo_reg = self._eixo_registro_original(registro)
+            eixo_reg = self._aplicar_offset_eixo(eixo_reg, offset_salvo) if eixo_reg is not None else None
             dist = self._distancia_eixos(eixo_atual, eixo_reg) if eixo_reg is not None else 0.0
             if dist < melhor_dist:
                 melhor = pontos
                 melhor_dist = dist
         if not melhor:
             return False
+        melhor = self._garantir_pontos_controle_no_desdobrado(molde, melhor, eixo_atual)
         if len(melhor) >= 3 and not self._pontos_mesmos(melhor[0], melhor[-1]):
             melhor.append(QPointF(melhor[0]))
         cantos = self._controles_resultado_desdobrar(molde, melhor, eixo_atual)
@@ -338,6 +396,10 @@ class Ferramenta(_DobrarBase):
         molde["molde_dobrado"] = False
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
+        molde.pop("dobra_eixo", None)
+        if isinstance(molde.get("estado_dobra"), dict):
+            molde["estado_dobra"]["ativo"] = False
+            molde["estado_dobra"]["contorno_aberto"] = [(p.x(), p.y()) for p in melhor]
         molde.pop("contornos_dobra_original", None)
         if self._fio_meio_ativo(canvas):
             self._centralizar_fio_no_molde(molde, eixo_atual)
@@ -350,15 +412,133 @@ class Ferramenta(_DobrarBase):
         self._status(canvas, "Molde restaurado ao contorno original da dobra.")
         return True
 
+    def _linha_ref_dobra_original(self, molde: dict) -> dict | None:
+        """Cria uma linha de referência a partir da última dobra preservada no molde."""
+        estado = molde.get("estado_dobra") if isinstance(molde, dict) else None
+        eixo_info = None
+        if isinstance(estado, dict):
+            eixo_info = estado.get("eixo")
+        if eixo_info is None:
+            registros = molde.get("contornos_dobra_original") if isinstance(molde, dict) else None
+            if isinstance(registros, list) and registros:
+                ultimo = registros[-1]
+                if isinstance(ultimo, dict):
+                    eixo_info = ultimo.get("eixo")
+        eixo = self._eixo_serializado_para_eixo(eixo_info)
+        if eixo is None:
+            return None
+        pontos_molde = self._pontos_elemento(molde)
+        eixo = self._aplicar_offset_eixo(eixo, self._offset_dobra_salva_para_molde_atual(molde, pontos_molde))
+        bbox = self._bbox_pontos(pontos_molde)
+        if bbox is not None and eixo[0] in {"h", "v"}:
+            min_x, min_y, max_x, max_y = bbox
+            margem = max(max_x - min_x, max_y - min_y, 1.0) * 0.08
+            if eixo[0] == "h":
+                y = float(eixo[1])
+                p1, p2 = QPointF(min_x - margem, y), QPointF(max_x + margem, y)
+            else:
+                x = float(eixo[1])
+                p1, p2 = QPointF(x, min_y - margem), QPointF(x, max_y + margem)
+        else:
+            p1, p2 = self._pontos_eixo(eixo)
+        return {
+            "tipo": "polyline",
+            "pontos": [(p1.x(), p1.y()), (p2.x(), p2.y())],
+            "origem_desdobrar": "dobra_original",
+            "eixo_serializado": eixo_info,
+        }
+
+    def _eixo_serializado_para_eixo(self, eixo_info):
+        if not isinstance(eixo_info, dict):
+            return None
+        tipo = str(eixo_info.get("tipo") or "").lower()
+        if tipo == "h":
+            try:
+                return ("h", float(eixo_info.get("valor")))
+            except Exception:
+                return None
+        if tipo == "v":
+            try:
+                return ("v", float(eixo_info.get("valor")))
+            except Exception:
+                return None
+        if tipo == "line":
+            p1 = eixo_info.get("p1")
+            p2 = eixo_info.get("p2")
+            if self._eh_ponto(p1) and self._eh_ponto(p2):
+                return ("line", QPointF(float(p1[0]), float(p1[1])), QPointF(float(p2[0]), float(p2[1])))
+        return None
+
+    def _centro_bbox_pontos(self, pontos: list[QPointF]) -> QPointF | None:
+        if not pontos:
+            return None
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        return QPointF((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+
+    def _pontos_serializados_para_qpoint(self, origem) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            if self._eh_ponto(item):
+                pontos.append(QPointF(float(item[0]), float(item[1])))
+        return pontos
+
+    def _offset_dobra_salva_para_molde_atual(self, molde: dict, pontos_atuais: list[QPointF] | None = None) -> QPointF:
+        """Calcula deslocamento entre a dobra salva e a posição atual do molde.
+
+        Se o molde dobrado foi movido depois da dobra, versões antigas podiam
+        deixar os dados internos da sombra/contorno na posição anterior. Esse
+        offset mantém desdobrar/restaurar coerente com a posição atual.
+        """
+        if pontos_atuais is None:
+            pontos_atuais = self._pontos_elemento(molde)
+        atuais = pontos_atuais[:-1] if len(pontos_atuais) > 2 and self._pontos_mesmos(pontos_atuais[0], pontos_atuais[-1]) else list(pontos_atuais)
+        estado = molde.get("estado_dobra") if isinstance(molde, dict) and isinstance(molde.get("estado_dobra"), dict) else None
+        referencia = None
+        if estado:
+            referencia = estado.get("contorno_dobrado") or estado.get("pontos_dobrados")
+        if not referencia and isinstance(molde, dict):
+            registros = molde.get("contornos_dobra_original")
+            if isinstance(registros, list) and registros:
+                ultimo = registros[-1]
+                if isinstance(ultimo, dict):
+                    referencia = ultimo.get("contorno_dobrado")
+        ref_pts = self._pontos_serializados_para_qpoint(referencia or [])
+        ref_pts = ref_pts[:-1] if len(ref_pts) > 2 and self._pontos_mesmos(ref_pts[0], ref_pts[-1]) else ref_pts
+        c_atual = self._centro_bbox_pontos(atuais)
+        c_ref = self._centro_bbox_pontos(ref_pts)
+        if c_atual is None or c_ref is None:
+            return QPointF(0.0, 0.0)
+        return QPointF(c_atual.x() - c_ref.x(), c_atual.y() - c_ref.y())
+
+    def _aplicar_offset_pontos(self, pontos: list[QPointF], offset: QPointF) -> list[QPointF]:
+        if abs(offset.x()) <= 1e-9 and abs(offset.y()) <= 1e-9:
+            return pontos
+        return [QPointF(p.x() + offset.x(), p.y() + offset.y()) for p in pontos]
+
+    def _aplicar_offset_eixo(self, eixo, offset: QPointF):
+        if eixo is None or (abs(offset.x()) <= 1e-9 and abs(offset.y()) <= 1e-9):
+            return eixo
+        if eixo[0] == "h":
+            return ("h", float(eixo[1]) + offset.y())
+        if eixo[0] == "v":
+            return ("v", float(eixo[1]) + offset.x())
+        return ("line", QPointF(eixo[1].x() + offset.x(), eixo[1].y() + offset.y()), QPointF(eixo[2].x() + offset.x(), eixo[2].y() + offset.y()))
+
     def _pontos_restauracao_original(self, registro, pontos_atuais: list[QPointF]) -> list[QPointF]:
         if isinstance(registro, dict):
+            pontos_originais = self._pontos_registro_original(registro)
+            if len(pontos_originais) >= 3:
+                return pontos_originais
             metade_movida = registro.get("metade_movida")
             if isinstance(metade_movida, list) and metade_movida:
                 metade = self._pontos_registro_original({"pontos": metade_movida})
                 base_atual = pontos_atuais[:-1] if len(pontos_atuais) > 2 and self._pontos_mesmos(pontos_atuais[0], pontos_atuais[-1]) else list(pontos_atuais)
                 unidos = self._unir_poligonos(base_atual, metade)
                 return unidos if len(unidos) >= 3 else base_atual
-            return self._pontos_registro_original(registro)
+            return pontos_originais
         metade_antiga = self._pontos_registro_original(registro)
         if len(metade_antiga) < 2:
             return []
@@ -414,6 +594,14 @@ class Ferramenta(_DobrarBase):
         return QPointF(eixo[1]), QPointF(eixo[2])
 
     def _linha_interna_em_ponto(self, canvas, molde_idx: int, pos: QPointF):
+        """Prioriza linhas internas do molde; se não encontrar, usa o perímetro.
+
+        Isso deixa o uso mais parecido com papel: uma linha desenhada dentro do molde
+        pode virar eixo real de dobra/desdobra, e o perímetro continua disponível.
+        """
+        internos = self._indices_linhas_internas_proximas(canvas, molde_idx, pos)
+        if internos:
+            return internos[0]
         return self._linha_do_proprio_molde_em_ponto(canvas, molde_idx, pos)
 
     def _elemento_linha_ref(self, canvas, ref) -> dict | None:
@@ -543,6 +731,11 @@ class Ferramenta(_DobrarBase):
             fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 128))
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
+    def _copiar_contorno_dobrado_ativo(self, canvas) -> bool:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        chk = getattr(dialog, "chk_copiar_contorno_dobrado", None) if dialog is not None else None
+        return bool(chk is not None and chk.isChecked())
+
     def _inserir_pique_ativo(self, canvas) -> bool:
         dialog = self._dialog_por_canvas.get(id(canvas))
         chk = getattr(dialog, "chk_inserir_pique", None) if dialog is not None else None
@@ -560,10 +753,76 @@ class Ferramenta(_DobrarBase):
 
     def _preparar_contorno_resultado(self, pontos: list[QPointF], eixo) -> list[QPointF]:
         base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
-        base = self._inserir_pontos_no_contorno(base, list(self._pontos_eixo(eixo)))
+        # Ao desdobrar, a dobra vira uma linha real do molde aberto.
+        # Por isso, os pontos onde o eixo encontra o contorno precisam entrar
+        # como vértices/controladores do perímetro, sem substituir os pontos
+        # principais que já existiam nas extremidades do molde.
+        base = self._inserir_pontos_no_contorno(base, self._pontos_eixo_no_contorno(base, eixo))
         if len(base) >= 2 and not self._pontos_mesmos(base[0], base[-1]):
             base.append(QPointF(base[0]))
         return base
+
+    def _garantir_pontos_controle_no_desdobrado(self, molde: dict, contorno: list[QPointF], eixo) -> list[QPointF]:
+        """Garante controles nos encontros do eixo sem perder as extremidades antigas.
+
+        Regras práticas do molde de papel:
+        - os cantos/pontos principais que já existiam continuam sendo pontos de controle;
+        - a cópia espelhada desses pontos também vira controle quando cai no contorno;
+        - os encontros do eixo da dobra com o contorno aberto entram como novos pontos
+          de controle, para o usuário conseguir editar/conferir a linha da dobra.
+        """
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
+        if len(base) < 2:
+            return list(contorno)
+
+        candidatos: list[QPointF] = []
+        principais = self._pontos_principais_molde(molde)
+        for ponto in principais:
+            candidatos.append(QPointF(ponto))
+            candidatos.append(self._espelhar_ponto(ponto, eixo))
+        candidatos.extend(self._pontos_eixo_no_contorno(base, eixo))
+
+        base = self._inserir_pontos_no_contorno(base, candidatos)
+        if len(base) >= 2 and not self._pontos_mesmos(base[0], base[-1]):
+            base.append(QPointF(base[0]))
+        return base
+
+    def _pontos_eixo_no_contorno(self, contorno: list[QPointF], eixo) -> list[QPointF]:
+        """Retorna os pontos do contorno que pertencem ao eixo da dobra.
+
+        Inclui interseções atravessadas pelo eixo e também extremidades de trechos
+        que já estão exatamente sobre o eixo. Esses pontos são usados como novos
+        controles da linha de dobra após desdobrar.
+        """
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
+        if len(base) < 2:
+            return []
+        tolerancia = max(self._tolerancia_contorno(base) * 20.0, 1e-7)
+        pontos: list[QPointF] = []
+
+        def adicionar(ponto: QPointF | None) -> None:
+            if ponto is None:
+                return
+            if not isfinite(float(ponto.x())) or not isfinite(float(ponto.y())):
+                return
+            if any(self._dist(ponto, existente) <= tolerancia for existente in pontos):
+                return
+            pontos.append(QPointF(ponto))
+
+        for a, b in zip(base, base[1:] + base[:1]):
+            va = self._valor_lado(a, eixo)
+            vb = self._valor_lado(b, eixo)
+            a_no_eixo = abs(va) <= tolerancia
+            b_no_eixo = abs(vb) <= tolerancia
+            if a_no_eixo:
+                adicionar(a)
+            if b_no_eixo:
+                adicionar(b)
+            if a_no_eixo and b_no_eixo:
+                continue
+            if (va < -tolerancia and vb > tolerancia) or (va > tolerancia and vb < -tolerancia):
+                adicionar(self._intersecao_segmento_eixo(a, b, eixo))
+        return pontos
 
     def _inserir_pontos_no_contorno(self, base: list[QPointF], pontos: list[QPointF]) -> list[QPointF]:
         saida = [QPointF(p) for p in base]
@@ -586,19 +845,32 @@ class Ferramenta(_DobrarBase):
         return saida
 
     def _controles_resultado_desdobrar(self, molde: dict, contorno: list[QPointF], eixo) -> list[QPointF]:
-        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else contorno
-        candidatos: list[QPointF] = []
-        for ponto in self._pontos_principais_molde(molde):
-            candidatos.append(QPointF(ponto))
-            candidatos.append(self._espelhar_ponto(ponto, eixo))
-        candidatos.extend(QPointF(p) for p in self._pontos_eixo(eixo))
-        controles: list[QPointF] = []
+        """Define os pontos principais do molde aberto depois do desdobrar.
+
+        Ao abrir a dobra, todo vértice real do novo contorno precisa virar ponto
+        de controle visível. Antes a função só mantinha pontos que batiam com os
+        controles antigos ou com o eixo; por isso um canto novo, criado pela
+        assimetria restaurada, podia ficar sem número/quadradinho.
+
+        Regra adotada: todos os vértices do contorno desdobrado entram como
+        controle, removendo apenas duplicados muito próximos e o ponto de
+        fechamento repetido. Assim as extremidades antigas continuam existindo e
+        os novos pontos no eixo da dobra também aparecem.
+        """
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
+        if len(base) < 2:
+            return [QPointF(p) for p in base]
+
+        # Garante explicitamente os encontros do eixo no próprio contorno antes
+        # de transformar em controles. Se o eixo cruza uma lateral, nasce um
+        # ponto de controle ali. Se a extremidade antiga já existia, ela fica.
+        base = self._inserir_pontos_no_contorno(base, self._pontos_eixo_no_contorno(base, eixo))
         tolerancia = self._tolerancia_contorno(base)
+        controles: list[QPointF] = []
         for ponto in base:
-            if any(self._dist(ponto, cand) <= tolerancia for cand in candidatos):
-                if not any(self._dist(ponto, existente) <= tolerancia for existente in controles):
-                    controles.append(QPointF(ponto))
-        return controles if len(controles) >= 2 else [QPointF(p) for p in base]
+            if not any(self._dist(ponto, existente) <= tolerancia for existente in controles):
+                controles.append(QPointF(ponto))
+        return controles
 
     def _sincronizar_piques_resultado(self, molde: dict, contorno: list[QPointF], eixo, inserir: bool) -> None:
         marcacoes = []
@@ -675,6 +947,10 @@ class Ferramenta(_DobrarBase):
         return any((min_x - margem) <= p.x() <= (max_x + margem) and (min_y - margem) <= p.y() <= (max_y + margem) for p in pontos)
 
     def _eixo_linha(self, el: dict):
+        eixo_serializado = el.get("eixo_serializado") if isinstance(el, dict) else None
+        eixo = self._eixo_serializado_para_eixo(eixo_serializado)
+        if eixo is not None:
+            return eixo
         if el.get("tipo") == "bezier_quadratica":
             p0 = el.get("p0")
             p2 = el.get("p2")

@@ -49,11 +49,17 @@ class DobrarDialog(QDialog):
         self.cmb_modo = QComboBox()
         self.cmb_modo.addItems(["Horizontal", "Vertical", "Linha"])
         form.addRow("Modo da dobra", self.cmb_modo)
+        self.cmb_acao = QComboBox()
+        self.cmb_acao.addItems(["Dobrar", "Conferir lados"])
+        form.addRow("Ação", self.cmb_acao)
         raiz.addLayout(form)
 
-        self.chk_manter_dimensoes = QCheckBox("Manter assimetria")
+        self.chk_manter_dimensoes = QCheckBox("Preservar original para desdobrar")
         self.chk_manter_dimensoes.setChecked(True)
         raiz.addWidget(self.chk_manter_dimensoes)
+        self.chk_mostrar_original = QCheckBox("Mostrar lado original oculto")
+        self.chk_mostrar_original.setChecked(True)
+        raiz.addWidget(self.chk_mostrar_original)
         self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
         self.chk_fio_meio.setChecked(False)
         raiz.addWidget(self.chk_fio_meio)
@@ -63,7 +69,7 @@ class Ferramenta(FerramentaBase):
     id_ferramenta = "dobrar"
     nome = "Dobrar"
     usa_painel_auxiliar = False
-    descricao_painel = "Dobra moldes pelo meio ou por uma linha reta, com preview azul."
+    descricao_painel = "Dobra moldes como papel: pela reta maior, pelo meio ou por uma linha reta, com original preservado."
 
     _dialog_por_canvas: dict[int, DobrarDialog] = {}
 
@@ -81,12 +87,16 @@ class Ferramenta(FerramentaBase):
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Dobrar: clique em um molde. Shift soma moldes. Mova para o lado da dobra e clique para aplicar.")
+        self._status(canvas, "Dobrar: clique no molde. Shift soma moldes. Mova para escolher o lado que dobra; esquerdo aplica, direito cancela.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
             dialog.hide()
+        # Ao fechar a ferramenta, limpa apenas guias temporárias da operação.
+        # Se o molde permaneceu dobrado, o pontilhado do lado dobrado continua
+        # visível até que a ferramenta Desdobrar abra/restaure o contorno.
+        self._ocultar_marcacoes_dobra(canvas)
         self._resetar_operacao()
         canvas.update()
 
@@ -151,6 +161,8 @@ class Ferramenta(FerramentaBase):
                 if eixo_el is not None:
                     self._desenhar_eixo(canvas, painter, eixo_el)
 
+        self._desenhar_originais_preservados(canvas, painter, indices)
+
         if self._lado_preview:
             pen_preview = QPen(cor, 2.0, Qt.SolidLine)
             pen_preview.setJoinStyle(Qt.RoundJoin)
@@ -186,6 +198,9 @@ class Ferramenta(FerramentaBase):
             else:
                 canvas._selecionados = {int(candidato)}
                 self._lado_preview = 0
+                dialog = self._obter_dialog(canvas)
+                if hasattr(dialog, "chk_mostrar_original"):
+                    self._mostrar_original_alterado(canvas, dialog.chk_mostrar_original.isChecked())
                 canvas.update()
                 self._status(canvas, "Molde selecionado. Mova para cima/baixo ou esquerda/direita e clique para dobrar.")
             event.accept()
@@ -216,6 +231,9 @@ class Ferramenta(FerramentaBase):
                 self._status(canvas, "Dobrar na linha: selecione um molde primeiro.")
             else:
                 canvas._selecionados = {int(candidato)}
+                dialog = self._obter_dialog(canvas)
+                if hasattr(dialog, "chk_mostrar_original"):
+                    self._mostrar_original_alterado(canvas, dialog.chk_mostrar_original.isChecked())
                 self._resetar_linha()
                 self._status(canvas, "Molde selecionado. Clique o primeiro ponto da linha de dobra.")
                 canvas.update()
@@ -255,7 +273,13 @@ class Ferramenta(FerramentaBase):
             self._status(canvas, "Escolha o lado da dobra com o mouse.")
             return
         dialog = self._obter_dialog(canvas)
-        manter = dialog.chk_manter_dimensoes.isChecked()
+        if str(getattr(dialog, "cmb_acao", None).currentText() if getattr(dialog, "cmb_acao", None) is not None else "Dobrar").strip().lower().startswith("conferir"):
+            self._conferir_lados(canvas, indices, eixo)
+            self._resetar_linha()
+            self._lado_preview = 0
+            canvas.update()
+            return
+        preservar_original = dialog.chk_manter_dimensoes.isChecked()
         afetados = 0
         for idx in indices:
             if not (0 <= idx < len(canvas.cena.elementos)):
@@ -265,29 +289,71 @@ class Ferramenta(FerramentaBase):
                 continue
             el = canvas.cena.elementos[idx]
             original = self._pontos_elemento(el)
+            original_base = original[:-1] if len(original) > 2 and self._pontos_mesmos(original[0], original[-1]) else list(original)
             lado_movido = -self._lado_preview
-            if manter and len(original) >= 2:
-                base_original = original[:-1] if len(original) > 2 and self._pontos_mesmos(original[0], original[-1]) else list(original)
-                metade_original = self._recortar_poligono_lado(base_original, eixo_el, lado_movido)
+
+            if preservar_original and len(original_base) >= 3:
+                metade_original = self._recortar_poligono_lado(original_base, eixo_el, lado_movido)
                 if len(metade_original) >= 3:
-                    contorno_pontilhado = self._fechar_contorno(metade_original)
-                    el.setdefault("contornos_dobra_original", []).append(
-                        {
-                            "pontos": [(p.x(), p.y()) for p in original],
-                            "metade_movida": [(p.x(), p.y()) for p in metade_original],
-                            "contorno_pontilhado": [(p.x(), p.y()) for p in contorno_pontilhado],
-                            "eixo": self._serializar_eixo(eixo_el),
-                            "lado_destino": int(self._lado_preview),
-                        }
+                    # Guarda DUAS referências diferentes:
+                    # 1) metade_movida / contorno_lado_original: posição aberta original, usada para restaurar a assimetria real;
+                    # 2) contorno_pontilhado / contorno_lado_dobrado: posição depois da dobra, usada para desenhar
+                    #    no canvas onde o lado dobrado ficou. Isso imita o papel real: o pontilhado acompanha a dobra,
+                    #    não fica parado mostrando o molde aberto antigo.
+                    contorno_lado_original = self._fechar_contorno(metade_original)
+                    contorno_lado_dobrado = self._fechar_contorno(
+                        [
+                            self._espelhar_ponto(p, eixo_el) if self._lado_ponto(p, eixo_el) == lado_movido else QPointF(p)
+                            for p in metade_original
+                        ]
                     )
+                    registro = {
+                        "pontos": [(p.x(), p.y()) for p in original],
+                        "metade_movida": [(p.x(), p.y()) for p in metade_original],
+                        "contorno_lado_original": [(p.x(), p.y()) for p in contorno_lado_original],
+                        "contorno_lado_dobrado": [(p.x(), p.y()) for p in contorno_lado_dobrado],
+                        # Compatibilidade: o visualizacao.py já procura contorno_pontilhado.
+                        # A partir daqui ele representa o lado dobrado, não o lado aberto antigo.
+                        "contorno_pontilhado": [(p.x(), p.y()) for p in contorno_lado_dobrado],
+                        "eixo": self._serializar_eixo(eixo_el),
+                        "lado_destino": int(self._lado_preview),
+                    }
+                    # Cada nova dobra é um processo novo. Mantemos só a referência
+                    # visual/técnica da dobra atual para não deixar pontilhados antigos
+                    # presos no canvas depois que o molde for movido ou dobrado de novo.
+                    el["contornos_dobra_original"] = [registro]
+                    el["estado_dobra"] = {
+                        "ativo": True,
+                        "eixo": self._serializar_eixo(eixo_el),
+                        "lado_destino": int(self._lado_preview),
+                        "lado_movido": int(lado_movido),
+                        "contorno_original": [(p.x(), p.y()) for p in original],
+                        "contorno_lado_original": [(p.x(), p.y()) for p in contorno_lado_original],
+                        "contorno_lado_dobrado": [(p.x(), p.y()) for p in contorno_lado_dobrado],
+                        # Nome antigo mantido para compatibilidade com versões anteriores do canvas.
+                        "contorno_lado_oculto": [(p.x(), p.y()) for p in contorno_lado_dobrado],
+                    }
+                    mostrar_original = getattr(dialog, "chk_mostrar_original", None)
+                    el["mostrar_contorno_dobra_original"] = bool(mostrar_original is None or mostrar_original.isChecked())
+
             self._dobrar_elemento(el, eixo_el, self._lado_preview)
+            pontos_dobrados_el = self._pontos_elemento(el)
+            if isinstance(el.get("estado_dobra"), dict):
+                el["estado_dobra"]["contorno_dobrado"] = [(p.x(), p.y()) for p in pontos_dobrados_el]
+                self._normalizar_registro_visual_dobra(el, pontos_dobrados_el)
             if getattr(dialog, "chk_fio_meio", None) is not None and dialog.chk_fio_meio.isChecked():
                 self._centralizar_fio_no_molde(el, eixo_el)
             el["molde_dobrado"] = True
             if eixo_el[0] == "h":
                 el["dobra_horizontal"] = True
+                el["dobra_vertical"] = False
             elif eixo_el[0] == "v":
                 el["dobra_vertical"] = True
+                el["dobra_horizontal"] = False
+            else:
+                el["dobra_horizontal"] = False
+                el["dobra_vertical"] = False
+            el["dobra_eixo"] = self._serializar_eixo(eixo_el)
             el.setdefault("metadados", {})["ultima_transformacao"] = "dobrar"
             afetados += 1
             if hasattr(canvas, "_indices_costuras_vinculadas"):
@@ -299,7 +365,7 @@ class Ferramenta(FerramentaBase):
         self._resetar_linha()
         self._lado_preview = 0
         canvas.update()
-        self._status(canvas, f"Dobra aplicada em {afetados} molde(s). A ferramenta continua ativa; duplo direito finaliza.")
+        self._status(canvas, f"Dobra aplicada em {afetados} molde(s). Original preservado para abrir/conferir; duplo direito finaliza.")
 
     def _obter_dialog(self, canvas) -> DobrarDialog:
         chave = id(canvas)
@@ -312,6 +378,10 @@ class Ferramenta(FerramentaBase):
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.cmb_modo.currentTextChanged.connect(lambda _texto, c=canvas: self._modo_alterado(c))
+            if hasattr(dialog, "chk_mostrar_original"):
+                dialog.chk_mostrar_original.toggled.connect(
+                    lambda marcado, c=canvas: self._mostrar_original_alterado(c, bool(marcado))
+                )
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: DobrarDialog) -> None:
@@ -327,6 +397,22 @@ class Ferramenta(FerramentaBase):
         if "vertical" in texto:
             return "vertical"
         return "horizontal"
+
+    def _mostrar_original_alterado(self, canvas, marcado: bool) -> None:
+        """Liga/desliga imediatamente a referência pontilhada do lado dobrado.
+
+        A marcação pode ter sido escondida ao fechar a ferramenta anterior.
+        Quando o usuário volta a marcar a caixa, a visualização precisa aparecer
+        na hora para os moldes selecionados, sem exigir nova dobra.
+        """
+        try:
+            for idx in self._indices_moldes(canvas):
+                el = canvas.cena.elementos[idx]
+                if isinstance(el, dict) and (el.get("contornos_dobra_original") or el.get("estado_dobra")):
+                    el["mostrar_contorno_dobra_original"] = bool(marcado)
+            canvas.update()
+        except Exception:
+            pass
 
     def _modo_alterado(self, canvas):
         self._resetar_linha()
@@ -492,9 +578,11 @@ class Ferramenta(FerramentaBase):
         mantido = self._recortar_poligono_lado(base, eixo, int(lado_destino))
         movido = self._recortar_poligono_lado(base, eixo, -int(lado_destino))
         movido_espelhado = [self._espelhar_ponto(p, eixo) for p in movido]
-        unidos = self._unir_poligonos(mantido, movido_espelhado)
+        referencias_uniao = [QPointF(p) for p in mantido] + [QPointF(p) for p in movido_espelhado]
+        unidos = self._unir_poligonos(mantido, movido_espelhado, referencias=referencias_uniao)
         if len(unidos) < 3:
             unidos = mantido or movido_espelhado
+        unidos = self._normalizar_vertices_dobra(unidos, referencias_uniao)
         if len(unidos) >= 3 and not self._pontos_mesmos(unidos[0], unidos[-1]):
             unidos.append(QPointF(unidos[0]))
         return unidos
@@ -535,7 +623,7 @@ class Ferramenta(FerramentaBase):
         t = max(0.0, min(1.0, va / denom))
         return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
 
-    def _unir_poligonos(self, a: list[QPointF], b: list[QPointF]) -> list[QPointF]:
+    def _unir_poligonos(self, a: list[QPointF], b: list[QPointF], referencias: list[QPointF] | None = None) -> list[QPointF]:
         caminhos = []
         for pontos in (a, b):
             if len(pontos) < 3:
@@ -549,8 +637,96 @@ class Ferramenta(FerramentaBase):
         unido = caminhos[0]
         for path in caminhos[1:]:
             unido = unido.united(path)
-        poligono = unido.simplified().toFillPolygon()
-        return self._limpar_pontos_repetidos([QPointF(p) for p in poligono])
+        poligono = [QPointF(p) for p in unido.simplified().toFillPolygon()]
+        return self._normalizar_vertices_dobra(poligono, referencias or (list(a) + list(b)))
+
+    def _normalizar_vertices_dobra(self, pontos: list[QPointF], referencias: list[QPointF] | None = None) -> list[QPointF]:
+        """Remove micro-cantos criados pela união geométrica da dobra.
+
+        Quando uma metade assimétrica é dobrada sobre a outra, o QPainterPath pode
+        gerar um pequeno chanfro/cantinho no encontro de duas linhas quase
+        coincidentes. Para a dobra de molde isso não deve virar um novo vértice:
+        a ponta precisa encaixar no canto real mais próximo, como papel dobrado.
+        """
+        base = self._limpar_pontos_repetidos([QPointF(p) for p in pontos])
+        if len(base) < 3:
+            return base
+
+        refs = [QPointF(p) for p in (referencias or [])]
+        tolerancia = self._tolerancia_encaixe_dobra(base + refs)
+
+        if refs:
+            encaixados: list[QPointF] = []
+            for ponto in base:
+                ref = self._referencia_mais_proxima(ponto, refs)
+                if ref is not None and self._dist(ponto, ref) <= tolerancia:
+                    ponto = QPointF(ref)
+                encaixados.append(QPointF(ponto))
+            base = self._limpar_pontos_repetidos(encaixados)
+
+        # Remove segmentos minúsculos que aparecem como "dente" no canto.
+        base = self._remover_micro_segmentos_dobra(base, tolerancia)
+
+        # Remove pontos praticamente alinhados, evitando criar ponto de controle
+        # falso em uma reta que deveria continuar limpa.
+        base = self._remover_pontos_colineares_dobra(base, tolerancia * 0.18)
+        return self._limpar_pontos_repetidos(base)
+
+    def _tolerancia_encaixe_dobra(self, pontos: list[QPointF]) -> float:
+        if not pontos:
+            return 0.05
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        diag = sqrt((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2)
+        # Em centímetros de cena, fica pequeno o bastante para não apagar detalhes
+        # reais, mas suficiente para eliminar o pequeno canto da união da dobra.
+        return max(0.08, min(2.0, diag * 0.035))
+
+    def _referencia_mais_proxima(self, ponto: QPointF, referencias: list[QPointF]) -> QPointF | None:
+        melhor = None
+        melhor_dist = float("inf")
+        for ref in referencias:
+            d = self._dist(ponto, ref)
+            if d < melhor_dist:
+                melhor = ref
+                melhor_dist = d
+        return QPointF(melhor) if melhor is not None else None
+
+    def _remover_micro_segmentos_dobra(self, pontos: list[QPointF], tolerancia: float) -> list[QPointF]:
+        saida = [QPointF(p) for p in pontos]
+        if len(saida) < 3:
+            return saida
+        mudou = True
+        while mudou and len(saida) >= 3:
+            mudou = False
+            total = len(saida)
+            remover: int | None = None
+            for i in range(total):
+                atual = saida[i]
+                prox = saida[(i + 1) % total]
+                if self._dist(atual, prox) <= tolerancia:
+                    # Mantém o ponto seguinte, que normalmente é o canto real.
+                    remover = i
+                    break
+            if remover is not None:
+                saida.pop(remover)
+                mudou = True
+        return saida
+
+    def _remover_pontos_colineares_dobra(self, pontos: list[QPointF], tolerancia: float) -> list[QPointF]:
+        if len(pontos) < 4:
+            return pontos
+        saida: list[QPointF] = []
+        total = len(pontos)
+        for i, p in enumerate(pontos):
+            anterior = pontos[(i - 1) % total]
+            proximo = pontos[(i + 1) % total]
+            if self._dist(anterior, p) <= tolerancia or self._dist(p, proximo) <= tolerancia:
+                continue
+            if self._distancia_ponto_segmento(anterior, proximo, p) <= tolerancia:
+                continue
+            saida.append(QPointF(p))
+        return saida if len(saida) >= 3 else pontos
 
     def _limpar_pontos_repetidos(self, pontos: list[QPointF]) -> list[QPointF]:
         saida: list[QPointF] = []
@@ -636,6 +812,134 @@ class Ferramenta(FerramentaBase):
         for a, b in zip(pontos, pontos[1:]):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
 
+    def _conferir_lados(self, canvas, indices: list[int], eixo) -> None:
+        """Compara os dois lados como se o molde fosse dobrado no papel, sem alterar o molde."""
+        resultados = []
+        for idx in indices:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            eixo_el = eixo if eixo[0] == "line" else self._eixo(canvas, [idx], self._obter_dialog(canvas).cmb_modo.currentText())
+            if eixo_el is None:
+                continue
+            pontos = self._pontos_elemento(el)
+            if len(pontos) < 3:
+                continue
+            base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
+            lado_destino = int(self._lado_preview or 1)
+            lado_a = self._recortar_poligono_lado(base, eixo_el, lado_destino)
+            lado_b = self._recortar_poligono_lado(base, eixo_el, -lado_destino)
+            lado_b_espelhado = [self._espelhar_ponto(p, eixo_el) for p in lado_b]
+            metricas = self._metricas_simetria(lado_a, lado_b_espelhado)
+            nome = str(el.get("nome_molde") or el.get("nome") or f"molde {idx + 1}")
+            el.setdefault("metadados", {})["ultima_conferencia_dobra"] = metricas
+            resultados.append((nome, metricas))
+        if not resultados:
+            self._status(canvas, "Não foi possível conferir os lados: escolha um molde fechado e um eixo válido.")
+            return
+        partes = []
+        for nome, met in resultados:
+            max_txt = canvas.formatar_distancia(met["diferenca_maxima"]) if hasattr(canvas, "formatar_distancia") else f"{met['diferenca_maxima']:.2f}"
+            media_txt = canvas.formatar_distancia(met["diferenca_media"]) if hasattr(canvas, "formatar_distancia") else f"{met['diferenca_media']:.2f}"
+            situacao = "simétrico" if met["diferenca_maxima"] <= met["tolerancia"] else "assimétrico"
+            partes.append(f"{nome}: {situacao} | máx. {max_txt} | média {media_txt}")
+        self._status(canvas, "Conferência da dobra: " + " ; ".join(partes))
+
+    def _metricas_simetria(self, lado_a: list[QPointF], lado_b: list[QPointF]) -> dict:
+        if len(lado_a) < 2 or len(lado_b) < 2:
+            return {"diferenca_maxima": float("inf"), "diferenca_media": float("inf"), "tolerancia": 0.05}
+        distancias = []
+        for ponto in lado_a:
+            distancias.append(self._distancia_ponto_polilinha(ponto, lado_b))
+        for ponto in lado_b:
+            distancias.append(self._distancia_ponto_polilinha(ponto, lado_a))
+        if not distancias:
+            return {"diferenca_maxima": float("inf"), "diferenca_media": float("inf"), "tolerancia": 0.05}
+        return {
+            "diferenca_maxima": max(distancias),
+            "diferenca_media": sum(distancias) / len(distancias),
+            "tolerancia": 0.05,
+            "amostras": len(distancias),
+        }
+
+    def _distancia_ponto_polilinha(self, ponto: QPointF, pontos: list[QPointF]) -> float:
+        if len(pontos) == 1:
+            return self._dist(ponto, pontos[0])
+        return min(self._distancia_ponto_segmento(a, b, ponto) for a, b in zip(pontos, pontos[1:]))
+
+    def _desenhar_originais_preservados(self, canvas, painter, indices: list[int]) -> None:
+        """Mostra o lado que foi dobrado já na posição dobrada, como referência pontilhada."""
+        if not indices:
+            return
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None and hasattr(dialog, "chk_mostrar_original") and not dialog.chk_mostrar_original.isChecked():
+            return
+        painter.save()
+        pen = QPen(QColor("#9aa0a6"), 1.1, Qt.DashLine)
+        pen.setDashPattern([4.0, 3.0])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for idx in indices:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            registros = el.get("contornos_dobra_original")
+            if not isinstance(registros, list) or not registros:
+                estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+                if estado and (estado.get("contorno_lado_dobrado") or estado.get("contorno_lado_oculto")):
+                    registros = [{"contorno_lado_dobrado": estado.get("contorno_lado_dobrado") or estado.get("contorno_lado_oculto")}]
+                else:
+                    continue
+            for registro in registros[-2:]:
+                origem = (
+                    registro.get("contorno_lado_dobrado")
+                    or registro.get("contorno_pontilhado")
+                    or registro.get("metade_movida")
+                ) if isinstance(registro, dict) else registro
+                if not isinstance(origem, list):
+                    continue
+                pontos = []
+                for item in origem:
+                    if self._eh_ponto(item):
+                        pontos.append(QPointF(float(item[0]), float(item[1])))
+                if len(pontos) >= 2:
+                    if not self._pontos_mesmos(pontos[0], pontos[-1]):
+                        pontos.append(QPointF(pontos[0]))
+                    self._desenhar_polilinha_tela(canvas, painter, pontos)
+        painter.restore()
+
+    def _normalizar_registro_visual_dobra(self, el: dict, pontos_dobrados: list[QPointF]) -> None:
+        """Faz a sombra/pontilhado encaixar no contorno dobrado real.
+
+        Assim o lado oculto não cria um cantinho separado no vértice superior
+        quando a metade dobrada termina muito perto de um canto existente.
+        """
+        referencias = [QPointF(p) for p in pontos_dobrados]
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        registros = el.get("contornos_dobra_original")
+        alvos = []
+        if estado is not None:
+            alvos.append(estado)
+        if isinstance(registros, list) and registros and isinstance(registros[-1], dict):
+            alvos.append(registros[-1])
+
+        for alvo in alvos:
+            origem = alvo.get("contorno_lado_dobrado") or alvo.get("contorno_pontilhado") or alvo.get("contorno_lado_oculto")
+            if not isinstance(origem, list):
+                continue
+            pontos = [QPointF(float(p[0]), float(p[1])) for p in origem if self._eh_ponto(p)]
+            if len(pontos) < 2:
+                continue
+            fechado = bool(len(pontos) >= 3 and self._pontos_mesmos(pontos[0], pontos[-1]))
+            pontos = pontos[:-1] if fechado else pontos
+            pontos = self._normalizar_vertices_dobra(pontos, referencias)
+            if fechado and pontos and not self._pontos_mesmos(pontos[0], pontos[-1]):
+                pontos.append(QPointF(pontos[0]))
+            serial = [(p.x(), p.y()) for p in pontos]
+            alvo["contorno_lado_dobrado"] = serial
+            alvo["contorno_pontilhado"] = serial
+            alvo["contorno_lado_oculto"] = serial
+
     def _serializar_eixo(self, eixo) -> dict:
         if eixo[0] == "h":
             return {"tipo": "h", "valor": float(eixo[1])}
@@ -646,6 +950,29 @@ class Ferramenta(FerramentaBase):
             "p1": (float(eixo[1].x()), float(eixo[1].y())),
             "p2": (float(eixo[2].x()), float(eixo[2].y())),
         }
+
+    def _ocultar_marcacoes_dobra(self, canvas) -> None:
+        """Limpa apenas marcações temporárias da ferramenta.
+
+        O pontilhado do lado dobrado NÃO é rastro temporário: ele representa a
+        posição real do papel após a dobra e deve permanecer enquanto o molde
+        estiver dobrado. Ele só some quando o molde é desdobrado/restaurado.
+        """
+        try:
+            elementos = getattr(getattr(canvas, "cena", None), "elementos", []) or []
+            for el in elementos:
+                if not isinstance(el, dict) or not el.get("molde"):
+                    continue
+                dobrado = bool(el.get("molde_dobrado"))
+                estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+                if estado and bool(estado.get("ativo")):
+                    dobrado = True
+                # Se não está dobrado, pode limpar a marcação. Se está dobrado,
+                # preserva o valor atual de mostrar_contorno_dobra_original.
+                if not dobrado:
+                    el["mostrar_contorno_dobra_original"] = False
+        except Exception:
+            pass
 
     def _resetar_operacao(self):
         self._lado_preview = 0
@@ -670,9 +997,8 @@ class Ferramenta(FerramentaBase):
         self._lado_preview = 0
         self._preview_pos = None
         self._resetar_linha()
-        canvas._selecionados = set()
         canvas.update()
-        self._status(canvas, "Dobrar cancelado. Clique em um molde para começar novamente.")
+        self._status(canvas, "Operação de dobra cancelada. A seleção foi mantida; escolha novamente o eixo/lado.")
 
     def _fechar(self, canvas):
         canvas.set_ferramenta_ativa("selecionar")
@@ -715,6 +1041,10 @@ class Ferramenta(FerramentaBase):
         t = ((ponto.x() - inicio.x()) * vx + (ponto.y() - inicio.y()) * vy) / denom
         t = max(0.0, min(1.0, t))
         return QPointF(inicio.x() + (vx * t), inicio.y() + (vy * t))
+
+    def _distancia_ponto_segmento(self, inicio: QPointF, fim: QPointF, ponto: QPointF) -> float:
+        proj = self._projetar_em_segmento(ponto, inicio, fim)
+        return self._dist(ponto, proj)
 
     def _status(self, canvas, texto: str) -> None:
         self.set_status(texto)

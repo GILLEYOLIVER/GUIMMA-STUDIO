@@ -4553,7 +4553,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                     self._transladar_elemento(canvas.cena.elementos[idx], dx, dy)
         if registrar_historico:
             canvas._registrar_historico()
-        canvas.elementos_alterados.emit()
+        self._emitir_elementos_canvas_alterados(canvas)
         canvas.update()
         return n
 
@@ -5659,6 +5659,38 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.layout_linha_usuario.addWidget(btn)
         self.layout_linha_usuario.addStretch(1)
 
+
+    def _conectar_sinal_elementos_canvas(self, canvas) -> None:
+        """Conecta o sinal de alteração do canvas sem quebrar se o canvas antigo não tiver esse sinal."""
+        sinal = getattr(canvas, "elementos_alterados", None)
+        if sinal is None or not hasattr(sinal, "connect"):
+            try:
+                self._log_debug_propriedades("Canvas sem sinal elementos_alterados; menu de moldes será atualizado manualmente.")
+            except Exception:
+                pass
+            return
+        try:
+            sinal.connect(self._atualizar_menu_moldes)
+        except Exception as exc:
+            try:
+                self._log_debug_propriedades(f"Falha ao conectar elementos_alterados: {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+
+    def _emitir_elementos_canvas_alterados(self, canvas) -> None:
+        """Emite a alteração do canvas ou atualiza o menu diretamente como fallback."""
+        sinal = getattr(canvas, "elementos_alterados", None)
+        if sinal is not None and hasattr(sinal, "emit"):
+            try:
+                sinal.emit()
+                return
+            except Exception:
+                pass
+        try:
+            self._atualizar_menu_moldes()
+        except Exception:
+            pass
+
     def _adicionar_aba_documento(self, nome: str | None = None, caminho_origem: str | None = None):
         if nome is None:
             self._contador_sem_nome += 1
@@ -5669,7 +5701,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
         area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
         area_doc.canvas.snap_changed.connect(self._on_snap_changed)
-        area_doc.canvas.elementos_alterados.connect(self._atualizar_menu_moldes)
+        self._conectar_sinal_elementos_canvas(area_doc.canvas)
         area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
         area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
         area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)
@@ -5899,7 +5931,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.zoom_changed.connect(self._on_zoom_canvas_alterado)
             area_doc.canvas.ferramenta_padrao_solicitada.connect(self._ativar_ferramenta_global)
             area_doc.canvas.snap_changed.connect(self._on_snap_changed)
-            area_doc.canvas.elementos_alterados.connect(self._atualizar_menu_moldes)
+            self._conectar_sinal_elementos_canvas(area_doc.canvas)
             area_doc.canvas.painel_coordenadas_changed.connect(self._on_painel_coordenadas_changed)
             area_doc.canvas.painel_posicao_changed.connect(self._on_painel_posicao_canvas)
             area_doc.canvas.set_ferramenta_ativa(self._ferramenta_ativa_id)

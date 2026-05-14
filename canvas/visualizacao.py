@@ -5,10 +5,8 @@ from copy import deepcopy
 from importlib import import_module
 from math import acos, atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
-from uuid import uuid4
-
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
     QPolygon, QWheelEvent
 from PySide6.QtWidgets import QMenu, QWidget
 
@@ -61,8 +59,12 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado: SnapResult | None = None
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
-        self._grid_visivel = False
-        self._cores_canvas = {
+        self._guia_fechamento: tuple[QPointF, QPointF] | None = None
+        self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
+        self._linha_cor = "#ffffff"
+        self._cores_tecidos: dict[str, str] = {}
+        self._mostrar_cor_tecidos = False
+        self._cores_canvas: dict[str, str] = {
             "desenho": "#ffffff",
             "fundo": "#000000",
             "selecao": "#2da8ff",
@@ -72,11 +74,8 @@ class VisualizacaoCanvas(QWidget):
         }
         self._cores_moldes: dict[str, dict] = {}
         self._estilo_linha_costura = "dash"
-        self._guia_fechamento: tuple[QPointF, QPointF] | None = None
-        self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
-        self._linha_cor = "#ffffff"
-        self._cores_tecidos: dict[str, str] = {}
-        self._mostrar_cor_tecidos = False
+        self._grid_visivel = True
+        self._visualizacao_instantanea_elementos: list[dict] = []
         self._linha_estilo = "solid"
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
@@ -115,12 +114,11 @@ class VisualizacaoCanvas(QWidget):
         self.lbl_status = None  # Será definido pela janela principal
         self._imagem_cache: dict[str, QPixmap] = {}
         self._mostrar_curva_original_emf = False
-        self._visualizacao_instantanea_elementos: list[dict] | None = None
 
-        self.setMinimumSize(0, 0)
+        self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.painel_coordenadas = PainelCoordenadas(self)
         self.painel_coordenadas.desfazer_ponto.connect(self._desfazer_ponto)
@@ -239,24 +237,80 @@ class VisualizacaoCanvas(QWidget):
             self._linha_amplitude = max(0.2, float(amplitude))
         self.update()
 
+    def _cor_hex_segura(self, valor: object, padrao: str) -> str:
+        """Normaliza uma cor recebida da janela principal sem quebrar o canvas."""
+        try:
+            cor = QColor(str(valor or ""))
+            if cor.isValid():
+                return cor.name()
+        except Exception:
+            pass
+        return str(padrao)
+
     def set_config_cores_canvas(self, cores: dict | None):
+        """Recebe as cores globais do canvas vindas da janela principal.
+
+        A janela principal chama este método ao criar/abrir documentos. Ele
+        precisa existir mesmo quando a configuração vier incompleta, para evitar
+        falha de abertura do projeto.
+        """
+        base = {
+            "desenho": "#ffffff",
+            "fundo": "#000000",
+            "selecao": "#2da8ff",
+            "grade": "#808080",
+            "snap_desenho": "#6f6f6f",
+            "snap_referencia": "#d71313",
+        }
+        atual = dict(getattr(self, "_cores_canvas", base) or base)
+        atual.update({k: atual.get(k, v) for k, v in base.items()})
         if isinstance(cores, dict):
-            for chave in ("desenho", "fundo", "selecao", "grade", "snap_desenho", "snap_referencia"):
+            for chave, padrao in base.items():
                 if chave in cores:
-                    cor = QColor(str(cores.get(chave)))
-                    if cor.isValid():
-                        self._cores_canvas[chave] = cor.name()
+                    atual[chave] = self._cor_hex_segura(cores.get(chave), padrao)
+        self._cores_canvas = atual
         self.update()
 
     def set_config_cores_moldes(self, cores: dict | None, estilo_linha_costura: str | None = None):
-        self._cores_moldes = dict(cores or {}) if isinstance(cores, dict) else {}
-        if estilo_linha_costura:
-            self._estilo_linha_costura = str(estilo_linha_costura)
+        """Recebe as cores de moldes/itens técnicos vindas da janela principal."""
+        normalizadas: dict[str, dict] = {}
+        if isinstance(cores, dict):
+            for chave, valor in cores.items():
+                if isinstance(valor, dict):
+                    normalizadas[str(chave)] = {
+                        "ativo": bool(valor.get("ativo", False)),
+                        "cor": self._cor_hex_segura(valor.get("cor"), "#efefef"),
+                    }
+        self._cores_moldes = normalizadas
+        if estilo_linha_costura is not None:
+            self._estilo_linha_costura = str(estilo_linha_costura or "dash")
         self.update()
 
     def set_grid_visivel(self, visivel: bool):
+        """Liga/desliga a grade sem depender de implementação externa."""
         self._grid_visivel = bool(visivel)
         self.update()
+
+    def set_visualizacao_instantanea(self, elementos: list[dict] | None):
+        """Mostra uma cópia visual temporária dos elementos atuais.
+
+        Usado pelo botão de visualização instantânea da barra inferior. Não
+        entra no histórico nem no arquivo salvo.
+        """
+        if not elementos:
+            self._visualizacao_instantanea_elementos = []
+        else:
+            try:
+                self._visualizacao_instantanea_elementos = [deepcopy(e) for e in elementos if isinstance(e, dict)]
+            except Exception:
+                self._visualizacao_instantanea_elementos = []
+        self.update()
+
+    def _config_cor_molde(self, chave: str, padrao: str) -> str:
+        cfg = getattr(self, "_cores_moldes", {}).get(chave, {})
+        if isinstance(cfg, dict) and bool(cfg.get("ativo", False)):
+            return self._cor_hex_segura(cfg.get("cor"), padrao)
+        return str(padrao)
 
     def set_modo_curva(self, modo: str):
         modo_txt = str(modo).lower().strip()
@@ -362,6 +416,14 @@ class VisualizacaoCanvas(QWidget):
         origem = self.cena.elementos if elementos is None else elementos
         return [self._elemento_serializavel(el) for el in origem if isinstance(el, dict)]
 
+
+    def _emitir_elementos_alterados(self) -> None:
+        """Avisa a janela principal que a lista/estado dos moldes mudou."""
+        try:
+            self.elementos_alterados.emit()
+        except Exception:
+            pass
+
     def _limpar_cache_runtime_elementos(self):
         """Remove caches Qt gravados acidentalmente na cena."""
         for elemento in self.cena.elementos:
@@ -398,8 +460,8 @@ class VisualizacaoCanvas(QWidget):
             return
         self._indice_historico -= 1
         self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
+        self._emitir_elementos_alterados()
         self.update()
-        self.elementos_alterados.emit()
 
     def refazer_acao(self):
         self._garantir_estado_atual_no_historico()
@@ -407,8 +469,8 @@ class VisualizacaoCanvas(QWidget):
             return
         self._indice_historico += 1
         self.cena.elementos = self._elementos_serializaveis(self._historico_elementos[self._indice_historico])
+        self._emitir_elementos_alterados()
         self.update()
-        self.elementos_alterados.emit()
 
     def copiar(self):
         if self._selecionados:
@@ -505,6 +567,99 @@ class VisualizacaoCanvas(QWidget):
                         item["x"] = float(item.get("x", 0.0)) + dx
                         item["y"] = float(item.get("y", 0.0)) + dy
 
+        # A dobra faz parte do molde: se o molde dobrado for movido,
+        # a sombra/pontilhado, eixo salvo e dados de restauração precisam
+        # acompanhar o mesmo deslocamento. Sem isso, a linha pontilhada fica
+        # parada no canvas como se fosse um objeto solto.
+        self._transladar_dados_dobra_elemento(elemento, dx, dy)
+
+    def _transladar_ponto_serializado(self, valor, dx: float, dy: float):
+        if isinstance(valor, (tuple, list)) and len(valor) >= 2:
+            try:
+                novo = [float(valor[0]) + dx, float(valor[1]) + dy]
+                if len(valor) > 2:
+                    novo.extend(valor[2:])
+                return tuple(novo) if isinstance(valor, tuple) else novo
+            except Exception:
+                return valor
+        return valor
+
+    def _transladar_lista_pontos_serializada(self, valor, dx: float, dy: float):
+        if not isinstance(valor, list):
+            return valor
+        saida = []
+        for item in valor:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                saida.append(self._transladar_ponto_serializado(item, dx, dy))
+            else:
+                saida.append(item)
+        return saida
+
+    def _transladar_eixo_serializado(self, eixo, dx: float, dy: float):
+        if not isinstance(eixo, dict):
+            return eixo
+        novo = dict(eixo)
+        tipo = str(novo.get("tipo") or "").lower()
+        try:
+            if tipo == "h" and "valor" in novo:
+                novo["valor"] = float(novo.get("valor", 0.0)) + dy
+            elif tipo == "v" and "valor" in novo:
+                novo["valor"] = float(novo.get("valor", 0.0)) + dx
+            elif tipo == "line":
+                if "p1" in novo:
+                    novo["p1"] = self._transladar_ponto_serializado(novo.get("p1"), dx, dy)
+                if "p2" in novo:
+                    novo["p2"] = self._transladar_ponto_serializado(novo.get("p2"), dx, dy)
+        except Exception:
+            return eixo
+        return novo
+
+    def _transladar_dados_dobra_elemento(self, elemento: dict, dx: float, dy: float) -> None:
+        if not isinstance(elemento, dict):
+            return
+
+        for chave_eixo in ("dobra_eixo",):
+            if isinstance(elemento.get(chave_eixo), dict):
+                elemento[chave_eixo] = self._transladar_eixo_serializado(elemento[chave_eixo], dx, dy)
+
+        estado = elemento.get("estado_dobra")
+        if isinstance(estado, dict):
+            for chave in (
+                "contorno_original",
+                "contorno_dobrado",
+                "contorno_aberto",
+                "contorno_lado_original",
+                "contorno_lado_dobrado",
+                "contorno_lado_oculto",
+                "contorno_pontilhado",
+                "metade_movida",
+                "pontos",
+            ):
+                if isinstance(estado.get(chave), list):
+                    estado[chave] = self._transladar_lista_pontos_serializada(estado[chave], dx, dy)
+            if isinstance(estado.get("eixo"), dict):
+                estado["eixo"] = self._transladar_eixo_serializado(estado["eixo"], dx, dy)
+
+        registros = elemento.get("contornos_dobra_original")
+        if isinstance(registros, list):
+            for registro in registros:
+                if not isinstance(registro, dict):
+                    continue
+                for chave in (
+                    "pontos",
+                    "metade_movida",
+                    "contorno_lado_original",
+                    "contorno_lado_dobrado",
+                    "contorno_lado_oculto",
+                    "contorno_pontilhado",
+                    "contorno_dobrado",
+                    "contorno_aberto",
+                ):
+                    if isinstance(registro.get(chave), list):
+                        registro[chave] = self._transladar_lista_pontos_serializada(registro[chave], dx, dy)
+                if isinstance(registro.get("eixo"), dict):
+                    registro["eixo"] = self._transladar_eixo_serializado(registro["eixo"], dx, dy)
+
     def recortar(self):
         self.copiar()
         self.apagar_selecionados()
@@ -526,10 +681,7 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def selecionar_moldes(self):
-        self._selecionados = {
-            idx for idx, el in enumerate(self.cena.elementos)
-            if el.get("molde") and self._elemento_visivel_no_menu_moldes(el)
-        }
+        self._selecionados = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
         self.update()
 
     def inverter_selecao(self):
@@ -538,10 +690,7 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def inverter_selecao_moldes(self):
-        moldes = {
-            idx for idx, el in enumerate(self.cena.elementos)
-            if el.get("molde") and self._elemento_visivel_no_menu_moldes(el)
-        }
+        moldes = {idx for idx, el in enumerate(self.cena.elementos) if el.get("molde")}
         self._selecionados = moldes - (set(self._selecionados) & moldes)
         self.update()
 
@@ -624,11 +773,13 @@ class VisualizacaoCanvas(QWidget):
             self._historico_elementos = self._historico_elementos[:self._indice_historico + 1]
         if self._historico_elementos and self._historico_elementos[-1] == snapshot:
             self._indice_historico = len(self._historico_elementos) - 1
+            self._emitir_elementos_alterados()
             return
         self._historico_elementos.append(snapshot)
         if len(self._historico_elementos) > self.LIMITE_DESFAZER + 1:
             self._historico_elementos.pop(0)
         self._indice_historico = len(self._historico_elementos) - 1
+        self._emitir_elementos_alterados()
 
     def _garantir_estado_atual_no_historico(self) -> None:
         snapshot = self._elementos_serializaveis()
@@ -877,7 +1028,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._dist(proj_fio, pos_cena) <= (tol_cena * 1.4):
                         self._adicionar_candidato_snap(candidatos, pos_cena, proj_fio, "fio", idx, tol_cena * 1.5)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("ponto_texto_nome") or el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         self._adicionar_candidato_snap(candidatos, pos_cena, p_nome, "nome", idx, tol_cena * 1.5)
@@ -1202,8 +1353,14 @@ class VisualizacaoCanvas(QWidget):
             "desdobrar",
         }
         runtime_ja_processado = False
-        if (
+        # Ferramentas ativas precisam receber o botão direito antes do canvas abrir
+        # menu/propriedades. Isso permite cancelar/confirmar fluxos como papel real.
+        runtime_tem_prioridade = (
             ferramenta in ferramentas_com_clique_proprio
+            or (event.button() == Qt.RightButton and ferramenta and ferramenta != "selecionar")
+        )
+        if (
+            runtime_tem_prioridade
             and self._runtime_tool
             and hasattr(self._runtime_tool, "on_mouse_press")
         ):
@@ -1288,9 +1445,14 @@ class VisualizacaoCanvas(QWidget):
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(self._cores_canvas.get("fundo", "#000000")))
+        fundo = getattr(self, "_cores_canvas", {}).get("fundo", "#000000")
+        painter.fillRect(self.rect(), QColor(fundo))
         painter.setRenderHint(QPainter.Antialiasing)
-        self._desenhar_grade_canvas(painter)
+
+        if bool(getattr(self, "_grid_visivel", True)):
+            self._desenhar_grade_canvas(painter)
+
+        self._desenhar_visualizacao_instantanea(painter)
 
         # Desenha destaque de reta temporária (para modo paralela/perpendicular)
         if self._destacar_reta_temporaria:
@@ -1301,12 +1463,10 @@ class VisualizacaoCanvas(QWidget):
             painter.drawLine(p1_tela, p2_tela)
 
         for idx, elemento in enumerate(self.cena.elementos):
-            if not self._elemento_visivel_no_menu_moldes(elemento):
-                continue
             if elemento.get("tipo") == "imagem":
                 self._desenhar_imagem_referencia(painter, elemento)
                 continue
-            cor_base = elemento.get("cor", self._cores_canvas.get("desenho", "#ffffff"))
+            cor_base = elemento.get("cor", "#d0d0d0")
             if elemento.get("molde") and self._mostrar_cor_tecidos:
                 tecido = str(elemento.get("tecido") or "").strip()
                 if tecido and tecido in self._cores_tecidos:
@@ -1330,14 +1490,12 @@ class VisualizacaoCanvas(QWidget):
                                                  cor=cor, espessura=esp, estilo=str(elemento.get("estilo", "solid")),
                                                  amplitude=float(elemento.get("amplitude", 1.0)),
                                                  destacar_controles=(idx in self._selecionados))
-            self._desenhar_contornos_dobra_original(painter, elemento)
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
             for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
                 self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
 
-        self._desenhar_visualizacao_instantanea(painter)
         self._desenhar_overlays_moldes(painter)
 
         if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
@@ -1345,95 +1503,83 @@ class VisualizacaoCanvas(QWidget):
         self._desenhar_overlay_snap_ativo(painter)
 
     def _desenhar_grade_canvas(self, painter: QPainter):
-        if not self._grid_visivel or self.zoom <= 0:
+        """Desenha uma grade leve no canvas, respeitando zoom/origem."""
+        try:
+            passo_cena = 10.0
+            if self.zoom >= 12.0:
+                passo_cena = 1.0
+            elif self.zoom >= 4.0:
+                passo_cena = 5.0
+            elif self.zoom < 0.35:
+                passo_cena = 50.0
+            cor_grade = QColor(getattr(self, "_cores_canvas", {}).get("grade", "#808080"))
+            cor_grade.setAlpha(45)
+            painter.save()
+            painter.setPen(QPen(cor_grade, 1.0))
+            canto1 = self._tela_para_cena(QPointF(0.0, 0.0))
+            canto2 = self._tela_para_cena(QPointF(float(self.width()), float(self.height())))
+            min_x, max_x = sorted((canto1.x(), canto2.x()))
+            min_y, max_y = sorted((canto1.y(), canto2.y()))
+            inicio_x = int(min_x // passo_cena) * passo_cena
+            inicio_y = int(min_y // passo_cena) * passo_cena
+            x = inicio_x
+            limite = 0
+            while x <= max_x and limite < 4000:
+                a = self._cena_para_tela(QPointF(x, min_y))
+                b = self._cena_para_tela(QPointF(x, max_y))
+                painter.drawLine(QPointF(a.x(), 0.0), QPointF(b.x(), float(self.height())))
+                x += passo_cena
+                limite += 1
+            y = inicio_y
+            limite = 0
+            while y <= max_y and limite < 4000:
+                a = self._cena_para_tela(QPointF(min_x, y))
+                b = self._cena_para_tela(QPointF(max_x, y))
+                painter.drawLine(QPointF(0.0, a.y()), QPointF(float(self.width()), b.y()))
+                y += passo_cena
+                limite += 1
+            painter.restore()
+        except Exception:
             return
-        passo_cena = 1.0
-        while passo_cena * self.zoom < 18.0:
-            passo_cena *= 2.0
-        while passo_cena * self.zoom > 72.0 and passo_cena > 0.125:
-            passo_cena /= 2.0
-        if passo_cena <= 0:
-            return
-        cor = QColor(self._cores_canvas.get("grade", "#808080"))
-        cor.setAlpha(90)
-        pen = QPen(cor, 1.0)
-        painter.save()
-        painter.setPen(pen)
-        x0 = self.origem_cena.x()
-        y0 = self.origem_cena.y()
-        x1 = x0 + (self.width() / self.zoom)
-        y1 = y0 + (self.height() / self.zoom)
-        inicio_x = int(x0 // passo_cena) - 1
-        fim_x = int(x1 // passo_cena) + 2
-        inicio_y = int(y0 // passo_cena) - 1
-        fim_y = int(y1 // passo_cena) + 2
-        for ix in range(inicio_x, fim_x):
-            x = ix * passo_cena
-            p1 = self._cena_para_tela(QPointF(x, y0))
-            p2 = self._cena_para_tela(QPointF(x, y1))
-            painter.drawLine(QPointF(p1.x(), 0.0), QPointF(p2.x(), float(self.height())))
-        for iy in range(inicio_y, fim_y):
-            y = iy * passo_cena
-            p1 = self._cena_para_tela(QPointF(x0, y))
-            p2 = self._cena_para_tela(QPointF(x1, y))
-            painter.drawLine(QPointF(0.0, p1.y()), QPointF(float(self.width()), p2.y()))
-        painter.restore()
-
-    def _cor_visualizacao_instantanea(self, elemento: dict) -> QColor:
-        cor = QColor(str(elemento.get("_cor_visualizacao_instantanea") or elemento.get("cor") or "#f2d15b"))
-        if not cor.isValid():
-            cor = QColor("#f2d15b")
-        cor.setAlpha(170)
-        return cor
 
     def _desenhar_visualizacao_instantanea(self, painter: QPainter):
-        elementos = self._visualizacao_instantanea_elementos
+        elementos = getattr(self, "_visualizacao_instantanea_elementos", []) or []
         if not elementos:
             return
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setOpacity(0.34)
         for elemento in elementos:
             if not isinstance(elemento, dict):
                 continue
-            cor = self._cor_visualizacao_instantanea(elemento)
-            pen = QPen(cor, max(1.0, float(elemento.get("espessura", 1.0))))
-            pen.setStyle(Qt.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            tipo = elemento.get("tipo")
-            if tipo == "polyline":
-                pontos = []
-                for pt in elemento.get("pontos", []) or []:
-                    if isinstance(pt, (tuple, list)) and len(pt) >= 2:
-                        try:
-                            pontos.append(QPointF(float(pt[0]), float(pt[1])))
-                        except (TypeError, ValueError):
-                            continue
-                if len(pontos) >= 2:
-                    path = QPainterPath(self._cena_para_tela(pontos[0]))
-                    for pt in pontos[1:]:
-                        path.lineTo(self._cena_para_tela(pt))
-                    painter.drawPath(path)
-            elif tipo == "bezier_quadratica":
-                try:
-                    p0 = QPointF(*elemento["p0"])
-                    p1 = QPointF(*elemento["p1"])
-                    p2 = QPointF(*elemento["p2"])
-                except Exception:
-                    continue
-                pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
-                if pontos:
-                    path = QPainterPath(self._cena_para_tela(pontos[0]))
-                    for pt in pontos[1:]:
-                        path.lineTo(self._cena_para_tela(pt))
-                    painter.drawPath(path)
-            elif tipo in {"circle", "esfera"}:
-                centro = elemento.get("centro")
-                if not (isinstance(centro, (tuple, list)) and len(centro) == 2):
-                    continue
-                raio = max(0.0, float(elemento.get("raio", 0.0)))
-                centro_tela = self._cena_para_tela(QPointF(float(centro[0]), float(centro[1])))
-                painter.drawEllipse(centro_tela, raio * self.zoom, raio * self.zoom)
+            cor = str(elemento.get("_cor_visualizacao_instantanea") or elemento.get("cor") or "#ffffff")
+            esp = max(1.0, float(elemento.get("espessura", 1.0) or 1.0))
+            try:
+                if elemento.get("tipo") == "polyline":
+                    pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+                    if len(pontos) >= 2:
+                        self._desenhar_polilinha(
+                            painter,
+                            pontos,
+                            cor=cor,
+                            espessura=esp,
+                            estilo=str(elemento.get("estilo", "solid")),
+                            amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
+                            fase_inicial=float(elemento.get("fase_inicio", 0.0) or 0.0),
+                        )
+                elif elemento.get("tipo") == "bezier_quadratica":
+                    self._desenhar_bezier_quadratica(
+                        painter,
+                        QPointF(*elemento["p0"]),
+                        QPointF(*elemento["p1"]),
+                        QPointF(*elemento["p2"]),
+                        cor=cor,
+                        espessura=esp,
+                        estilo=str(elemento.get("estilo", "solid")),
+                        amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
+                        destacar_controles=False,
+                    )
+            except Exception:
+                continue
         painter.restore()
 
     def _desenhar_imagem_referencia(self, painter: QPainter, elemento: dict):
@@ -1472,58 +1618,72 @@ class VisualizacaoCanvas(QWidget):
         if not self._snap_ativo or not self._snap_resultado:
             return
         snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
-        tipo_snap = str(self._snap_resultado.tipo)
-        cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
-        if tipo_snap == "controle":
-            cor = QColor(self._cores_canvas.get("selecao", "#2da8ff"))
-        elif tipo_snap in {"borda", "ponto médio"}:
-            cor = QColor(self._cores_canvas.get("snap_desenho", "#6f6f6f"))
-        elif tipo_snap == "interseção":
-            cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
+        cor = QColor("#ffd400")
+        if self._snap_resultado.tipo == "controle":
+            cor = QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff"))
+        elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
+            cor = QColor("#7df9ff")
+        elif self._snap_resultado.tipo == "interseção":
+            cor = QColor("#ff62b0")
         pen = QPen(cor, 1.6)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(snap_tela, 6, 6)
         painter.drawLine(QPointF(snap_tela.x() - 8, snap_tela.y()), QPointF(snap_tela.x() + 8, snap_tela.y()))
         painter.drawLine(QPointF(snap_tela.x(), snap_tela.y() - 8), QPointF(snap_tela.x(), snap_tela.y() + 8))
-        texto = self._rotulo_snap(tipo_snap)
-        if texto:
-            fonte_original = painter.font()
-            fonte_snap = painter.font()
-            fonte_snap.setPointSizeF(max(7.0, fonte_snap.pointSizeF() * 0.78))
-            painter.setFont(fonte_snap)
-            metrics = QFontMetrics(fonte_snap)
-            largura = metrics.horizontalAdvance(texto) + 8
-            altura = metrics.height() + 3
-            x = snap_tela.x() + 12
-            y = snap_tela.y() - altura - 8
-            if x + largura > self.width() - 4:
-                x = snap_tela.x() - largura - 12
-            if y < 4:
-                y = snap_tela.y() + 12
-            painter.fillRect(QRectF(x, y, largura, altura), QColor(8, 18, 28, 220))
-            painter.setPen(QPen(QColor("#ffffff"), 1.0))
-            painter.drawText(QRectF(x, y, largura, altura), Qt.AlignCenter, texto)
-            painter.setFont(fonte_original)
 
-    def _rotulo_snap(self, tipo: str) -> str:
-        mapa = {
-            "ponto médio": "ponto médio",
-            "nó": "nó",
-            "borda": "borda da linha",
-            "interseção": "interseção",
-            "centro": "centro",
-            "controle": "controle",
-            "fio": "fio",
-            "coord": "coordenada",
-        }
-        return mapa.get(str(tipo), str(tipo) if tipo else "")
+    def _ferramenta_dobra_ativa(self) -> bool:
+        ferramenta = str(getattr(self, "ferramenta_ativa", "") or "").strip().lower()
+        return ferramenta in {"dobrar", "desdobrar"}
+
+    def _molde_tem_referencia_dobra_original(self, el: dict) -> bool:
+        if not isinstance(el, dict):
+            return False
+        if isinstance(el.get("contornos_dobra_original"), list) and bool(el.get("contornos_dobra_original")):
+            return True
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        if estado and estado.get("contorno_lado_oculto"):
+            return True
+        return False
+
+    def _deve_desenhar_contorno_dobra_original(self, el: dict) -> bool:
+        """Mostra o pontilhado enquanto o molde permanecer dobrado.
+
+        Esse pontilhado representa onde o lado do papel ficou depois da dobra.
+        Por isso ele deve continuar visível mesmo após sair da ferramenta
+        Dobrar/Desdobrar. Ele só desaparece quando o molde é desdobrado.
+        """
+        if not isinstance(el, dict):
+            return False
+        if not self._molde_tem_referencia_dobra_original(el):
+            return False
+        # Se o usuário desligou explicitamente a visualização, respeita.
+        if el.get("mostrar_contorno_dobra_original") is False:
+            return False
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        dobrado = bool(el.get("molde_dobrado")) or bool(estado and estado.get("ativo"))
+        # Durante a ferramenta ativa também permite visualizar a referência
+        # de uma dobra selecionada. Fora dela, só mostra se o molde está dobrado.
+        return bool(dobrado or self._ferramenta_dobra_ativa())
+
+    def _deve_desenhar_eixo_dobra_salvo(self) -> bool:
+        """Não desenha eixo salvo da dobra como overlay permanente.
+
+        A linha/eixo azul é apenas uma guia temporária da operação atual,
+        desenhada pela própria ferramenta Dobrar/Desdobrar enquanto o usuário
+        está escolhendo a dobra. Se o eixo salvo do molde for redesenhado aqui,
+        ele pode aparecer no local antigo quando o molde já foi movido e, ao
+        abrir a ferramenta novamente, dá a impressão de que a linha ficou presa
+        no canvas.
+
+        O eixo continua salvo nos dados do molde para restaurar/desdobrar, mas
+        não deve ser exibido por este overlay global.
+        """
+        return False
 
     def _desenhar_overlays_moldes(self, painter: QPainter):
         for idx, el in enumerate(self.cena.elementos):
             if not el.get("molde"):
-                continue
-            if not self._elemento_visivel_no_menu_moldes(el):
                 continue
             pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             if len(pontos) < 3:
@@ -1531,13 +1691,47 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
-            self._desenhar_margem_molde(painter, base, el)
+            # A referência pontilhada acompanha o lado dobrado do papel.
+            # Ela NÃO representa mais o molde aberto antigo; representa onde o lado ficou após dobrar.
+            # O eixo azul continua sendo apenas guia operacional de Dobrar/Desdobrar.
+            if self._deve_desenhar_contorno_dobra_original(el):
+                self._desenhar_contorno_dobra_original(painter, el)
+            if self._deve_desenhar_eixo_dobra_salvo():
+                self._desenhar_eixo_dobra_salvo(painter, el)
+
             if idx in self._selecionados:
                 self._desenhar_selecao_molde(painter, base, el)
 
-            self._desenhar_texto_molde_configurado(painter, base, el, "nome", el.get("mostrar_nome", True))
-            self._desenhar_texto_molde_configurado(painter, base, el, "descricao", el.get("visual_descricao", False))
-            self._desenhar_texto_molde_configurado(painter, base, el, "observacoes", el.get("visual_observacoes", False))
+            self._desenhar_margens_molde_canvas(painter, el, base)
+
+            self._desenhar_texto_config_molde_canvas(
+                painter,
+                el,
+                base,
+                chave="nome",
+                texto=str(el.get("nome_molde") or ""),
+                visivel=bool(el.get("mostrar_nome", True)),
+                padrao_ref="Centro centro",
+            )
+
+            self._desenhar_texto_config_molde_canvas(
+                painter,
+                el,
+                base,
+                chave="descricao",
+                texto=str(el.get("descricao") or ""),
+                visivel=bool(el.get("visual_descricao", el.get("mostrar_descricao", False))),
+                padrao_ref="Centro abaixo",
+            )
+            self._desenhar_texto_config_molde_canvas(
+                painter,
+                el,
+                base,
+                chave="observacoes",
+                texto=str(el.get("observacoes") or el.get("observacao") or ""),
+                visivel=bool(el.get("visual_observacoes", el.get("mostrar_observacoes", False))),
+                padrao_ref="Centro topo",
+            )
 
             if el.get("mostrar_fio", True):
                 fio_origem = el.get("fio_origem")
@@ -1588,12 +1782,12 @@ class VisualizacaoCanvas(QWidget):
                             tamanho=self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0),
                         )
                 else:
-                    ang = atan2(p2.y() - p1.y(), p2.x() - p1.x()) * 180.0 / 3.141592653589793
+                    ang = float(el.get("fio_angulo", 90.0))
                     fonte_fio = painter.font()
                     tamanho_fio_px = self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0)
                     fonte_fio.setPixelSize(int(max(6, round(tamanho_fio_px))))
                     painter.setFont(fonte_fio)
-                    painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
+                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
                     texto_ang = f"{int(round(ang))}°"
                     metrics_fio = QFontMetrics(painter.font())
                     largura_ang = metrics_fio.horizontalAdvance(texto_ang)
@@ -1604,53 +1798,210 @@ class VisualizacaoCanvas(QWidget):
                     y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 2.0))
                     painter.drawText(int(x_ang), int(y_ang), texto_ang)
 
-            if el.get("mostrar_numeros", False):
+            mostrar_numeros = bool(el.get("mostrar_numeros", el.get("mostrar_controles", True)))
+            if mostrar_numeros:
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 if cantos:
                     cx = sum(p.x() for p in cantos) / len(cantos)
                     cy = sum(p.y() for p in cantos) / len(cantos)
                 else:
                     cx, cy = 0.0, 0.0
-                painter.setPen(QPen(QColor(self._cor_molde_config("numeros", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
+                painter.setPen(QPen(QColor("#ffffff"), 1.0))
                 fonte_num = painter.font()
-                fonte_num.setPixelSize(
-                    int(max(4, min(96, round(self._altura_cm_para_px(
-                        self._valor_float_molde(el, ("numero_altura_cm",), None),
-                        self.TAMANHO_NUMERO_PADRAO_CM,
-                    )))))
+                tamanho_num_px = self._tamanho_texto_cm_para_px(
+                    self._altura_texto_config_cm(el, "numero", self.TAMANHO_NUMERO_PADRAO_CM),
+                    minimo_px=7.0,
+                    maximo_px=220.0,
                 )
+                fonte_num.setPixelSize(int(round(tamanho_num_px)))
+                fonte_num.setBold(True)
                 painter.setFont(fonte_num)
-                inicio = int(el.get("numero_ponto_inicio", 0) or 0)
-                total = max(1, len(cantos))
                 metrics_num = QFontMetrics(painter.font())
+                afastamento = max(10.0, tamanho_num_px * 0.95)
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     dx = pt.x() - cx
                     dy = pt.y() - cy
                     mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
-                    margem = max(12.0, metrics_num.height() + 8.0)
-                    off_x = (dx / mod) * margem
-                    off_y = (dy / mod) * margem
-                    numero = ((i - 1 - inicio) % total) + 1
-                    texto = str(numero)
-                    largura = max(12, metrics_num.horizontalAdvance(texto) + 4)
-                    altura = max(12, metrics_num.height() + 2)
-                    rect = QRectF(
-                        pt_tela.x() + off_x - (largura / 2.0),
-                        pt_tela.y() + off_y - (altura / 2.0),
-                        largura,
-                        altura,
-                    )
-                    painter.drawText(rect, Qt.AlignCenter, texto)
-                if self._ferramenta_manipulacao_ativa():
+                    off_x = (dx / mod) * afastamento
+                    off_y = (dy / mod) * afastamento
+                    texto_num = str(i)
+                    largura_num = metrics_num.horizontalAdvance(texto_num)
+                    altura_num = metrics_num.height()
+                    x_txt = pt_tela.x() + off_x
+                    y_txt = pt_tela.y() + off_y
+                    if off_x < 0:
+                        x_txt -= largura_num
+                    if off_y < 0:
+                        y_txt -= max(2.0, altura_num * 0.25)
+                    else:
+                        y_txt += altura_num
+                    painter.drawText(int(round(x_txt)), int(round(y_txt)), texto_num)
+                if el.get("mostrar_controles", True) and self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-                    cor_auxiliar = self._cor_molde_config("ponto_controle", "#ff3b30")
-                    painter.setPen(QPen(QColor(cor_auxiliar), 1.0))
-                    painter.setBrush(QColor(cor_auxiliar))
+                    painter.setPen(QPen(QColor("#ff3b30"), 1.0))
+                    painter.setBrush(QColor("#ff3b30"))
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _pontos_serializados_para_qpoint(self, origem) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                try:
+                    pontos.append(QPointF(float(item[0]), float(item[1])))
+                except Exception:
+                    pass
+        return pontos
+
+    def _centro_bbox_pontos(self, pontos: list[QPointF]) -> QPointF | None:
+        if not pontos:
+            return None
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        return QPointF((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+
+    def _offset_dobra_salva_para_molde_atual(self, el: dict) -> QPointF:
+        """Retorna quanto os dados salvos da dobra precisam acompanhar o molde.
+
+        Alguns fluxos antigos de movimentação deslocavam apenas os pontos do
+        molde e deixavam o contorno pontilhado salvo na posição antiga. Como a
+        sombra pontilhada faz parte do molde dobrado, ela é desenhada com esse
+        deslocamento compensado.
+        """
+        if not isinstance(el, dict):
+            return QPointF(0.0, 0.0)
+        atuais = self._pontos_serializados_para_qpoint(el.get("pontos") or [])
+        if len(atuais) >= 2 and abs(atuais[0].x() - atuais[-1].x()) <= 1e-7 and abs(atuais[0].y() - atuais[-1].y()) <= 1e-7:
+            atuais = atuais[:-1]
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        referencia = None
+        if estado:
+            referencia = estado.get("contorno_dobrado") or estado.get("pontos_dobrados")
+        if not referencia:
+            registros = el.get("contornos_dobra_original")
+            if isinstance(registros, list) and registros:
+                ultimo = registros[-1]
+                if isinstance(ultimo, dict):
+                    referencia = ultimo.get("contorno_dobrado")
+        ref_pts = self._pontos_serializados_para_qpoint(referencia or [])
+        if len(ref_pts) >= 2 and abs(ref_pts[0].x() - ref_pts[-1].x()) <= 1e-7 and abs(ref_pts[0].y() - ref_pts[-1].y()) <= 1e-7:
+            ref_pts = ref_pts[:-1]
+        c_atual = self._centro_bbox_pontos(atuais)
+        c_ref = self._centro_bbox_pontos(ref_pts)
+        if c_atual is None or c_ref is None:
+            return QPointF(0.0, 0.0)
+        return QPointF(c_atual.x() - c_ref.x(), c_atual.y() - c_ref.y())
+
+    def _aplicar_offset_pontos(self, pontos: list[QPointF], offset: QPointF) -> list[QPointF]:
+        if abs(offset.x()) <= 1e-9 and abs(offset.y()) <= 1e-9:
+            return pontos
+        return [QPointF(p.x() + offset.x(), p.y() + offset.y()) for p in pontos]
+
+    def _registro_dobra_visual_atual(self, el: dict):
+        """Retorna somente a referência visual da dobra atual.
+
+        Versões anteriores desenhavam os dois últimos registros de
+        contornos_dobra_original. Isso deixava pontilhados antigos presos no
+        canvas quando o molde era movido ou dobrado novamente. O pontilhado é a
+        sombra do lado dobrado atual, portanto só uma referência deve ser
+        desenhada: primeiro o estado_dobra ativo, depois o último registro.
+        """
+        if not isinstance(el, dict):
+            return None
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        if estado and (estado.get("contorno_lado_dobrado") or estado.get("contorno_lado_oculto") or estado.get("contorno_pontilhado")):
+            return estado
+        registros = el.get("contornos_dobra_original")
+        if isinstance(registros, list):
+            for registro in reversed(registros):
+                if isinstance(registro, dict) and (registro.get("contorno_lado_dobrado") or registro.get("contorno_pontilhado") or registro.get("contorno_lado_oculto")):
+                    return registro
+        return None
+
+    def _desenhar_contorno_dobra_original(self, painter: QPainter, el: dict):
+        """Desenha apenas a sombra pontilhada da dobra atual."""
+        if not bool(el.get("mostrar_contorno_dobra_original", True)):
+            return
+        registro = self._registro_dobra_visual_atual(el)
+        if not isinstance(registro, dict):
+            return
+        origem = (
+            registro.get("contorno_lado_dobrado")
+            or registro.get("contorno_pontilhado")
+            or registro.get("contorno_lado_oculto")
+        )
+        if not isinstance(origem, list):
+            return
+        pontos = self._pontos_serializados_para_qpoint(origem)
+        if len(pontos) < 2:
+            return
+        pontos = self._aplicar_offset_pontos(pontos, self._offset_dobra_salva_para_molde_atual(el))
+        if abs(pontos[0].x() - pontos[-1].x()) > 1e-7 or abs(pontos[0].y() - pontos[-1].y()) > 1e-7:
+            pontos.append(QPointF(pontos[0]))
+        cor_ref = str(el.get("cor") or "#8e949b")
+        if not QColor(cor_ref).isValid():
+            cor_ref = "#8e949b"
+        painter.save()
+        pen = QPen(QColor(cor_ref), 1.0, Qt.DashLine)
+        pen.setDashPattern([4.0, 3.0])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        self._desenhar_polilinha(painter, pontos, cor=cor_ref, espessura=1.0, estilo="dash")
+        painter.restore()
+
+    def _desenhar_eixo_dobra_salvo(self, painter: QPainter, el: dict):
+        """Mostra o eixo salvo da última dobra, mesmo depois de aplicada."""
+        eixo_info = el.get("dobra_eixo")
+        if not isinstance(eixo_info, dict):
+            estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+            eixo_info = estado.get("eixo") if estado else None
+        if not isinstance(eixo_info, dict):
+            return
+        try:
+            tipo = str(eixo_info.get("tipo") or "").lower()
+            offset = self._offset_dobra_salva_para_molde_atual(el)
+            base = []
+            for item in el.get("pontos", []) or []:
+                if isinstance(item, (tuple, list)) and len(item) >= 2:
+                    base.append(QPointF(float(item[0]), float(item[1])))
+            if not base:
+                return
+            min_x = min(p.x() for p in base)
+            max_x = max(p.x() for p in base)
+            min_y = min(p.y() for p in base)
+            max_y = max(p.y() for p in base)
+            margem = max(max_x - min_x, max_y - min_y, 1.0) * 0.04
+            if tipo == "h":
+                y = float(eixo_info.get("valor")) + offset.y()
+                p1 = QPointF(min_x - margem, y)
+                p2 = QPointF(max_x + margem, y)
+            elif tipo == "v":
+                x = float(eixo_info.get("valor")) + offset.x()
+                p1 = QPointF(x, min_y - margem)
+                p2 = QPointF(x, max_y + margem)
+            elif tipo == "line":
+                raw1 = eixo_info.get("p1")
+                raw2 = eixo_info.get("p2")
+                if not (isinstance(raw1, (tuple, list)) and isinstance(raw2, (tuple, list)) and len(raw1) >= 2 and len(raw2) >= 2):
+                    return
+                p1 = QPointF(float(raw1[0]) + offset.x(), float(raw1[1]) + offset.y())
+                p2 = QPointF(float(raw2[0]) + offset.x(), float(raw2[1]) + offset.y())
+            else:
+                return
+        except Exception:
+            return
+        painter.save()
+        pen = QPen(QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
+        pen.setDashPattern([6.0, 4.0])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(self._cena_para_tela(p1), self._cena_para_tela(p2))
+        painter.restore()
 
     def _desenhar_selecao_molde(self, painter: QPainter, base: list[QPointF], el: dict):
         if not base:
@@ -1669,7 +2020,7 @@ class VisualizacaoCanvas(QWidget):
         largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
         altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
 
-        ret_pen = QPen(QColor(self._cores_canvas.get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
+        ret_pen = QPen(QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
         ret_pen.setDashPattern([3.5, 2.5])
         painter.setPen(ret_pen)
         painter.setBrush(Qt.NoBrush)
@@ -1681,8 +2032,8 @@ class VisualizacaoCanvas(QWidget):
         else:
             pontos_controle = [self._cena_para_tela(pt) for pt in base[:4]]
 
-        painter.setPen(QPen(QColor(self._cor_molde_config("ponto_controle", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
-        painter.setBrush(QColor(self._cores_canvas.get("fundo", "#000000")))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor("#000000"))
         for pt in pontos_controle:
             d = 4
             diamond = QPolygon([
@@ -1713,42 +2064,18 @@ class VisualizacaoCanvas(QWidget):
         y_ini = min(canto_sup_esq.y(), canto_inf_dir.y())
         largura = abs(canto_inf_dir.x() - canto_sup_esq.x())
         altura = abs(canto_inf_dir.y() - canto_sup_esq.y())
-        pen = QPen(QColor(self._cores_canvas.get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
+        pen = QPen(QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff")), 1.0, Qt.DashLine)
         pen.setDashPattern([3.5, 2.5])
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
 
-    def _bbox_tela_pontos(self, pontos: list[QPointF]) -> tuple[float, float, float, float]:
-        pts = [self._cena_para_tela(p) for p in pontos]
-        if not pts:
-            return (0.0, 0.0, float(self.width()), float(self.height()))
-        xs = [p.x() for p in pts]
-        ys = [p.y() for p in pts]
-        return (min(xs), min(ys), max(xs), max(ys))
-
-    def _altura_cm_para_px(self, altura_cm: float | None, padrao_cm: float = 0.7) -> float:
-        if altura_cm is None:
-            altura_cm = padrao_cm
-        try:
-            valor_cm = max(0.1, float(altura_cm))
-        except (TypeError, ValueError):
-            valor_cm = float(padrao_cm)
-        return max(4.0, min(160.0, valor_cm * max(float(self.zoom), 1.0) * 0.52))
-
-    def _texto_molde_por_chave(self, el: dict, chave: str) -> str:
-        if chave == "nome":
-            return str(el.get("nome_molde") or "")
-        if chave == "descricao":
-            return str(el.get("descricao") or "")
-        return str(el.get("observacoes") or el.get("observacao") or "")
-
-    def _ponto_referencia_texto_molde(self, base: list[QPointF], referencia: str) -> QPointF:
+    def _ponto_referencia_molde_canvas(self, base: list[QPointF], referencia: str) -> QPointF:
         xs = [p.x() for p in base]
         ys = [p.y() for p in base]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
-        ref = str(referencia or "Centro centro").lower()
+        ref = str(referencia or "Centro centro").strip().lower()
         if "esquerda" in ref:
             x = min_x
         elif "direita" in ref:
@@ -1757,100 +2084,207 @@ class VisualizacaoCanvas(QWidget):
             x = (min_x + max_x) / 2.0
         if "topo" in ref:
             y = min_y
-        elif "abaixo" in ref:
+        elif "abaixo" in ref or "baixo" in ref:
             y = max_y
         else:
             y = (min_y + max_y) / 2.0
         return QPointF(x, y)
 
-    def _ponto_texto_molde(self, el: dict, base: list[QPointF], chave: str) -> QPointF:
-        referencia = str(el.get(f"referencia_texto_{chave}") or "Centro centro").strip()
-        valor = el.get(f"ponto_texto_{chave}")
-        if chave == "nome" and valor is None:
-            valor = el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
-        if referencia.lower() == "livre" and isinstance(valor, (list, tuple)) and len(valor) >= 2:
+    def _valor_float_molde_decimal(self, el: dict, chaves: tuple[str, ...], padrao=None):
+        """Lê número salvo no molde usando ponto decimal como padrão.
+
+        O programa deve trabalhar com ponto decimal: 0.5 = meio centímetro,
+        0.4 = quatro milímetros, 1.2 = doze milímetros. A vírgula é aceita
+        apenas para não quebrar arquivos antigos, mas os valores novos devem
+        ser gravados e exibidos com ponto.
+        """
+        for chave in chaves:
+            valor = el.get(chave)
+            if valor is None:
+                continue
             try:
-                return QPointF(float(valor[0]), float(valor[1]))
-            except (TypeError, ValueError):
-                pass
-        return self._ponto_referencia_texto_molde(base, referencia)
+                return float(str(valor).replace(",", ".").replace("cm", "").strip())
+            except Exception:
+                continue
+        return padrao
 
-    def _retangulo_texto_por_referencia(self, largura: float, altura: float, referencia: str) -> QRectF:
-        ref = str(referencia or "Centro centro").strip().lower()
-        if ref == "livre":
-            ref = "centro centro"
-        if "esquerda" in ref:
-            x = 0.0
-        elif "direita" in ref:
-            x = -largura
-        else:
-            x = -largura / 2.0
-        if "topo" in ref:
-            y = 0.0
-        elif "abaixo" in ref:
-            y = -altura
-        else:
-            y = -altura / 2.0
-        return QRectF(x, y, largura, altura)
+    def _tamanho_texto_cm_para_px(self, altura_cm: float, minimo_px: float = 6.0, maximo_px: float = 260.0) -> float:
+        # 1 unidade da cena = 1 cm. Assim, 5.0 cm no campo de propriedades
+        # vira 5 cm reais no canvas, multiplicado pelo zoom atual.
+        try:
+            valor = float(altura_cm)
+        except Exception:
+            valor = 0.0
+        return max(minimo_px, min(maximo_px, valor * max(float(getattr(self, "zoom", 1.0)), 0.01)))
 
-    def _desenhar_texto_molde_configurado(self, painter: QPainter, base: list[QPointF], el: dict, chave: str, visivel: bool):
-        if not visivel:
-            return
-        texto = self._texto_molde_por_chave(el, chave).strip()
-        if not texto:
-            return
-        referencia = str(el.get(f"referencia_texto_{chave}") or "Centro centro")
-        alinhamento = str(el.get(f"alinhamento_texto_{chave}") or "Centro")
-        angulo = self._valor_float_molde(el, (f"texto_{chave}_angulo", f"{chave}_angulo"), 0.0)
-        altura_padrao = self.TAMANHO_NOME_PADRAO_CM if chave == "nome" else 0.7
-        tamanho_px = self._altura_cm_para_px(
-            self._valor_float_molde(el, (f"texto_{chave}_altura_cm", f"{chave}_altura_cm"), None),
-            altura_padrao,
+    def _altura_texto_config_cm(self, el: dict, chave: str, padrao_cm: float) -> float:
+        valor = self._valor_float_molde_decimal(
+            el,
+            (
+                f"texto_{chave}_altura_cm",
+                f"altura_texto_{chave}_cm",
+                f"altura_{chave}_cm",
+                f"tam_{chave}_cm",
+                f"tamanho_{chave}_cm",
+            ),
+            None,
         )
-        pos = self._cena_para_tela(self._ponto_texto_molde(el, base, chave))
-        bbox_tela = self._bbox_tela_pontos(base)
-        largura_molde_px = max(40.0, bbox_tela[2] - bbox_tela[0] - 12.0)
+        if valor is None and chave == "nome":
+            valor = self._valor_float_molde_decimal(el, ("tam_nome", "tamanho_nome", "fonte_nome"), None)
+        if valor is None and chave in {"numero", "numeros", "números"}:
+            valor = self._valor_float_molde_decimal(el, ("numero_altura_cm", "altura_numero_cm", "tam_numero", "tamanho_numero"), None)
+        if valor is None:
+            valor = padrao_cm
+        return max(0.05, float(valor))
 
-        painter.save()
-        fonte = painter.font()
-        fonte.setPixelSize(int(max(4, min(160, round(tamanho_px)))))
-        painter.setFont(fonte)
-        metric = QFontMetrics(painter.font())
-        largura_texto = metric.horizontalAdvance(texto) + 22
-        largura = max(40.0, min(max(120.0, float(largura_texto)), max(largura_molde_px, float(largura_texto))))
-        altura = max(float(metric.height() + 6), float(tamanho_px * 1.8))
-        flags = Qt.AlignVCenter
-        if alinhamento.lower().startswith("esq"):
-            flags |= Qt.AlignLeft
-        elif alinhamento.lower().startswith("dir"):
-            flags |= Qt.AlignRight
+    def _tamanho_texto_config_canvas(self, el: dict, chave: str, padrao_px: float = 10.0) -> float:
+        padrao_cm = self.TAMANHO_NOME_PADRAO_CM if chave == "nome" else 0.7
+        valor_cm = self._valor_float_molde_decimal(
+            el,
+            (f"texto_{chave}_altura_cm", f"altura_texto_{chave}_cm", f"altura_{chave}_cm"),
+            None,
+        )
+        if valor_cm is not None:
+            return self._tamanho_texto_cm_para_px(valor_cm)
+        valor_px = self._valor_float_molde_decimal(
+            el,
+            (f"texto_{chave}_tamanho_px", f"texto_{chave}_altura_px", f"tam_{chave}_px"),
+            None,
+        )
+        if valor_px is not None:
+            return max(7.0, min(180.0, float(valor_px)))
+        return self._tamanho_texto_cm_para_px(padrao_cm) if padrao_px == 10.0 else float(padrao_px)
+
+    def _desenhar_texto_config_molde_canvas(
+            self,
+            painter: QPainter,
+            el: dict,
+            base: list[QPointF],
+            chave: str,
+            texto: str,
+            visivel: bool,
+            padrao_ref: str = "Centro centro",
+    ):
+        texto = str(texto or "").strip()
+        if not visivel or not texto or not base:
+            return
+        referencia = str(el.get(f"referencia_texto_{chave}") or padrao_ref).strip()
+        ponto_raw = el.get(f"ponto_texto_{chave}")
+        if chave == "nome" and ponto_raw is None:
+            ponto_raw = el.get("ponto_texto")
+        if referencia.lower() == "livre" and isinstance(ponto_raw, (list, tuple)) and len(ponto_raw) == 2:
+            ponto = QPointF(float(ponto_raw[0]), float(ponto_raw[1]))
         else:
-            flags |= Qt.AlignCenter
-        painter.translate(pos)
-        if abs(float(angulo or 0.0)) > 0.01:
-            painter.rotate(-float(angulo))
-        chave_cor = {
-            "nome": "nome_molde",
-            "descricao": "descricao",
-            "observacoes": "observacoes",
-        }.get(chave, "nome_molde")
-        painter.setPen(QPen(QColor(self._cor_molde_config(chave_cor, self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
-        painter.drawText(self._retangulo_texto_por_referencia(largura, altura, referencia), flags, texto)
+            ponto = self._ponto_referencia_molde_canvas(base, referencia)
+        tela = self._cena_para_tela(ponto)
+        bbox_tela = self._bbox_tela_pontos(base)
+        margem_px = 6.0
+        limite_largura = max(12.0, bbox_tela[2] - bbox_tela[0] - (margem_px * 2.0))
+        limite_altura = max(10.0, bbox_tela[3] - bbox_tela[1] - (margem_px * 2.0))
+        fonte = painter.font()
+        fonte.setBold(False)
+        fonte.setPixelSize(int(round(self._tamanho_texto_config_canvas(el, chave, 10.0))))
+        painter.setFont(fonte)
+        metrics = QFontMetrics(painter.font())
+        linhas = texto.splitlines() or [texto]
+        largura = min(max(metrics.horizontalAdvance(l) for l in linhas), int(limite_largura))
+        altura = min(metrics.height() * max(1, len(linhas)), int(limite_altura))
+        tela = self._ponto_tela_dentro_bbox(tela, bbox_tela, largura, altura, margem_px)
+        alinhamento_txt = str(el.get(f"alinhamento_texto_{chave}") or "Centro").lower()
+        alinhamento = Qt.AlignVCenter
+        if "esquerda" in alinhamento_txt:
+            alinhamento |= Qt.AlignLeft
+        elif "direita" in alinhamento_txt:
+            alinhamento |= Qt.AlignRight
+        else:
+            alinhamento |= Qt.AlignCenter
+        angulo = float(el.get(f"texto_{chave}_angulo", 0.0) or 0.0)
+        rect = QRectF(-largura / 2.0, -altura / 2.0, largura, altura)
+        painter.save()
+        painter.translate(tela)
+        if abs(angulo) > 1e-6:
+            painter.rotate(-angulo)
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.drawText(rect, alinhamento, texto)
         painter.restore()
 
-    def _desenhar_margem_molde(self, painter: QPainter, base: list[QPointF], el: dict):
-        if not el.get("mostrar_margem", False) or len(base) < 3:
+    def _area_assinada_pontos_canvas(self, pontos: list[QPointF]) -> float:
+        area = 0.0
+        total = len(pontos)
+        for i, p1 in enumerate(pontos):
+            p2 = pontos[(i + 1) % total]
+            area += (p1.x() * p2.y()) - (p2.x() * p1.y())
+        return area / 2.0
+
+    def _margens_por_segmento_canvas(self, molde: dict, total_segmentos: int) -> dict[int, float]:
+        margens: dict[int, float] = {}
+        for dados in (molde.get("margens_molde"), molde.get("margens"), molde.get("margem_cm_por_elemento")):
+            if isinstance(dados, list):
+                for item in dados:
+                    if not isinstance(item, dict):
+                        continue
+                    idx = item.get("indice", item.get("segmento", item.get("elemento")))
+                    valor = item.get("margem", item.get("valor", item.get("cm")))
+                    try:
+                        if isinstance(idx, str) and idx.lower().startswith("elemento"):
+                            idx = idx.split()[-1]
+                        idx_int = int(idx) - 1 if int(idx) >= 1 else int(idx)
+                        if 0 <= idx_int < total_segmentos:
+                            margens[idx_int] = max(0.0, float(str(valor).replace(",", ".")))
+                    except Exception:
+                        continue
+            elif isinstance(dados, dict):
+                for idx, valor in dados.items():
+                    try:
+                        idx_txt = str(idx).strip()
+                        if idx_txt.lower().startswith("elemento"):
+                            idx_txt = idx_txt.split()[-1]
+                        idx_int = int(idx_txt) - 1 if int(idx_txt) >= 1 else int(idx_txt)
+                        if 0 <= idx_int < total_segmentos:
+                            margens[idx_int] = max(0.0, float(str(valor).replace(",", ".")))
+                    except Exception:
+                        continue
+        return margens
+
+    def _pontos_offset_segmento_canvas(self, base: list[QPointF], seg_idx: int, margem: float, sentido: float):
+        total = len(base)
+        if total < 2:
+            return None
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-9:
+            return None
+        nx = (-dy / comp) * sentido
+        ny = (dx / comp) * sentido
+        off_a = QPointF(a.x() + nx * margem, a.y() + ny * margem)
+        off_b = QPointF(b.x() + nx * margem, b.y() + ny * margem)
+        return a, b, off_a, off_b
+
+    def _intersecao_linhas_canvas(self, a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> QPointF | None:
+        x1, y1, x2, y2 = a1.x(), a1.y(), a2.x(), a2.y()
+        x3, y3, x4, y4 = b1.x(), b1.y(), b2.x(), b2.y()
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(den) <= 1e-9:
+            return None
+        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
+        return QPointF(px, py)
+
+    def _desenhar_margens_molde_canvas(self, painter: QPainter, molde: dict, base: list[QPointF]):
+        if not molde.get("mostrar_margem", False) or len(base) < 3:
             return
-        margens = self._margens_por_segmento_molde(el, len(base))
+        margens = self._margens_por_segmento_canvas(molde, len(base))
         if not margens:
             return
-        sentido = 1.0 if self._area_assinada_pontos(base) < 0.0 else -1.0
-        cor = QColor(str(el.get("cor") or self._cores_canvas.get("desenho", "#ffffff")))
+        sentido = 1.0 if self._area_assinada_pontos_canvas(base) < 0.0 else -1.0
+        cor = QColor(str(molde.get("cor") or "#ffffff"))
         if not cor.isValid():
-            cor = QColor(self._cores_canvas.get("desenho", "#ffffff"))
-        cor = QColor(self._cor_molde_config("margem", cor.name()))
+            cor = QColor("#ffffff")
         painter.save()
-        pen = QPen(cor, 1.0)
+        pen = QPen(cor, max(1.0, float(molde.get("espessura", 1.0))))
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -1858,17 +2292,17 @@ class VisualizacaoCanvas(QWidget):
         for seg_idx, margem in margens.items():
             if margem <= 0:
                 continue
-            pontos_offset = self._pontos_offset_segmento_molde(base, seg_idx, margem, sentido)
+            pontos_offset = self._pontos_offset_segmento_canvas(base, seg_idx, margem, sentido)
             if pontos_offset is None:
                 continue
             a, b, off_a, off_b = pontos_offset
             painter.drawLine(self._cena_para_tela(off_a), self._cena_para_tela(off_b))
             margem_anterior = float(margens.get((seg_idx - 1) % total, 0.0) or 0.0)
             if margem_anterior > 0:
-                anterior = self._pontos_offset_segmento_molde(base, (seg_idx - 1) % total, margem_anterior, sentido)
+                anterior = self._pontos_offset_segmento_canvas(base, (seg_idx - 1) % total, margem_anterior, sentido)
                 if anterior is not None:
                     canto = QPainterPath(self._cena_para_tela(anterior[3]))
-                    controle = self._intersecao_linhas_molde(anterior[2], anterior[3], off_a, off_b)
+                    controle = self._intersecao_linhas_canvas(anterior[2], anterior[3], off_a, off_b)
                     if controle is None:
                         controle = QPointF(anterior[3].x() + off_a.x() - a.x(), anterior[3].y() + off_a.y() - a.y())
                     canto.quadTo(self._cena_para_tela(controle), self._cena_para_tela(off_a))
@@ -1880,96 +2314,16 @@ class VisualizacaoCanvas(QWidget):
                 painter.drawLine(self._cena_para_tela(off_b), self._cena_para_tela(b))
         painter.restore()
 
-    def _margens_por_segmento_molde(self, el: dict, total_segmentos: int) -> dict[int, float]:
-        margens: dict[int, float] = {}
-        for dados in (el.get("margens_molde"), el.get("margens"), el.get("margem_cm_por_elemento")):
-            if isinstance(dados, list):
-                for item in dados:
-                    if isinstance(item, dict):
-                        idx = self._indice_segmento_margem_molde(str(item.get("elemento") or ""), total_segmentos)
-                        valor = self._valor_margem_molde(item.get("margem"))
-                        if idx is not None and valor > 0:
-                            margens[idx] = valor
-            elif isinstance(dados, dict):
-                for elemento, valor_raw in dados.items():
-                    idx = self._indice_segmento_margem_molde(str(elemento), total_segmentos)
-                    valor = self._valor_margem_molde(valor_raw)
-                    if idx is not None and valor > 0:
-                        margens[idx] = valor
-        return margens
-
-    @staticmethod
-    def _valor_margem_molde(valor) -> float:
-        try:
-            texto = str(valor).replace("cm", "").replace(",", ".").strip()
-            return max(0.0, float(texto or 0.0))
-        except (TypeError, ValueError):
-            return 0.0
-
-    @staticmethod
-    def _indice_segmento_margem_molde(elemento: str, total_segmentos: int) -> int | None:
-        partes = str(elemento or "").replace(" ", "").split("-", 1)
-        if len(partes) != 2 or total_segmentos <= 0:
-            return None
-        try:
-            inicio = int(partes[0])
-            fim = int(partes[1])
-        except ValueError:
-            return None
-        esperado_fim = (inicio % total_segmentos) + 1
-        if inicio < 1 or inicio > total_segmentos or fim != esperado_fim:
-            return None
-        return inicio - 1
-
-    @staticmethod
-    def _area_assinada_pontos(pontos: list[QPointF]) -> float:
-        area = 0.0
-        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
-            area += (a.x() * b.y()) - (b.x() * a.y())
-        return area / 2.0
-
-    @staticmethod
-    def _pontos_offset_segmento_molde(
-            base: list[QPointF],
-            seg_idx: int,
-            margem: float,
-            sentido: float,
-    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | None:
-        total = len(base)
-        a = base[seg_idx % total]
-        b = base[(seg_idx + 1) % total]
-        dx = b.x() - a.x()
-        dy = b.y() - a.y()
-        comp = sqrt((dx * dx) + (dy * dy))
-        if comp <= 1e-9:
-            return None
-        nx = sentido * (-dy / comp)
-        ny = sentido * (dx / comp)
-        return a, b, QPointF(a.x() + (nx * margem), a.y() + (ny * margem)), QPointF(b.x() + (nx * margem), b.y() + (ny * margem))
-
-    @staticmethod
-    def _intersecao_linhas_molde(p1: QPointF, p2: QPointF, p3: QPointF, p4: QPointF) -> QPointF | None:
-        x1, y1 = p1.x(), p1.y()
-        x2, y2 = p2.x(), p2.y()
-        x3, y3 = p3.x(), p3.y()
-        x4, y4 = p4.x(), p4.y()
-        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if abs(den) <= 1e-9:
-            return None
-        px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
-        py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
-        return QPointF(px, py)
+    def _bbox_tela_pontos(self, pontos: list[QPointF]) -> tuple[float, float, float, float]:
+        pts = [self._cena_para_tela(p) for p in pontos]
+        if not pts:
+            return (0.0, 0.0, float(self.width()), float(self.height()))
+        xs = [p.x() for p in pts]
+        ys = [p.y() for p in pts]
+        return (min(xs), min(ys), max(xs), max(ys))
 
     def _valor_float_molde(self, el: dict, chaves: tuple[str, ...], padrao):
-        for chave in chaves:
-            valor = el.get(chave)
-            if valor is None:
-                continue
-            try:
-                return float(valor)
-            except Exception:
-                continue
-        return padrao
+        return self._valor_float_molde_decimal(el, chaves, padrao)
 
     def _tamanho_pixel_molde(self, el: dict, chaves: tuple[str, ...], padrao: float) -> float:
         valor = self._valor_float_molde(el, chaves, None)
@@ -2058,8 +2412,7 @@ class VisualizacaoCanvas(QWidget):
         margem_px = min(12.0, max(5.0, comp * 0.06))
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
-        cor_fio = self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))
-        pen = QPen(QColor(cor_fio), 1.15)
+        pen = QPen(QColor("#ffffff"), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
@@ -2086,7 +2439,7 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
         painter.drawText(int(round(ancora.x() - largura / 2.0)), int(round(ancora.y() - 4.0)), int(round(largura)), int(round(altura)), Qt.AlignCenter, texto)
         painter.restore()
 
@@ -2108,8 +2461,7 @@ class VisualizacaoCanvas(QWidget):
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
 
-        cor_fio = self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))
-        pen = QPen(QColor(cor_fio), 1.15)
+        pen = QPen(QColor("#ffffff"), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
@@ -2162,7 +2514,7 @@ class VisualizacaoCanvas(QWidget):
         path.closeSubpath()
         painter.save()
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))))
+        painter.setBrush(QColor("#ffffff"))
         painter.drawPath(path)
         painter.restore()
 
@@ -2193,7 +2545,7 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor(self._cor_molde_config("fio", self._cores_canvas.get("desenho", "#ffffff"))), 1.0))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
         painter.drawText(
             int(round(ancora.x() - (largura / 2))),
             int(round(ancora.y() - 4)),
@@ -2469,34 +2821,6 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() - tamanho), int(pt.x() + tamanho), int(pt.y() + tamanho))
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
 
-    def _desenhar_contornos_dobra_original(self, painter: QPainter, elemento: dict):
-        contornos = elemento.get("contornos_dobra_original")
-        if not isinstance(contornos, list):
-            return
-        cor = self._cor_molde_config("molde_dobrado", self._cores_canvas.get("selecao", "#2da8ff"))
-        for contorno in contornos:
-            if isinstance(contorno, dict):
-                contorno = contorno.get("contorno_pontilhado") or contorno.get("metade_movida") or contorno.get("pontos")
-            if not isinstance(contorno, list) or len(contorno) < 2:
-                continue
-            pontos = []
-            for p in contorno:
-                if isinstance(p, (list, tuple)) and len(p) >= 2:
-                    try:
-                        pontos.append(QPointF(float(p[0]), float(p[1])))
-                    except Exception:
-                        continue
-            if len(pontos) >= 2:
-                if len(pontos) >= 3 and self._dist(pontos[0], pontos[-1]) > 1e-7:
-                    pontos.append(QPointF(pontos[0]))
-                self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.0, estilo="dot")
-                painter.setPen(QPen(QColor(cor), 1.0))
-                painter.setBrush(QColor(cor))
-                limite = len(pontos) - 1 if len(pontos) >= 2 and self._dist(pontos[0], pontos[-1]) <= 1e-7 else len(pontos)
-                for pt in pontos[:limite]:
-                    tela = self._cena_para_tela(pt)
-                    painter.drawEllipse(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
-
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()
         aby = b.y() - a.y()
@@ -2525,8 +2849,6 @@ class VisualizacaoCanvas(QWidget):
         candidatos: list[int] = []
         for idx in range(len(self.cena.elementos) - 1, -1, -1):
             el = self.cena.elementos[idx]
-            if not self._elemento_visivel_no_menu_moldes(el):
-                continue
             if el.get("tipo") == "polyline":
                 pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
                 if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
@@ -2548,7 +2870,7 @@ class VisualizacaoCanvas(QWidget):
                     if self._distancia_ponto_segmento(p1, p2, pos) <= tolerancia:
                         candidatos.append(idx)
                 if el.get("mostrar_nome", True) and str(el.get("nome_molde") or "").strip():
-                    pos_nome = el.get("nome_posicao") or el.get("nome_centro")
+                    pos_nome = el.get("ponto_texto_nome") or el.get("ponto_texto") or el.get("nome_posicao") or el.get("nome_centro")
                     if isinstance(pos_nome, (list, tuple)) and len(pos_nome) == 2:
                         p_nome = QPointF(float(pos_nome[0]), float(pos_nome[1]))
                         if self._dist(p_nome, pos) <= (tolerancia * 2.0):
@@ -2580,42 +2902,15 @@ class VisualizacaoCanvas(QWidget):
         if subtipo == "contorno":
             return cor, max(1.35, esp), "solid"
         if subtipo == "costura":
-            return self._cor_molde_config("costura", cor), max(0.85, esp * 0.82), self._estilo_linha_costura
+            return self._config_cor_molde("costura", cor), max(0.85, esp * 0.82), str(getattr(self, "_estilo_linha_costura", "dash") or "dash")
         if subtipo == "linha_interna":
-            return self._cor_molde_config("linhas_auxiliares", "#bfbfbf"), max(0.75, esp * 0.8), "solid"
-        if subtipo == "fio":
-            return self._cor_molde_config("fio", "#83ffb6"), max(0.8, esp * 0.8), "dot"
-        if subtipo == "pique":
-            return self._cor_molde_config("piques", "#83ffb6"), max(0.8, esp * 0.8), "dot"
+            return self._config_cor_molde("linhas_auxiliares", "#bfbfbf"), max(0.75, esp * 0.8), "solid"
+        if subtipo in {"fio", "pique"}:
+            chave = "fio" if subtipo == "fio" else "piques"
+            return self._config_cor_molde(chave, "#83ffb6"), max(0.8, esp * 0.8), "dot"
         if subtipo in {"texto", "anotacao"}:
-            return self._cor_molde_config("observacoes", "#9a9a9a"), max(0.7, esp * 0.7), "dot"
+            return "#9a9a9a", max(0.7, esp * 0.7), "dot"
         return cor, esp, estilo
-
-    def _cor_molde_config(self, chave: str, fallback: str) -> str:
-        cfg = self._cores_moldes.get(chave)
-        if isinstance(cfg, dict) and bool(cfg.get("ativo", False)):
-            cor = QColor(str(cfg.get("cor", "")))
-            if cor.isValid():
-                return cor.name()
-        return fallback
-
-    def _elemento_visivel_no_menu_moldes(self, elemento: dict) -> bool:
-        if not isinstance(elemento, dict):
-            return True
-        if elemento.get("molde"):
-            return bool(elemento.get("menu_moldes_visivel", True))
-        vinculo = str(elemento.get("costura_de_molde_id") or "").strip()
-        if not vinculo and bool(elemento.get("molde_linha_vinculada")):
-            vinculo = str(elemento.get("molde_id") or "").strip()
-        if not vinculo:
-            return True
-        for molde in self.cena.elementos:
-            if not isinstance(molde, dict) or not molde.get("molde"):
-                continue
-            molde_id = str(molde.get("molde_id") or molde.get("id") or "").strip()
-            if molde_id == vinculo:
-                return bool(molde.get("menu_moldes_visivel", True))
-        return True
 
     def _molde_id_elemento(self, elemento: dict) -> str:
         return str(elemento.get("molde_id") or elemento.get("id") or "").strip()
@@ -2650,13 +2945,6 @@ class VisualizacaoCanvas(QWidget):
     def set_mostrar_curva_original_emf(self, ativo: bool):
         self._mostrar_curva_original_emf = bool(ativo)
         self.update()
-
-    def set_visualizacao_instantanea(self, elementos: list[dict] | None):
-        self._visualizacao_instantanea_elementos = deepcopy(elementos) if elementos else None
-        self.update()
-
-    def visualizacao_instantanea_ativa(self) -> bool:
-        return bool(self._visualizacao_instantanea_elementos)
 
     def _pontos_render_elemento(self, elemento: dict) -> list[QPointF]:
         if self._mostrar_curva_original_emf:
