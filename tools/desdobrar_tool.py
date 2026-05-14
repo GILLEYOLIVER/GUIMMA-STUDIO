@@ -18,7 +18,7 @@ class Ferramenta(_DobrarBase):
     def __init__(self):
         super().__init__()
         self._molde_idx: int | None = None
-        self._hover_idx: int | None = None
+        self._hover_idx = None
         self._ultimo_direito = 0.0
 
     def on_activate(self, canvas):
@@ -70,7 +70,7 @@ class Ferramenta(_DobrarBase):
             self._status(canvas, "Passe o mouse sobre uma linha interna do molde e clique para desdobrar.")
             event.accept()
             return True
-        self._aplicar_desdobrar(canvas, self._molde_idx, int(alvo))
+        self._aplicar_desdobrar(canvas, self._molde_idx, alvo)
         event.accept()
         return True
 
@@ -85,9 +85,9 @@ class Ferramenta(_DobrarBase):
     def on_paint_overlay(self, canvas, painter):
         if self._molde_idx is None or self._hover_idx is None:
             return
-        if not (0 <= self._hover_idx < len(canvas.cena.elementos)):
+        el = self._elemento_linha_ref(canvas, self._hover_idx)
+        if el is None:
             return
-        el = canvas.cena.elementos[self._hover_idx]
         pontos = self._pontos_para_preview_linha(el)
         if len(pontos) < 2:
             return
@@ -98,13 +98,14 @@ class Ferramenta(_DobrarBase):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
 
-    def _aplicar_desdobrar(self, canvas, molde_idx: int, linha_idx: int) -> None:
+    def _aplicar_desdobrar(self, canvas, molde_idx: int, linha_ref) -> None:
         if not (0 <= molde_idx < len(canvas.cena.elementos)):
             return
-        if not (0 <= linha_idx < len(canvas.cena.elementos)):
-            return
         molde = canvas.cena.elementos[molde_idx]
-        linha = canvas.cena.elementos[linha_idx]
+        linha = self._elemento_linha_ref(canvas, linha_ref)
+        if linha is None:
+            self._status(canvas, "Linha escolhida inválida para desdobrar.")
+            return
         eixo = self._eixo_linha(linha)
         if eixo is None:
             self._status(canvas, "A linha escolhida não tem extremidades válidas para desdobrar.")
@@ -233,10 +234,15 @@ class Ferramenta(_DobrarBase):
             return QPointF(x, 0.0), QPointF(x, 1.0)
         return QPointF(eixo[1]), QPointF(eixo[2])
 
-    def _linha_interna_em_ponto(self, canvas, molde_idx: int, pos: QPointF) -> int | None:
+    def _linha_interna_em_ponto(self, canvas, molde_idx: int, pos: QPointF):
+        interna_molde = self._linha_do_proprio_molde_em_ponto(canvas, molde_idx, pos)
+        if interna_molde is not None:
+            return interna_molde
         candidatos = canvas._indices_elementos_em_ponto(pos) if hasattr(canvas, "_indices_elementos_em_ponto") else []
-        if not candidatos:
-            candidatos = self._indices_linhas_internas_proximas(canvas, molde_idx, pos)
+        candidatos = list(candidatos)
+        for extra in self._indices_linhas_internas_proximas(canvas, molde_idx, pos):
+            if extra not in candidatos:
+                candidatos.append(extra)
         for idx in candidatos:
             if idx == molde_idx or not (0 <= idx < len(canvas.cena.elementos)):
                 continue
@@ -244,6 +250,64 @@ class Ferramenta(_DobrarBase):
             if self._eh_linha_interna_do_molde(canvas, molde_idx, el):
                 return int(idx)
         return None
+
+    def _elemento_linha_ref(self, canvas, ref) -> dict | None:
+        if isinstance(ref, int):
+            if 0 <= ref < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[ref]
+                return el if isinstance(el, dict) else None
+            return None
+        if isinstance(ref, dict):
+            return ref
+        return None
+
+    def _linha_do_proprio_molde_em_ponto(self, canvas, molde_idx: int, pos: QPointF) -> dict | None:
+        if not (0 <= molde_idx < len(canvas.cena.elementos)):
+            return None
+        molde = canvas.cena.elementos[molde_idx]
+        tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        linhas = self._linhas_do_proprio_molde(molde)
+        melhor = None
+        melhor_dist = tolerancia
+        for linha in linhas:
+            pontos = self._pontos_para_preview_linha(linha)
+            if len(pontos) < 2:
+                continue
+            dist = min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
+            if dist <= melhor_dist:
+                melhor = linha
+                melhor_dist = dist
+        return melhor
+
+    def _linhas_do_proprio_molde(self, molde: dict) -> list[dict]:
+        linhas: list[dict] = []
+        fio_origem = molde.get("fio_origem")
+        fio_fim = molde.get("fio_fim")
+        if self._eh_ponto(fio_origem) and self._eh_ponto(fio_fim):
+            linhas.append(
+                {
+                    "tipo": "polyline",
+                    "pontos": [
+                        (float(fio_origem[0]), float(fio_origem[1])),
+                        (float(fio_fim[0]), float(fio_fim[1])),
+                    ],
+                    "origem_desdobrar": "fio",
+                }
+            )
+        if bool(molde.get("molde_dobrado")) or bool(molde.get("contornos_dobra_original")):
+            pontos = self._pontos_elemento(molde)
+            base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+            for a, b in zip(base, base[1:] + base[:1]):
+                if self._dist(a, b) <= 1e-9:
+                    continue
+                linhas.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(a.x(), a.y()), (b.x(), b.y())],
+                        "origem_desdobrar": "segmento_contorno_dobrado",
+                    }
+                )
+        return linhas
 
     def _indices_linhas_internas_proximas(self, canvas, molde_idx: int, pos: QPointF) -> list[int]:
         tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
