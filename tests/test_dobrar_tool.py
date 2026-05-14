@@ -68,6 +68,13 @@ class DobrarToolTestCase(unittest.TestCase):
         self.assertFalse(hasattr(dialog, "chk_inserir_pique"))
         dialog.deleteLater()
 
+    def test_dobra_meio_respeita_ponto_medio_da_reta_maior(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDobrar()
+
+        self.assertEqual(ferramenta._eixo(canvas, [0], "Horizontal"), ("h", 4.0))
+        self.assertEqual(ferramenta._eixo(canvas, [0], "Vertical"), ("v", 5.0))
+
     def test_dobrar_mantem_contorno_pontilhado_fechado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaDobrar()

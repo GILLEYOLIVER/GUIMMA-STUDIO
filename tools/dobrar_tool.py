@@ -351,9 +351,39 @@ class Ferramenta(FerramentaBase):
         if bbox is None:
             return None
         min_x, min_y, max_x, max_y = bbox
+        ponto_medio_reta = self._ponto_medio_reta_maior(canvas, indices, modo_norm)
         if modo_norm == "horizontal":
+            if ponto_medio_reta is not None:
+                return ("h", ponto_medio_reta.y())
             return ("h", (min_y + max_y) / 2.0)
+        if ponto_medio_reta is not None:
+            return ("v", ponto_medio_reta.x())
         return ("v", (min_x + max_x) / 2.0)
+
+    def _ponto_medio_reta_maior(self, canvas, indices: list[int], modo_norm: str) -> QPointF | None:
+        melhor = None
+        melhor_comprimento = 0.0
+        fallback = None
+        fallback_comprimento = 0.0
+        for idx in indices:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            pontos = self._pontos_elemento(canvas.cena.elementos[idx])
+            base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+            if len(base) < 2:
+                continue
+            for a, b in zip(base, base[1:] + base[:1]):
+                comprimento = self._dist(a, b)
+                if comprimento > fallback_comprimento:
+                    fallback_comprimento = comprimento
+                    fallback = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+                dx = abs(b.x() - a.x())
+                dy = abs(b.y() - a.y())
+                orientacao_ok = dy >= dx if modo_norm == "horizontal" else dx >= dy
+                if orientacao_ok and comprimento > melhor_comprimento:
+                    melhor_comprimento = comprimento
+                    melhor = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+        return melhor or fallback
 
     def _centralizar_fio_no_molde(self, el: dict, eixo) -> None:
         pontos = self._pontos_elemento(el)

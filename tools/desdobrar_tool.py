@@ -328,7 +328,8 @@ class Ferramenta(_DobrarBase):
                 melhor_dist = dist
         if not melhor:
             return False
-        melhor = self._preparar_contorno_resultado(melhor, eixo_atual)
+        if len(melhor) >= 3 and not self._pontos_mesmos(melhor[0], melhor[-1]):
+            melhor.append(QPointF(melhor[0]))
         cantos = self._controles_resultado_desdobrar(molde, melhor, eixo_atual)
         self._sincronizar_piques_resultado(molde, melhor, eixo_atual, inserir=self._inserir_pique_ativo(canvas))
         molde["pontos"] = [(p.x(), p.y()) for p in melhor]

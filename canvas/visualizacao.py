@@ -1604,7 +1604,7 @@ class VisualizacaoCanvas(QWidget):
                     y_ang = max(bbox_tela[1] + altura_ang, min(y_ang, bbox_tela[3] - 2.0))
                     painter.drawText(int(x_ang), int(y_ang), texto_ang)
 
-            if el.get("mostrar_controles", True):
+            if el.get("mostrar_numeros", False):
                 cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
                 if cantos:
                     cx = sum(p.x() for p in cantos) / len(cantos)
