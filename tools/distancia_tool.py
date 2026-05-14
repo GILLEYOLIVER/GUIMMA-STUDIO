@@ -55,6 +55,12 @@ class Ferramenta(FerramentaBase):
         if self._p0 is None:
             return False
         self._p1 = canvas._ponto_com_snap(event.position())
+        d = sqrt((self._p1.x() - self._p0.x()) ** 2 + (self._p1.y() - self._p0.y()) ** 2)
+        v = canvas.formatar_valor_unidade(d)
+        unidade = getattr(canvas, "_unidade_sigla", "cm")
+        txt = f"Distância (prévia): {v} ({unidade})"
+        self.set_status(txt)
+        mensagem_status(canvas, txt)
         canvas.update()
         event.accept()
         return True
