@@ -43,9 +43,12 @@ class DesdobrarDialog(QDialog):
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(8, 8, 8, 8)
         raiz.setSpacing(6)
-        self.chk_inserir_pique = QCheckBox("Inserir pique")
-        self.chk_inserir_pique.setChecked(False)
-        raiz.addWidget(self.chk_inserir_pique)
+        self.chk_automatico = QCheckBox("Automático")
+        self.chk_automatico.setChecked(True)
+        raiz.addWidget(self.chk_automatico)
+        self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
+        self.chk_fio_meio.setChecked(False)
+        raiz.addWidget(self.chk_fio_meio)
 
 
 class Ferramenta(_DobrarBase):
@@ -194,6 +197,8 @@ class Ferramenta(_DobrarBase):
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
         molde.pop("contornos_dobra_original", None)
+        if self._fio_meio_ativo(canvas):
+            self._centralizar_fio_no_molde(molde, eixo)
         molde.setdefault("metadados", {})["ultima_transformacao"] = "desdobrar"
         canvas._selecionados = {molde_idx}
         canvas._registrar_historico()
@@ -281,6 +286,8 @@ class Ferramenta(_DobrarBase):
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
         molde.pop("contornos_dobra_original", None)
+        if self._fio_meio_ativo(canvas):
+            self._centralizar_fio_no_molde(molde, eixo_atual)
         molde.setdefault("metadados", {})["ultima_transformacao"] = "desdobrar_original"
         canvas._selecionados = {molde_idx}
         canvas._registrar_historico()
@@ -485,7 +492,13 @@ class Ferramenta(_DobrarBase):
 
     def _inserir_pique_ativo(self, canvas) -> bool:
         dialog = self._dialog_por_canvas.get(id(canvas))
-        return bool(dialog is not None and dialog.chk_inserir_pique.isChecked())
+        chk = getattr(dialog, "chk_inserir_pique", None) if dialog is not None else None
+        return bool(chk is not None and chk.isChecked())
+
+    def _fio_meio_ativo(self, canvas) -> bool:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        chk = getattr(dialog, "chk_fio_meio", None) if dialog is not None else None
+        return bool(chk is not None and chk.isChecked())
 
     def _preparar_contorno_resultado(self, pontos: list[QPointF], eixo) -> list[QPointF]:
         base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)

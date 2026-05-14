@@ -2205,6 +2205,31 @@ class PropriedadesMoldesDialog(QDialog):
         grid.addWidget(self.ed_nome_visualizacao, 3, 1, 1, 4)
 
         box_vis = QGroupBox("Visualização")
+        check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
+        box_vis.setStyleSheet(
+            """
+            QGroupBox { color:#111111; border:1px solid #c7cdd3; margin-top:8px; }
+            QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 3px; }
+            QCheckBox { color:#111111; spacing:6px; }
+            QCheckBox::indicator {
+                width:13px;
+                height:13px;
+                border:1px solid #6c7480;
+                background:#ffffff;
+            }
+            QCheckBox::indicator:unchecked {
+                image:none;
+                background:#ffffff;
+                border:1px solid #6c7480;
+            }
+            QCheckBox::indicator:checked {
+                image:url(__CHECK_ICON__);
+                background:#ffffff;
+                border:1px solid #075f8c;
+            }
+            """
+            .replace("__CHECK_ICON__", check_icon)
+        )
         gvis = QGridLayout(box_vis)
         gvis.setContentsMargins(10, 14, 10, 8)
         gvis.setHorizontalSpacing(24)
@@ -2457,7 +2482,6 @@ class PropriedadesMoldesDialog(QDialog):
                 molde["visual_observacoes"] = True
         elif elemento == "Números":
             molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
-            molde["mostrar_numeros"] = True
         elif elemento == "Fio":
             molde["mostrar_fio"] = True
 

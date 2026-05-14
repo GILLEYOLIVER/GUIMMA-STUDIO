@@ -47,13 +47,16 @@ class DobrarDialog(QDialog):
 
         form = QFormLayout()
         self.cmb_modo = QComboBox()
-        self.cmb_modo.addItems(["Dobrar horizontal", "Dobrar vertical", "Dobrar na linha"])
-        form.addRow("Modo", self.cmb_modo)
+        self.cmb_modo.addItems(["Horizontal", "Vertical", "Linha"])
+        form.addRow("Modo da dobra", self.cmb_modo)
         raiz.addLayout(form)
 
-        self.chk_manter_dimensoes = QCheckBox("Manter dimensoes originais")
+        self.chk_manter_dimensoes = QCheckBox("Manter dobra")
         self.chk_manter_dimensoes.setChecked(True)
         raiz.addWidget(self.chk_manter_dimensoes)
+        self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
+        self.chk_fio_meio.setChecked(False)
+        raiz.addWidget(self.chk_fio_meio)
 
 
 class Ferramenta(FerramentaBase):
@@ -108,7 +111,7 @@ class Ferramenta(FerramentaBase):
         self._preview_pos = QPointF(pos)
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
-        if modo == "Dobrar na linha":
+        if self._modo_normalizado(modo) == "linha":
             return self._clique_modo_linha(canvas, event, pos)
         return self._clique_modo_meio(canvas, event, pos, modo)
 
@@ -125,7 +128,7 @@ class Ferramenta(FerramentaBase):
             return
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
-        if modo == "Dobrar na linha" and self._linha_p1 is not None and self._linha_p2 is None and self._preview_pos is not None:
+        if self._modo_normalizado(modo) == "linha" and self._linha_p1 is not None and self._linha_p2 is None and self._preview_pos is not None:
             painter.save()
             cor_linha = QColor(getattr(canvas, "_cores_canvas", {}).get("selecao", "#2da8ff"))
             painter.setPen(QPen(cor_linha, 1.4, Qt.DashLine))
@@ -238,7 +241,7 @@ class Ferramenta(FerramentaBase):
             self._status(canvas, "Mova o mouse para um dos lados da linha antes de aplicar.")
             event.accept()
             return True
-        self._aplicar(canvas, "Dobrar na linha")
+        self._aplicar(canvas, "Linha")
         event.accept()
         return True
 
@@ -278,6 +281,8 @@ class Ferramenta(FerramentaBase):
                         }
                     )
             self._dobrar_elemento(el, eixo_el, self._lado_preview)
+            if getattr(dialog, "chk_fio_meio", None) is not None and dialog.chk_fio_meio.isChecked():
+                self._centralizar_fio_no_molde(el, eixo_el)
             el["molde_dobrado"] = True
             if eixo_el[0] == "h":
                 el["dobra_horizontal"] = True
@@ -315,6 +320,14 @@ class Ferramenta(FerramentaBase):
             fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
+    def _modo_normalizado(self, modo: str) -> str:
+        texto = str(modo or "").strip().lower()
+        if "linha" in texto or "line" in texto:
+            return "linha"
+        if "vertical" in texto:
+            return "vertical"
+        return "horizontal"
+
     def _modo_alterado(self, canvas):
         self._resetar_linha()
         self._lado_preview = 0
@@ -329,7 +342,8 @@ class Ferramenta(FerramentaBase):
         ]
 
     def _eixo(self, canvas, indices: list[int], modo: str):
-        if modo == "Dobrar na linha":
+        modo_norm = self._modo_normalizado(modo)
+        if modo_norm == "linha":
             if self._linha_p1 is None or self._linha_p2 is None:
                 return None
             return ("line", QPointF(self._linha_p1), QPointF(self._linha_p2))
@@ -337,9 +351,32 @@ class Ferramenta(FerramentaBase):
         if bbox is None:
             return None
         min_x, min_y, max_x, max_y = bbox
-        if modo == "Dobrar horizontal":
+        if modo_norm == "horizontal":
             return ("h", (min_y + max_y) / 2.0)
         return ("v", (min_x + max_x) / 2.0)
+
+    def _centralizar_fio_no_molde(self, el: dict, eixo) -> None:
+        pontos = self._pontos_elemento(el)
+        if not pontos:
+            return
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        if max_x <= min_x or max_y <= min_y:
+            return
+        margem_x = (max_x - min_x) * 0.18
+        margem_y = (max_y - min_y) * 0.18
+        if eixo[0] == "v":
+            x = (min_x + max_x) / 2.0
+            origem = (x, min_y + margem_y)
+            fim = (x, max_y - margem_y)
+        else:
+            y = (min_y + max_y) / 2.0
+            origem = (min_x + margem_x, y)
+            fim = (max_x - margem_x, y)
+        el["fio_origem"] = origem
+        el["fio_fim"] = fim
 
     def _calcular_lado_preview(self, canvas, pos: QPointF) -> int:
         indices = self._indices_moldes(canvas)
@@ -595,7 +632,7 @@ class Ferramenta(FerramentaBase):
         if not indices:
             return False
         dialog = self._obter_dialog(canvas)
-        if dialog.cmb_modo.currentText() == "Dobrar na linha":
+        if self._modo_normalizado(dialog.cmb_modo.currentText()) == "linha":
             return self._linha_p1 is not None or self._linha_p2 is not None
         return bool(self._lado_preview)
 
