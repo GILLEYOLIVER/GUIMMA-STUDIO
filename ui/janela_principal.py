@@ -4699,11 +4699,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         caixa.setWindowTitle("Atenção")
         caixa.setIcon(QMessageBox.Question)
         caixa.setText("Deseja recuperar arquivo(s) perdido(s)?")
-        caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        self._traduzir_botoes_padrao_message_box(caixa)
-        self._ordenar_botoes_sim_na_direita(caixa)
+        caixa.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        caixa.addButton("Não", QMessageBox.ButtonRole.ActionRole)
+        botao_sim = caixa.addButton("Sim", QMessageBox.ButtonRole.ActionRole)
         QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
-        if caixa.exec() != QMessageBox.Yes:
+        caixa.exec()
+        if caixa.clickedButton() is not botao_sim:
             self._limpar_arquivo_recuperacao()
             return
         self._limpar_abas_documentos()
