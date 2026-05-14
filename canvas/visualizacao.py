@@ -1472,12 +1472,13 @@ class VisualizacaoCanvas(QWidget):
         if not self._snap_ativo or not self._snap_resultado:
             return
         snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
+        tipo_snap = str(self._snap_resultado.tipo)
         cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
-        if self._snap_resultado.tipo == "controle":
+        if tipo_snap == "controle":
             cor = QColor(self._cores_canvas.get("selecao", "#2da8ff"))
-        elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
+        elif tipo_snap in {"borda", "ponto médio"}:
             cor = QColor(self._cores_canvas.get("snap_desenho", "#6f6f6f"))
-        elif self._snap_resultado.tipo == "interseção":
+        elif tipo_snap == "interseção":
             cor = QColor(self._cores_canvas.get("snap_referencia", "#d71313"))
         pen = QPen(cor, 1.6)
         painter.setPen(pen)
@@ -1485,6 +1486,33 @@ class VisualizacaoCanvas(QWidget):
         painter.drawEllipse(snap_tela, 6, 6)
         painter.drawLine(QPointF(snap_tela.x() - 8, snap_tela.y()), QPointF(snap_tela.x() + 8, snap_tela.y()))
         painter.drawLine(QPointF(snap_tela.x(), snap_tela.y() - 8), QPointF(snap_tela.x(), snap_tela.y() + 8))
+        texto = self._rotulo_snap(tipo_snap)
+        if texto:
+            metrics = QFontMetrics(painter.font())
+            largura = metrics.horizontalAdvance(texto) + 12
+            altura = metrics.height() + 6
+            x = snap_tela.x() + 12
+            y = snap_tela.y() - altura - 10
+            if x + largura > self.width() - 4:
+                x = snap_tela.x() - largura - 12
+            if y < 4:
+                y = snap_tela.y() + 14
+            painter.fillRect(QRectF(x, y, largura, altura), QColor(8, 18, 28, 220))
+            painter.setPen(QPen(QColor("#ffffff"), 1.0))
+            painter.drawText(QRectF(x, y, largura, altura), Qt.AlignCenter, texto)
+
+    def _rotulo_snap(self, tipo: str) -> str:
+        mapa = {
+            "ponto médio": "Snap: ponto médio",
+            "nó": "Snap: nó",
+            "borda": "Snap: borda da linha",
+            "interseção": "Snap: interseção",
+            "centro": "Snap: centro",
+            "controle": "Snap: controle",
+            "fio": "Snap: fio",
+            "coord": "Snap: coordenada",
+        }
+        return mapa.get(str(tipo), f"Snap: {tipo}" if tipo else "")
 
     def _desenhar_overlays_moldes(self, painter: QPainter):
         for idx, el in enumerate(self.cena.elementos):
