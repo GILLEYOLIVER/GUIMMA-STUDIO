@@ -15,6 +15,7 @@ class Ferramenta(FerramentaBase):
     usa_painel_auxiliar = False
     descricao_painel = "Selecione elementos com clique, caixa de seleção e ciclo com botão direito."
     EIXOS_FIO = (0.0, 270.0, 180.0, 90.0)
+    DISTANCIA_VISUAL_SELECAO_CM = 1.5
 
     def __init__(self):
         super().__init__()
@@ -232,7 +233,7 @@ class Ferramenta(FerramentaBase):
                 pontos = [QPointF(*el["p0"]), QPointF(*el["p1"]), QPointF(*el["p2"])]
             if not pontos:
                 continue
-            margem = 0.5
+            margem = self.DISTANCIA_VISUAL_SELECAO_CM
             min_x = min(p.x() for p in pontos) - margem
             max_x = max(p.x() for p in pontos) + margem
             min_y = min(p.y() for p in pontos) - margem

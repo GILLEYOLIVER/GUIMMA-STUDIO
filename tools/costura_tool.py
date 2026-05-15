@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from math import sqrt
+from math import atan2, pi, sqrt
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QLocale
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -23,6 +23,30 @@ from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
+class NumeroLimpoSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox que mostra 1 em vez de 1,00 e aceita vírgula decimal."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        try:
+            self.setLocale(QLocale(QLocale.Language.Portuguese, QLocale.Country.Brazil))
+        except AttributeError:
+            self.setLocale(QLocale(QLocale.Portuguese, QLocale.Brazil))
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802 - API Qt
+        texto = f"{float(value):.2f}".rstrip("0").rstrip(".")
+        if texto == "-0":
+            texto = "0"
+        return texto.replace(".", ",")
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802 - API Qt
+        texto = str(text or "").strip().replace(" ", "").replace(",", ".")
+        try:
+            return float(texto)
+        except ValueError:
+            return 0.0
+
+
 class CosturaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +54,7 @@ class CosturaDialog(QDialog):
         self.setWindowTitle("Costura")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.setFixedWidth(378)
+        self.setFixedWidth(480)
         self.setStyleSheet(
             """
             QDialog { background:#f2f2f2; color:#111111; }
@@ -65,14 +89,14 @@ class CosturaDialog(QDialog):
         self.cmb_tipo.addItems(["Costura", "Offset"])
         self.cmb_posicao = QComboBox()
         self.cmb_posicao.addItems(["Selecionar", "Todo molde"])
-        self.sp_costura = QDoubleSpinBox()
+        self.sp_costura = NumeroLimpoSpinBox()
         self.sp_costura.setRange(0.0, 999999.0)
         self.sp_costura.setDecimals(2)
         self.sp_costura.setSingleStep(0.1)
         self.sp_costura.setValue(1.0)
         self.sp_costura.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.chk_costura_fim = QCheckBox("Costura fim (cm)")
-        self.sp_costura_fim = QDoubleSpinBox()
+        self.chk_costura_fim = QCheckBox("Largura do fim da costura (cm)")
+        self.sp_costura_fim = NumeroLimpoSpinBox()
         self.sp_costura_fim.setRange(0.0, 999999.0)
         self.sp_costura_fim.setDecimals(2)
         self.sp_costura_fim.setSingleStep(0.1)
@@ -85,7 +109,7 @@ class CosturaDialog(QDialog):
         self.cmb_pique.addItems(["T", "V", "I", "Nenhum"])
 
         topo.addWidget(self.cmb_tipo, 0, 0, 1, 2)
-        topo.addWidget(QLabel("Posicao"), 0, 2)
+        topo.addWidget(QLabel("Posição"), 0, 2)
         topo.addWidget(self.cmb_posicao, 0, 3)
         topo.addWidget(QLabel("Costura (cm)"), 1, 0)
         topo.addWidget(self.sp_costura, 1, 1)
@@ -123,25 +147,88 @@ class CosturaDialog(QDialog):
         rodape.addWidget(self.lbl_status, 1)
         raiz.addLayout(rodape)
 
-        self.chk_costura_fim.toggled.connect(self.sp_costura_fim.setEnabled)
+        self.sp_costura.valueChanged.connect(self._sincronizar_largura_fim_desabilitada)
+        self.chk_costura_fim.toggled.connect(self._alternar_largura_fim)
+        self._alternar_largura_fim(False)
+
+    def _alternar_largura_fim(self, ativo: bool) -> None:
+        ativo = bool(ativo)
+        self.sp_costura_fim.setEnabled(ativo)
+        if not ativo:
+            self._sincronizar_largura_fim_desabilitada()
+        self.sp_costura_fim.setStyleSheet(
+            "" if ativo else "QDoubleSpinBox { background:#eeeeee; color:#8b8b8b; border:1px solid #c7c7c7; }"
+        )
+
+    def _sincronizar_largura_fim_desabilitada(self, *_args) -> None:
+        if self.chk_costura_fim.isChecked():
+            return
+        self.sp_costura_fim.blockSignals(True)
+        self.sp_costura_fim.setValue(float(self.sp_costura.value()))
+        self.sp_costura_fim.blockSignals(False)
 
     def margem(self) -> float:
         return float(self.sp_costura.value())
+
+    def margem_final(self) -> float:
+        return float(self.sp_costura_fim.value()) if self.chk_costura_fim.isChecked() else self.margem()
+
+    def usa_largura_final(self) -> bool:
+        return bool(self.chk_costura_fim.isChecked())
 
     def atualizar_status(self, texto: str) -> None:
         self.lbl_status.setText(texto)
 
     def atualizar_trechos(self, pontos: list[QPointF]) -> None:
-        if len(pontos) >= 4:
-            self.atualizar_status(f"Preview de costura com margem de {Ferramenta._fmt(self.margem())} cm.")
+        if len(pontos) >= 2:
+            if self.usa_largura_final():
+                self.atualizar_status(
+                    "Preview de costura: início "
+                    f"{Ferramenta._fmt(self.margem())} cm → fim {Ferramenta._fmt(self.margem_final())} cm."
+                )
+            else:
+                self.atualizar_status(f"Preview de costura com largura de {Ferramenta._fmt(self.margem())} cm.")
 
-    def atualizar_tabela_segmentos(self, total: int, segmentos: set[int]) -> None:
-        self.tabela.setRowCount(max(0, total))
-        for i in range(max(0, total)):
+    def atualizar_tabela_segmentos(
+        self,
+        total: int,
+        segmentos: set[int],
+        ordem: list[int] | None = None,
+        largura_inicio: float | None = None,
+        largura_fim: float | None = None,
+        usar_largura_fim: bool = False,
+    ) -> None:
+        total = max(0, int(total))
+        segmentos = {int(s) % total for s in segmentos} if total else set()
+        ordem_normalizada: list[int] = []
+        if ordem and total:
+            ordem_normalizada = [int(s) % total for s in ordem if int(s) % total in segmentos]
+        if not ordem_normalizada:
+            ordem_normalizada = sorted(segmentos)
+
+        largura_inicio = self.margem() if largura_inicio is None else float(largura_inicio)
+        largura_fim = self.margem_final() if largura_fim is None else float(largura_fim)
+        posicoes = {seg_idx: pos for pos, seg_idx in enumerate(ordem_normalizada)}
+        qtd = max(1, len(ordem_normalizada))
+
+        self.tabela.setRowCount(total)
+        for i in range(total):
+            if i in segmentos:
+                if usar_largura_fim and i in posicoes:
+                    pos = posicoes[i]
+                    ini = largura_inicio + ((largura_fim - largura_inicio) * (pos / qtd))
+                    fim = largura_inicio + ((largura_fim - largura_inicio) * ((pos + 1) / qtd))
+                    largura_txt = f"{Ferramenta._fmt(ini)}→{Ferramenta._fmt(fim)}"
+                else:
+                    largura_txt = Ferramenta._fmt(largura_inicio)
+                acabamento_txt = self.cmb_acab_ini.currentText()
+            else:
+                largura_txt = "0"
+                acabamento_txt = ""
             valores = [
                 f"{i + 1}-{(i + 1) % total + 1}",
-                Ferramenta._fmt(self.margem()) if i in segmentos else "0",
-                self.cmb_acab_ini.currentText() if i in segmentos else "",
+                largura_txt,
+                acabamento_txt,
             ]
             for col, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
@@ -181,6 +268,7 @@ class Ferramenta(FerramentaBase):
         self._alvo_idx: int | None = None
         self._segmento_inicio: int | None = None
         self._segmentos_selecionados: set[int] = set()
+        self._segmentos_ordem: list[int] = []
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
         self._preview_conectores: list[tuple[QPointF, QPointF]] = []
         self._direito_confirma_fechamento = False
@@ -223,10 +311,10 @@ class Ferramenta(FerramentaBase):
             self._preview = []
             if idx is not None:
                 pontos = self._pontos_fechados(canvas.cena.elementos[idx])
-                self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+                self._preview = [QPointF(x, y) for x, y in self._gerar_costura_atual(canvas, pontos)]
                 self._atualizar_dialog_com_preview(canvas)
                 total = self._total_segmentos(canvas, idx)
-                self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(range(total)))
+                self._atualizar_tabela_atual(canvas, total, set(range(total)), list(range(total)))
         canvas.update()
         return False
 
@@ -269,9 +357,9 @@ class Ferramenta(FerramentaBase):
             self._costura_finalizada = False
             self._direito_confirma_fechamento = False
             pontos = self._pontos_fechados(canvas.cena.elementos[idx])
-            self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            self._preview = [QPointF(x, y) for x, y in self._gerar_costura_atual(canvas, pontos)]
             total = self._total_segmentos(canvas, idx)
-            self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(range(total)))
+            self._atualizar_tabela_atual(canvas, total, set(range(total)), list(range(total)))
             self.set_status("Molde selecionado. Clique esquerdo novamente aplica; direito fecha.")
             canvas.update()
             event.accept()
@@ -366,6 +454,8 @@ class Ferramenta(FerramentaBase):
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.sp_costura.valueChanged.connect(lambda valor: self._definir_margem(canvas, float(valor)))
+            dialog.sp_costura_fim.valueChanged.connect(lambda _valor: self._recalcular_preview(canvas))
+            dialog.chk_costura_fim.toggled.connect(lambda _ativo: self._recalcular_preview(canvas))
             dialog.cmb_posicao.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
             dialog.cmb_acab_ini.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
             dialog.cmb_acab_fim.currentTextChanged.connect(lambda _txt: self._recalcular_preview(canvas))
@@ -375,6 +465,9 @@ class Ferramenta(FerramentaBase):
 
     def _definir_margem(self, canvas, valor: float) -> None:
         self._margem_cm = max(0.0, round(float(valor), 2))
+        dialog = self._obter_dialog(canvas)
+        if not dialog.chk_costura_fim.isChecked():
+            dialog._sincronizar_largura_fim_desabilitada()
         self._recalcular_preview(canvas)
         self.set_status(self._mensagem_pronta())
 
@@ -386,10 +479,10 @@ class Ferramenta(FerramentaBase):
                 self._atualizar_preview_segmento(canvas)
         elif self._preview_idx is not None and self._elemento_valido(canvas, self._preview_idx):
             pontos = self._pontos_fechados(canvas.cena.elementos[self._preview_idx])
-            self._preview = [QPointF(x, y) for x, y in self._gerar_costura(pontos, self._margem_cm)]
+            self._preview = [QPointF(x, y) for x, y in self._gerar_costura_atual(canvas, pontos)]
             self._atualizar_dialog_com_preview(canvas)
             total = self._total_segmentos(canvas, self._preview_idx)
-            self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(range(total)))
+            self._atualizar_tabela_atual(canvas, total, set(range(total)), list(range(total)))
         canvas.update()
 
     def _atualizar_dialog_com_preview(self, canvas) -> None:
@@ -422,11 +515,12 @@ class Ferramenta(FerramentaBase):
         self._alvo_idx = idx
         self._segmento_inicio = seg_idx
         self._segmentos_selecionados = {seg_idx}
+        self._segmentos_ordem = [seg_idx]
         self._costura_em_andamento = True
         self._costura_finalizada = False
         self._direito_confirma_fechamento = False
         self._atualizar_preview_segmentos(canvas)
-        self.set_status("Costura iniciada. Mova no sentido horario para acrescentar; anti-horario seleciona todo o molde. Clique esquerdo termina.")
+        self.set_status("Costura iniciada. Mova o hover no sentido horário do perímetro para acrescentar. Clique esquerdo termina.")
         canvas.update()
         event.accept()
         return True
@@ -440,6 +534,78 @@ class Ferramenta(FerramentaBase):
     def _acabamentos_atuais(self, canvas) -> tuple[str, str]:
         dialog = self._obter_dialog(canvas)
         return dialog.cmb_acab_ini.currentText(), dialog.cmb_acab_fim.currentText()
+
+    def _larguras_atuais(self, canvas) -> tuple[float, float, bool]:
+        dialog = self._obter_dialog(canvas)
+        inicio = max(0.0, float(dialog.sp_costura.value()))
+        fim = max(0.0, float(dialog.sp_costura_fim.value())) if dialog.chk_costura_fim.isChecked() else inicio
+        usar_fim = bool(dialog.chk_costura_fim.isChecked())
+        return inicio, fim, usar_fim
+
+    def _atualizar_tabela_atual(
+        self,
+        canvas,
+        total: int,
+        segmentos: set[int],
+        ordem: list[int] | None = None,
+    ) -> None:
+        inicio, fim, usar_fim = self._larguras_atuais(canvas)
+        self._obter_dialog(canvas).atualizar_tabela_segmentos(
+            total,
+            set(segmentos),
+            ordem=ordem,
+            largura_inicio=inicio,
+            largura_fim=fim,
+            usar_largura_fim=usar_fim,
+        )
+
+    def _gerar_costura_atual(self, canvas, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        inicio, fim, usar_fim = self._larguras_atuais(canvas)
+        if not usar_fim:
+            return self._gerar_costura(pontos, inicio)
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        total = len(base)
+        if total < 3:
+            return []
+        ordem = self._ordem_segmentos_horaria_visual(base)
+        return self._gerar_costura_segmentos_variavel(
+            base + [base[0]],
+            ordem,
+            inicio,
+            fim,
+            *self._acabamentos_atuais(canvas),
+        )
+
+    def _gerar_costura_segmentos_atual(
+        self,
+        canvas,
+        pontos: list[tuple[float, float]],
+        segmentos: set[int],
+        ordem: list[int] | None = None,
+    ) -> list[tuple[float, float]]:
+        inicio, fim, usar_fim = self._larguras_atuais(canvas)
+        acabamento_inicial, acabamento_final = self._acabamentos_atuais(canvas)
+        if not usar_fim:
+            return self._gerar_costura_segmentos(
+                pontos,
+                segmentos,
+                inicio,
+                acabamento_inicial,
+                acabamento_final,
+            )
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        if len(base) < 3 or not segmentos:
+            return []
+        if ordem is None or not ordem:
+            ordem = self._ordenar_segmentos_horario(base, segmentos)
+        return self._gerar_costura_segmentos_variavel(
+            pontos,
+            ordem,
+            inicio,
+            fim,
+            acabamento_inicial,
+            acabamento_final,
+        )
 
     def _cor_preview_alvo(self, canvas) -> QColor:
         idx = self._alvo_idx if self._alvo_idx is not None else self._preview_idx
@@ -477,14 +643,14 @@ class Ferramenta(FerramentaBase):
         if not self._elemento_valido(canvas, idx):
             return
         self._preview_idx = idx
-        self._preview = [QPointF(x, y) for x, y in self._gerar_costura_segmentos(
+        self._preview = [QPointF(x, y) for x, y in self._gerar_costura_segmentos_atual(
+            canvas,
             self._pontos_fechados(canvas.cena.elementos[idx]),
             {seg_idx},
-            self._margem_cm,
-            *self._acabamentos_atuais(canvas),
+            [seg_idx],
         )]
         self._preview_conectores = self._gerar_conectores_preview_segmentos(canvas, idx, {seg_idx})
-        self._obter_dialog(canvas).atualizar_tabela_segmentos(self._total_segmentos(canvas, idx), {seg_idx})
+        self._atualizar_tabela_atual(canvas, self._total_segmentos(canvas, idx), {seg_idx}, [seg_idx])
 
     def _atualizar_composicao_por_hover(self, canvas) -> None:
         if self._hover_segmento is None or self._alvo_idx is None or self._segmento_inicio is None:
@@ -492,15 +658,14 @@ class Ferramenta(FerramentaBase):
         idx, seg_idx = self._hover_segmento
         if idx != self._alvo_idx:
             return
-        total = self._total_segmentos(canvas, idx)
-        if total <= 0:
+        if not self._elemento_valido(canvas, idx):
             return
-        frente = self._distancia_circular(self._segmento_inicio, seg_idx, total)
-        tras = self._distancia_circular(seg_idx, self._segmento_inicio, total)
-        if tras < frente:
-            self._segmentos_selecionados = set(range(total))
-        else:
-            self._segmentos_selecionados = {(self._segmento_inicio + i) % total for i in range(frente + 1)}
+        pontos = self._pontos_fechados(canvas.cena.elementos[idx])
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        if len(base) < 3:
+            return
+        self._segmentos_ordem = self._segmentos_horarios(base, self._segmento_inicio, seg_idx)
+        self._segmentos_selecionados = set(self._segmentos_ordem)
         self._atualizar_preview_segmentos(canvas)
 
     def _atualizar_preview_segmentos(self, canvas) -> None:
@@ -511,11 +676,16 @@ class Ferramenta(FerramentaBase):
         if idx is None or not self._elemento_valido(canvas, idx):
             return
         pontos = self._pontos_fechados(canvas.cena.elementos[idx])
-        self._preview = [QPointF(x, y) for x, y in self._gerar_costura_segmentos(
+        ordem = self._segmentos_ordem or self._ordenar_segmentos_horario(
+            pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos),
+            self._segmentos_selecionados,
+        )
+        self._segmentos_ordem = ordem
+        self._preview = [QPointF(x, y) for x, y in self._gerar_costura_segmentos_atual(
+            canvas,
             pontos,
             self._segmentos_selecionados,
-            self._margem_cm,
-            *self._acabamentos_atuais(canvas),
+            ordem,
         )]
         base = [QPointF(x, y) for x, y in pontos[:-1]]
         total = len(base)
@@ -523,40 +693,48 @@ class Ferramenta(FerramentaBase):
             if 0 <= seg_idx < total:
                 self._realce_segmentos.append((base[seg_idx], base[(seg_idx + 1) % total]))
         self._preview_conectores = self._gerar_conectores_preview_segmentos(canvas, idx, self._segmentos_selecionados)
-        self._obter_dialog(canvas).atualizar_tabela_segmentos(total, set(self._segmentos_selecionados))
+        self._atualizar_tabela_atual(canvas, total, set(self._segmentos_selecionados), self._segmentos_ordem)
 
     def _finalizar_costura_segmentos(self, canvas) -> bool:
         if self._alvo_idx is None or not self._segmentos_selecionados:
             self.set_status("Nenhuma linha selecionada para costura.")
             return False
-        if self._aplicar_segmentos(canvas, self._alvo_idx, self._segmentos_selecionados):
+        if self._aplicar_segmentos(canvas, self._alvo_idx, self._segmentos_selecionados, self._segmentos_ordem):
             self._costura_em_andamento = False
             self._costura_finalizada = True
             self._direito_confirma_fechamento = False
             self._segmento_inicio = None
             self._segmentos_selecionados = set()
+            self._segmentos_ordem = []
             self.set_status("Costura finalizada. Clique esquerdo em outra linha para continuar ou clique direito para fechar.")
             canvas.update()
             return True
         self.set_status("Nao foi possivel aplicar costura nesses segmentos.")
         return False
 
-    def _aplicar_segmentos(self, canvas, idx: int, segmentos: set[int]) -> bool:
+    def _aplicar_segmentos(
+        self,
+        canvas,
+        idx: int,
+        segmentos: set[int],
+        ordem: list[int] | None = None,
+    ) -> bool:
         if not self._elemento_valido(canvas, idx):
             return False
         if self._tipo_operacao(canvas) == "Offset":
             return self._aplicar_offset_segmentos(canvas, idx, segmentos)
         alvo = canvas.cena.elementos[idx]
         pontos = self._pontos_fechados(alvo)
-        costura = self._gerar_costura_segmentos(pontos, segmentos, self._margem_cm, *self._acabamentos_atuais(canvas))
+        costura = self._gerar_costura_segmentos_atual(canvas, pontos, segmentos, ordem)
         if len(costura) < 2:
             return False
         molde_id = str(alvo.get("molde_id") or alvo.get("id") or "")
         if not molde_id:
             molde_id = str(uuid4())
             alvo["molde_id"] = molde_id
+        self._remover_costuras_do_alvo(canvas, molde_id)
         el = self._elemento_costura(canvas, costura, alvo, molde_id)
-        el["costura_segmentos"] = sorted(int(s) for s in segmentos)
+        el["costura_segmentos"] = [int(s) for s in (ordem or sorted(segmentos))]
         el["costura_parcial"] = len(segmentos) < self._total_segmentos(canvas, idx)
         canvas.cena.elementos.append(el)
         canvas._registrar_historico()
@@ -581,7 +759,7 @@ class Ferramenta(FerramentaBase):
             alvos.append(canvas.cena.elementos[idx])
         for alvo in alvos:
             pontos = self._pontos_fechados(alvo)
-            costura = self._gerar_costura(pontos, self._margem_cm)
+            costura = self._gerar_costura_atual(canvas, pontos)
             if len(costura) < 4:
                 continue
             molde_id = str(alvo.get("molde_id") or alvo.get("id") or "")
@@ -673,12 +851,18 @@ class Ferramenta(FerramentaBase):
         pique = ""
         acabamento_inicial = ""
         acabamento_final = ""
+        largura_inicio = float(self._margem_cm)
+        largura_fim = float(self._margem_cm)
+        usar_largura_fim = False
         if dialog is not None:
             tipo_costura = dialog.cmb_tipo.currentText()
             posicao = dialog.cmb_posicao.currentText()
             pique = dialog.cmb_pique.currentText() if dialog.chk_pique.isChecked() else ""
             acabamento_inicial = dialog.cmb_acab_ini.currentText()
             acabamento_final = dialog.cmb_acab_fim.currentText()
+            largura_inicio = float(dialog.sp_costura.value())
+            largura_fim = float(dialog.sp_costura_fim.value()) if dialog.chk_costura_fim.isChecked() else largura_inicio
+            usar_largura_fim = bool(dialog.chk_costura_fim.isChecked())
         return {
             "tipo": "polyline",
             "pontos": pontos,
@@ -687,9 +871,13 @@ class Ferramenta(FerramentaBase):
             "estilo": "dash",
             "subtipo_audaces": "costura",
             "parte_do_molde": True,
+            "molde_linha_vinculada": True,
+            "selecionavel_individual": False,
             "molde_id": molde_id,
             "costura_de_molde_id": molde_id,
-            "margem_costura_cm": float(self._margem_cm),
+            "margem_costura_cm": float(largura_inicio),
+            "margem_costura_fim_cm": float(largura_fim),
+            "costura_fim_ativa": bool(usar_largura_fim),
             "tipo_costura": tipo_costura,
             "posicao_costura": posicao,
             "pique_costura": pique,
@@ -704,14 +892,28 @@ class Ferramenta(FerramentaBase):
                 "pique_costura": pique,
                 "acabamento_inicial": acabamento_inicial,
                 "acabamento_final": acabamento_final,
+                "margem_costura_cm": float(largura_inicio),
+                "margem_costura_fim_cm": float(largura_fim),
+                "costura_fim_ativa": bool(usar_largura_fim),
             },
         }
 
     def _remover_costuras_do_alvo(self, canvas, molde_id: str) -> None:
-        canvas.cena.elementos = [
-            el for el in canvas.cena.elementos
-            if str(el.get("costura_de_molde_id") or "") != molde_id
-        ]
+        alvo_id = str(molde_id or "").strip()
+        if not alvo_id:
+            return
+
+        def eh_costura_do_alvo(el: dict) -> bool:
+            subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").strip()
+            if subtipo != "costura" and not el.get("costura_de_molde_id"):
+                return False
+            return (
+                str(el.get("costura_de_molde_id") or "").strip() == alvo_id
+                or str(el.get("molde_id") or "").strip() == alvo_id
+                or str(el.get("metadados", {}).get("costura_de_molde_id") or "").strip() == alvo_id
+            )
+
+        canvas.cena.elementos = [el for el in canvas.cena.elementos if not eh_costura_do_alvo(el)]
 
     def _indice_alvo(self, canvas, pos: QPointF) -> int | None:
         for idx in canvas._indices_elementos_em_ponto(pos):
@@ -730,7 +932,8 @@ class Ferramenta(FerramentaBase):
         subtipo = str(elemento.get("subtipo_audaces") or elemento.get("metadados", {}).get("subtipo_audaces") or "")
         if subtipo == "costura" or elemento.get("costura_de_molde_id"):
             return []
-        pontos = [(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+
+        pontos = self._pontos_base_para_costura(elemento)
         if len(pontos) < 3:
             return []
         if self._dist(pontos[0], pontos[-1]) > 1e-6:
@@ -738,6 +941,40 @@ class Ferramenta(FerramentaBase):
                 return []
             pontos.append(pontos[0])
         return pontos if len(pontos) >= 4 else []
+
+    def _pontos_base_para_costura(self, elemento: dict) -> list[tuple[float, float]]:
+        """Retorna os pontos usados pela costura na mesma ordem visual dos números do molde.
+
+        O canvas desenha os números do molde a partir de ``controle_cantos`` quando
+        esse campo existe. Se a ferramenta usa ``pontos`` em outra ordem, o usuário
+        clica numa borda vendo um número, mas a tabela/fluxo seleciona outra borda.
+        Para contornos simples, onde ``controle_cantos`` representa os mesmos cantos
+        do contorno, a costura deve seguir essa ordem numerada. Para moldes com
+        muitos pontos/curvas, mantemos ``pontos`` para não perder a geometria fina.
+        """
+        pontos: list[tuple[float, float]] = []
+        for item in elemento.get("pontos", []) or []:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    pontos.append((float(item[0]), float(item[1])))
+                except Exception:
+                    continue
+        if len(pontos) >= 2 and self._dist(pontos[0], pontos[-1]) <= 1e-6:
+            pontos_abertos = pontos[:-1]
+        else:
+            pontos_abertos = list(pontos)
+
+        controles: list[tuple[float, float]] = []
+        for item in elemento.get("controle_cantos", []) or []:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    controles.append((float(item[0]), float(item[1])))
+                except Exception:
+                    continue
+
+        if len(controles) >= 3 and (not pontos_abertos or len(controles) == len(pontos_abertos)):
+            return list(controles)
+        return pontos_abertos
 
     def _limpar_estado(self) -> None:
         self._preview = []
@@ -749,6 +986,7 @@ class Ferramenta(FerramentaBase):
         self._alvo_idx = None
         self._segmento_inicio = None
         self._segmentos_selecionados = set()
+        self._segmentos_ordem = []
         self._realce_segmentos = []
         self._direito_confirma_fechamento = False
 
@@ -764,6 +1002,87 @@ class Ferramenta(FerramentaBase):
         if total <= 0:
             return 0
         return (fim - inicio) % total
+
+    def _passo_horario(self, base: list[tuple[float, float]]) -> int:
+        """Retorna o avanço de índice que representa o sentido horário visual no canvas."""
+        if len(base) < 3:
+            return 1
+        # No canvas Qt, normalmente Y cresce para baixo. Nesse sistema, área positiva
+        # representa o contorno visualmente horário; área negativa representa anti-horário.
+        return 1 if self._area_assinada(base) >= 0.0 else -1
+
+    def _ordem_segmentos_horaria_visual(self, base: list[tuple[float, float]]) -> list[int]:
+        """Ordem visual horária dos segmentos, independente da ordem interna dos pontos.
+
+        No canvas Qt o eixo Y cresce para baixo. Ordenando o ângulo do ponto médio
+        do segmento em torno do centro do molde em sentido crescente, obtemos o
+        percurso visual horário: topo → direita → baixo → esquerda, ou o mesmo
+        ciclo iniciando em qualquer lado. Isso evita inverter quando o molde foi
+        criado começando por outro canto.
+        """
+        total = len(base)
+        if total <= 0:
+            return []
+        cx = sum(float(x) for x, _ in base) / total
+        cy = sum(float(y) for _, y in base) / total
+        itens: list[tuple[float, int]] = []
+        for seg_idx in range(total):
+            a = base[seg_idx]
+            b = base[(seg_idx + 1) % total]
+            mx = (float(a[0]) + float(b[0])) / 2.0
+            my = (float(a[1]) + float(b[1])) / 2.0
+            ang = atan2(my - cy, mx - cx)
+            if ang < 0.0:
+                ang += 2.0 * pi
+            itens.append((ang, seg_idx))
+        return [seg_idx for _ang, seg_idx in sorted(itens, key=lambda item: item[0])]
+
+    def _segmentos_horarios(self, base: list[tuple[float, float]], inicio: int, fim: int) -> list[int]:
+        total = len(base)
+        if total <= 0:
+            return []
+        inicio %= total
+        fim %= total
+        ciclo = self._ordem_segmentos_horaria_visual(base)
+        if inicio not in ciclo or fim not in ciclo:
+            return [inicio]
+        pos_inicio = ciclo.index(inicio)
+        pos_fim = ciclo.index(fim)
+        ordem = [inicio]
+        pos = pos_inicio
+        limite = total + 1
+        while pos != pos_fim and len(ordem) < limite:
+            pos = (pos + 1) % total
+            ordem.append(ciclo[pos])
+        return ordem
+
+    def _ordenar_segmentos_horario(self, base: list[tuple[float, float]], segmentos: set[int]) -> list[int]:
+        total = len(base)
+        if total <= 0 or not segmentos:
+            return []
+        segmentos_norm = {int(s) % total for s in segmentos}
+        ciclo = self._ordem_segmentos_horaria_visual(base)
+        return [seg_idx for seg_idx in ciclo if seg_idx in segmentos_norm] or sorted(segmentos_norm)
+
+    def _vertices_caminho_horario(
+        self,
+        base: list[tuple[float, float]],
+        ordem: list[int],
+    ) -> list[tuple[float, float]]:
+        total = len(base)
+        if total <= 0 or not ordem:
+            return []
+        passo = self._passo_horario(base)
+        ordem = [int(s) % total for s in ordem]
+        if passo >= 0:
+            vertices = [base[ordem[0]]]
+            for seg_idx in ordem:
+                vertices.append(base[(seg_idx + 1) % total])
+        else:
+            vertices = [base[(ordem[0] + 1) % total]]
+            for seg_idx in ordem:
+                vertices.append(base[seg_idx % total])
+        return vertices
 
     def _agrupar_segmentos(self, segmentos: set[int], total: int) -> list[list[int]]:
         if total <= 0 or not segmentos:
@@ -782,6 +1101,10 @@ class Ferramenta(FerramentaBase):
             grupos[0] = grupos[-1] + grupos[0]
             grupos.pop()
         return grupos
+
+    @staticmethod
+    def _acabamento_canto_reto(acabamento: str) -> bool:
+        return str(acabamento or "").strip().lower() in {"", "canto reto", "reto"}
 
     def _deduplicar_pontos(self, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
         saida: list[tuple[float, float]] = []
@@ -826,15 +1149,17 @@ class Ferramenta(FerramentaBase):
         for grupo in grupos:
             inicio = grupo[0]
             fim_vertice = (grupo[-1] + 1) % total
-            cap_ini = self._pontos_acabamento_extremidade(
-                base,
-                costura_total,
-                inicio,
-                grupo[0],
-                margem,
-                acabamento_inicial,
-                inicio=True,
-            )
+            cap_ini = []
+            if not self._acabamento_canto_reto(acabamento_inicial):
+                cap_ini = self._pontos_acabamento_extremidade(
+                    base,
+                    costura_total,
+                    inicio,
+                    grupo[0],
+                    margem,
+                    acabamento_inicial,
+                    inicio=True,
+                )
             for ponto in cap_ini:
                 if not saida or self._dist(saida[-1], ponto) > 1e-6:
                     saida.append(ponto)
@@ -844,21 +1169,280 @@ class Ferramenta(FerramentaBase):
                 prox = costura_total[(seg_idx + 1) % total]
                 if not saida or self._dist(saida[-1], prox) > 1e-6:
                     saida.append(prox)
-            cap_fim = self._pontos_acabamento_extremidade(
-                base,
-                costura_total,
-                fim_vertice,
-                grupo[-1],
-                margem,
-                acabamento_final,
-                inicio=False,
-            )
+            cap_fim = []
+            if not self._acabamento_canto_reto(acabamento_final):
+                cap_fim = self._pontos_acabamento_extremidade(
+                    base,
+                    costura_total,
+                    fim_vertice,
+                    grupo[-1],
+                    margem,
+                    acabamento_final,
+                    inicio=False,
+                )
             for ponto in cap_fim:
                 if not saida or self._dist(saida[-1], ponto) > 1e-6:
                     saida.append(ponto)
             if len(grupos) > 1:
                 saida.append(saida[-1])
         return saida
+
+    def _normal_externa_segmento(
+        self,
+        base: list[tuple[float, float]],
+        seg_idx: int,
+    ) -> tuple[float, float]:
+        total = len(base)
+        if total <= 0:
+            return 0.0, 0.0
+        a = base[seg_idx % total]
+        b = base[(seg_idx + 1) % total]
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        comp = sqrt((dx * dx) + (dy * dy))
+        if comp <= 1e-9:
+            return 0.0, 0.0
+        sentido = 1.0 if self._area_assinada(base) < 0.0 else -1.0
+        return sentido * (-dy / comp), sentido * (dx / comp)
+
+    def _linha_offset_constante_segmento(
+        self,
+        base: list[tuple[float, float]],
+        seg_idx: int,
+        margem: float,
+    ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        total = len(base)
+        if total < 2:
+            return None
+        seg_idx %= total
+        a = base[seg_idx]
+        b = base[(seg_idx + 1) % total]
+        nx, ny = self._normal_externa_segmento(base, seg_idx)
+        return (
+            (a[0] + (nx * margem), a[1] + (ny * margem)),
+            (b[0] + (nx * margem), b[1] + (ny * margem)),
+        )
+
+    def _ajustar_extremos_costura_variavel(
+        self,
+        base: list[tuple[float, float]],
+        ordem: list[int],
+        linhas: list[tuple[tuple[float, float], tuple[float, float]]],
+        costura: list[tuple[float, float]],
+        margem_inicio: float,
+        margem_fim: float,
+    ) -> None:
+        """Estende a costura parcial até encontrar as laterais deslocadas.
+
+        Para acabamento "Canto reto", o trecho de costura não deve voltar para
+        o ponto original do molde, mas também não pode parar exatamente em cima
+        do vértice original deslocado. Ele precisa chegar até a interseção com
+        a costura/lateral adjacente do molde. Esse é o pedaço que ficava
+        faltando no canto mostrado pelo usuário.
+        """
+        total = len(base)
+        if total < 3 or not ordem or not linhas or not costura:
+            return
+        if len(set(int(s) % total for s in ordem)) >= total:
+            return
+
+        passo = self._passo_horario(base)
+        primeiro = int(ordem[0]) % total
+        ultimo = int(ordem[-1]) % total
+        if passo >= 0:
+            anterior_inicio = (primeiro - 1) % total
+            proximo_fim = (ultimo + 1) % total
+        else:
+            anterior_inicio = (primeiro + 1) % total
+            proximo_fim = (ultimo - 1) % total
+
+        linha_inicio = self._linha_offset_constante_segmento(base, anterior_inicio, float(margem_inicio))
+        if linha_inicio is not None:
+            inter_inicio = self._intersecao_linhas(linha_inicio[0], linha_inicio[1], linhas[0][0], linhas[0][1])
+            if inter_inicio is not None:
+                costura[0] = (round(float(inter_inicio[0]), 6), round(float(inter_inicio[1]), 6))
+
+        linha_fim = self._linha_offset_constante_segmento(base, proximo_fim, float(margem_fim))
+        if linha_fim is not None:
+            inter_fim = self._intersecao_linhas(linhas[-1][0], linhas[-1][1], linha_fim[0], linha_fim[1])
+            if inter_fim is not None:
+                costura[-1] = (round(float(inter_fim[0]), 6), round(float(inter_fim[1]), 6))
+
+    def _gerar_costura_segmentos_variavel(
+        self,
+        pontos: list[tuple[float, float]],
+        ordem: list[int],
+        margem_inicio: float,
+        margem_fim: float,
+        acabamento_inicial: str = "Canto reto",
+        acabamento_final: str = "Canto reto",
+    ) -> list[tuple[float, float]]:
+        base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
+        total = len(base)
+        if total < 3 or not ordem:
+            return []
+
+        ordem_normalizada: list[int] = []
+        for seg_idx in ordem:
+            seg = int(seg_idx) % total
+            if not ordem_normalizada or ordem_normalizada[-1] != seg:
+                ordem_normalizada.append(seg)
+        if not ordem_normalizada:
+            return []
+
+        passo = self._passo_horario(base)
+        qtd = len(ordem_normalizada)
+        delta = float(margem_fim) - float(margem_inicio)
+        margens = [float(margem_inicio) + (delta * (i / max(1, qtd))) for i in range(qtd + 1)]
+
+        linhas: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for pos, seg_idx in enumerate(ordem_normalizada):
+            if passo >= 0:
+                a = base[seg_idx % total]
+                b = base[(seg_idx + 1) % total]
+            else:
+                a = base[(seg_idx + 1) % total]
+                b = base[seg_idx % total]
+            nx, ny = self._normal_externa_segmento(base, seg_idx)
+            m_ini = margens[pos]
+            m_fim = margens[pos + 1]
+            off_a = (a[0] + (nx * m_ini), a[1] + (ny * m_ini))
+            off_b = (b[0] + (nx * m_fim), b[1] + (ny * m_fim))
+            linhas.append((off_a, off_b))
+
+        if not linhas:
+            return []
+
+        selecao_total = len(set(int(s) % total for s in ordem_normalizada)) >= total
+
+        if selecao_total:
+            # Quando a costura pega todo o perímetro, ela precisa ser um contorno
+            # fechado. Mesmo com largura inicial/final diferente, o fechamento é
+            # feito pela interseção da última linha deslocada com a primeira,
+            # evitando pontas abertas e pequenos traços soltos nos cantos.
+            fechamento = self._intersecao_linhas(
+                linhas[-1][0],
+                linhas[-1][1],
+                linhas[0][0],
+                linhas[0][1],
+            )
+            if fechamento is None:
+                fechamento = linhas[0][0]
+            costura: list[tuple[float, float]] = [
+                (round(float(fechamento[0]), 6), round(float(fechamento[1]), 6))
+            ]
+            for i in range(1, len(linhas)):
+                anterior = linhas[i - 1]
+                atual = linhas[i]
+                inter = self._intersecao_linhas(anterior[0], anterior[1], atual[0], atual[1])
+                if inter is None:
+                    inter = anterior[1]
+                costura.append((round(float(inter[0]), 6), round(float(inter[1]), 6)))
+            costura.append(costura[0])
+            return self._deduplicar_pontos(costura)
+
+        costura: list[tuple[float, float]] = [linhas[0][0]]
+        for i in range(1, len(linhas)):
+            anterior = linhas[i - 1]
+            atual = linhas[i]
+            inter = self._intersecao_linhas(anterior[0], anterior[1], atual[0], atual[1])
+            if inter is None:
+                inter = anterior[1]
+            costura.append((round(float(inter[0]), 6), round(float(inter[1]), 6)))
+        costura.append(linhas[-1][1])
+
+        if self._acabamento_canto_reto(acabamento_inicial) and self._acabamento_canto_reto(acabamento_final):
+            self._ajustar_extremos_costura_variavel(
+                base,
+                ordem_normalizada,
+                linhas,
+                costura,
+                float(margem_inicio),
+                float(margem_fim),
+            )
+            return self._deduplicar_pontos(costura)
+
+        vertices = self._vertices_caminho_horario(base, ordem_normalizada)
+        if len(vertices) < 2:
+            return self._deduplicar_pontos(costura)
+
+        tang_ini = self._vetor_normalizado(vertices[0], vertices[1])
+        tang_fim = self._vetor_normalizado(vertices[-2], vertices[-1])
+        cap_ini = self._pontos_acabamento_livre(
+            vertices[0],
+            costura[0],
+            tang_ini,
+            float(margem_inicio),
+            acabamento_inicial,
+            inicio=True,
+        )
+        cap_fim = self._pontos_acabamento_livre(
+            vertices[-1],
+            costura[-1],
+            tang_fim,
+            float(margem_fim),
+            acabamento_final,
+            inicio=False,
+        )
+        return self._deduplicar_pontos(cap_ini + costura + cap_fim)
+
+    @staticmethod
+    def _vetor_normalizado(
+        a: tuple[float, float],
+        b: tuple[float, float],
+    ) -> tuple[float, float]:
+        dx = float(b[0]) - float(a[0])
+        dy = float(b[1]) - float(a[1])
+        comp = sqrt((dx * dx) + (dy * dy)) or 1.0
+        return dx / comp, dy / comp
+
+    def _pontos_acabamento_livre(
+        self,
+        base_pt: tuple[float, float],
+        off_pt: tuple[float, float],
+        tangente: tuple[float, float],
+        margem: float,
+        acabamento: str,
+        inicio: bool,
+    ) -> list[tuple[float, float]]:
+        tx, ty = tangente
+        if inicio:
+            tx = -tx
+            ty = -ty
+
+        nx = off_pt[0] - base_pt[0]
+        ny = off_pt[1] - base_pt[1]
+        ncomp = sqrt((nx * nx) + (ny * ny)) or max(1e-9, abs(float(margem)))
+        nx /= ncomp
+        ny /= ncomp
+        dist = abs(float(margem))
+        nome = str(acabamento or "Canto reto").strip().lower()
+
+        def p(dx_t: float, dx_n: float) -> tuple[float, float]:
+            return (
+                round(base_pt[0] + (tx * dx_t) + (nx * dx_n), 6),
+                round(base_pt[1] + (ty * dx_t) + (ny * dx_n), 6),
+            )
+
+        if "45" in nome:
+            pontos = [base_pt, p(dist, dist)]
+        elif "90" in nome:
+            pontos = [base_pt, p(dist, 0.0), p(dist, dist)]
+        elif "degrau" in nome:
+            pontos = [base_pt, p(dist * 0.55, 0.0), p(dist * 0.55, dist), off_pt]
+        elif "fechado" in nome:
+            pontos = [base_pt, p(dist * 0.75, dist), off_pt]
+        elif "aberto" in nome:
+            pontos = [base_pt, p(dist * 0.75, 0.0), off_pt]
+        else:
+            # Canto reto na costura é somente a borda deslocada.
+            # Não fecha de volta no ponto original do molde, porque isso cria
+            # o "canto" que aparece nas imagens do usuário.
+            pontos = [off_pt]
+
+        if not inicio:
+            pontos = list(reversed(pontos))
+        return [(round(float(x), 6), round(float(y), 6)) for x, y in pontos]
 
     def _pontos_acabamento_extremidade(
         self,
@@ -1020,10 +1604,13 @@ class Ferramenta(FerramentaBase):
 
     def _mensagem_pronta(self) -> str:
         return (
-            f"Costura pronta: margem {self._fmt(self._margem_cm)} cm. "
-            "Passe o mouse para prever, clique aplica. +/- ajusta, Enter aplica na selecao."
+            f"Costura pronta: largura inicial {self._fmt(self._margem_cm)} cm. "
+            "Passe o mouse para prever, clique aplica. +/- ajusta, Enter aplica na seleção."
         )
 
     @staticmethod
     def _fmt(valor: float) -> str:
-        return f"{valor:.2f}".rstrip("0").rstrip(".")
+        texto = f"{float(valor):.2f}".rstrip("0").rstrip(".")
+        if texto == "-0":
+            texto = "0"
+        return texto.replace(".", ",")
