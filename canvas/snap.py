@@ -59,8 +59,14 @@ class SnapManager:
         return candidatos_validos
 
     def _elemento_curva_suave(self, elemento: dict) -> bool:
-        tipo_curva = str(elemento.get("tipo_curva") or "").lower()
-        return bool(elemento.get("curva_suave") or tipo_curva == "parabola_3p" or tipo_curva.startswith("spline"))
+        tipo_curva = str(elemento.get("tipo_curva") or "").strip().lower()
+        return bool(
+            elemento.get("curva_suave")
+            or elemento.get("curva_editavel")
+            or elemento.get("pontos_tracado_real")
+            or tipo_curva == "parabola_3p"
+            or tipo_curva.startswith("spline")
+        )
 
     def _amostrar_curva_suave(self, pontos: list[QPointF], amostras_por_trecho: int = 18) -> list[QPointF]:
         if len(pontos) < 3:
@@ -90,6 +96,71 @@ class SnapManager:
             saida.append(QPointF(pts[-1]))
         return saida
 
+    def _pontos_polyline(self, elemento: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for item in elemento.get("pontos", []) or []:
+            pt = self._ponto_serializado(item)
+            if pt is not None:
+                pontos.append(pt)
+        return pontos
+
+    def _ponto_serializado(self, item) -> QPointF | None:
+        try:
+            if isinstance(item, dict):
+                return QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0)))
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                return QPointF(float(item[0]), float(item[1]))
+        except Exception:
+            return None
+        return None
+
+    def _controles_oficiais_elemento(self, elemento: dict) -> list[QPointF]:
+        # Moldes: controles oficiais, não a amostra renderizada.
+        if elemento.get("molde"):
+            controles = self._pontos_controle_serializados(elemento.get("controle_cantos", []))
+            controles.extend(self._pontos_controle_serializados(elemento.get("controle_auxiliares", [])))
+            return controles
+        tipo_curva = str(elemento.get("tipo_curva") or "").strip().lower()
+        if tipo_curva == "parabola_3p" or elemento.get("pontos_tracado_real") or elemento.get("curva_editavel"):
+            for chave in ("pontos_principais", "pontos_controle_curva", "pontos_controle_principais", "pontos_controle", "controle_pontos"):
+                controles = self._pontos_controle_serializados(elemento.get(chave, []))
+                if len(controles) >= 2:
+                    return controles
+        return []
+
+    def _amostrar_parabola_3p(self, controles: list[QPointF], segmentos: int = 48) -> list[QPointF]:
+        if len(controles) != 3:
+            return []
+        p0, p_meio, p2 = controles
+        # Controle Bézier quadrático que passa pelo ponto intermediário em t=0.5.
+        cx = (2.0 * p_meio.x()) - (0.5 * p0.x()) - (0.5 * p2.x())
+        cy = (2.0 * p_meio.y()) - (0.5 * p0.y()) - (0.5 * p2.y())
+        pc = QPointF(cx, cy)
+        saida: list[QPointF] = []
+        n = max(8, int(segmentos))
+        for i in range(n + 1):
+            t = i / float(n)
+            u = 1.0 - t
+            saida.append(QPointF(
+                (u * u * p0.x()) + (2.0 * u * t * pc.x()) + (t * t * p2.x()),
+                (u * u * p0.y()) + (2.0 * u * t * pc.y()) + (t * t * p2.y()),
+            ))
+        return saida
+
+    def _pontos_borda_elemento(self, elemento: dict) -> list[QPointF]:
+        pontos = self._pontos_polyline(elemento)
+        tipo_curva = str(elemento.get("tipo_curva") or "").strip().lower()
+        controles = self._controles_oficiais_elemento(elemento)
+        if tipo_curva == "parabola_3p" and len(controles) == 3:
+            return self._amostrar_parabola_3p(controles)
+        # Se já existe traçado real/renderizado, ele é a borda para snap de borda/interseção.
+        if elemento.get("pontos_tracado_real") and len(pontos) >= 2:
+            return pontos
+        if self._elemento_curva_suave(elemento):
+            base = controles if len(controles) >= 2 else pontos
+            return self._amostrar_curva_suave(base) if len(base) >= 3 else base
+        return pontos
+
     def _candidato_grade(self, cursor: QPointF, tolerancia_cena: float, candidatos: list[SnapResult]):
         if not self.snap_grade:
             return
@@ -109,10 +180,12 @@ class SnapManager:
         tolerancia_cena: float,
         candidatos: list[SnapResult],
     ):
-        pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        pontos = self._pontos_polyline(elemento)
         controles_principais = self._pontos_controle_serializados(elemento.get("controle_cantos", []) or elemento.get("pontos_controle_principais", []))
         controles_auxiliares = self._pontos_controle_serializados(elemento.get("controle_auxiliares", []) or elemento.get("pontos_auxiliares", []))
-        pontos_bbox = pontos + controles_principais + controles_auxiliares
+        controles_oficiais = self._controles_oficiais_elemento(elemento)
+        pontos_borda = self._pontos_borda_elemento(elemento)
+        pontos_bbox = pontos_borda + pontos + controles_principais + controles_auxiliares + controles_oficiais
         if not pontos_bbox:
             return
         xs = [p.x() for p in pontos_bbox]
@@ -125,11 +198,20 @@ class SnapManager:
             candidatos.append(SnapResult(ponto=ponto, tipo="controle principal", distancia=self._dist(cursor, ponto), elemento_idx=idx))
         for ponto in controles_auxiliares:
             candidatos.append(SnapResult(ponto=ponto, tipo="controle auxiliar", distancia=self._dist(cursor, ponto), elemento_idx=idx))
-        # Nós reais/controladores: poucos pontos principais da curva.
-        for ponto in pontos:
-            candidatos.append(SnapResult(ponto=ponto, tipo="nó", distancia=self._dist(cursor, ponto), elemento_idx=idx))
 
-        pontos_borda = self._amostrar_curva_suave(pontos) if self._elemento_curva_suave(elemento) else pontos
+        # Em curva/moldes com controles oficiais, os nós de snap são os controles,
+        # nunca todos os pontos de amostra/renderização.
+        if controles_oficiais:
+            vistos = {(round(p.x(), 7), round(p.y(), 7)) for p in controles_principais + controles_auxiliares}
+            for ponto in controles_oficiais:
+                assinatura = (round(ponto.x(), 7), round(ponto.y(), 7))
+                if assinatura in vistos:
+                    continue
+                candidatos.append(SnapResult(ponto=ponto, tipo="nó", distancia=self._dist(cursor, ponto), elemento_idx=idx))
+        else:
+            for ponto in pontos:
+                candidatos.append(SnapResult(ponto=ponto, tipo="nó", distancia=self._dist(cursor, ponto), elemento_idx=idx))
+
         for inicio, fim in zip(pontos_borda, pontos_borda[1:]):
             meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
             candidatos.append(SnapResult(ponto=meio, tipo="ponto médio", distancia=self._dist(cursor, meio), elemento_idx=idx))
@@ -159,11 +241,9 @@ class SnapManager:
         candidatos.append(SnapResult(ponto=ponto, tipo="centro", distancia=self._dist(cursor, ponto), elemento_idx=idx))
 
     def _segmentos_polyline(self, idx: int, elemento: dict) -> list[tuple[int, QPointF, QPointF]]:
-        pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+        pontos = self._pontos_borda_elemento(elemento)
         if len(pontos) < 2:
             return []
-        if self._elemento_curva_suave(elemento):
-            pontos = self._amostrar_curva_suave(pontos)
         return [(idx, inicio, fim) for inicio, fim in zip(pontos, pontos[1:])]
 
     def _candidatos_interseccoes(
