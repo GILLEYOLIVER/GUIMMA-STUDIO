@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from core.geometry.engine import point_segment_distance
+from core.geometry.engine import point_segment_distance, sample_quadratic_bezier_through_point
 from tools.tool_base import FerramentaBase
 
 try:
@@ -555,11 +555,29 @@ class Ferramenta(FerramentaBase):
         controles = [(float(p.x()), float(p.y())) for p in pontos]
         quantidade = len(pontos)
 
+        tipo_curva = str(el.get("tipo_curva") or "").lower()
         if quantidade == 2 or not curva:
             desenho = list(controles)
             el["curva"] = False
             el["suave"] = False
             el["tipo_linha"] = "reta"
+        elif tipo_curva == "parabola_3p" and quantidade == 3:
+            p0, pmedio, p2 = pontos
+            desenho = sample_quadratic_bezier_through_point(
+                (float(p0.x()), float(p0.y())),
+                (float(pmedio.x()), float(pmedio.y())),
+                (float(p2.x()), float(p2.y())),
+                self._amostras_desenho(quantidade),
+            )
+            el["curva"] = True
+            el["suave"] = True
+            el["curva_suave"] = True
+            el["curva_editavel"] = True
+            el["pontos_tracado_real"] = True
+            el["renderizacao"] = "polyline"
+            el["tipo_curva"] = "parabola_3p"
+            el["tipo_linha"] = "curva"
+            el["subtipo"] = el.get("subtipo") or "curva"
         else:
             desenho = [(float(p.x()), float(p.y())) for p in self._amostrar_curva_suave(pontos, self._amostras_desenho(quantidade))]
             el["curva"] = True

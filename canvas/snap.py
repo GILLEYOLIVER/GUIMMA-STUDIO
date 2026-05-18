@@ -59,7 +59,8 @@ class SnapManager:
         return candidatos_validos
 
     def _elemento_curva_suave(self, elemento: dict) -> bool:
-        return bool(elemento.get("curva_suave") or str(elemento.get("tipo_curva") or "").startswith("spline"))
+        tipo_curva = str(elemento.get("tipo_curva") or "").lower()
+        return bool(elemento.get("curva_suave") or tipo_curva == "parabola_3p" or tipo_curva.startswith("spline"))
 
     def _amostrar_curva_suave(self, pontos: list[QPointF], amostras_por_trecho: int = 18) -> list[QPointF]:
         if len(pontos) < 3:
