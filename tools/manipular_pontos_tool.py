@@ -528,31 +528,47 @@ class Ferramenta(FerramentaBase):
         b = (u - ti) / h
         return a * yi + b * yj + (((a ** 3) - a) * mi + ((b ** 3) - b) * mj) * (h * h) / 6.0
 
-    def _gerar_tracado_curva_real(self, controles: list[QPointF]) -> list[tuple[float, float]]:
+    def _gerar_tracado_curva_real(self, controles: list[QPointF], fechado: bool = False) -> list[tuple[float, float]]:
         controles = [QPointF(p) for p in controles]
         if len(controles) <= 1:
             return [(p.x(), p.y()) for p in controles]
         if len(controles) == 2:
             return [(controles[0].x(), controles[0].y()), (controles[1].x(), controles[1].y())]
-        t = [0.0]
-        for i in range(1, len(controles)):
-            t.append(t[-1] + max(self._dist_pontos_local(controles[i - 1], controles[i]), 1e-6))
-        xs = [p.x() for p in controles]
-        ys = [p.y() for p in controles]
-        mx = self._resolver_segundas_derivadas_local(xs, t)
-        my = self._resolver_segundas_derivadas_local(ys, t)
+
         saida: list[QPointF] = []
-        for i in range(len(controles) - 1):
+        total = len(controles)
+        limite = total if fechado else total - 1
+        for i in range(limite):
+            p0 = controles[(i - 1) % total] if fechado or i > 0 else controles[i]
+            p1 = controles[i]
+            p2 = controles[(i + 1) % total]
+            p3 = controles[(i + 2) % total] if fechado or i + 2 < total else p2
             if i == 0:
-                saida.append(QPointF(controles[i]))
-            dist = t[i + 1] - t[i]
-            amostras = max(12, min(34, int(dist * 0.16) + 12))
+                saida.append(QPointF(p1))
+            dist = self._dist_pontos_local(p1, p2)
+            amostras = max(8, min(22, int(dist * 0.10) + 8))
             for s in range(1, amostras + 1):
-                u = t[i] + ((t[i + 1] - t[i]) * (s / float(amostras)))
-                x = self._avaliar_spline_local(t[i], t[i + 1], xs[i], xs[i + 1], mx[i], mx[i + 1], u)
-                y = self._avaliar_spline_local(t[i], t[i + 1], ys[i], ys[i + 1], my[i], my[i + 1], u)
-                saida.append(QPointF(x, y))
+                saida.append(self._catmull_rom(p0, p1, p2, p3, s / float(amostras)))
+        if fechado and saida:
+            saida[-1] = QPointF(saida[0])
         return [(float(p.x()), float(p.y())) for p in saida]
+
+    def _catmull_rom(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
+        t2 = t * t
+        t3 = t2 * t
+        x = 0.5 * (
+            (2.0 * p1.x())
+            + (-p0.x() + p2.x()) * t
+            + (2.0 * p0.x() - 5.0 * p1.x() + 4.0 * p2.x() - p3.x()) * t2
+            + (-p0.x() + 3.0 * p1.x() - 3.0 * p2.x() + p3.x()) * t3
+        )
+        y = 0.5 * (
+            (2.0 * p1.y())
+            + (-p0.y() + p2.y()) * t
+            + (2.0 * p0.y() - 5.0 * p1.y() + 4.0 * p2.y() - p3.y()) * t2
+            + (-p0.y() + 3.0 * p1.y() - 3.0 * p2.y() + p3.y()) * t3
+        )
+        return QPointF(x, y)
 
     def _salvar_controles_curva_real(self, el: dict, controles: list[QPointF]) -> None:
         lista = [(float(p.x()), float(p.y())) for p in controles]
@@ -564,7 +580,7 @@ class Ferramenta(FerramentaBase):
         el["curva_suave"] = True
         el["pontos_tracado_real"] = True
         el["renderizacao"] = "polyline"
-        el["tipo_curva"] = el.get("tipo_curva") or "spline_natural"
+        el["tipo_curva"] = el.get("tipo_curva") or "spline_catmull_rom"
 
     def _pontos_controle_curva(self, el: dict) -> list[QPointF]:
         """Retorna somente os pontos principais/controláveis da curva."""
@@ -637,7 +653,11 @@ class Ferramenta(FerramentaBase):
             try:
                 painter.setBrush(Qt.NoBrush)
                 esp = max(1.8, float(el.get("espessura", 1.0)) + 0.8)
-                if hasattr(canvas, "_desenhar_curva_suave_por_pontos"):
+                if el.get("pontos_tracado_real"):
+                    canvas._desenhar_polilinha(
+                        painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid", amplitude=1.0
+                    )
+                elif hasattr(canvas, "_desenhar_curva_suave_por_pontos"):
                     canvas._desenhar_curva_suave_por_pontos(
                         painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid"
                     )
@@ -895,7 +915,7 @@ class Ferramenta(FerramentaBase):
                 return
             controles[p_idx] = QPointF(pos)
             self._salvar_controles_curva_real(el, controles)
-            el["pontos"] = self._gerar_tracado_curva_real(controles)
+            el["pontos"] = self._gerar_tracado_curva_real(controles, fechado=bool(el.get("fechado")))
             return
 
         pontos = list(el.get("pontos", []))

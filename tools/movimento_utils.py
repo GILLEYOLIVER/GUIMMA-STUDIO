@@ -8,7 +8,11 @@ CHAVES_LISTAS_PONTOS = (
     "marcacoes_no_perimetro",
     "distancias_no_perimetro",
     "marcacoes_perimetro",
+    "pontos_principais",
+    "pontos_controle_curva",
     "pontos_controle_principais",
+    "pontos_controle",
+    "controle_pontos",
     "pontos_auxiliares",
 )
 
