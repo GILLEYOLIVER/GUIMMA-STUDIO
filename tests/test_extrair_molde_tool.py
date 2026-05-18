@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from importlib.util import find_spec
+from math import cos, pi, sin
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -56,6 +57,27 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertIn((5.0, 4.0), auxiliares)
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(len(auxiliares), 4)
+
+    def test_contorno_arredondado_recebe_mais_controles_principais(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (10.0 + cos((2.0 * pi * i) / 48.0) * 5.0, 8.0 + sin((2.0 * pi * i) / 48.0) * 4.4)
+            for i in range(48)
+        ]
+        molde = {"tipo": "molde", "pontos": [*pontos, pontos[0]]}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertGreaterEqual(len(molde["controle_cantos"]), 8)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
+
+    def test_trecho_curvo_longo_recebe_multiplos_auxiliares(self):
+        ferramenta = FerramentaExtrairMolde()
+        trecho = [(float(x), (float(x) - 5.0) ** 2 * 0.18) for x in range(11)]
+
+        auxiliares = ferramenta._auxiliares_para_trecho_curvo(trecho)
+
+        self.assertGreaterEqual(len(auxiliares), 3)
 
 
 if __name__ == "__main__":

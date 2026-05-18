@@ -1824,7 +1824,7 @@ class VisualizacaoCanvas(QWidget):
             if idx in getattr(self, "_piscando_ponto_restauracao_indices", set()) and getattr(self, "_piscando_ponto_restauracao_visivel", False):
                 self._desenhar_piscar_ponto_restauracao(painter, base)
 
-            if idx in self._selecionados:
+            if idx in self._selecionados and self.ferramenta_ativa != "manipular_pontos":
                 self._desenhar_selecao_molde(painter, base, el)
 
             self._desenhar_margens_molde_canvas(painter, el, base)
