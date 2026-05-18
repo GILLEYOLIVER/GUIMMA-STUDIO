@@ -141,6 +141,40 @@ class Ferramenta(FerramentaBase):
         except Exception:
             return False
 
+    def _elemento_curva_suave(self, elemento: dict) -> bool:
+        if not isinstance(elemento, dict):
+            return False
+        return bool(
+            elemento.get("curva_suave")
+            or elemento.get("suavizar")
+            or str(elemento.get("tipo_curva") or "").lower().startswith("spline")
+            or str(elemento.get("renderizacao") or "").lower() == "curva_suave"
+        )
+
+    def _sincronizar_curva_suave(self, el: dict) -> None:
+        # Curva com traçado real: manter somente os controles como controles.
+        if self._curva_tracado_real(el):
+            controles = self._pontos_controle_curva(el)
+            if len(controles) >= 2:
+                self._salvar_controles_curva_real(el, controles)
+            return
+        if not self._elemento_curva_suave(el):
+            return
+        pontos = list(el.get("pontos") or [])
+        normalizados: list[tuple[float, float]] = []
+        for item in pontos:
+            pt = self._ponto_qt(item)
+            if pt is not None:
+                normalizados.append((pt.x(), pt.y()))
+        if len(normalizados) < 2:
+            return
+        el["pontos"] = list(normalizados)
+        el["pontos_controle_curva"] = list(normalizados)
+        el["pontos_principais"] = list(normalizados)
+        el["curva_suave"] = True
+        el["tipo_curva"] = str(el.get("tipo_curva") or "spline_np_controle")
+        el["renderizacao"] = "curva_suave"
+
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
@@ -266,6 +300,7 @@ class Ferramenta(FerramentaBase):
         if fechado and len(pontos) >= 2:
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
+        self._sincronizar_curva_suave(el)
         if el.get("molde"):
             for antigo, novo in zip(pontos_anteriores, pontos):
                 anterior_pt = QPointF(float(antigo[0]), float(antigo[1]))
@@ -341,6 +376,7 @@ class Ferramenta(FerramentaBase):
         if fechado and len(novos) >= 2:
             novos[-1] = novos[0]
         el["pontos"] = novos
+        self._sincronizar_curva_suave(el)
         return True
 
     def _indices_intervalo(self, a: int, b: int, n: int, fechado: bool) -> list[int]:
@@ -438,12 +474,200 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_paint_overlay(self, canvas, painter):
+        self._desenhar_linha_curva_selecionada(canvas, painter)
+        self._desenhar_pontos_controle_curvas_visiveis(canvas, painter)
         self._desenhar_molde_em_manipulacao(canvas, painter)
         self._desenhar_controles_molde_hover(canvas, painter)
         self._desenhar_guia(canvas, painter)
         self._desenhar_hover(canvas, painter)
         self._desenhar_hover_dobra_pontilhada(canvas, painter)
-        self._desenhar_angulo(canvas, painter)
+
+    def _curva_tracado_real(self, el: dict) -> bool:
+        return isinstance(el, dict) and bool(
+            el.get("pontos_tracado_real")
+            or el.get("curva_editavel")
+            or el.get("pontos_principais")
+            or el.get("pontos_controle_curva")
+        )
+
+    def _dist_pontos_local(self, a: QPointF, b: QPointF) -> float:
+        dx = a.x() - b.x()
+        dy = a.y() - b.y()
+        return (dx * dx + dy * dy) ** 0.5
+
+    def _resolver_segundas_derivadas_local(self, valores: list[float], t: list[float]) -> list[float]:
+        n = len(valores)
+        if n <= 2:
+            return [0.0] * n
+        m = n - 2
+        a = [0.0] * m
+        b = [0.0] * m
+        c = [0.0] * m
+        d = [0.0] * m
+        for j in range(m):
+            i = j + 1
+            h0 = max(t[i] - t[i - 1], 1e-9)
+            h1 = max(t[i + 1] - t[i], 1e-9)
+            a[j] = h0
+            b[j] = 2.0 * (h0 + h1)
+            c[j] = h1
+            d[j] = 6.0 * (((valores[i + 1] - valores[i]) / h1) - ((valores[i] - valores[i - 1]) / h0))
+        for i in range(1, m):
+            w = a[i] / b[i - 1]
+            b[i] -= w * c[i - 1]
+            d[i] -= w * d[i - 1]
+        internos = [0.0] * m
+        internos[-1] = d[-1] / b[-1]
+        for i in range(m - 2, -1, -1):
+            internos[i] = (d[i] - c[i] * internos[i + 1]) / b[i]
+        return [0.0] + internos + [0.0]
+
+    def _avaliar_spline_local(self, ti: float, tj: float, yi: float, yj: float, mi: float, mj: float, u: float) -> float:
+        h = max(tj - ti, 1e-9)
+        a = (tj - u) / h
+        b = (u - ti) / h
+        return a * yi + b * yj + (((a ** 3) - a) * mi + ((b ** 3) - b) * mj) * (h * h) / 6.0
+
+    def _gerar_tracado_curva_real(self, controles: list[QPointF]) -> list[tuple[float, float]]:
+        controles = [QPointF(p) for p in controles]
+        if len(controles) <= 1:
+            return [(p.x(), p.y()) for p in controles]
+        if len(controles) == 2:
+            return [(controles[0].x(), controles[0].y()), (controles[1].x(), controles[1].y())]
+        t = [0.0]
+        for i in range(1, len(controles)):
+            t.append(t[-1] + max(self._dist_pontos_local(controles[i - 1], controles[i]), 1e-6))
+        xs = [p.x() for p in controles]
+        ys = [p.y() for p in controles]
+        mx = self._resolver_segundas_derivadas_local(xs, t)
+        my = self._resolver_segundas_derivadas_local(ys, t)
+        saida: list[QPointF] = []
+        for i in range(len(controles) - 1):
+            if i == 0:
+                saida.append(QPointF(controles[i]))
+            dist = t[i + 1] - t[i]
+            amostras = max(12, min(34, int(dist * 0.16) + 12))
+            for s in range(1, amostras + 1):
+                u = t[i] + ((t[i + 1] - t[i]) * (s / float(amostras)))
+                x = self._avaliar_spline_local(t[i], t[i + 1], xs[i], xs[i + 1], mx[i], mx[i + 1], u)
+                y = self._avaliar_spline_local(t[i], t[i + 1], ys[i], ys[i + 1], my[i], my[i + 1], u)
+                saida.append(QPointF(x, y))
+        return [(float(p.x()), float(p.y())) for p in saida]
+
+    def _salvar_controles_curva_real(self, el: dict, controles: list[QPointF]) -> None:
+        lista = [(float(p.x()), float(p.y())) for p in controles]
+        el["pontos_principais"] = list(lista)
+        el["pontos_controle_curva"] = list(lista)
+        el["pontos_controle_principais"] = list(lista)
+        el["pontos_controle"] = list(lista)
+        el["curva_editavel"] = True
+        el["curva_suave"] = True
+        el["pontos_tracado_real"] = True
+        el["renderizacao"] = "polyline"
+        el["tipo_curva"] = el.get("tipo_curva") or "spline_natural"
+
+    def _pontos_controle_curva(self, el: dict) -> list[QPointF]:
+        """Retorna somente os pontos principais/controláveis da curva."""
+        origem = el.get("pontos_principais") or el.get("pontos_controle_curva") or el.get("pontos") or []
+        pontos: list[QPointF] = []
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            pt = self._ponto_qt(item)
+            if pt is None:
+                continue
+            if not pontos:
+                pontos.append(QPointF(pt))
+                continue
+            dx = pt.x() - pontos[-1].x()
+            dy = pt.y() - pontos[-1].y()
+            if ((dx * dx) + (dy * dy)) > 1e-9:
+                pontos.append(QPointF(pt))
+        return pontos
+
+    def _indice_ponto_controle_para_ponto_real(self, canvas, el: dict, controle_idx: int) -> int | None:
+        """Converte o ponto de controle visível para o índice real em el["pontos"]."""
+        if self._curva_tracado_real(el):
+            return controle_idx
+        pontos = list(el.get("pontos", []) or [])
+        controles = self._pontos_controle_curva(el)
+        if not (0 <= controle_idx < len(controles)):
+            return None
+        alvo = controles[controle_idx]
+        melhor_idx = None
+        melhor_dist = float("inf")
+        for i, item in enumerate(pontos):
+            pt = self._ponto_qt(item)
+            if pt is None:
+                continue
+            dist = canvas._dist(pt, alvo)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_idx = i
+        return melhor_idx
+
+    def _indices_curvas_para_mostrar(self, canvas) -> set[int]:
+        indices: set[int] = set()
+        for idx in getattr(canvas, "_selecionados", set()) or set():
+            if 0 <= int(idx) < len(canvas.cena.elementos):
+                indices.add(int(idx))
+        if self._hover_elemento_idx is not None:
+            indices.add(int(self._hover_elemento_idx))
+        if self._hover_ponto_poly is not None:
+            indices.add(int(self._hover_ponto_poly[0]))
+        if self._ponto_selecionado is not None:
+            indices.add(int(self._ponto_selecionado[0]))
+        if self._arrastando_ponto_poly is not None:
+            indices.add(int(self._arrastando_ponto_poly[0]))
+        return indices
+
+    def _desenhar_linha_curva_selecionada(self, canvas, painter) -> None:
+        """Realça a curva em azul quando ela está em hover/selecionada/manipulação."""
+        for idx in sorted(self._indices_curvas_para_mostrar(canvas)):
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") != "polyline" or not self._elemento_curva_suave(el):
+                continue
+            pontos = [self._ponto_qt(p) for p in (el.get("pontos", []) or [])]
+            pontos = [p for p in pontos if p is not None]
+            if len(pontos) < 2:
+                continue
+            painter.save()
+            try:
+                painter.setBrush(Qt.NoBrush)
+                esp = max(1.8, float(el.get("espessura", 1.0)) + 0.8)
+                if hasattr(canvas, "_desenhar_curva_suave_por_pontos"):
+                    canvas._desenhar_curva_suave_por_pontos(
+                        painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid"
+                    )
+                else:
+                    canvas._desenhar_polilinha(
+                        painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid", amplitude=1.0
+                    )
+            finally:
+                painter.restore()
+
+    def _desenhar_pontos_controle_curvas_visiveis(self, canvas, painter) -> None:
+        """Mostra os pontos de controle principais em vermelho para poder mover."""
+        for idx in sorted(self._indices_curvas_para_mostrar(canvas)):
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            if el.get("tipo") != "polyline" or not self._elemento_curva_suave(el):
+                continue
+            controles = self._pontos_controle_curva(el)
+            if not controles:
+                continue
+            painter.save()
+            try:
+                painter.setPen(QPen(QColor("#ff2f5f"), 1.2))
+                painter.setBrush(QColor("#ff2f5f"))
+                for pt_cena in controles:
+                    pt = canvas._cena_para_tela(pt_cena)
+                    painter.drawRect(int(pt.x() - 4), int(pt.y() - 4), 8, 8)
+            finally:
+                painter.restore()
 
     def _dobra_pontilhada_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
@@ -531,7 +755,7 @@ class Ferramenta(FerramentaBase):
         painter.drawEllipse(int(tela.x() - 11), int(tela.y() - 11), 22, 22)
 
     def _ponto_polilinha_em_ponto(self, canvas, ponto: QPointF) -> tuple[int, int] | None:
-        tolerancia = 8.0 / max(canvas.zoom, 0.001)
+        tolerancia = 10.0 / max(canvas.zoom, 0.001)
         candidatos = sorted(canvas._selecionados) if canvas._selecionados else list(range(len(canvas.cena.elementos)))
         for idx in candidatos:
             if idx < 0 or idx >= len(canvas.cena.elementos):
@@ -539,6 +763,17 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
+
+            # Curva suave: só os pontos principais/controláveis aparecem e podem ser pegos.
+            if self._elemento_curva_suave(el):
+                controles = self._pontos_controle_curva(el)
+                for controle_idx, controle in enumerate(controles):
+                    if canvas._dist(controle, ponto) <= tolerancia:
+                        p_real = self._indice_ponto_controle_para_ponto_real(canvas, el, controle_idx)
+                        if p_real is not None:
+                            return idx, p_real
+                continue
+
             pontos = el.get("pontos", [])
             if el.get("molde"):
                 indices_permitidos = self._indices_pontos_principais_molde(canvas, el)
@@ -641,13 +876,28 @@ class Ferramenta(FerramentaBase):
 
     def _gerar_guia(self, canvas, idx: int, p_idx: int):
         el = canvas.cena.elementos[idx]
-        pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if self._curva_tracado_real(el):
+            pontos = self._pontos_controle_curva(el)
+        else:
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        if not (0 <= p_idx < len(pontos)):
+            return None
         anterior = pontos[p_idx - 1] if p_idx > 0 else None
         proximo = pontos[p_idx + 1] if p_idx + 1 < len(pontos) else None
         return QPointF(pontos[p_idx]), anterior, proximo
 
     def _atualizar_ponto(self, canvas, idx: int, p_idx: int, pos: QPointF):
         el = canvas.cena.elementos[idx]
+
+        if self._curva_tracado_real(el):
+            controles = self._pontos_controle_curva(el)
+            if not (0 <= p_idx < len(controles)):
+                return
+            controles[p_idx] = QPointF(pos)
+            self._salvar_controles_curva_real(el, controles)
+            el["pontos"] = self._gerar_tracado_curva_real(controles)
+            return
+
         pontos = list(el.get("pontos", []))
         if not (0 <= p_idx < len(pontos)):
             return
@@ -662,6 +912,7 @@ class Ferramenta(FerramentaBase):
                 elif p_idx == len(pontos) - 1:
                     pontos[0] = pontos[-1]
         el["pontos"] = pontos
+        self._sincronizar_curva_suave(el)
         if el.get("molde"):
             self._mover_controles_correspondentes(canvas, el, anterior, pos)
             self._reajustar_fio_no_molde(el)
@@ -932,6 +1183,7 @@ class Ferramenta(FerramentaBase):
         if fechado and len(novos) >= 2:
             novos[-1] = novos[0]
         el["pontos"] = novos
+        self._sincronizar_curva_suave(el)
         return True
 
     def _recravar_auxiliares_no_perimetro(self, el: dict) -> None:
@@ -1046,7 +1298,7 @@ class Ferramenta(FerramentaBase):
         if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
-        if not el.get("molde") or el.get("tipo") != "polyline":
+        if el.get("tipo") != "polyline":
             return
         pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
         if len(pontos) < 2:
@@ -1055,7 +1307,10 @@ class Ferramenta(FerramentaBase):
         painter.setBrush(Qt.NoBrush)
         cor = "#2da8ff"
         esp = max(1.6, float(el.get("espessura", 1.0)) + 0.7)
-        canvas._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp, estilo="solid", amplitude=1.0)
+        if self._elemento_curva_suave(el) and hasattr(canvas, "_desenhar_curva_suave_por_pontos"):
+            canvas._desenhar_curva_suave_por_pontos(painter, pontos, cor=cor, espessura=esp, estilo="solid")
+        else:
+            canvas._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp, estilo="solid", amplitude=1.0)
         painter.restore()
 
     def _desenhar_hover(self, canvas, painter):

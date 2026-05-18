@@ -1580,6 +1580,9 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
+                if self._elemento_curva_suave(elemento):
+                    self._desenhar_curva_suave_elemento(painter, elemento, cor=cor, espessura=esp, estilo=estilo)
+                    continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
                                          estilo=estilo,
                                          amplitude=float(elemento.get("amplitude", 1.0)),
@@ -2712,6 +2715,98 @@ class VisualizacaoCanvas(QWidget):
         if not cor.isValid():
             cor = QColor("#d0d0d0")
         return cor.lighter(135).name()
+
+    def _elemento_curva_suave(self, elemento: dict) -> bool:
+        if not isinstance(elemento, dict):
+            return False
+        return bool(
+            elemento.get("curva_suave")
+            or elemento.get("suavizar")
+            or str(elemento.get("tipo_curva") or "").lower().startswith("spline")
+            or str(elemento.get("renderizacao") or "").lower() == "curva_suave"
+        )
+
+    def _pontos_curva_suave_elemento(self, elemento: dict) -> list[QPointF]:
+        # Para ferramenta Curva, os pontos salvos são os pontos principais.
+        # Priorizar "pontos" evita usar campos antigos defasados e mantém o
+        # desenho exatamente onde a manipulação deixou.
+        origem = elemento.get("pontos") or elemento.get("pontos_controle_curva") or elemento.get("pontos_principais") or []
+        pontos: list[QPointF] = []
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            try:
+                if isinstance(item, dict):
+                    pontos.append(QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0))))
+                elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                    pontos.append(QPointF(float(item[0]), float(item[1])))
+            except Exception:
+                continue
+        return pontos
+
+    def _desenhar_curva_suave_por_pontos(
+            self,
+            painter: QPainter,
+            pontos: list[QPointF],
+            cor: str = "#ffffff",
+            espessura: float = 1.0,
+            estilo: str = "solid",
+    ):
+        if len(pontos) < 2:
+            return
+        if len(pontos) == 2:
+            self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo)
+            return
+
+        fechado = len(pontos) > 3 and self._dist_qpoint(pontos[0], pontos[-1]) <= 1e-6
+        pts = [QPointF(p) for p in (pontos[:-1] if fechado else pontos)]
+        if len(pts) < 3:
+            self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo)
+            return
+
+        path = QPainterPath(self._cena_para_tela(pts[0]))
+        total = len(pts)
+        limite = total if fechado else total - 1
+        tensao = 1.0
+        for i in range(limite):
+            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
+
+            c1 = QPointF(
+                p1.x() + (p2.x() - p0.x()) * tensao / 6.0,
+                p1.y() + (p2.y() - p0.y()) * tensao / 6.0,
+            )
+            c2 = QPointF(
+                p2.x() - (p3.x() - p1.x()) * tensao / 6.0,
+                p2.y() - (p3.y() - p1.y()) * tensao / 6.0,
+            )
+            path.cubicTo(self._cena_para_tela(c1), self._cena_para_tela(c2), self._cena_para_tela(p2))
+        if fechado:
+            path.closeSubpath()
+
+        painter.save()
+        pen = QPen(QColor(cor), espessura)
+        self._aplicar_estilo_caneta(pen, estilo)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+        painter.restore()
+
+    def _desenhar_curva_suave_elemento(
+            self,
+            painter: QPainter,
+            elemento: dict,
+            cor: str,
+            espessura: float,
+            estilo: str = "solid",
+    ):
+        pontos = self._pontos_curva_suave_elemento(elemento)
+        self._desenhar_curva_suave_por_pontos(painter, pontos, cor=cor, espessura=espessura, estilo=estilo)
 
     def _desenhar_polilinha_suavizada(self, painter: QPainter, pontos: list[QPointF], cor: str = "#ff5a00",
                                       espessura: float = 1.0, estilo: str = "solid"):

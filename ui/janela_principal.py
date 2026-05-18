@@ -318,7 +318,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._garantir_ajuste_automatico_na_barra_usuario()
         self._ultima_aba_nao_usuario = "construcao"
         self._barra_usuarios_posicao = self.projeto_atual.preferencias_usuario.get("barra_usuarios_posicao", "area")
-        self._barra_usuarios_habilitada = True
+        self._barra_usuarios_modo_lateral = str(
+            self.projeto_atual.preferencias_usuario.get("barra_usuarios_modo_lateral", "completa")
+        )
+        self._barra_usuarios_habilitada = bool(self.projeto_atual.preferencias_usuario.get("barra_usuarios_habilitada", True))
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = self.PERFIL_USUARIO_PADRAO
@@ -460,6 +463,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "precisao_medida": self._precisao_medida,
             "barra_usuarios_habilitada": self._barra_usuarios_habilitada,
             "barra_usuarios_posicao": self._barra_usuarios_posicao,
+            "barra_usuarios_modo_lateral": self._barra_usuarios_modo_lateral,
             "estilo_desenho": dict(self._estilo_desenho_atual),
             "cores_canvas_global": dict(self._cores_canvas_global),
             "cores_moldes_global": {chave: dict(valor) for chave, valor in self._cores_moldes_global.items()},
@@ -481,8 +485,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._passo_unidade_medida = float(cfg.get("passo_unidade_medida", self._passo_unidade_medida))
         self._unidade_area = str(cfg.get("unidade_area", self._unidade_area))
         self._precisao_medida = str(cfg.get("precisao_medida", self._precisao_medida))
-        self._barra_usuarios_habilitada = True
+        self._barra_usuarios_habilitada = bool(cfg.get("barra_usuarios_habilitada", self._barra_usuarios_habilitada))
         self._barra_usuarios_posicao = str(cfg.get("barra_usuarios_posicao", self._barra_usuarios_posicao))
+        self._barra_usuarios_modo_lateral = str(
+            cfg.get("barra_usuarios_modo_lateral", self._barra_usuarios_modo_lateral)
+        )
         estilo = cfg.get("estilo_desenho")
         if isinstance(estilo, dict):
             self._estilo_desenho_atual.update(estilo)
@@ -673,10 +680,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_barra_usuarios = self.menu_visao.addMenu("Barra de usuários")
         self.action_barra_usuarios_habilitada = QAction("Exibir barra de usuários", self)
         self.action_barra_usuarios_habilitada.setCheckable(True)
-        self.action_barra_usuarios_habilitada.setChecked(True)
-        self.action_barra_usuarios_habilitada.setEnabled(False)
+        self.action_barra_usuarios_habilitada.setChecked(bool(self._barra_usuarios_habilitada))
         self.action_barra_usuarios_habilitada.toggled.connect(self._alternar_barra_usuarios_habilitada)
         menu_barra_usuarios.addAction(self.action_barra_usuarios_habilitada)
+        menu_barra_usuarios.addSeparator()
         grupo_posicao_barra = QActionGroup(self)
         grupo_posicao_barra.setExclusive(True)
         self.action_barra_usuarios_topo = QAction("No topo (acima das abas)", self)
@@ -687,10 +694,36 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_barra_usuarios.addAction(self.action_barra_usuarios_topo)
         self.action_barra_usuarios_area = QAction("Entre botões e régua", self)
         self.action_barra_usuarios_area.setCheckable(True)
-        self.action_barra_usuarios_area.setChecked(self._barra_usuarios_posicao != "topo")
+        self.action_barra_usuarios_area.setChecked(self._barra_usuarios_posicao == "area")
         self.action_barra_usuarios_area.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("area") if marcado else None)
         grupo_posicao_barra.addAction(self.action_barra_usuarios_area)
         menu_barra_usuarios.addAction(self.action_barra_usuarios_area)
+        self.action_barra_usuarios_lateral = QAction("Na lateral", self)
+        self.action_barra_usuarios_lateral.setCheckable(True)
+        self.action_barra_usuarios_lateral.setChecked(self._barra_usuarios_posicao == "lateral")
+        self.action_barra_usuarios_lateral.triggered.connect(lambda marcado=False: self._definir_posicao_barra_usuarios("lateral") if marcado else None)
+        grupo_posicao_barra.addAction(self.action_barra_usuarios_lateral)
+        menu_barra_usuarios.addAction(self.action_barra_usuarios_lateral)
+        menu_barra_usuarios.addSeparator()
+        menu_estilo_lateral = menu_barra_usuarios.addMenu("Estilo lateral")
+        grupo_estilo_lateral = QActionGroup(self)
+        grupo_estilo_lateral.setExclusive(True)
+        self.action_barra_usuarios_lateral_completa = QAction("Lateral completa (ícone + nome)", self)
+        self.action_barra_usuarios_lateral_completa.setCheckable(True)
+        self.action_barra_usuarios_lateral_completa.setChecked(self._barra_usuarios_modo_lateral == "completa")
+        self.action_barra_usuarios_lateral_completa.triggered.connect(
+            lambda marcado=False: self._definir_modo_barra_usuarios_lateral("completa") if marcado else None
+        )
+        grupo_estilo_lateral.addAction(self.action_barra_usuarios_lateral_completa)
+        menu_estilo_lateral.addAction(self.action_barra_usuarios_lateral_completa)
+        self.action_barra_usuarios_lateral_icones = QAction("Lateral básica (somente ícones)", self)
+        self.action_barra_usuarios_lateral_icones.setCheckable(True)
+        self.action_barra_usuarios_lateral_icones.setChecked(self._barra_usuarios_modo_lateral == "icones")
+        self.action_barra_usuarios_lateral_icones.triggered.connect(
+            lambda marcado=False: self._definir_modo_barra_usuarios_lateral("icones") if marcado else None
+        )
+        grupo_estilo_lateral.addAction(self.action_barra_usuarios_lateral_icones)
+        menu_estilo_lateral.addAction(self.action_barra_usuarios_lateral_icones)
         self.btn_visao.setMenu(self.menu_visao)
         sup.addWidget(self.btn_visao)
 
@@ -1207,21 +1240,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             rb_suave = QRadioButton("Curva suave")
             rb_3p = QRadioButton("Curva por 3 pontos")
             rb_2p = QRadioButton("Curva por 2 pontos")
+            rb_espelhada = QRadioButton("Curvas espelhadas")
 
             layout.addWidget(rb_np)
             layout.addWidget(rb_suave)
             layout.addWidget(rb_3p)
             layout.addWidget(rb_2p)
+            layout.addWidget(rb_espelhada)
 
             rb_np.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("np") if marcado else None)
             rb_suave.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("suave") if marcado else None)
             rb_3p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("3p") if marcado else None)
             rb_2p.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("2p") if marcado else None)
+            rb_espelhada.toggled.connect(lambda marcado: self._definir_modo_curva_area_atual("espelhada") if marcado else None)
 
             self._rb_curva_np = rb_np
             self._rb_curva_suave = rb_suave
             self._rb_curva_3p = rb_3p
             self._rb_curva_2p = rb_2p
+            self._rb_curva_espelhada = rb_espelhada
             self._janela_aux_curva = janela
         else:
             janela = self._janela_aux_curva
@@ -4890,9 +4927,25 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = QWidget()
         area.setStyleSheet("background: #eceff3;")
         area.setMinimumSize(0, 0)
-        layout = QVBoxLayout(area)
-        layout.setContentsMargins(6, 4, 6, 4)
+
+        layout_externo = QHBoxLayout(area)
+        layout_externo.setContentsMargins(6, 4, 6, 4)
+        layout_externo.setSpacing(6)
+
+        self.barra_lateral_ferramentas = None
+        try:
+            self.barra_lateral_ferramentas = self._criar_barra_lateral_ferramentas()
+            layout_externo.addWidget(self.barra_lateral_ferramentas, 0)
+        except Exception as exc:
+            print(f"[GUIMMA][barra_lateral] Falha ao criar barra lateral: {type(exc).__name__}: {exc}")
+
+        area_principal = QWidget()
+        area_principal.setMinimumSize(0, 0)
+        layout = QVBoxLayout(area_principal)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
+        layout_externo.addWidget(area_principal, 1)
+
         self.host_barra_usuario_area = QWidget()
         self.host_barra_usuario_area_layout = QVBoxLayout(self.host_barra_usuario_area)
         self.host_barra_usuario_area_layout.setContentsMargins(0, 0, 0, 0)
@@ -4935,7 +4988,177 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._atualizar_linha_usuarios()
         self._atualizar_menu_moldes()
         self._on_tab_ribbon_alterada(self.ribbon.current_tab_id() or "inicio")
+        self._atualizar_barra_lateral_ferramentas()
         return area
+
+    def _criar_barra_lateral_ferramentas(self) -> QWidget:
+        painel = QFrame()
+        painel.setObjectName("BarraLateralFerramentas")
+        painel.setFixedWidth(154)
+        painel.setMinimumHeight(0)
+        painel.setStyleSheet(
+            """
+            QFrame#BarraLateralFerramentas {
+                background: #f8fafc;
+                border: 1px solid #d6dde6;
+                border-radius: 6px;
+            }
+            QLabel#TituloBarraLateralFerramentas {
+                color: #1f2937;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 8px 8px 4px 8px;
+            }
+            QLabel#GrupoBarraLateralFerramentas {
+                color: #64748b;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 8px 8px 2px 8px;
+            }
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            """
+        )
+
+        layout_painel = QVBoxLayout(painel)
+        layout_painel.setContentsMargins(0, 0, 0, 0)
+        layout_painel.setSpacing(0)
+
+        titulo = QLabel("USUÁRIO")
+        titulo.setObjectName("TituloBarraLateralFerramentas")
+        self.lbl_titulo_barra_lateral_ferramentas = titulo
+        layout_painel.addWidget(titulo, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        conteudo = QWidget()
+        self.layout_barra_lateral_ferramentas = QVBoxLayout(conteudo)
+        self.layout_barra_lateral_ferramentas.setContentsMargins(6, 0, 6, 8)
+        self.layout_barra_lateral_ferramentas.setSpacing(2)
+        scroll.setWidget(conteudo)
+        layout_painel.addWidget(scroll, 1)
+
+        return painel
+
+    def _criar_botao_barra_lateral_ferramenta(self, tool_id: str, somente_icone: bool = False):
+        try:
+            tool = self.ribbon.tool_def(tool_id) if hasattr(self, "ribbon") else None
+            if not tool:
+                return None
+
+            btn = QToolButton()
+            btn.setCheckable(True)
+            btn.setToolButtonStyle(Qt.ToolButtonIconOnly if somente_icone else Qt.ToolButtonTextBesideIcon)
+            try:
+                icon_name = getattr(tool, "icon", "")
+                caminho_icone = ICONS_DIR / icon_name if icon_name else None
+                if caminho_icone is not None and caminho_icone.exists():
+                    btn.setIcon(QIcon(str(caminho_icone)))
+            except Exception:
+                pass
+            btn.setIconSize(QSize(18, 18))
+            btn.setText("" if somente_icone else tool.title)
+            btn.setToolTip(tool.title)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setProperty("tool_id", tool_id)
+            if somente_icone:
+                btn.setFixedSize(38, 34)
+                btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            else:
+                btn.setFixedHeight(31)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setStyleSheet(
+                """
+                QToolButton {
+                    background: transparent;
+                    border: 1px solid transparent;
+                    border-radius: 5px;
+                    color: #111827;
+                    font-size: 12px;
+                    font-weight: 400;
+                    padding: 3px 6px;
+                    text-align: left;
+                }
+                QToolButton:hover {
+                    background: #eef5ff;
+                    border: 1px solid #d7e8fb;
+                }
+                QToolButton:pressed {
+                    background: #e2effc;
+                }
+                QToolButton:checked {
+                    background: #e7f1ff;
+                    border: 1px solid #9dc9f4;
+                    color: #0b5f9e;
+                    font-weight: 600;
+                }
+                """
+            )
+            btn.clicked.connect(lambda _=False, tid=tool_id: self._abrir_pagina_ferramenta(tid))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda _pos, tid=tool_id: self._remover_ferramenta_usuario(tid))
+            return btn
+        except Exception as exc:
+            print(f"[GUIMMA][barra_lateral] Falha ao criar botão {tool_id}: {type(exc).__name__}: {exc}")
+            return None
+
+    def _atualizar_barra_lateral_ferramentas(self):
+        try:
+            if not hasattr(self, "layout_barra_lateral_ferramentas") or not hasattr(self, "barra_lateral_ferramentas"):
+                return
+
+            mostrar_lateral = bool(self._barra_usuarios_habilitada) and self._barra_usuarios_posicao == "lateral"
+            self.barra_lateral_ferramentas.setVisible(mostrar_lateral)
+            if not mostrar_lateral:
+                return
+
+            while self.layout_barra_lateral_ferramentas.count():
+                item = self.layout_barra_lateral_ferramentas.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+
+            ativo = getattr(self, "_ferramenta_ativa_id", "selecionar")
+            somente_icone = getattr(self, "_barra_usuarios_modo_lateral", "completa") == "icones"
+            self.barra_lateral_ferramentas.setFixedWidth(58 if somente_icone else 154)
+            if hasattr(self, "lbl_titulo_barra_lateral_ferramentas"):
+                self.lbl_titulo_barra_lateral_ferramentas.setText("USUÁRIO")
+                self.lbl_titulo_barra_lateral_ferramentas.setAlignment(Qt.AlignCenter if somente_icone else (Qt.AlignLeft | Qt.AlignVCenter))
+
+            if not self._ferramentas_usuario_ids:
+                vazio = QLabel("Sem atalhos")
+                vazio.setAlignment(Qt.AlignCenter)
+                vazio.setToolTip("Sem ferramentas na barra de usuário.")
+                vazio.setStyleSheet("color:#64748b; font-size:11px; padding:8px;")
+                self.layout_barra_lateral_ferramentas.addWidget(vazio)
+                self.layout_barra_lateral_ferramentas.addStretch(1)
+                return
+
+            for tool_id in self._ferramentas_usuario_ids:
+                botao = self._criar_botao_barra_lateral_ferramenta(tool_id, somente_icone=somente_icone)
+                if botao is None:
+                    continue
+                botao.setChecked(tool_id == ativo)
+                if somente_icone:
+                    wrap = QWidget()
+                    hlay = QHBoxLayout(wrap)
+                    hlay.setContentsMargins(0, 0, 0, 0)
+                    hlay.addStretch(1)
+                    hlay.addWidget(botao)
+                    hlay.addStretch(1)
+                    self.layout_barra_lateral_ferramentas.addWidget(wrap)
+                else:
+                    self.layout_barra_lateral_ferramentas.addWidget(botao)
+
+            self.layout_barra_lateral_ferramentas.addStretch(1)
+        except Exception as exc:
+            print(f"[GUIMMA][barra_lateral] Falha ao atualizar barra lateral: {type(exc).__name__}: {exc}")
 
     def _criar_painel_menu_moldes(self) -> QWidget:
         painel = QFrame()
@@ -5406,34 +5629,75 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.painel_controles_usuario.setVisible(tab_id == "usuarios")
 
     def _alternar_barra_usuarios_habilitada(self, habilitada: bool):
-        self._barra_usuarios_habilitada = True
-        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = True
+        self._barra_usuarios_habilitada = bool(habilitada)
+        self.projeto_atual.preferencias_usuario["barra_usuarios_habilitada"] = bool(habilitada)
+        self._reposicionar_barra_usuarios()
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._sincronizar_menu_barra_usuarios()
         self._salvar_preferencias_app()
 
     def _definir_posicao_barra_usuarios(self, posicao: str):
-        if posicao not in {"topo", "area"}:
+        if posicao not in {"topo", "area", "lateral"}:
             return
         self._barra_usuarios_posicao = posicao
         self.projeto_atual.preferencias_usuario["barra_usuarios_posicao"] = posicao
         self._reposicionar_barra_usuarios()
         self._atualizar_visibilidade_barra_usuarios(self.ribbon.current_tab_id() or "inicio")
+        self._sincronizar_menu_barra_usuarios()
         self._salvar_preferencias_app()
+
+    def _definir_modo_barra_usuarios_lateral(self, modo: str):
+        if modo not in {"completa", "icones"}:
+            return
+        self._barra_usuarios_modo_lateral = modo
+        self.projeto_atual.preferencias_usuario["barra_usuarios_modo_lateral"] = modo
+        self._atualizar_barra_lateral_ferramentas()
+        self._sincronizar_menu_barra_usuarios()
+        self._salvar_preferencias_app()
+
+    def _sincronizar_menu_barra_usuarios(self):
+        if hasattr(self, "action_barra_usuarios_habilitada"):
+            self.action_barra_usuarios_habilitada.blockSignals(True)
+            self.action_barra_usuarios_habilitada.setChecked(bool(self._barra_usuarios_habilitada))
+            self.action_barra_usuarios_habilitada.blockSignals(False)
+        if hasattr(self, "action_barra_usuarios_topo"):
+            self.action_barra_usuarios_topo.setChecked(self._barra_usuarios_posicao == "topo")
+        if hasattr(self, "action_barra_usuarios_area"):
+            self.action_barra_usuarios_area.setChecked(self._barra_usuarios_posicao == "area")
+        if hasattr(self, "action_barra_usuarios_lateral"):
+            self.action_barra_usuarios_lateral.setChecked(self._barra_usuarios_posicao == "lateral")
+        if hasattr(self, "action_barra_usuarios_lateral_completa"):
+            self.action_barra_usuarios_lateral_completa.setChecked(self._barra_usuarios_modo_lateral == "completa")
+        if hasattr(self, "action_barra_usuarios_lateral_icones"):
+            self.action_barra_usuarios_lateral_icones.setChecked(self._barra_usuarios_modo_lateral == "icones")
 
     def _reposicionar_barra_usuarios(self):
         if not hasattr(self, "faixa_usuarios"):
             return
         if self.faixa_usuarios.parentWidget() is not None:
             self.faixa_usuarios.setParent(None)
-        if self._barra_usuarios_posicao == "topo":
+        if not self._barra_usuarios_habilitada:
+            self.faixa_usuarios.hide()
+        elif self._barra_usuarios_posicao == "topo":
             self.host_barra_usuario_topo_layout.addWidget(self.faixa_usuarios)
-        else:
+            self.faixa_usuarios.show()
+        elif self._barra_usuarios_posicao == "area":
             self.host_barra_usuario_area_layout.addWidget(self.faixa_usuarios)
+            self.faixa_usuarios.show()
+        else:
+            self.faixa_usuarios.hide()
+        self._atualizar_barra_lateral_ferramentas()
 
     def _atualizar_visibilidade_barra_usuarios(self, tab_id: str):
+        visivel = self._barra_usuarios_habilitada or (tab_id == "usuarios")
         if hasattr(self, "faixa_usuarios"):
-            visivel = self._barra_usuarios_habilitada or (tab_id == "usuarios")
-            self.faixa_usuarios.setVisible(visivel)
+            mostrar_faixa = visivel and self._barra_usuarios_posicao in {"topo", "area"}
+            self.faixa_usuarios.setVisible(mostrar_faixa)
+        if hasattr(self, "barra_lateral_ferramentas") and self.barra_lateral_ferramentas is not None:
+            mostrar_lateral = visivel and self._barra_usuarios_posicao == "lateral"
+            self.barra_lateral_ferramentas.setVisible(mostrar_lateral)
+            if mostrar_lateral:
+                self._atualizar_barra_lateral_ferramentas()
 
     def _lista_usuario_com_ajuste(self, ids: list[str]) -> list[str]:
         saida = list(ids or [])
@@ -5605,6 +5869,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.action_barra_usuarios_habilitada.setChecked(self._barra_usuarios_habilitada)
             self.action_barra_usuarios_habilitada.blockSignals(False)
         self._atualizar_linha_usuarios()
+        self._sincronizar_menu_barra_usuarios()
         self.lbl_status.setText(f"Perfil '{nome_perfil}' carregado.")
 
     def _criar_novo_perfil_usuario(self):
@@ -5698,6 +5963,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             )
             self.layout_linha_usuario.addWidget(btn)
         self.layout_linha_usuario.addStretch(1)
+        self._atualizar_barra_lateral_ferramentas()
 
 
     def _conectar_sinal_elementos_canvas(self, canvas) -> None:
@@ -6060,6 +6326,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = tool_id
         self._salvar_preferencias_app()
         self.ribbon.set_active_tool(tool_id)
+        self._atualizar_barra_lateral_ferramentas()
         self._ocultar_janelas_auxiliares(exceto=tool_id)
         area_atual = self._area_documento_atual()
         if area_atual:

@@ -58,6 +58,37 @@ class SnapManager:
         candidatos_validos.sort(key=lambda c: (self._prioridade_elemento(cena, c.elemento_idx), self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
 
+    def _elemento_curva_suave(self, elemento: dict) -> bool:
+        return bool(elemento.get("curva_suave") or str(elemento.get("tipo_curva") or "").startswith("spline"))
+
+    def _amostrar_curva_suave(self, pontos: list[QPointF], amostras_por_trecho: int = 18) -> list[QPointF]:
+        if len(pontos) < 3:
+            return [QPointF(p) for p in pontos]
+        fechado = len(pontos) > 3 and self._dist(pontos[0], pontos[-1]) <= 1e-6
+        pts = [QPointF(p) for p in (pontos[:-1] if fechado else pontos)]
+        if len(pts) < 3:
+            return [QPointF(p) for p in pontos]
+        saida: list[QPointF] = []
+        total = len(pts)
+        limite = total if fechado else total - 1
+        for i in range(limite):
+            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
+            for s in range(amostras_por_trecho):
+                t = s / float(amostras_por_trecho)
+                t2 = t * t
+                t3 = t2 * t
+                x = 0.5 * ((2*p1.x()) + (-p0.x()+p2.x())*t + (2*p0.x()-5*p1.x()+4*p2.x()-p3.x())*t2 + (-p0.x()+3*p1.x()-3*p2.x()+p3.x())*t3)
+                y = 0.5 * ((2*p1.y()) + (-p0.y()+p2.y())*t + (2*p0.y()-5*p1.y()+4*p2.y()-p3.y())*t2 + (-p0.y()+3*p1.y()-3*p2.y()+p3.y())*t3)
+                saida.append(QPointF(x, y))
+        if fechado and saida:
+            saida.append(QPointF(saida[0]))
+        elif pts:
+            saida.append(QPointF(pts[-1]))
+        return saida
+
     def _candidato_grade(self, cursor: QPointF, tolerancia_cena: float, candidatos: list[SnapResult]):
         if not self.snap_grade:
             return
@@ -78,23 +109,46 @@ class SnapManager:
         candidatos: list[SnapResult],
     ):
         pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
-        if not pontos:
+        controles_principais = self._pontos_controle_serializados(elemento.get("controle_cantos", []) or elemento.get("pontos_controle_principais", []))
+        controles_auxiliares = self._pontos_controle_serializados(elemento.get("controle_auxiliares", []) or elemento.get("pontos_auxiliares", []))
+        pontos_bbox = pontos + controles_principais + controles_auxiliares
+        if not pontos_bbox:
             return
-        xs = [p.x() for p in pontos]
-        ys = [p.y() for p in pontos]
+        xs = [p.x() for p in pontos_bbox]
+        ys = [p.y() for p in pontos_bbox]
         margem = tolerancia_cena * 2.5
         if cursor.x() < min(xs) - margem or cursor.x() > max(xs) + margem or cursor.y() < min(ys) - margem or cursor.y() > max(ys) + margem:
             return
 
+        for ponto in controles_principais:
+            candidatos.append(SnapResult(ponto=ponto, tipo="controle principal", distancia=self._dist(cursor, ponto), elemento_idx=idx))
+        for ponto in controles_auxiliares:
+            candidatos.append(SnapResult(ponto=ponto, tipo="controle auxiliar", distancia=self._dist(cursor, ponto), elemento_idx=idx))
+        # Nós reais/controladores: poucos pontos principais da curva.
         for ponto in pontos:
             candidatos.append(SnapResult(ponto=ponto, tipo="nó", distancia=self._dist(cursor, ponto), elemento_idx=idx))
 
-        for inicio, fim in zip(pontos, pontos[1:]):
+        pontos_borda = self._amostrar_curva_suave(pontos) if self._elemento_curva_suave(elemento) else pontos
+        for inicio, fim in zip(pontos_borda, pontos_borda[1:]):
             meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
             candidatos.append(SnapResult(ponto=meio, tipo="ponto médio", distancia=self._dist(cursor, meio), elemento_idx=idx))
 
             proj = self._projetar_em_segmento(cursor, inicio, fim)
             candidatos.append(SnapResult(ponto=proj, tipo="borda", distancia=self._dist(cursor, proj), elemento_idx=idx))
+
+    def _pontos_controle_serializados(self, origem) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            try:
+                if isinstance(item, dict):
+                    pontos.append(QPointF(float(item["x"]), float(item["y"])))
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    pontos.append(QPointF(float(item[0]), float(item[1])))
+            except Exception:
+                continue
+        return pontos
 
     def _candidatos_circulo(self, idx: int, elemento: dict, cursor: QPointF, candidatos: list[SnapResult]):
         centro = elemento.get("centro")
@@ -107,6 +161,8 @@ class SnapManager:
         pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
         if len(pontos) < 2:
             return []
+        if self._elemento_curva_suave(elemento):
+            pontos = self._amostrar_curva_suave(pontos)
         return [(idx, inicio, fim) for inicio, fim in zip(pontos, pontos[1:])]
 
     def _candidatos_interseccoes(
@@ -206,14 +262,16 @@ class SnapManager:
     def _prioridade(self, tipo: str) -> int:
         if tipo == "interseção":
             return 0
-        if tipo == "nó":
+        if tipo in {"controle principal", "controle auxiliar", "controle"}:
             return 1
-        if tipo == "centro":
+        if tipo == "nó":
             return 2
-        if tipo == "ponto médio":
+        if tipo == "centro":
             return 3
-        if tipo == "borda":
+        if tipo == "ponto médio":
             return 4
+        if tipo == "borda":
+            return 5
         if tipo == "grade":
             return 5
         return 9
