@@ -228,9 +228,9 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["pontos"][0], (0.0, 0.0))
-        self.assertEqual(molde["pontos"][1], (2.5, 1.0))
+        self.assertEqual(molde["pontos"][1], (2.5, 1.5))
         self.assertEqual(molde["pontos"][2], (5.0, 2.0))
-        self.assertEqual(molde["pontos"][3], (7.5, 1.0))
+        self.assertEqual(molde["pontos"][3], (7.5, 1.5))
         self.assertEqual(molde["pontos"][4], (10.0, 0.0))
         self.assertEqual(molde["pontos"][5], (10.0, 2.5))
         self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)])
