@@ -291,12 +291,16 @@ class Ferramenta(FerramentaBase):
                     ny = round(ny, 2)
                 pontos[i] = (nx, ny)
         else:
-            # Modo "1 ponto": move exclusivamente o ponto clicado.
-            # (o deslocamento do ponto selecionado já foi aplicado em _atualizar_ponto)
+            # Em molde, um controle deforma só os trechos até as âncoras vizinhas.
+            # O deslocamento do ponto selecionado já foi aplicado em _atualizar_ponto.
             if el.get("molde"):
-                # Reajusta apenas os pontos intermediários/auxiliares para que não
-                # "segurem" a linha quando um ponto principal é movido.
-                self._mover_molde_n_pontos(canvas, el, p_idx, dx, dy)
+                pontos_base = list(pontos)
+                if 0 <= p_idx < len(pontos_base):
+                    x, y = pontos_base[p_idx]
+                    pontos_base[p_idx] = (float(x) - dx, float(y) - dy)
+                    if fechado and p_idx == 0 and len(pontos_base) >= 2:
+                        pontos_base[-1] = pontos_base[0]
+                self._redistribuir_molde_local_por_ponto(canvas, el, pontos_base, p_idx, dx, dy)
                 pontos = list(el.get("pontos", []))
 
         if fechado and len(pontos) >= 2:
@@ -1080,7 +1084,6 @@ class Ferramenta(FerramentaBase):
         destino = self._normalizar_destino(destino)
         if tipo == "canto":
             self._arrastar_canto_molde(canvas, el, controle_idx, destino)
-            self._recravar_auxiliares_no_perimetro(el)
         else:
             self._arrastar_auxiliar_molde(canvas, el, controle_idx, destino)
         self._reajustar_fio_no_molde(el)
@@ -1112,7 +1115,7 @@ class Ferramenta(FerramentaBase):
                 pontos[-1] = pontos[0]
         el["pontos"] = pontos
         if ponto_idx is not None:
-            self._redistribuir_molde_por_deslocamentos(canvas, el, pontos_originais, {ponto_idx: (dx, dy)})
+            self._redistribuir_molde_local_por_ponto(canvas, el, pontos_originais, ponto_idx, dx, dy)
 
     def _indice_ponto_mais_proximo(self, canvas, pontos: list, alvo: QPointF) -> int | None:
         if not pontos:
@@ -1140,12 +1143,20 @@ class Ferramenta(FerramentaBase):
         origem_aux = self._ponto_qt(aux[controle_idx])
         if origem_aux is None:
             return
+        dx = destino.x() - origem_aux.x()
+        dy = destino.y() - origem_aux.y()
+        pontos_originais = list(el.get("pontos", []))
+        ponto_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, origem_aux)
         aux[controle_idx] = (destino.x(), destino.y())
         el["controle_auxiliares"] = aux
         self._atualizar_espelho_controle(el, "pontos_auxiliares", controle_idx, destino)
 
+        if ponto_idx is not None and self._redistribuir_molde_local_por_ponto(
+            canvas, el, pontos_originais, ponto_idx, dx, dy
+        ):
+            return
+
         cantos = list(el.get("controle_cantos", []))
-        pontos_originais = list(el.get("pontos", []))
         if len(cantos) < 2 or len(pontos_originais) < 2:
             return
 
@@ -1184,6 +1195,112 @@ class Ferramenta(FerramentaBase):
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
         self._sincronizar_curva_suave(el)
+
+    def _redistribuir_molde_local_por_ponto(
+        self,
+        canvas,
+        el: dict,
+        pontos_base: list,
+        p_idx: int,
+        dx: float,
+        dy: float,
+    ) -> bool:
+        if len(pontos_base) < 2:
+            return False
+        fechado = len(pontos_base) >= 2 and canvas._dist(
+            self._ponto_qt(pontos_base[0]) or QPointF(),
+            self._ponto_qt(pontos_base[-1]) or QPointF(),
+        ) <= 1e-6
+        n = len(pontos_base) - 1 if fechado else len(pontos_base)
+        if n <= 0:
+            return False
+        if fechado and p_idx == len(pontos_base) - 1:
+            p_idx = 0
+        if not (0 <= p_idx < n):
+            return False
+
+        ancoras = self._ancoras_molde_ordenadas(canvas, el, pontos_base)
+        if p_idx not in ancoras:
+            ancoras.append(p_idx)
+            ancoras.sort()
+        pos_atual = next((i for i, ancora in enumerate(ancoras) if ancora == p_idx), None)
+        if pos_atual is None:
+            return False
+
+        novos = list(pontos_base)
+        x, y = pontos_base[p_idx]
+        nx = float(x) + dx
+        ny = float(y) + dy
+        if self._modo_discreto():
+            nx = round(nx, 2)
+            ny = round(ny, 2)
+        novos[p_idx] = (nx, ny)
+
+        anterior = ancoras[pos_atual - 1] if pos_atual > 0 else (ancoras[-1] if fechado and len(ancoras) > 1 else None)
+        proximo = (
+            ancoras[pos_atual + 1]
+            if pos_atual + 1 < len(ancoras)
+            else (ancoras[0] if fechado and len(ancoras) > 1 else None)
+        )
+
+        if anterior is not None and anterior != p_idx:
+            indices = self._indices_intervalo(anterior, p_idx, n, fechado)
+            self._aplicar_deslocamento_intervalo_molde(novos, pontos_base, indices, (0.0, 0.0), (dx, dy))
+        if proximo is not None and proximo != p_idx:
+            indices = self._indices_intervalo(p_idx, proximo, n, fechado)
+            self._aplicar_deslocamento_intervalo_molde(novos, pontos_base, indices, (dx, dy), (0.0, 0.0))
+
+        if fechado and len(novos) >= 2:
+            novos[-1] = novos[0]
+        el["pontos"] = novos
+        self._sincronizar_curva_suave(el)
+        return True
+
+    def _ancoras_molde_ordenadas(self, canvas, el: dict, pontos_base: list) -> list[int]:
+        fechado = len(pontos_base) >= 2 and canvas._dist(
+            self._ponto_qt(pontos_base[0]) or QPointF(),
+            self._ponto_qt(pontos_base[-1]) or QPointF(),
+        ) <= 1e-6
+        n = len(pontos_base) - 1 if fechado else len(pontos_base)
+        if n <= 0:
+            return []
+        encontrados: set[int] = set()
+        for chave in ("controle_cantos", "controle_auxiliares"):
+            for item in el.get(chave, []) or []:
+                pt = self._ponto_qt(item)
+                if pt is None:
+                    continue
+                idx = self._indice_ponto_mais_proximo(canvas, pontos_base[:n], pt)
+                if idx is not None and 0 <= idx < n:
+                    encontrados.add(idx)
+        return sorted(encontrados)
+
+    def _aplicar_deslocamento_intervalo_molde(
+        self,
+        novos: list,
+        pontos_base: list,
+        indices: list[int],
+        desloc_a: tuple[float, float],
+        desloc_b: tuple[float, float],
+    ) -> None:
+        if len(indices) < 2:
+            return
+        denom = max(1, len(indices) - 1)
+        dxa, dya = desloc_a
+        dxb, dyb = desloc_b
+        for pos, idx_local in enumerate(indices):
+            if not (0 <= idx_local < len(pontos_base)):
+                continue
+            t = max(0.0, min(1.0, pos / float(denom)))
+            ddx = (dxa * (1.0 - t)) + (dxb * t)
+            ddy = (dya * (1.0 - t)) + (dyb * t)
+            x, y = pontos_base[idx_local]
+            nx = float(x) + ddx
+            ny = float(y) + ddy
+            if self._modo_discreto():
+                nx = round(nx, 2)
+                ny = round(ny, 2)
+            novos[idx_local] = (nx, ny)
 
     def _segmento_indices_do_auxiliar(
         self,
