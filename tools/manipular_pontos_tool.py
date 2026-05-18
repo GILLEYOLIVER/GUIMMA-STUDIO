@@ -536,12 +536,19 @@ class Ferramenta(FerramentaBase):
         b = (u - ti) / h
         return a * yi + b * yj + (((a ** 3) - a) * mi + ((b ** 3) - b) * mj) * (h * h) / 6.0
 
-    def _gerar_tracado_curva_real(self, controles: list[QPointF], fechado: bool = False) -> list[tuple[float, float]]:
+    def _gerar_tracado_curva_real(
+        self,
+        controles: list[QPointF],
+        fechado: bool = False,
+        tipo_curva: str | None = None,
+    ) -> list[tuple[float, float]]:
         controles = [QPointF(p) for p in controles]
         if len(controles) <= 1:
             return [(p.x(), p.y()) for p in controles]
         if len(controles) == 2:
             return [(controles[0].x(), controles[0].y()), (controles[1].x(), controles[1].y())]
+        if not fechado and str(tipo_curva or "").lower() == "parabola_3p" and len(controles) == 3:
+            return self._gerar_parabola_3p_curva_real(controles)
 
         saida: list[QPointF] = []
         total = len(controles)
@@ -560,6 +567,25 @@ class Ferramenta(FerramentaBase):
         if fechado and saida:
             saida[-1] = QPointF(saida[0])
         return [(float(p.x()), float(p.y())) for p in saida]
+
+    def _gerar_parabola_3p_curva_real(self, controles: list[QPointF]) -> list[tuple[float, float]]:
+        p0, pmedio, p2 = [QPointF(p) for p in controles]
+        controle = QPointF(
+            (2.0 * pmedio.x()) - (0.5 * (p0.x() + p2.x())),
+            (2.0 * pmedio.y()) - (0.5 * (p0.y() + p2.y())),
+        )
+        segmentos = 48
+        saida: list[tuple[float, float]] = []
+        for i in range(segmentos + 1):
+            t = i / float(segmentos)
+            u = 1.0 - t
+            x = (u * u * p0.x()) + (2.0 * u * t * controle.x()) + (t * t * p2.x())
+            y = (u * u * p0.y()) + (2.0 * u * t * controle.y()) + (t * t * p2.y())
+            saida.append((float(x), float(y)))
+        saida[0] = (float(p0.x()), float(p0.y()))
+        saida[segmentos // 2] = (float(pmedio.x()), float(pmedio.y()))
+        saida[-1] = (float(p2.x()), float(p2.y()))
+        return saida
 
     def _catmull_rom(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
         t2 = t * t
@@ -962,7 +988,11 @@ class Ferramenta(FerramentaBase):
                 return
             controles[p_idx] = QPointF(pos)
             self._salvar_controles_curva_real(el, controles)
-            el["pontos"] = self._gerar_tracado_curva_real(controles, fechado=bool(el.get("fechado")))
+            el["pontos"] = self._gerar_tracado_curva_real(
+                controles,
+                fechado=bool(el.get("fechado")),
+                tipo_curva=str(el.get("tipo_curva") or ""),
+            )
             return
 
         pontos = list(el.get("pontos", []))

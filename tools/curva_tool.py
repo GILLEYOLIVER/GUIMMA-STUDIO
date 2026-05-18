@@ -412,6 +412,37 @@ class Ferramenta(FerramentaBase):
         )
         return QPointF(x, y)
 
+    def _controle_quadratico_por_ponto_medio(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> QPointF:
+        return QPointF(
+            (2.0 * pmedio.x()) - (0.5 * (p0.x() + p2.x())),
+            (2.0 * pmedio.y()) - (0.5 * (p0.y() + p2.y())),
+        )
+
+    def _ponto_bezier_quadratico(self, p0: QPointF, p1: QPointF, p2: QPointF, t: float) -> QPointF:
+        u = 1.0 - t
+        return QPointF(
+            (u * u * p0.x()) + (2.0 * u * t * p1.x()) + (t * t * p2.x()),
+            (u * u * p0.y()) + (2.0 * u * t * p1.y()) + (t * t * p2.y()),
+        )
+
+    def _gerar_parabola_3p(self, canvas, pontos: List[QPointF]) -> List[QPointF]:
+        pts = self._remover_repetidos([QPointF(p) for p in pontos], tolerancia=0.001)
+        if len(pts) != 3:
+            return self._gerar_spline(canvas, pts, fechado=False)
+        p0, pmedio, p2 = pts
+        controle = self._controle_quadratico_por_ponto_medio(p0, pmedio, p2)
+        segmentos = max(
+            24,
+            min(96, self._amostras_por_trecho(canvas, p0, pmedio) + self._amostras_por_trecho(canvas, pmedio, p2)),
+        )
+        if segmentos % 2:
+            segmentos += 1
+        curva = [self._ponto_bezier_quadratico(p0, controle, p2, i / float(segmentos)) for i in range(segmentos + 1)]
+        curva[0] = QPointF(p0)
+        curva[segmentos // 2] = QPointF(pmedio)
+        curva[-1] = QPointF(p2)
+        return self._remover_repetidos(curva, tolerancia=0.001)
+
     def _gerar_spline(self, canvas, pontos: List[QPointF], fechado: bool = False) -> List[QPointF]:
         """
         Gera o traçado editável a partir dos pontos de controle.
@@ -485,6 +516,8 @@ class Ferramenta(FerramentaBase):
             curva = list(nos)
         elif len(nos) == 2:
             curva = [QPointF(nos[0]), QPointF(nos[1])]
+        elif self._modo_curva_atual(canvas) == "3p" and len(nos) == 3:
+            curva = self._gerar_parabola_3p(canvas, nos)
         else:
             curva = self._gerar_spline(canvas, nos, fechado=False)
         canvas._curva_np_curva_confirmada = curva
@@ -575,6 +608,8 @@ class Ferramenta(FerramentaBase):
             base.append(QPointF(cursor))
         if len(base) <= 2:
             return [QPointF(p) for p in base]
+        if self._modo_curva_atual(canvas) == "3p" and len(base) == 3 and not fechado:
+            return self._gerar_parabola_3p(canvas, base)
         return self._gerar_spline(canvas, base, fechado=fechado)
 
     # -------------------------------------------------------------------------
@@ -611,6 +646,7 @@ class Ferramenta(FerramentaBase):
             fechado: bool = False,
             curva_espelhada: bool = False,
             eixo_espelho_x: float | None = None,
+            tipo_curva: str = "spline_catmull_rom",
     ):
         if not hasattr(canvas, "cena") or not hasattr(canvas.cena, "elementos"):
             return
@@ -634,7 +670,7 @@ class Ferramenta(FerramentaBase):
         if curva_suave and len(principais) > 2:
             elemento["curva_editavel"] = True
             elemento["curva_suave"] = True
-            elemento["tipo_curva"] = "spline_catmull_rom"
+            elemento["tipo_curva"] = tipo_curva
             elemento["renderizacao"] = "polyline"
             elemento["pontos_tracado_real"] = True
             elemento["pontos_principais"] = list(principais)
@@ -671,8 +707,13 @@ class Ferramenta(FerramentaBase):
         # Gerar spline
         if len(pontos_controle) == 2:
             curva = [QPointF(pontos_controle[0]), QPointF(pontos_controle[1])]
+            tipo_curva = "linha_2p"
+        elif self._modo_curva_atual(canvas) == "3p" and len(pontos_controle) == 3 and not fechado:
+            curva = self._gerar_parabola_3p(canvas, pontos_controle)
+            tipo_curva = "parabola_3p"
         else:
             curva = self._gerar_spline(canvas, pontos_controle, fechado)
+            tipo_curva = "spline_catmull_rom"
 
         # Garantir fechamento visual
         if fechado and curva:
@@ -687,6 +728,7 @@ class Ferramenta(FerramentaBase):
             curva_suave=len(pontos_controle) > 2,
             pontos_principais=pontos_controle,
             fechado=fechado,
+            tipo_curva=tipo_curva,
         )
 
         if self._modo_curva_atual(canvas) == "espelhada" and pontos_controle:
