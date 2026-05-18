@@ -1151,26 +1151,29 @@ class Ferramenta(FerramentaBase):
         el["controle_auxiliares"] = aux
         self._atualizar_espelho_controle(el, "pontos_auxiliares", controle_idx, destino)
 
-        if ponto_idx is not None and self._redistribuir_molde_local_por_ponto(
-            canvas, el, pontos_originais, ponto_idx, dx, dy
-        ):
-            return
-
         cantos = list(el.get("controle_cantos", []))
         if len(cantos) < 2 or len(pontos_originais) < 2:
+            if ponto_idx is not None:
+                self._redistribuir_molde_local_por_ponto(canvas, el, pontos_originais, ponto_idx, dx, dy)
             return
 
         a_idx, b_idx = self._segmento_indices_do_auxiliar(cantos, aux, controle_idx, origem_aux)
         if a_idx is None or b_idx is None:
+            if ponto_idx is not None:
+                self._redistribuir_molde_local_por_ponto(canvas, el, pontos_originais, ponto_idx, dx, dy)
             return
         a = self._ponto_qt(cantos[a_idx])
         b = self._ponto_qt(cantos[b_idx])
         if a is None or b is None:
+            if ponto_idx is not None:
+                self._redistribuir_molde_local_por_ponto(canvas, el, pontos_originais, ponto_idx, dx, dy)
             return
 
         ponto_a_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, a)
         ponto_b_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, b)
         if ponto_a_idx is None or ponto_b_idx is None or ponto_a_idx == ponto_b_idx:
+            if ponto_idx is not None:
+                self._redistribuir_molde_local_por_ponto(canvas, el, pontos_originais, ponto_idx, dx, dy)
             return
 
         fechado = len(pontos_originais) >= 2 and canvas._dist(

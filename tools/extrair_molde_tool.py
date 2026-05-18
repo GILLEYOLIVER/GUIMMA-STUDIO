@@ -1894,7 +1894,10 @@ class Ferramenta(FerramentaBase):
         for pos, inicio in enumerate(indices_ordenados):
             fim = indices_ordenados[(pos + 1) % len(indices_ordenados)]
             trecho = self._pontos_intervalo_contorno(base, inicio, fim)
-            if len(trecho) < 3:
+            if len(trecho) < 2:
+                continue
+            if len(trecho) == 2:
+                aux.append(self._ponto_medio_tuple(trecho[0], trecho[1]))
                 continue
             selecionados = self._auxiliares_para_trecho_curvo(trecho)
             aux.extend(selecionados)
@@ -1927,7 +1930,7 @@ class Ferramenta(FerramentaBase):
         desvio_max = max(desvios, default=0.0)
         tolerancia_curva = max(0.25, corda * 0.015)
         if desvio_max <= tolerancia_curva:
-            return []
+            return [self._ponto_medio_tuple(trecho[0], trecho[-1])]
         comprimento = sum(self._dist_tuple(x, y) for x, y in zip(trecho, trecho[1:]))
         quantidade = 1 if comprimento <= corda * 1.35 else 2
         if desvio_max > corda * 0.20 and len(trecho) >= 7:
@@ -1938,6 +1941,13 @@ class Ferramenta(FerramentaBase):
             idx = max(1, min(len(trecho) - 2, round(alvo * (len(trecho) - 1))))
             saida.append((float(trecho[idx][0]), float(trecho[idx][1])))
         return self._deduplicar_pontos(saida, tol=1e-4)
+
+    def _ponto_medio_tuple(
+        self,
+        a: tuple[float, float],
+        b: tuple[float, float],
+    ) -> tuple[float, float]:
+        return ((float(a[0]) + float(b[0])) / 2.0, (float(a[1]) + float(b[1])) / 2.0)
 
     def _distancia_ponto_segmento_tuple(
         self,
