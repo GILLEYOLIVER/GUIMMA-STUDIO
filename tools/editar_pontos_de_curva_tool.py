@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.geometry.engine import point_segment_distance
 from tools.tool_base import FerramentaBase
 
 try:
@@ -182,6 +183,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando: tuple[int, int] | None = None
         self._quantidade_pontos = 5
         self._pontos_exibidos: list[QPointF] = []
+        self._ultima_pos_arraste: QPointF | None = None
 
     def on_activate(self, canvas):
         # Não chama super().on_activate(canvas), porque ele cria o painel auxiliar intruso.
@@ -189,6 +191,7 @@ class Ferramenta(FerramentaBase):
         self._idx_elemento = None
         self._arrastando = None
         self._pontos_exibidos = []
+        self._ultima_pos_arraste = None
         self._fechar_paineis_intrusos(canvas)
         self._mostrar_painel(canvas)
         self.set_status("Clique em uma linha ou curva para editar os pontos.")
@@ -203,6 +206,7 @@ class Ferramenta(FerramentaBase):
         self._idx_elemento = None
         self._arrastando = None
         self._pontos_exibidos = []
+        self._ultima_pos_arraste = None
         try:
             canvas.removeEventFilter(self)
             canvas.update()
@@ -251,6 +255,7 @@ class Ferramenta(FerramentaBase):
         alca = self._alca_em_ponto(canvas, pos)
         if alca is not None:
             self._arrastando = alca
+            self._ultima_pos_arraste = QPointF(pos)
             self.set_status("Arraste o ponto vermelho para ajustar a curva.")
             event.accept()
             return True
@@ -291,11 +296,15 @@ class Ferramenta(FerramentaBase):
         if indice < 0 or indice >= len(pontos):
             return False
         pos = self._ponto_mouse_cena(canvas, event)
+        if self._ultima_pos_arraste is not None and self._dist(self._ultima_pos_arraste, pos) <= 0.01:
+            event.accept()
+            return True
+        self._ultima_pos_arraste = QPointF(pos)
         pontos[indice] = QPointF(pos)
         self._gravar_pontos_no_elemento(el, pontos, curva=(len(pontos) > 2))
         self._idx_elemento = idx
         self._pontos_exibidos = self._pontos_controle_do_elemento(el)
-        self._atualizar_texto_painel()
+        self.set_status(f"Movendo ponto {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}")
         canvas.update()
         event.accept()
         return True
@@ -304,6 +313,8 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton or self._arrastando is None:
             return False
         self._arrastando = None
+        self._ultima_pos_arraste = None
+        self._atualizar_texto_painel()
         self._registrar_historico_seguro(canvas)
         self._emitir_alteracao_segura(canvas)
         self.set_status("Curva atualizada.")
@@ -524,7 +535,7 @@ class Ferramenta(FerramentaBase):
         # Reamostra mantendo o formato visual atual da curva, não uma polilinha quebrada.
         render_atual = self._pontos_render_do_elemento(el)
         if len(render_atual) < 2:
-            render_atual = self._amostrar_curva_suave(base, max(96, quantidade * 16))
+            render_atual = self._amostrar_curva_suave(base, self._amostras_desenho(quantidade))
         controles = self._reamostrar_polyline(render_atual, quantidade)
         self._gravar_pontos_no_elemento(el, controles, curva=True)
 
@@ -550,7 +561,7 @@ class Ferramenta(FerramentaBase):
             el["suave"] = False
             el["tipo_linha"] = "reta"
         else:
-            desenho = [(float(p.x()), float(p.y())) for p in self._amostrar_curva_suave(pontos, max(96, quantidade * 24))]
+            desenho = [(float(p.x()), float(p.y())) for p in self._amostrar_curva_suave(pontos, self._amostras_desenho(quantidade))]
             el["curva"] = True
             el["suave"] = True
             el["curva_suave"] = True
@@ -699,6 +710,9 @@ class Ferramenta(FerramentaBase):
             novos.append(QPointF(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t))
         return novos
 
+    def _amostras_desenho(self, quantidade_controles: int) -> int:
+        return max(72, min(480, int(quantidade_controles) * 12))
+
     def _alca_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
         if self._idx_elemento is None or not (0 <= self._idx_elemento < len(canvas.cena.elementos)):
             return None
@@ -738,16 +752,7 @@ class Ferramenta(FerramentaBase):
         return melhor
 
     def _distancia_ponto_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> float:
-        vx = b.x() - a.x()
-        vy = b.y() - a.y()
-        wx = p.x() - a.x()
-        wy = p.y() - a.y()
-        c2 = vx * vx + vy * vy
-        if c2 <= 1e-12:
-            return self._dist(p, a)
-        t = max(0.0, min(1.0, (wx * vx + wy * vy) / c2))
-        proj = QPointF(a.x() + t * vx, a.y() + t * vy)
-        return self._dist(p, proj)
+        return float(point_segment_distance((p.x(), p.y()), (a.x(), a.y()), (b.x(), b.y())))
 
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return hypot(a.x() - b.x(), a.y() - b.y())

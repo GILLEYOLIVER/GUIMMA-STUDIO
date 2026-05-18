@@ -1580,7 +1580,7 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
-                if self._elemento_curva_suave(elemento):
+                if self._elemento_curva_suave(elemento) and not elemento.get("pontos_tracado_real"):
                     self._desenhar_curva_suave_elemento(painter, elemento, cor=cor, espessura=esp, estilo=estilo)
                     continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,

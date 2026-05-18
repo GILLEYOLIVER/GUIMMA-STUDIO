@@ -1,12 +1,96 @@
 from __future__ import annotations
 
 from math import sqrt
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
+from core.geometry.engine import polyline_perimeter
+from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
+
+
+class _PainelCurva(QFrame):
+    OBJETO = "PainelCurvaRetasECurvas"
+
+    def __init__(self, ferramenta: "Ferramenta", canvas):
+        super().__init__(canvas)
+        self.ferramenta = ferramenta
+        self.setObjectName(self.OBJETO)
+        self.setWindowFlags(Qt.Widget)
+        self.setFixedWidth(136)
+        self._drag_offset: QPoint | None = None
+        self.setStyleSheet(
+            """
+            QFrame#PainelCurvaRetasECurvas {
+                background:#f8fafc;
+                border:1px solid #cfd8e3;
+                border-radius:2px;
+            }
+            QLabel {
+                color:#1f2937;
+                font-size:11px;
+                padding:2px 4px;
+            }
+            QPushButton {
+                background:#f3f4f6;
+                border:1px solid #d1d5db;
+                color:#111827;
+                min-height:20px;
+                font-size:11px;
+                padding:1px 6px;
+            }
+            QPushButton:hover { background:#e0f2fe; border-color:#7dd3fc; }
+            QPushButton:disabled { color:#9ca3af; background:#f8fafc; }
+            """
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 3, 4, 4)
+        layout.setSpacing(2)
+        self.titulo = QLabel("Retas e curvas")
+        layout.addWidget(self.titulo)
+        self.btn_desfazer = QPushButton("Desfaz ponto")
+        self.btn_desfazer.clicked.connect(self._desfazer)
+        layout.addWidget(self.btn_desfazer)
+
+    def atualizar(self, quantidade: int):
+        self.btn_desfazer.setEnabled(quantidade > 0)
+
+    def _desfazer(self):
+        self.ferramenta.desfazer_ultimo_ponto()
+
+    def _limitar(self, pos: QPoint) -> QPoint:
+        parent = self.parentWidget()
+        if parent is None:
+            return pos
+        margem = 8
+        area = QRect(margem, margem, max(1, parent.width() - margem * 2), max(1, parent.height() - margem * 2))
+        x = max(area.left(), min(pos.x(), area.right() - self.width()))
+        y = max(area.top(), min(pos.y(), area.bottom() - self.height()))
+        return QPoint(int(x), int(y))
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton and event.position().y() <= 22:
+            self._drag_offset = event.position().toPoint()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            self.move(self._limitar(self.pos() + event.position().toPoint() - self._drag_offset))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton and self._drag_offset is not None:
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class Ferramenta(FerramentaBase):
@@ -36,12 +120,28 @@ class Ferramenta(FerramentaBase):
     COR_SNAP = "#7df9ff"
     COR_FECHAR = "#00ff88"
 
+    def __init__(self):
+        super().__init__()
+        self._canvas = None
+        self._painel_curva: _PainelCurva | None = None
+
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._canvas = canvas
         self._garantir_estado(canvas)
         self._resetar(canvas, manter_elementos=True)
+        self._mostrar_painel(canvas)
         self._set_status(canvas)
         canvas.update()
+
+    def on_deactivate(self, canvas):
+        self._ocultar_painel()
+        self._canvas = None
+        self._resetar(canvas, manter_elementos=True)
+        try:
+            canvas.update()
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # ESTADO
@@ -59,6 +159,10 @@ class Ferramenta(FerramentaBase):
             canvas._curva_estado = "parada"
         if not hasattr(canvas, "_curva_fechando"):
             canvas._curva_fechando = False
+        if not hasattr(canvas, "_curva_np_curva_confirmada"):
+            canvas._curva_np_curva_confirmada = []
+        if not hasattr(canvas, "_curva_np_perimetro_confirmado"):
+            canvas._curva_np_perimetro_confirmado = 0.0
 
     def _resetar(self, canvas, manter_elementos=True):
         canvas._curva_estado = "parada"
@@ -67,6 +171,9 @@ class Ferramenta(FerramentaBase):
         canvas._curva_np_preview = []
         canvas._curva_snap_preview = None
         canvas._curva_fechando = False
+        canvas._curva_np_curva_confirmada = []
+        canvas._curva_np_perimetro_confirmado = 0.0
+        self._atualizar_painel(canvas)
 
         if not manter_elementos and hasattr(canvas, "_resetar_estado_curva"):
             try:
@@ -76,13 +183,71 @@ class Ferramenta(FerramentaBase):
 
     def _set_status(self, canvas):
         if not canvas._curva_np_nos:
-            self.set_status("Curva: clique para adicionar o primeiro nó.")
+            self._status(canvas, "Curva: indique pontos.")
         else:
-            msg = "Curva: continue clicando para adicionar nós. "
+            msg = f"Curva: {len(canvas._curva_np_nos)} ponto(s). "
             if len(canvas._curva_np_nos) >= 3:
                 msg += "Clique no primeiro nó para fechar. "
             msg += "Botão direito ou Enter finaliza. ESC cancela."
-            self.set_status(msg)
+            self._status(canvas, msg)
+
+    def _status(self, canvas, texto: str):
+        self.set_status(texto)
+        mensagem_status(canvas, texto)
+
+    def _mostrar_painel(self, canvas):
+        painel = None
+        try:
+            existentes = canvas.findChildren(QFrame, _PainelCurva.OBJETO)
+            painel = existentes[0] if existentes else None
+        except Exception:
+            painel = None
+        if painel is None:
+            painel = _PainelCurva(self, canvas)
+        else:
+            painel.ferramenta = self
+        self._painel_curva = painel
+        margem = 14
+        try:
+            x = max(margem, canvas.width() - painel.width() - margem)
+            y = max(margem, int(canvas.height() * 0.28))
+            painel.move(QPoint(x, y))
+        except Exception:
+            pass
+        self._atualizar_painel(canvas)
+        painel.show()
+        painel.raise_()
+
+    def _ocultar_painel(self):
+        if self._painel_curva is not None:
+            self._painel_curva.hide()
+
+    def _atualizar_painel(self, canvas):
+        painel = self._painel_curva
+        if painel is None:
+            return
+        try:
+            painel.atualizar(len(getattr(canvas, "_curva_np_nos", []) or []))
+        except Exception:
+            pass
+
+    def desfazer_ultimo_ponto(self):
+        canvas = self._canvas
+        if canvas is None:
+            return
+        self._garantir_estado(canvas)
+        if not canvas._curva_np_nos:
+            self._status(canvas, "Curva: nenhum ponto para desfazer.")
+            self._atualizar_painel(canvas)
+            return
+        canvas._curva_np_nos.pop()
+        canvas._curva_fechando = False
+        cursor = getattr(canvas, "_curva_np_cursor", None)
+        self._atualizar_curva_confirmada(canvas)
+        canvas._curva_np_preview = self._gerar_preview_profissional(canvas, cursor=cursor, fechado=False)
+        self._atualizar_status_metricas(canvas, canvas._curva_np_preview or canvas._curva_np_curva_confirmada)
+        self._atualizar_painel(canvas)
+        canvas.update()
 
     # -------------------------------------------------------------------------
     # HELPERS
@@ -318,7 +483,45 @@ class Ferramenta(FerramentaBase):
             return nos
         if len(nos) == 2:
             return [QPointF(nos[0]), QPointF(nos[1])]
+        if not fechado:
+            cache = getattr(canvas, "_curva_np_curva_confirmada", None)
+            if isinstance(cache, list) and len(cache) >= 2:
+                return [QPointF(p) for p in cache]
         return self._gerar_spline(canvas, nos, fechado)
+
+    def _atualizar_curva_confirmada(self, canvas) -> List[QPointF]:
+        nos = self._remover_repetidos([QPointF(p) for p in getattr(canvas, "_curva_np_nos", [])], tolerancia=0.001)
+        if len(nos) <= 1:
+            curva = list(nos)
+        elif len(nos) == 2:
+            curva = [QPointF(nos[0]), QPointF(nos[1])]
+        else:
+            curva = self._gerar_spline(canvas, nos, fechado=False)
+        canvas._curva_np_curva_confirmada = curva
+        canvas._curva_np_perimetro_confirmado = self._comprimento_polyline(curva)
+        return curva
+
+    def _comprimento_polyline(self, pontos: List[QPointF]) -> float:
+        if len(pontos) < 2:
+            return 0.0
+        return float(polyline_perimeter([(float(p.x()), float(p.y())) for p in pontos]))
+
+    def _formatar_valor(self, canvas, valor: float) -> str:
+        if hasattr(canvas, "formatar_valor_unidade"):
+            try:
+                return canvas.formatar_valor_unidade(valor)
+            except Exception:
+                pass
+        return f"{valor:.2f}"
+
+    def _atualizar_status_metricas(self, canvas, pontos: List[QPointF] | None = None):
+        pontos = pontos if pontos is not None else getattr(canvas, "_curva_np_preview", [])
+        perimetro = self._comprimento_polyline(pontos or [])
+        unidade = getattr(canvas, "_unidade_sigla", "cm")
+        txt = f"Curva: pontos {len(getattr(canvas, '_curva_np_nos', []) or [])} | perímetro {self._formatar_valor(canvas, perimetro)} ({unidade})"
+        if getattr(canvas, "_curva_fechando", False):
+            txt += " | fechar curva"
+        self._status(canvas, txt)
 
     def _trecho_temporario_cursor(self, canvas, cursor: QPointF) -> List[QPointF]:
         """Desenha somente o trecho temporário até o cursor.
@@ -488,15 +691,15 @@ class Ferramenta(FerramentaBase):
         if len(pontos_base) < 2:
             return False
 
-        # Se fechado, garantir que o último ponto seja igual ao primeiro
-        if fechado and len(pontos_base) >= 3:
-            pontos_base[-1] = QPointF(pontos_base[0])
+        pontos_controle = [QPointF(p) for p in pontos_base]
+        if fechado and len(pontos_controle) >= 3 and self._dist(pontos_controle[0], pontos_controle[-1]) <= 0.001:
+            pontos_controle.pop()
 
         # Gerar spline
-        if len(pontos_base) == 2:
-            curva = [QPointF(pontos_base[0]), QPointF(pontos_base[1])]
+        if len(pontos_controle) == 2:
+            curva = [QPointF(pontos_controle[0]), QPointF(pontos_controle[1])]
         else:
-            curva = self._gerar_spline(canvas, pontos_base, fechado)
+            curva = self._gerar_spline(canvas, pontos_controle, fechado)
 
         # Garantir fechamento visual
         if fechado and curva:
@@ -508,15 +711,15 @@ class Ferramenta(FerramentaBase):
         self._append_elemento_polyline(
             canvas,
             curva,
-            curva_suave=len(pontos_base) > 2,
-            pontos_principais=pontos_base,
+            curva_suave=len(pontos_controle) > 2,
+            pontos_principais=pontos_controle,
             fechado=fechado,
         )
 
-        if self._modo_curva_atual(canvas) == "espelhada" and pontos_base:
-            eixo_x = pontos_base[0].x()
+        if self._modo_curva_atual(canvas) == "espelhada" and pontos_controle:
+            eixo_x = pontos_controle[0].x()
             curva_espelho = self._espelhar_pontos(curva, eixo_x)
-            principais_espelho = self._espelhar_pontos(pontos_base, eixo_x)
+            principais_espelho = self._espelhar_pontos(pontos_controle, eixo_x)
             self._append_elemento_polyline(
                 canvas,
                 curva_espelho,
@@ -538,7 +741,7 @@ class Ferramenta(FerramentaBase):
 
         if event.key() == Qt.Key_Escape:
             self._resetar(canvas, manter_elementos=True)
-            self.set_status("Curva cancelada.")
+            self._status(canvas, "Curva cancelada.")
             canvas.update()
             event.accept()
             return True
@@ -547,10 +750,10 @@ class Ferramenta(FerramentaBase):
             fechado = getattr(canvas, "_curva_fechando", False)
             if self._finalizar_np(canvas, fechado):
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Curva finalizada.")
+                self._status(canvas, "Curva finalizada.")
             else:
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Curva encerrada (menos de 2 pontos).")
+                self._status(canvas, "Curva encerrada (menos de 2 pontos).")
             canvas.update()
             event.accept()
             return True
@@ -566,10 +769,10 @@ class Ferramenta(FerramentaBase):
             fechado = getattr(canvas, "_curva_fechando", False)
             if self._finalizar_np(canvas, fechado):
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Curva finalizada.")
+                self._status(canvas, "Curva finalizada.")
             else:
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Curva encerrada (menos de 2 pontos).")
+                self._status(canvas, "Curva encerrada (menos de 2 pontos).")
             canvas.update()
             event.accept()
             return True
@@ -587,10 +790,10 @@ class Ferramenta(FerramentaBase):
             # Fecha a curva imediatamente
             if self._finalizar_np(canvas, fechado=True):
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Curva fechada e finalizada.")
+                self._status(canvas, "Curva fechada e finalizada.")
             else:
                 self._resetar(canvas, manter_elementos=True)
-                self.set_status("Erro ao fechar curva.")
+                self._status(canvas, "Erro ao fechar curva.")
             canvas.update()
             event.accept()
             return True
@@ -605,15 +808,17 @@ class Ferramenta(FerramentaBase):
 
         canvas._curva_np_cursor = QPointF(pos)
         canvas._curva_fechando = False
+        self._atualizar_curva_confirmada(canvas)
+        self._atualizar_painel(canvas)
 
         modo = self._modo_curva_atual(canvas)
         if (modo == "2p" and len(canvas._curva_np_nos) >= 2) or (modo == "3p" and len(canvas._curva_np_nos) >= 3):
             ok = self._finalizar_np(canvas, fechado=False)
             self._resetar(canvas, manter_elementos=True)
-            self.set_status("Curva finalizada." if ok else "Curva encerrada.")
+            self._status(canvas, "Curva finalizada." if ok else "Curva encerrada.")
         else:
             canvas._curva_np_preview = self._gerar_preview_profissional(canvas, cursor=None, fechado=False)
-            self._set_status(canvas)
+            self._atualizar_status_metricas(canvas, canvas._curva_np_preview or canvas._curva_np_curva_confirmada)
 
         canvas.update()
         event.accept()
@@ -637,6 +842,7 @@ class Ferramenta(FerramentaBase):
         if canvas._curva_np_nos:
             canvas._curva_np_cursor = QPointF(pos)
             canvas._curva_np_preview = self._gerar_preview_profissional(canvas, cursor=pos, fechado=fechando)
+            self._atualizar_status_metricas(canvas, canvas._curva_np_preview)
 
             canvas.update()
             event.accept()
