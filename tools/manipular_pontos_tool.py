@@ -1037,9 +1037,9 @@ class Ferramenta(FerramentaBase):
         destino = self._normalizar_destino(destino)
         if tipo == "canto":
             self._arrastar_canto_molde(canvas, el, controle_idx, destino)
+            self._recravar_auxiliares_no_perimetro(el)
         else:
             self._arrastar_auxiliar_molde(canvas, el, controle_idx, destino)
-        self._recravar_auxiliares_no_perimetro(el)
         self._reajustar_fio_no_molde(el)
 
     def _arrastar_canto_molde(self, canvas, el: dict, controle_idx: int, destino: QPointF):
@@ -1097,50 +1097,79 @@ class Ferramenta(FerramentaBase):
         origem_aux = self._ponto_qt(aux[controle_idx])
         if origem_aux is None:
             return
-        dx = destino.x() - origem_aux.x()
-        dy = destino.y() - origem_aux.y()
-        if abs(dx) <= 1e-9 and abs(dy) <= 1e-9:
-            return
         aux[controle_idx] = (destino.x(), destino.y())
         el["controle_auxiliares"] = aux
         self._atualizar_espelho_controle(el, "pontos_auxiliares", controle_idx, destino)
 
         cantos = list(el.get("controle_cantos", []))
-        a_idx, b_idx = self._segmento_controle_mais_proximo(cantos, origem_aux)
-        pontos_para_mover: list[tuple[QPointF, QPointF]] = [(origem_aux, destino)]
         pontos_originais = list(el.get("pontos", []))
-        indices_principais_movidos: list[int] = []
-        if a_idx is not None and b_idx is not None:
-            for canto_idx in (a_idx, b_idx):
-                canto = self._ponto_qt(cantos[canto_idx])
-                if canto is None:
-                    continue
-                ponto_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, canto)
-                if ponto_idx is not None:
-                    indices_principais_movidos.append(ponto_idx)
-                novo_canto = QPointF(canto.x() + dx, canto.y() + dy)
-                cantos[canto_idx] = (novo_canto.x(), novo_canto.y())
-                self._atualizar_espelho_controle(el, "pontos_controle_principais", canto_idx, novo_canto)
-                pontos_para_mover.append((canto, novo_canto))
-            el["controle_cantos"] = cantos
+        if len(cantos) < 2 or len(pontos_originais) < 2:
+            return
 
-        tol = 10.0 / max(canvas.zoom, 0.001)
-        pontos = list(el.get("pontos", []))
-        for p_idx, (x, y) in enumerate(pontos):
-            pt = QPointF(float(x), float(y))
-            for origem, novo in pontos_para_mover:
-                if canvas._dist(pt, origem) <= tol:
-                    pontos[p_idx] = (novo.x(), novo.y())
-                    break
-        if len(pontos) >= 2:
-            p0 = QPointF(float(pontos[0][0]), float(pontos[0][1]))
-            pn = QPointF(float(pontos[-1][0]), float(pontos[-1][1]))
-            if canvas._dist(p0, pn) <= tol:
-                pontos[-1] = pontos[0]
+        a_idx, b_idx = self._segmento_indices_do_auxiliar(cantos, aux, controle_idx, origem_aux)
+        if a_idx is None or b_idx is None:
+            return
+        a = self._ponto_qt(cantos[a_idx])
+        b = self._ponto_qt(cantos[b_idx])
+        if a is None or b is None:
+            return
+
+        ponto_a_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, a)
+        ponto_b_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, b)
+        if ponto_a_idx is None or ponto_b_idx is None or ponto_a_idx == ponto_b_idx:
+            return
+
+        fechado = len(pontos_originais) >= 2 and canvas._dist(
+            self._ponto_qt(pontos_originais[0]) or QPointF(),
+            self._ponto_qt(pontos_originais[-1]) or QPointF(),
+        ) <= 1e-6
+        n = len(pontos_originais) - 1 if fechado else len(pontos_originais)
+        indices = self._indices_intervalo(ponto_a_idx, ponto_b_idx, n, fechado)
+        if len(indices) < 2:
+            return
+
+        pontos = list(pontos_originais)
+        denom = max(1, len(indices) - 1)
+        controle_bezier = self._controle_quadratico_passando_por_meio(a, destino, b)
+        for pos, idx_local in enumerate(indices):
+            t = pos / float(denom)
+            novo = self._bezier_quadratica(a, controle_bezier, b, t)
+            if self._modo_discreto():
+                novo = QPointF(round(novo.x(), 2), round(novo.y(), 2))
+            pontos[idx_local] = (novo.x(), novo.y())
+        if fechado and len(pontos) >= 2:
+            pontos[-1] = pontos[0]
         el["pontos"] = pontos
-        if indices_principais_movidos:
-            deslocamentos = {ponto_idx: (dx, dy) for ponto_idx in indices_principais_movidos}
-            self._redistribuir_molde_por_deslocamentos(canvas, el, pontos_originais, deslocamentos)
+        self._sincronizar_curva_suave(el)
+
+    def _segmento_indices_do_auxiliar(
+        self,
+        cantos: list,
+        auxiliares: list,
+        controle_idx: int,
+        origem_aux: QPointF,
+    ) -> tuple[int | None, int | None]:
+        total = len(cantos)
+        if total < 2:
+            return None, None
+        fechado = total >= 3 and len(auxiliares) == total
+        if fechado and 0 <= controle_idx < total:
+            return controle_idx, (controle_idx + 1) % total
+        if len(auxiliares) == total - 1 and 0 <= controle_idx < total - 1:
+            return controle_idx, controle_idx + 1
+        return self._segmento_controle_mais_proximo(cantos, origem_aux)
+
+    def _bezier_quadratica(self, a: QPointF, controle: QPointF, b: QPointF, t: float) -> QPointF:
+        u = 1.0 - t
+        x = (u * u * a.x()) + (2.0 * u * t * controle.x()) + (t * t * b.x())
+        y = (u * u * a.y()) + (2.0 * u * t * controle.y()) + (t * t * b.y())
+        return QPointF(x, y)
+
+    def _controle_quadratico_passando_por_meio(self, a: QPointF, meio: QPointF, b: QPointF) -> QPointF:
+        return QPointF(
+            (2.0 * meio.x()) - ((a.x() + b.x()) * 0.5),
+            (2.0 * meio.y()) - ((a.y() + b.y()) * 0.5),
+        )
 
     def _redistribuir_molde_por_deslocamentos(
         self,
