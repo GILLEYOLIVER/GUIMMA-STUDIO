@@ -168,6 +168,40 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 10.0, "y": 0.0})
         self.assertEqual(canvas.historico, 1)
 
+    def test_arrasta_vertice_intermediario_de_molde_suave_ponto_a_ponto(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "curva_suave": True,
+                "tipo_curva": "spline_catmull_rom",
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.0),
+                    (5.0, 0.0),
+                    (10.0, 0.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0)],
+                "controle_auxiliares": [(5.0, 0.0)],
+                "pontos_principais": [(0.0, 0.0), (10.0, 0.0)],
+                "pontos_controle_curva": [(0.0, 0.0), (10.0, 0.0)],
+            }
+        )
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 3.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 3.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["pontos"][1], (2.0, 3.0))
+        self.assertEqual(molde["pontos"][0], (0.0, 0.0))
+        self.assertEqual(molde["pontos"][2], (5.0, 0.0))
+        self.assertEqual(molde["pontos"][3], (10.0, 0.0))
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(molde["pontos_principais"], [(0.0, 0.0), (10.0, 0.0)])
+
     def test_shift_seleciona_varios_pontos_e_arrasta_juntos(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()

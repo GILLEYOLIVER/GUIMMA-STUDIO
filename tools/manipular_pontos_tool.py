@@ -152,6 +152,8 @@ class Ferramenta(FerramentaBase):
         )
 
     def _sincronizar_curva_suave(self, el: dict) -> None:
+        if el.get("molde"):
+            return
         # Curva com traçado real: manter somente os controles como controles.
         if self._curva_tracado_real(el):
             controles = self._pontos_controle_curva(el)
@@ -483,7 +485,9 @@ class Ferramenta(FerramentaBase):
         self._desenhar_hover_dobra_pontilhada(canvas, painter)
 
     def _curva_tracado_real(self, el: dict) -> bool:
-        return isinstance(el, dict) and bool(
+        if not isinstance(el, dict) or el.get("molde"):
+            return False
+        return bool(
             el.get("pontos_tracado_real")
             or el.get("curva_editavel")
             or el.get("pontos_principais")
@@ -676,7 +680,10 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline" or not self._elemento_curva_suave(el):
                 continue
-            controles = self._pontos_controle_curva(el)
+            if el.get("molde"):
+                controles = self._pontos_polyline_editaveis_molde(el)
+            else:
+                controles = self._pontos_controle_curva(el)
             if not controles:
                 continue
             painter.save()
@@ -784,6 +791,16 @@ class Ferramenta(FerramentaBase):
             if el.get("tipo") != "polyline":
                 continue
 
+            if el.get("molde"):
+                pontos = el.get("pontos", [])
+                fechado = self._polyline_fechada(canvas, pontos)
+                limite = len(pontos) - 1 if fechado else len(pontos)
+                for p_idx in range(max(0, limite)):
+                    ponto_real = self._ponto_qt(pontos[p_idx])
+                    if ponto_real is not None and canvas._dist(ponto_real, ponto) <= tolerancia:
+                        return idx, p_idx
+                continue
+
             # Curva suave: só os pontos principais/controláveis aparecem e podem ser pegos.
             if self._elemento_curva_suave(el):
                 controles = self._pontos_controle_curva(el)
@@ -809,6 +826,32 @@ class Ferramenta(FerramentaBase):
                 if canvas._dist(QPointF(float(x), float(y)), ponto) <= tolerancia:
                     return idx, p_idx
         return None
+
+    def _pontos_polyline_editaveis_molde(self, el: dict) -> list[QPointF]:
+        pontos = el.get("pontos", [])
+        if not isinstance(pontos, list):
+            return []
+        saida: list[QPointF] = []
+        limite = len(pontos)
+        if limite >= 2:
+            p0 = self._ponto_qt(pontos[0])
+            pn = self._ponto_qt(pontos[-1])
+            if p0 is not None and pn is not None and self._dist_pontos_local(p0, pn) <= 1e-6:
+                limite -= 1
+        for item in pontos[:limite]:
+            pt = self._ponto_qt(item)
+            if pt is not None:
+                saida.append(pt)
+        return saida
+
+    def _polyline_fechada(self, canvas, pontos: list) -> bool:
+        if len(pontos) < 2:
+            return False
+        p0 = self._ponto_qt(pontos[0])
+        pn = self._ponto_qt(pontos[-1])
+        if p0 is None or pn is None:
+            return False
+        return canvas._dist(p0, pn) <= 1e-6
 
     def _indices_pontos_principais_molde(self, canvas, el: dict) -> set[int]:
         """
