@@ -1729,12 +1729,21 @@ class Ferramenta(FerramentaBase):
         if not el.get("molde"):
             return
 
-        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", [])) if p is not None]
-        painter.setPen(QPen(QColor("#2da8ff"), 1.0))
-        painter.setBrush(QColor("#001522"))
-        for pt in cantos:
+        controles = [
+            (pt, "#ff3030", 3)
+            for pt in (self._ponto_qt(item) for item in el.get("controle_cantos", []))
+            if pt is not None
+        ]
+        controles.extend(
+            (pt, "#ff3030", 2)
+            for pt in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []))
+            if pt is not None
+        )
+        for pt, cor, raio in controles:
             tela = canvas._cena_para_tela(pt)
-            painter.drawRect(int(tela.x() - 3), int(tela.y() - 3), 6, 6)
+            painter.setPen(QPen(QColor(cor), 1.0))
+            painter.setBrush(QColor(cor))
+            painter.drawEllipse(tela, float(raio), float(raio))
 
     def _desenhar_molde_em_manipulacao(self, canvas, painter):
         idx = None
@@ -1742,8 +1751,6 @@ class Ferramenta(FerramentaBase):
             idx = self._arrastando_controle_molde[0]
         elif self._arrastando_ponto_poly is not None:
             idx = self._arrastando_ponto_poly[0]
-        elif self._hover_controle_molde is not None:
-            idx = self._hover_controle_molde[0]
         if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
             return
         el = canvas.cena.elementos[idx]
@@ -1754,8 +1761,8 @@ class Ferramenta(FerramentaBase):
             return
         painter.save()
         painter.setBrush(Qt.NoBrush)
-        cor = "#2da8ff"
-        esp = max(1.6, float(el.get("espessura", 1.0)) + 0.7)
+        cor = "#ff2020"
+        esp = max(1.8, float(el.get("espessura", 1.0)) + 0.6)
         if self._elemento_curva_suave(el) and hasattr(canvas, "_desenhar_curva_suave_por_pontos"):
             canvas._desenhar_curva_suave_por_pontos(painter, pontos, cor=cor, espessura=esp, estilo="solid")
         else:
@@ -1773,7 +1780,7 @@ class Ferramenta(FerramentaBase):
                     if ponto is None:
                         return
                     pt = canvas._cena_para_tela(ponto)
-                    painter.setPen(QPen(QColor("#2da8ff"), 1.4))
+                    painter.setPen(QPen(QColor("#ff3030"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
 
@@ -1787,7 +1794,7 @@ class Ferramenta(FerramentaBase):
                     if ponto is None:
                         return
                     pt = canvas._cena_para_tela(ponto)
-                    painter.setPen(QPen(QColor("#66d9ff"), 2.0))
+                    painter.setPen(QPen(QColor("#ff3030"), 2.0))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 11), int(pt.y() - 11), 22, 22)
 
@@ -1802,7 +1809,7 @@ class Ferramenta(FerramentaBase):
                     if controle is None:
                         return
                     pt = canvas._cena_para_tela(controle)
-                    painter.setPen(QPen(QColor("#2da8ff"), 1.4))
+                    painter.setPen(QPen(QColor("#ff3030"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 8), int(pt.y() - 8), 16, 16)
 
@@ -1818,7 +1825,7 @@ class Ferramenta(FerramentaBase):
             if controle is None:
                 continue
             pt = canvas._cena_para_tela(controle)
-            painter.setPen(QPen(QColor("#66d9ff"), 2.0))
+            painter.setPen(QPen(QColor("#ff3030"), 2.0))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(int(pt.x() - 11), int(pt.y() - 11), 22, 22)
 

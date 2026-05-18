@@ -1791,12 +1791,42 @@ class Ferramenta(FerramentaBase):
         if len(base) <= 4:
             return list(range(len(base)))
         if self._eh_quase_circulo(base):
-            return self._indices_para_circulo(base)
+            return self._indices_por_amostragem(base, min(12, max(8, len(base) // 4)))
 
         candidatos = self._indices_por_angulo(base)
-        if len(candidatos) < 4:
-            candidatos = self._indices_por_amostragem(base, 4)
+        minimo = self._quantidade_minima_controles_principais(base)
+        if len(candidatos) < minimo:
+            candidatos = self._mesclar_indices_controle(
+                base,
+                candidatos,
+                self._indices_por_amostragem(base, minimo),
+            )
         return candidatos
+
+    def _quantidade_minima_controles_principais(self, base: list[tuple[float, float]]) -> int:
+        if len(base) <= 4:
+            return len(base)
+        perimetro = sum(self._dist_tuple(a, b) for a, b in zip(base, [*base[1:], base[0]]))
+        por_perimetro = int(round(perimetro / 12.0))
+        por_vertices = int(round(len(base) / 10.0))
+        return max(6, min(18, por_perimetro, por_vertices if por_vertices > 0 else 6, len(base)))
+
+    def _mesclar_indices_controle(
+        self,
+        base: list[tuple[float, float]],
+        primeiros: list[int],
+        extras: list[int],
+    ) -> list[int]:
+        n = len(base)
+        usados: set[int] = set()
+        saida: list[int] = []
+        for idx in [*primeiros, *extras]:
+            idx = int(idx) % n
+            if idx in usados:
+                continue
+            usados.add(idx)
+            saida.append(idx)
+        return sorted(saida)
 
     def _indices_por_angulo(self, base: list[tuple[float, float]]) -> list[int]:
         n = len(base)
@@ -1928,13 +1958,15 @@ class Ferramenta(FerramentaBase):
             return []
         desvios = [self._distancia_ponto_segmento_tuple(p, trecho[0], trecho[-1]) for p in trecho[1:-1]]
         desvio_max = max(desvios, default=0.0)
-        tolerancia_curva = max(0.25, corda * 0.015)
+        tolerancia_curva = max(0.12, corda * 0.008)
         if desvio_max <= tolerancia_curva:
             return [self._ponto_medio_tuple(trecho[0], trecho[-1])]
         comprimento = sum(self._dist_tuple(x, y) for x, y in zip(trecho, trecho[1:]))
-        quantidade = 1 if comprimento <= corda * 1.35 else 2
-        if desvio_max > corda * 0.20 and len(trecho) >= 7:
-            quantidade = 3
+        quantidade = 2 if comprimento <= corda * 1.25 else 3
+        if desvio_max > corda * 0.14 and len(trecho) >= 7:
+            quantidade = 4
+        if len(trecho) >= 18:
+            quantidade = max(quantidade, min(6, len(trecho) // 7))
         saida: list[tuple[float, float]] = []
         for passo in range(1, quantidade + 1):
             alvo = passo / float(quantidade + 1)
