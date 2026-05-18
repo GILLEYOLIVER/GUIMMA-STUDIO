@@ -7,6 +7,11 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit
 
+from core.geometry.engine import (
+    quadratic_bezier_control_for_point,
+    quadratic_bezier_parameter_for_point,
+    sample_quadratic_bezier_through_point,
+)
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -147,6 +152,7 @@ class Ferramenta(FerramentaBase):
         return bool(
             elemento.get("curva_suave")
             or elemento.get("suavizar")
+            or str(elemento.get("tipo_curva") or "").lower() == "parabola_3p"
             or str(elemento.get("tipo_curva") or "").lower().startswith("spline")
             or str(elemento.get("renderizacao") or "").lower() == "curva_suave"
         )
@@ -570,22 +576,19 @@ class Ferramenta(FerramentaBase):
 
     def _gerar_parabola_3p_curva_real(self, controles: list[QPointF]) -> list[tuple[float, float]]:
         p0, pmedio, p2 = [QPointF(p) for p in controles]
-        controle = QPointF(
-            (2.0 * pmedio.x()) - (0.5 * (p0.x() + p2.x())),
-            (2.0 * pmedio.y()) - (0.5 * (p0.y() + p2.y())),
+        return sample_quadratic_bezier_through_point(
+            (float(p0.x()), float(p0.y())),
+            (float(pmedio.x()), float(pmedio.y())),
+            (float(p2.x()), float(p2.y())),
+            96,
         )
-        segmentos = 48
-        saida: list[tuple[float, float]] = []
-        for i in range(segmentos + 1):
-            t = i / float(segmentos)
-            u = 1.0 - t
-            x = (u * u * p0.x()) + (2.0 * u * t * controle.x()) + (t * t * p2.x())
-            y = (u * u * p0.y()) + (2.0 * u * t * controle.y()) + (t * t * p2.y())
-            saida.append((float(x), float(y)))
-        saida[0] = (float(p0.x()), float(p0.y()))
-        saida[segmentos // 2] = (float(pmedio.x()), float(pmedio.y()))
-        saida[-1] = (float(p2.x()), float(p2.y()))
-        return saida
+
+    def _parametro_parabola_3p(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> float:
+        return quadratic_bezier_parameter_for_point(
+            (float(p0.x()), float(p0.y())),
+            (float(pmedio.x()), float(pmedio.y())),
+            (float(p2.x()), float(p2.y())),
+        )
 
     def _catmull_rom(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
         t2 = t * t
@@ -687,7 +690,20 @@ class Ferramenta(FerramentaBase):
             try:
                 painter.setBrush(Qt.NoBrush)
                 esp = max(1.8, float(el.get("espessura", 1.0)) + 0.8)
-                if el.get("pontos_tracado_real"):
+                if (
+                    str(el.get("tipo_curva") or "").lower() == "parabola_3p"
+                    and hasattr(canvas, "_desenhar_parabola_3p_elemento")
+                    and canvas._desenhar_parabola_3p_elemento(
+                        painter,
+                        el,
+                        cor="#2da8ff",
+                        espessura=esp,
+                        estilo="solid",
+                        amplitude=1.0,
+                    )
+                ):
+                    pass
+                elif el.get("pontos_tracado_real"):
                     canvas._desenhar_polilinha(
                         painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid", amplitude=1.0
                     )
@@ -822,13 +838,8 @@ class Ferramenta(FerramentaBase):
                 continue
 
             if el.get("molde"):
-                pontos = el.get("pontos", [])
-                fechado = self._polyline_fechada(canvas, pontos)
-                limite = len(pontos) - 1 if fechado else len(pontos)
-                for p_idx in range(max(0, limite)):
-                    ponto_real = self._ponto_qt(pontos[p_idx])
-                    if ponto_real is not None and canvas._dist(ponto_real, ponto) <= tolerancia:
-                        return idx, p_idx
+                # Moldes so podem ser deformados pelos controles oficiais
+                # (controle_cantos/controle_auxiliares), tratados antes desta busca.
                 continue
 
             # Curva suave: só os pontos principais/controláveis aparecem e podem ser pegos.
@@ -858,20 +869,27 @@ class Ferramenta(FerramentaBase):
         return None
 
     def _pontos_polyline_editaveis_molde(self, el: dict) -> list[QPointF]:
-        pontos = el.get("pontos", [])
-        if not isinstance(pontos, list):
-            return []
+        atuais = self._pontos_controle_molde_por_chaves(el, ("controle_cantos", "controle_auxiliares"))
+        if atuais:
+            return atuais
+        return self._pontos_controle_molde_por_chaves(el, ("pontos_controle_principais", "pontos_auxiliares"))
+
+    def _pontos_controle_molde_por_chaves(self, el: dict, chaves: tuple[str, ...]) -> list[QPointF]:
         saida: list[QPointF] = []
-        limite = len(pontos)
-        if limite >= 2:
-            p0 = self._ponto_qt(pontos[0])
-            pn = self._ponto_qt(pontos[-1])
-            if p0 is not None and pn is not None and self._dist_pontos_local(p0, pn) <= 1e-6:
-                limite -= 1
-        for item in pontos[:limite]:
-            pt = self._ponto_qt(item)
-            if pt is not None:
-                saida.append(pt)
+        vistos: set[tuple[float, float]] = set()
+        for chave in chaves:
+            valores = el.get(chave, [])
+            if not isinstance(valores, list):
+                continue
+            for item in valores:
+                pt = self._ponto_qt(item)
+                if pt is None:
+                    continue
+                assinatura = (round(float(pt.x()), 7), round(float(pt.y()), 7))
+                if assinatura in vistos:
+                    continue
+                vistos.add(assinatura)
+                saida.append(QPointF(pt))
         return saida
 
     def _polyline_fechada(self, canvas, pontos: list) -> bool:
@@ -1359,10 +1377,12 @@ class Ferramenta(FerramentaBase):
         return QPointF(x, y)
 
     def _controle_quadratico_passando_por_meio(self, a: QPointF, meio: QPointF, b: QPointF) -> QPointF:
-        return QPointF(
-            (2.0 * meio.x()) - ((a.x() + b.x()) * 0.5),
-            (2.0 * meio.y()) - ((a.y() + b.y()) * 0.5),
+        x, y = quadratic_bezier_control_for_point(
+            (float(a.x()), float(a.y())),
+            (float(meio.x()), float(meio.y())),
+            (float(b.x()), float(b.y())),
         )
+        return QPointF(x, y)
 
     def _redistribuir_molde_por_deslocamentos(
         self,

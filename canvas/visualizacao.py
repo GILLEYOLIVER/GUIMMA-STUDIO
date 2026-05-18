@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult
+from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -1580,6 +1581,15 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
+                if self._desenhar_parabola_3p_elemento(
+                    painter,
+                    elemento,
+                    cor=cor,
+                    espessura=esp,
+                    estilo=estilo,
+                    amplitude=float(elemento.get("amplitude", 1.0)),
+                ):
+                    continue
                 if self._elemento_curva_suave(elemento) and not elemento.get("pontos_tracado_real"):
                     self._desenhar_curva_suave_elemento(painter, elemento, cor=cor, espessura=esp, estilo=estilo)
                     continue
@@ -1658,6 +1668,15 @@ class VisualizacaoCanvas(QWidget):
             esp = max(1.0, float(elemento.get("espessura", 1.0) or 1.0))
             try:
                 if elemento.get("tipo") == "polyline":
+                    if self._desenhar_parabola_3p_elemento(
+                        painter,
+                        elemento,
+                        cor=cor,
+                        espessura=esp,
+                        estilo=str(elemento.get("estilo", "solid")),
+                        amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
+                    ):
+                        continue
                     pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
                     if len(pontos) >= 2:
                         self._desenhar_polilinha(
@@ -2722,9 +2741,68 @@ class VisualizacaoCanvas(QWidget):
         return bool(
             elemento.get("curva_suave")
             or elemento.get("suavizar")
+            or str(elemento.get("tipo_curva") or "").lower() == "parabola_3p"
             or str(elemento.get("tipo_curva") or "").lower().startswith("spline")
             or str(elemento.get("renderizacao") or "").lower() == "curva_suave"
         )
+
+    def _qpoint_serializado(self, item) -> QPointF | None:
+        try:
+            if isinstance(item, dict):
+                return QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0)))
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                return QPointF(float(item[0]), float(item[1]))
+        except Exception:
+            return None
+        return None
+
+    def _controles_parabola_3p_elemento(self, elemento: dict) -> list[QPointF]:
+        if str(elemento.get("tipo_curva") or "").strip().lower() != "parabola_3p":
+            return []
+        for chave in ("pontos_principais", "pontos_controle_curva", "pontos_controle_principais", "pontos_controle"):
+            origem = elemento.get(chave)
+            if not isinstance(origem, list):
+                continue
+            pontos = [pt for item in origem if (pt := self._qpoint_serializado(item)) is not None]
+            if len(pontos) == 3:
+                return [QPointF(p) for p in pontos]
+        origem = elemento.get("pontos")
+        if isinstance(origem, list) and len(origem) == 3:
+            pontos = [pt for item in origem if (pt := self._qpoint_serializado(item)) is not None]
+            if len(pontos) == 3:
+                return [QPointF(p) for p in pontos]
+        return []
+
+    def _desenhar_parabola_3p_elemento(
+            self,
+            painter: QPainter,
+            elemento: dict,
+            cor: str,
+            espessura: float,
+            estilo: str = "solid",
+            amplitude: float = 1.0,
+    ) -> bool:
+        controles = self._controles_parabola_3p_elemento(elemento)
+        if len(controles) != 3:
+            return False
+        p0, pmedio, p2 = controles
+        cx, cy = quadratic_bezier_control_for_point(
+            (float(p0.x()), float(p0.y())),
+            (float(pmedio.x()), float(pmedio.y())),
+            (float(p2.x()), float(p2.y())),
+        )
+        self._desenhar_bezier_quadratica(
+            painter,
+            p0,
+            QPointF(cx, cy),
+            p2,
+            cor=cor,
+            espessura=espessura,
+            estilo=estilo,
+            amplitude=amplitude,
+            destacar_controles=False,
+        )
+        return True
 
     def _pontos_curva_suave_elemento(self, elemento: dict) -> list[QPointF]:
         # Para ferramenta Curva, os pontos salvos são os pontos principais.
@@ -2898,8 +2976,20 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_bezier_quadratica(self, painter: QPainter, p0: QPointF, p1: QPointF, p2: QPointF,
                                     cor: str, espessura: float, estilo: str, amplitude: float,
                                     destacar_controles: bool = False):
-        pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=42)
-        self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude)
+        if is_geometric_line_style(estilo):
+            pontos = self._amostrar_bezier_quadratica(p0, p1, p2, segmentos=96)
+            self._desenhar_polilinha(painter, pontos, cor=cor, espessura=espessura, estilo=estilo, amplitude=amplitude)
+        else:
+            path = QPainterPath(self._cena_para_tela(p0))
+            path.quadTo(self._cena_para_tela(p1), self._cena_para_tela(p2))
+            pen = QPen(QColor(cor), espessura)
+            self._aplicar_estilo_caneta(pen, estilo)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
         if not destacar_controles:
             return
         self._desenhar_segmento(painter, p0, p1, tracejado=True, cor="#6fa8ff")
