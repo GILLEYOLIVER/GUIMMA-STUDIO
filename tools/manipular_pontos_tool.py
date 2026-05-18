@@ -977,7 +977,11 @@ class Ferramenta(FerramentaBase):
     def _criar_estado_arraste_ponto(self, canvas, idx: int, p_idx: int) -> dict | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return None
-        pontos = canvas.cena.elementos[idx].get("pontos", [])
+        el = canvas.cena.elementos[idx]
+        if self._curva_tracado_real(el):
+            pontos = self._pontos_controle_curva(el)
+        else:
+            pontos = el.get("pontos", [])
         if not (0 <= p_idx < len(pontos)):
             return None
         origem = self._ponto_qt(pontos[p_idx])
@@ -1338,10 +1342,12 @@ class Ferramenta(FerramentaBase):
             idx, p_idx = self._hover_ponto_poly
             if 0 <= idx < len(canvas.cena.elementos):
                 el = canvas.cena.elementos[idx]
-                pontos = el.get("pontos", [])
+                pontos = self._pontos_controle_curva(el) if self._curva_tracado_real(el) else el.get("pontos", [])
                 if 0 <= p_idx < len(pontos):
-                    x, y = pontos[p_idx]
-                    pt = canvas._cena_para_tela(QPointF(float(x), float(y)))
+                    ponto = self._ponto_qt(pontos[p_idx])
+                    if ponto is None:
+                        return
+                    pt = canvas._cena_para_tela(ponto)
                     painter.setPen(QPen(QColor("#2da8ff"), 1.4))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 9), int(pt.y() - 9), 18, 18)
@@ -1349,10 +1355,13 @@ class Ferramenta(FerramentaBase):
         if self._ponto_selecionado is not None:
             idx, p_idx = self._ponto_selecionado
             if 0 <= idx < len(canvas.cena.elementos):
-                pontos = canvas.cena.elementos[idx].get("pontos", [])
+                el = canvas.cena.elementos[idx]
+                pontos = self._pontos_controle_curva(el) if self._curva_tracado_real(el) else el.get("pontos", [])
                 if 0 <= p_idx < len(pontos):
-                    x, y = pontos[p_idx]
-                    pt = canvas._cena_para_tela(QPointF(float(x), float(y)))
+                    ponto = self._ponto_qt(pontos[p_idx])
+                    if ponto is None:
+                        return
+                    pt = canvas._cena_para_tela(ponto)
                     painter.setPen(QPen(QColor("#66d9ff"), 2.0))
                     painter.setBrush(Qt.NoBrush)
                     painter.drawEllipse(int(pt.x() - 11), int(pt.y() - 11), 22, 22)
