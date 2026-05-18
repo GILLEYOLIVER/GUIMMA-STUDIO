@@ -28,6 +28,7 @@ class Ferramenta(FerramentaBase):
         inserir_em = seg_idx + 1
         pontos.insert(inserir_em, (pos.x(), pos.y()))
         el["pontos"] = pontos
+        self._sincronizar_controles_apos_insercao(el, pos)
         canvas._selecionados = {idx}
         canvas._registrar_historico()
         canvas.update()
@@ -51,3 +52,54 @@ class Ferramenta(FerramentaBase):
                     melhor_dist = d
                     melhor = (idx, seg_idx)
         return melhor
+
+    def _sincronizar_controles_apos_insercao(self, el: dict, ponto: QPointF) -> None:
+        if el.get("molde"):
+            auxiliares = list(el.get("controle_auxiliares", []) or [])
+            novo = (float(ponto.x()), float(ponto.y()))
+            if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in auxiliares):
+                auxiliares.append(novo)
+            el["controle_auxiliares"] = auxiliares
+            el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
+            return
+
+        if not (
+            el.get("curva_suave")
+            or el.get("curva_editavel")
+            or el.get("pontos_controle_curva")
+            or el.get("pontos_principais")
+        ):
+            return
+        if el.get("pontos_tracado_real"):
+            return
+
+        controles = []
+        for item in el.get("pontos", []) or []:
+            pt = self._tupla_ponto(item)
+            if pt is not None:
+                controles.append(pt)
+        if len(controles) < 2:
+            return
+        el["pontos_controle_curva"] = list(controles)
+        el["pontos_principais"] = list(controles)
+        el["pontos_controle"] = list(controles)
+        el["curva_suave"] = True
+
+    @staticmethod
+    def _tupla_ponto(p) -> tuple[float, float] | None:
+        try:
+            if isinstance(p, QPointF):
+                return float(p.x()), float(p.y())
+            if isinstance(p, dict):
+                return float(p["x"]), float(p["y"])
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                return float(p[0]), float(p[1])
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _dist_tuple(a: tuple[float, float] | None, b: tuple[float, float]) -> float:
+        if a is None:
+            return float("inf")
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
