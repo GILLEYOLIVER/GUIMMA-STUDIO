@@ -391,18 +391,34 @@ class Ferramenta(FerramentaBase):
         )
 
     def _amostras_por_trecho(self, canvas, a: QPointF, b: QPointF) -> int:
-        """Amostragem moderada e independente do zoom.
-
-        Em ferramenta CAD/modelagem, a curva precisa ficar suave, mas não pode
-        gravar centenas de pontos quando o zoom está alto.
-        """
+        """Amostragem leve para manter a criação e o zoom fluidos."""
         d = self._dist(a, b)
-        return max(12, min(34, int(d * 0.16) + 12))
+        return max(8, min(22, int(d * 0.10) + 8))
+
+    def _catmull_rom(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
+        t2 = t * t
+        t3 = t2 * t
+        x = 0.5 * (
+            (2.0 * p1.x())
+            + (-p0.x() + p2.x()) * t
+            + (2.0 * p0.x() - 5.0 * p1.x() + 4.0 * p2.x() - p3.x()) * t2
+            + (-p0.x() + 3.0 * p1.x() - 3.0 * p2.x() + p3.x()) * t3
+        )
+        y = 0.5 * (
+            (2.0 * p1.y())
+            + (-p0.y() + p2.y()) * t
+            + (2.0 * p0.y() - 5.0 * p1.y() + 4.0 * p2.y() - p3.y()) * t2
+            + (-p0.y() + 3.0 * p1.y() - 3.0 * p2.y() + p3.y()) * t3
+        )
+        return QPointF(x, y)
 
     def _gerar_spline(self, canvas, pontos: List[QPointF], fechado: bool = False) -> List[QPointF]:
         """
-        Gera uma spline cúbica natural a partir dos pontos de controle.
-        Se fechado, a curva é fechada suavemente.
+        Gera o traçado editável a partir dos pontos de controle.
+
+        Catmull-Rom passa pelos nós clicados, é local (mover um ponto afeta
+        principalmente seus vizinhos) e é bem mais leve que recalcular spline
+        natural global a cada movimento do mouse.
         """
         pts = self._remover_repetidos([QPointF(p) for p in pontos], tolerancia=0.001)
 
@@ -411,45 +427,19 @@ class Ferramenta(FerramentaBase):
         if len(pts) == 2:
             return [QPointF(pts[0]), QPointF(pts[1])]
 
-        # Para curvas fechadas, adicionamos o primeiro ponto ao final para suavidade
-        if fechado and len(pts) >= 3:
-            pts_fechado = pts + [pts[0]]
-        else:
-            pts_fechado = pts
-
-        t = self._parametros_por_corda(pts_fechado)
-        xs = [p.x() for p in pts_fechado]
-        ys = [p.y() for p in pts_fechado]
-
-        mx = self._resolver_segundas_derivadas(xs, t)
-        my = self._resolver_segundas_derivadas(ys, t)
-
         resultado: List[QPointF] = []
-
-        num_segmentos = len(pts_fechado) - 1
-
-        for i in range(num_segmentos):
-            ti = t[i]
-            tj = t[i + 1]
-            xi = xs[i]
-            xj = xs[i + 1]
-            yi = ys[i]
-            yj = ys[i + 1]
-            mxi = mx[i]
-            mxj = mx[i + 1]
-            myi = my[i]
-            myj = my[i + 1]
-
-            amostras = self._amostras_por_trecho(canvas, pts_fechado[i], pts_fechado[i + 1])
-
+        total = len(pts)
+        limite = total if fechado else total - 1
+        for i in range(limite):
+            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
             if i == 0:
-                resultado.append(QPointF(pts_fechado[i]))
-
+                resultado.append(QPointF(p1))
+            amostras = self._amostras_por_trecho(canvas, p1, p2)
             for s in range(1, amostras + 1):
-                u = ti + ((tj - ti) * (s / float(amostras)))
-                x = self._avaliar_spline(ti, tj, xi, xj, mxi, mxj, u)
-                y = self._avaliar_spline(ti, tj, yi, yj, myi, myj, u)
-                resultado.append(QPointF(x, y))
+                resultado.append(self._catmull_rom(p0, p1, p2, p3, s / float(amostras)))
 
         if fechado and resultado:
             if self._dist(resultado[0], resultado[-1]) > 0.001:
@@ -575,34 +565,17 @@ class Ferramenta(FerramentaBase):
         return self._remover_repetidos(pontos, tolerancia=0.001)
 
     def _gerar_preview_profissional(self, canvas, cursor: QPointF | None = None, fechado: bool = False) -> List[QPointF]:
-        """Preview igual ao comportamento do vídeo.
-
-        - nós confirmados viram uma curva estável;
-        - o mouse só cria um trecho temporário;
-        - ao fechar, calcula o contorno fechado completo.
-        """
+        """Mostra exatamente o traçado que será gravado se o usuário clicar."""
         nos = [QPointF(p) for p in getattr(canvas, "_curva_np_nos", [])]
         if not nos:
             return []
 
-        if fechado:
-            base = list(nos)
-            if cursor is not None and self._dist2(base[-1], cursor) > 0.0001:
-                base.append(QPointF(cursor))
-            return self._gerar_spline(canvas, base, fechado=True)
-
-        curva_fixa = self._curva_dos_nos_confirmados(canvas, fechado=False)
-
-        if cursor is None:
-            return curva_fixa
-
-        if self._dist2(QPointF(nos[-1]), cursor) <= 0.0001:
-            return curva_fixa
-
-        trecho = self._trecho_temporario_cursor(canvas, cursor)
-        if curva_fixa and trecho and self._dist2(curva_fixa[-1], trecho[0]) <= 1e-8:
-            return self._remover_repetidos(curva_fixa + trecho[1:], tolerancia=0.001)
-        return self._remover_repetidos(curva_fixa + trecho, tolerancia=0.001)
+        base = list(nos)
+        if cursor is not None and not fechado and self._dist2(QPointF(base[-1]), cursor) > 0.0001:
+            base.append(QPointF(cursor))
+        if len(base) <= 2:
+            return [QPointF(p) for p in base]
+        return self._gerar_spline(canvas, base, fechado=fechado)
 
     # -------------------------------------------------------------------------
     # PREVIEW E FINALIZAÇÃO
@@ -661,7 +634,7 @@ class Ferramenta(FerramentaBase):
         if curva_suave and len(principais) > 2:
             elemento["curva_editavel"] = True
             elemento["curva_suave"] = True
-            elemento["tipo_curva"] = "spline_natural"
+            elemento["tipo_curva"] = "spline_catmull_rom"
             elemento["renderizacao"] = "polyline"
             elemento["pontos_tracado_real"] = True
             elemento["pontos_principais"] = list(principais)
