@@ -53,6 +53,17 @@ class CurvaToolTestCase(unittest.TestCase):
         self.assertLess(depois.y(), 0.0)
         self.assertLess(abs(antes.y() - depois.y()), 1e-6)
 
+    def test_modo_3p_assimetrico_preserva_ponto_intermediario_clicado(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaCurva()
+        ponto_meio = QPointF(3.0, -5.0)
+        pontos = [QPointF(0.0, 0.0), ponto_meio, QPointF(10.0, 0.0)]
+
+        curva = ferramenta._gerar_parabola_3p(canvas, pontos)
+
+        self.assertTrue(any(abs(p.x() - ponto_meio.x()) < 1e-7 and abs(p.y() - ponto_meio.y()) < 1e-7 for p in curva))
+        self.assertNotAlmostEqual(ferramenta._parametro_parabola_3p(pontos[0], ponto_meio, pontos[2]), 0.5)
+
     def test_finalizar_3p_salva_tipo_parabola_e_tres_controles_clicados(self):
         canvas = _FakeCanvas()
         canvas._curva_np_nos = [QPointF(0.0, 0.0), QPointF(5.0, -5.0), QPointF(10.0, 0.0)]

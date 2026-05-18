@@ -63,6 +63,87 @@ def polyline_perimeter(points: list[tuple[float, float]]) -> float:
     return sum(dist(a, b) for a, b in zip(points, points[1:]))
 
 
+def quadratic_bezier_parameter_for_point(
+    p0: tuple[float, float],
+    p_mid: tuple[float, float],
+    p2: tuple[float, float],
+) -> float:
+    if _geometry_native is not None:
+        try:
+            return float(_geometry_native.quadratic_bezier_parameter_for_point(p0, p_mid, p2))
+        except Exception:
+            pass
+    vx = p2[0] - p0[0]
+    vy = p2[1] - p0[1]
+    den = (vx * vx) + (vy * vy)
+    if den <= 1e-9:
+        return 0.5
+    t = (((p_mid[0] - p0[0]) * vx) + ((p_mid[1] - p0[1]) * vy)) / den
+    return max(0.05, min(0.95, t))
+
+
+def quadratic_bezier_control_for_point(
+    p0: tuple[float, float],
+    p_mid: tuple[float, float],
+    p2: tuple[float, float],
+) -> tuple[float, float]:
+    if _geometry_native is not None:
+        try:
+            cx, cy = _geometry_native.quadratic_bezier_control_for_point(p0, p_mid, p2)
+            return float(cx), float(cy)
+        except Exception:
+            pass
+    t = quadratic_bezier_parameter_for_point(p0, p_mid, p2)
+    u = 1.0 - t
+    den = max(1e-9, 2.0 * u * t)
+    return (
+        (p_mid[0] - (u * u * p0[0]) - (t * t * p2[0])) / den,
+        (p_mid[1] - (u * u * p0[1]) - (t * t * p2[1])) / den,
+    )
+
+
+def sample_quadratic_bezier(
+    p0: tuple[float, float],
+    control: tuple[float, float],
+    p2: tuple[float, float],
+    segments: int,
+) -> list[tuple[float, float]]:
+    if _geometry_native is not None:
+        try:
+            return [(float(x), float(y)) for x, y in _geometry_native.sample_quadratic_bezier(p0, control, p2, int(segments))]
+        except Exception:
+            pass
+    n = max(2, int(segments))
+    pts: list[tuple[float, float]] = []
+    for i in range(n + 1):
+        t = i / float(n)
+        u = 1.0 - t
+        pts.append(
+            (
+                (u * u * p0[0]) + (2.0 * u * t * control[0]) + (t * t * p2[0]),
+                (u * u * p0[1]) + (2.0 * u * t * control[1]) + (t * t * p2[1]),
+            )
+        )
+    return pts
+
+
+def sample_quadratic_bezier_through_point(
+    p0: tuple[float, float],
+    p_mid: tuple[float, float],
+    p2: tuple[float, float],
+    segments: int,
+) -> list[tuple[float, float]]:
+    n = max(2, int(segments))
+    control = quadratic_bezier_control_for_point(p0, p_mid, p2)
+    pts = sample_quadratic_bezier(p0, control, p2, n)
+    pts[0] = (float(p0[0]), float(p0[1]))
+    pts[-1] = (float(p2[0]), float(p2[1]))
+    t_mid = quadratic_bezier_parameter_for_point(p0, p_mid, p2)
+    idx_mid = max(1, min(n - 1, int(round(t_mid * n))))
+    pts[idx_mid] = (float(p_mid[0]), float(p_mid[1]))
+    return pts
+
+
 def ensure_closed_polyline(points: list[tuple[float, float]], eps: float = 0.001) -> list[tuple[float, float]]:
     if len(points) < 2:
         return points

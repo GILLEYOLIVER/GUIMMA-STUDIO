@@ -4,6 +4,7 @@
 //   -o geometry_native$(python-config --extension-suffix)
 
 #include <cmath>
+#include <algorithm>
 #include <vector>
 #include <utility>
 
@@ -90,7 +91,56 @@ static double polyline_perimeter(const std::vector<std::pair<double, double>>& p
     return acc;
 }
 
+static double quadratic_bezier_parameter_for_point(
+    const std::pair<double, double>& p0,
+    const std::pair<double, double>& p_mid,
+    const std::pair<double, double>& p2) {
+    const double vx = p2.first - p0.first;
+    const double vy = p2.second - p0.second;
+    const double denom = (vx * vx) + (vy * vy);
+    if (denom <= 1e-9) {
+        return 0.5;
+    }
+    const double raw = (((p_mid.first - p0.first) * vx) + ((p_mid.second - p0.second) * vy)) / denom;
+    return std::max(0.05, std::min(0.95, raw));
+}
+
+static std::pair<double, double> quadratic_bezier_control_for_point(
+    const std::pair<double, double>& p0,
+    const std::pair<double, double>& p_mid,
+    const std::pair<double, double>& p2) {
+    const double t = quadratic_bezier_parameter_for_point(p0, p_mid, p2);
+    const double u = 1.0 - t;
+    const double denom = std::max(1e-9, 2.0 * u * t);
+    return {
+        (p_mid.first - (u * u * p0.first) - (t * t * p2.first)) / denom,
+        (p_mid.second - (u * u * p0.second) - (t * t * p2.second)) / denom,
+    };
+}
+
+static std::vector<std::pair<double, double>> sample_quadratic_bezier(
+    const std::pair<double, double>& p0,
+    const std::pair<double, double>& control,
+    const std::pair<double, double>& p2,
+    int segments) {
+    const int n = std::max(2, segments);
+    std::vector<std::pair<double, double>> out;
+    out.reserve(static_cast<std::size_t>(n + 1));
+    for (int i = 0; i <= n; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(n);
+        const double u = 1.0 - t;
+        out.push_back({
+            (u * u * p0.first) + (2.0 * u * t * control.first) + (t * t * p2.first),
+            (u * u * p0.second) + (2.0 * u * t * control.second) + (t * t * p2.second),
+        });
+    }
+    return out;
+}
+
 PYBIND11_MODULE(geometry_native, m) {
+    m.def("quadratic_bezier_parameter_for_point", &quadratic_bezier_parameter_for_point, "Parametro t da parabola por projecao na corda");
+    m.def("quadratic_bezier_control_for_point", &quadratic_bezier_control_for_point, "Controle quadratico que passa por tres pontos");
+    m.def("sample_quadratic_bezier", &sample_quadratic_bezier, "Amostra Bezier quadratica");
     m.doc() = "Operações geométricas nativas para GUIMMA Studio";
     m.def("internal_angle", &internal_angle, "Ângulo interno entre três pontos");
     m.def("point_in_polygon", &point_in_polygon, "Teste ponto em polígono");

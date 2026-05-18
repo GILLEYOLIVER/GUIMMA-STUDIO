@@ -7,7 +7,12 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
-from core.geometry.engine import polyline_perimeter
+from core.geometry.engine import (
+    polyline_perimeter,
+    quadratic_bezier_control_for_point,
+    quadratic_bezier_parameter_for_point,
+    sample_quadratic_bezier_through_point,
+)
 from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
 
@@ -413,9 +418,18 @@ class Ferramenta(FerramentaBase):
         return QPointF(x, y)
 
     def _controle_quadratico_por_ponto_medio(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> QPointF:
-        return QPointF(
-            (2.0 * pmedio.x()) - (0.5 * (p0.x() + p2.x())),
-            (2.0 * pmedio.y()) - (0.5 * (p0.y() + p2.y())),
+        x, y = quadratic_bezier_control_for_point(
+            (float(p0.x()), float(p0.y())),
+            (float(pmedio.x()), float(pmedio.y())),
+            (float(p2.x()), float(p2.y())),
+        )
+        return QPointF(x, y)
+
+    def _parametro_parabola_3p(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> float:
+        return quadratic_bezier_parameter_for_point(
+            (float(p0.x()), float(p0.y())),
+            (float(pmedio.x()), float(pmedio.y())),
+            (float(p2.x()), float(p2.y())),
         )
 
     def _ponto_bezier_quadratico(self, p0: QPointF, p1: QPointF, p2: QPointF, t: float) -> QPointF:
@@ -430,17 +444,21 @@ class Ferramenta(FerramentaBase):
         if len(pts) != 3:
             return self._gerar_spline(canvas, pts, fechado=False)
         p0, pmedio, p2 = pts
-        controle = self._controle_quadratico_por_ponto_medio(p0, pmedio, p2)
         segmentos = max(
-            24,
-            min(96, self._amostras_por_trecho(canvas, p0, pmedio) + self._amostras_por_trecho(canvas, pmedio, p2)),
+            96,
+            min(192, (self._amostras_por_trecho(canvas, p0, pmedio) + self._amostras_por_trecho(canvas, pmedio, p2)) * 3),
         )
         if segmentos % 2:
             segmentos += 1
-        curva = [self._ponto_bezier_quadratico(p0, controle, p2, i / float(segmentos)) for i in range(segmentos + 1)]
-        curva[0] = QPointF(p0)
-        curva[segmentos // 2] = QPointF(pmedio)
-        curva[-1] = QPointF(p2)
+        curva = [
+            QPointF(x, y)
+            for x, y in sample_quadratic_bezier_through_point(
+                (float(p0.x()), float(p0.y())),
+                (float(pmedio.x()), float(pmedio.y())),
+                (float(p2.x()), float(p2.y())),
+                segmentos,
+            )
+        ]
         return self._remover_repetidos(curva, tolerancia=0.001)
 
     def _gerar_spline(self, canvas, pontos: List[QPointF], fechado: bool = False) -> List[QPointF]:

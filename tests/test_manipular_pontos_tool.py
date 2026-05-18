@@ -257,7 +257,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 10.0, "y": 0.0})
         self.assertEqual(canvas.historico, 1)
 
-    def test_arrasta_vertice_intermediario_de_molde_suave_ponto_a_ponto(self):
+    def test_nao_arrasta_vertice_intermediario_de_molde_fora_dos_controles(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
             {
@@ -279,17 +279,18 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         ferramenta = FerramentaManipularPontos()
         ferramenta.on_activate(canvas)
 
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
-        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 3.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 3.0))))
+        self.assertFalse(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["pontos"][1], (2.0, 3.0))
+        self.assertEqual(molde["pontos"][1], (2.0, 1.0))
         self.assertEqual(molde["pontos"][0], (0.0, 0.0))
         self.assertEqual(molde["pontos"][2], (5.0, 0.0))
         self.assertEqual(molde["pontos"][3], (10.0, 0.0))
         self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0)])
         self.assertEqual(molde["pontos_principais"], [(0.0, 0.0), (10.0, 0.0)])
+        controles_visiveis = [(p.x(), p.y()) for p in ferramenta._pontos_polyline_editaveis_molde(molde)]
+        self.assertEqual(controles_visiveis, [(0.0, 0.0), (10.0, 0.0), (5.0, 0.0)])
+        self.assertNotIn((2.0, 1.0), controles_visiveis)
 
     def test_shift_seleciona_varios_pontos_e_arrasta_juntos(self):
         canvas = _FakeCanvas()
