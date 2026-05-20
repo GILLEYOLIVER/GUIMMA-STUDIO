@@ -101,17 +101,18 @@ class InserirPontoToolTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_inserir_ponto_em_molde_cria_auxiliar_manipulavel(self):
+    def test_inserir_ponto_em_molde_cria_principal_manipulavel(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPonto()
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertIn((5.0, 0.0), molde["controle_auxiliares"])
-        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_auxiliares"])
-        self.assertEqual(len(molde["controle_cantos"]), 3)
-        self.assertNotIn((5.0, 0.0), molde["pontos"])
+        self.assertIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
+        self.assertNotIn((5.0, 0.0), molde["controle_auxiliares"])
+        self.assertEqual(len(molde["controle_cantos"]), 4)
+        self.assertIn((5.0, 0.0), molde["pontos"])
         self.assertEqual(canvas._selecionados, {0})
         self.assertEqual(canvas.historico, 1)
 
@@ -125,6 +126,43 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertIn((5.0, 0.0), molde["controle_cantos"])
         self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
         self.assertEqual(len(molde["controle_cantos"]), 4)
+
+    def test_inserir_principal_em_curva_do_molde_preserva_auxiliares_do_trecho(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.6),
+                    (5.0, 3.0),
+                    (8.0, 1.6),
+                    (10.0, 0.0),
+                    (10.0, 8.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)],
+                "controle_auxiliares": [(5.0, 3.0), (10.0, 4.0), (5.0, 4.0)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 10.0, "y": 8.0},
+                ],
+                "pontos_auxiliares": [
+                    {"x": 5.0, "y": 3.0},
+                    {"x": 10.0, "y": 4.0},
+                    {"x": 5.0, "y": 4.0},
+                ],
+            }
+        )
+        ferramenta = FerramentaInserirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertIn((5.0, 3.0), molde["controle_cantos"])
+        self.assertNotIn((5.0, 3.0), molde["controle_auxiliares"])
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 4)
+        self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 3.0)
 
     def test_inserir_ponto_em_curva_livre_sincroniza_controles(self):
         canvas = _FakeCanvas()

@@ -200,6 +200,7 @@ class Ferramenta(FerramentaBase):
 
         controles.pop(controle_idx)
         el[chave] = [self._tupla_xy(item) for item in controles if self._tupla_xy(item) is not None]
+        el["_controles_topologia_alterada"] = True
         if not self._regenerar_molde_por_controles(canvas, el):
             self.set_status("Exclusão cancelada: não foi possível regenerar o contorno.")
             return False
@@ -258,8 +259,6 @@ class Ferramenta(FerramentaBase):
         return len(cantos) >= 3
 
     def _atribuir_auxiliares(self, cantos: list[QPointF], segmentos: list[tuple[int, int]], auxiliares: list[QPointF]) -> dict[int, list[QPointF]]:
-        if len(auxiliares) == len(segmentos):
-            return {idx: [QPointF(auxiliares[idx])] for idx in range(len(segmentos))}
         saida: dict[int, list[tuple[float, QPointF]]] = {i: [] for i in range(len(segmentos))}
         for aux in auxiliares:
             melhor_seg: int | None = None

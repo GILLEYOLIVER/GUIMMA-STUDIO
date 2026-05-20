@@ -15,6 +15,7 @@ from core.geometry.engine import (
 )
 from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
 class _PainelCurva(QFrame):
@@ -27,6 +28,7 @@ class _PainelCurva(QFrame):
         self.setWindowFlags(Qt.Widget)
         self.setFixedWidth(136)
         self._drag_offset: QPoint | None = None
+        self._chave_posicao = "painel:curva"
         self.setStyleSheet(
             """
             QFrame#PainelCurvaRetasECurvas {
@@ -93,9 +95,14 @@ class _PainelCurva(QFrame):
     def mouseReleaseEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton and self._drag_offset is not None:
             self._drag_offset = None
+            salvar_posicao(self, self._chave_posicao)
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def hideEvent(self, event):  # noqa: N802
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
 
 
 class Ferramenta(FerramentaBase):
@@ -215,11 +222,14 @@ class Ferramenta(FerramentaBase):
         else:
             painel.ferramenta = self
         self._painel_curva = painel
-        margem = 14
         try:
-            x = max(margem, canvas.width() - painel.width() - margem)
-            y = max(margem, int(canvas.height() * 0.28))
-            painel.move(QPoint(x, y))
+            if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+                destino = canvas.calcular_posicao_painel_auxiliar(painel.width(), painel.height(), abaixo_coordenadas=True)
+            else:
+                margem = 14
+                destino = QPoint(max(margem, canvas.width() - painel.width() - margem), max(margem, int(canvas.height() * 0.28)))
+            if not restaurar_posicao(painel, painel._chave_posicao, fallback=painel._limitar(destino)):
+                salvar_posicao(painel, painel._chave_posicao)
         except Exception:
             pass
         self._atualizar_painel(canvas)

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from config import ICONS_DIR
 from tools.tool_base import FerramentaBase
-from ui.posicao_janelas import instalar_memoria_posicao, salvar_posicao
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class PreviewOrientacaoAa(QLabel):
@@ -336,8 +336,7 @@ class Ferramenta(FerramentaBase):
             pass
 
         posicao = _limitar_no_parent(posicao)
-        dialog.move(posicao)
-        salvar_posicao(dialog, dialog._chave_posicao)
+        restaurar_posicao(dialog, dialog._chave_posicao, fallback=posicao)
 
     def _aplicar_e_fechar(self, canvas, dialog: AjusteAutomaticoDialog):
         quantidade = self.aplicar(canvas, dialog.opcoes())

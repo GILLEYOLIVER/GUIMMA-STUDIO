@@ -442,7 +442,7 @@ class Ferramenta(FerramentaBase):
                 canvas.update()
             event.accept()
             return True
-        pos = canvas._ponto_com_snap(self._posicao_tela_exata_no_canvas(canvas, event.position()))
+        pos = canvas._tela_para_cena(self._posicao_tela_exata_no_canvas(canvas, event.position()))
         self._ultima_pos_cena = QPointF(pos)
         if self._ultimo_pos_arrasto is None:
             self._ultimo_pos_arrasto = pos
@@ -971,7 +971,7 @@ class Ferramenta(FerramentaBase):
         molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
 
         usar_auxiliares = bool(self._cfg.get("usar_auxiliares", True))
-        if usar_auxiliares and len(indices_cantos) >= 2:
+        if usar_auxiliares and len(indices_cantos) >= 1:
             auxiliares = self._calcular_auxiliares_no_contorno(base, indices_cantos)
         else:
             auxiliares = []
@@ -1791,17 +1791,12 @@ class Ferramenta(FerramentaBase):
         if len(base) <= 4:
             return list(range(len(base)))
         if self._eh_forma_fechada_suave(base):
-            return self._indices_quatro_extremos(base)
+            return [self._indice_principal_curva_fechada(base)]
 
         candidatos = self._indices_por_angulo(base)
-        minimo = self._quantidade_minima_controles_principais(base)
-        if len(candidatos) < minimo:
-            candidatos = self._mesclar_indices_controle(
-                base,
-                candidatos,
-                self._indices_por_amostragem(base, minimo),
-            )
-        return candidatos
+        if candidatos:
+            return candidatos
+        return [0]
 
     def _quantidade_minima_controles_principais(self, base: list[tuple[float, float]]) -> int:
         if len(base) <= 4:
@@ -1915,9 +1910,30 @@ class Ferramenta(FerramentaBase):
             b = QPointF(*base[i])
             c = QPointF(*base[(i + 1) % len(base)])
             angulos.append(self._angulo_interno(a, b, c))
-        cantos_duros = sum(1 for ang in angulos if ang < 105.0)
-        cantos_visiveis = sum(1 for ang in angulos if ang < 128.0)
-        return cantos_duros == 0 and cantos_visiveis <= max(2, len(base) // 18)
+        cantos_duros = sum(1 for ang in angulos if ang < 96.0)
+        return cantos_duros <= 1
+
+    def _indice_principal_curva_fechada(self, base: list[tuple[float, float]]) -> int:
+        if not base:
+            return 0
+        if len(base) < 3:
+            return 0
+        angulos = []
+        for i in range(len(base)):
+            a = QPointF(*base[i - 1])
+            b = QPointF(*base[i])
+            c = QPointF(*base[(i + 1) % len(base)])
+            angulos.append(self._angulo_interno(a, b, c))
+        menor = min(angulos)
+        if menor < 128.0:
+            return int(angulos.index(menor))
+        xs = [x for x, _ in base]
+        max_x = max(xs)
+        candidatos = [i for i, (x, _y) in enumerate(base) if abs(x - max_x) <= 1e-6]
+        if candidatos:
+            cy = sum(y for _x, y in base) / len(base)
+            return int(min(candidatos, key=lambda i: abs(base[i][1] - cy)))
+        return 0
 
     def _indices_quatro_extremos(self, base: list[tuple[float, float]]) -> list[int]:
         xs = [x for x, _ in base]
@@ -1944,16 +1960,17 @@ class Ferramenta(FerramentaBase):
     def _calcular_auxiliares_no_contorno(self, base: list[tuple[float, float]], indices_cantos: list[int]) -> list[tuple[float, float]]:
         n = len(base)
         indices_ordenados = sorted({int(i) for i in indices_cantos if 0 <= int(i) < n})
-        if len(indices_ordenados) < 2:
+        if not indices_ordenados:
             return []
+        if len(indices_ordenados) == 1:
+            inicio = indices_ordenados[0]
+            trecho = [base[(inicio + passo) % n] for passo in range(n + 1)]
+            return self._deduplicar_pontos(self._auxiliares_para_contorno_curvo_fechado(trecho), tol=1e-4)
         aux: list[tuple[float, float]] = []
         for pos, inicio in enumerate(indices_ordenados):
             fim = indices_ordenados[(pos + 1) % len(indices_ordenados)]
             trecho = self._pontos_intervalo_contorno(base, inicio, fim)
             if len(trecho) < 2:
-                continue
-            if len(trecho) == 2:
-                aux.append(self._ponto_medio_tuple(trecho[0], trecho[1]))
                 continue
             selecionados = self._auxiliares_para_trecho_curvo(trecho)
             aux.extend(selecionados)
@@ -1975,30 +1992,44 @@ class Ferramenta(FerramentaBase):
         return pontos
 
     def _auxiliares_para_trecho_curvo(self, trecho: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        if len(trecho) < 3:
+        if len(trecho) < 2:
             return []
-        a = QPointF(*trecho[0])
-        b = QPointF(*trecho[-1])
-        corda = self._dist(a, b)
-        if corda <= 1e-6:
+        return self._deduplicar_pontos(
+            [self._ponto_no_trecho_por_fracao(trecho, passo / 5.0) for passo in range(1, 5)],
+            tol=1e-4,
+        )
+
+    def _auxiliares_para_contorno_curvo_fechado(self, trecho: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(trecho) < 2:
             return []
-        desvios = [self._distancia_ponto_segmento_tuple(p, trecho[0], trecho[-1]) for p in trecho[1:-1]]
-        desvio_max = max(desvios, default=0.0)
-        tolerancia_curva = max(0.12, corda * 0.008)
-        if desvio_max <= tolerancia_curva:
-            return [self._ponto_medio_tuple(trecho[0], trecho[-1])]
-        comprimento = sum(self._dist_tuple(x, y) for x, y in zip(trecho, trecho[1:]))
-        quantidade = 2 if comprimento <= corda * 1.25 else 3
-        if desvio_max > corda * 0.14 and len(trecho) >= 7:
-            quantidade = 4
-        if len(trecho) >= 18:
-            quantidade = max(quantidade, min(6, len(trecho) // 7))
-        saida: list[tuple[float, float]] = []
-        for passo in range(1, quantidade + 1):
-            alvo = passo / float(quantidade + 1)
-            idx = max(1, min(len(trecho) - 2, round(alvo * (len(trecho) - 1))))
-            saida.append((float(trecho[idx][0]), float(trecho[idx][1])))
-        return self._deduplicar_pontos(saida, tol=1e-4)
+        perimetro = sum(self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:]))
+        pontos_base = max(1, len(trecho) - 1)
+        por_perimetro = int(round(perimetro / 1.8))
+        por_amostras = int(round(pontos_base / 2.0))
+        quantidade = max(24, min(96, max(por_perimetro, por_amostras)))
+        return self._deduplicar_pontos(
+            [self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1)) for passo in range(1, quantidade + 1)],
+            tol=1e-4,
+        )
+
+    def _ponto_no_trecho_por_fracao(self, trecho: list[tuple[float, float]], fracao: float) -> tuple[float, float]:
+        if len(trecho) == 1:
+            return (float(trecho[0][0]), float(trecho[0][1]))
+        comprimentos = [self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:])]
+        total = sum(comprimentos)
+        if total <= 1e-9:
+            return self._ponto_medio_tuple(trecho[0], trecho[-1])
+        alvo = max(0.0, min(1.0, float(fracao))) * total
+        acumulado = 0.0
+        for (a, b), comp in zip(zip(trecho, trecho[1:]), comprimentos):
+            if acumulado + comp >= alvo or comp <= 1e-9:
+                t = 0.0 if comp <= 1e-9 else (alvo - acumulado) / comp
+                return (
+                    float(a[0]) + ((float(b[0]) - float(a[0])) * t),
+                    float(a[1]) + ((float(b[1]) - float(a[1])) * t),
+                )
+            acumulado += comp
+        return (float(trecho[-1][0]), float(trecho[-1][1]))
 
     def _ponto_medio_tuple(
         self,

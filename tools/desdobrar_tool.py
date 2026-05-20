@@ -727,7 +727,10 @@ class Ferramenta(_DobrarBase):
 
     def _restaurar_dialog(self, canvas, dialog: DesdobrarDialog) -> None:
         fallback = None
-        if hasattr(canvas, "mapToGlobal"):
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
+            fallback = canvas.mapToGlobal(pos_local)
+        elif hasattr(canvas, "mapToGlobal"):
             fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 128))
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 

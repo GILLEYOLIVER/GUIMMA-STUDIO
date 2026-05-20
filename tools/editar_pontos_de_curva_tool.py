@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from core.geometry.engine import point_segment_distance, sample_quadratic_bezier_through_point
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 try:
     from tools.painel_ferramenta import PainelFerramentaBasico
@@ -40,6 +41,7 @@ class _PainelEditarPontosCurva(QFrame):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setFixedWidth(318)
         self.setMouseTracking(True)
+        self._chave_posicao = "painel:editar_pontos_de_curva"
         self.setStyleSheet(
             """
             QFrame#PainelEditarPontosCurvaUnico {
@@ -154,9 +156,14 @@ class _PainelEditarPontosCurva(QFrame):
         if event.button() == Qt.LeftButton and self._arrastando:
             self._arrastando = False
             self.setCursor(Qt.OpenHandCursor)
+            salvar_posicao(self, self._chave_posicao)
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def hideEvent(self, event):  # noqa: N802
+        salvar_posicao(self, self._chave_posicao)
+        super().hideEvent(event)
 
     def _limitar(self, pos: QPoint) -> QPoint:
         parent = self.parentWidget()
@@ -419,7 +426,16 @@ class Ferramenta(FerramentaBase):
             self._painel.move(self._painel._limitar(self._painel.pos()))
             return
         margem = 14
-        self._painel.move(QPoint(max(margem, self._canvas.width() - self._painel.width() - margem), margem))
+        if hasattr(self._canvas, "calcular_posicao_painel_auxiliar"):
+            destino = self._canvas.calcular_posicao_painel_auxiliar(
+                self._painel.width(),
+                self._painel.height(),
+                abaixo_coordenadas=True,
+            )
+        else:
+            destino = QPoint(max(margem, self._canvas.width() - self._painel.width() - margem), margem)
+        if not restaurar_posicao(self._painel, self._painel._chave_posicao, fallback=self._painel._limitar(destino)):
+            salvar_posicao(self._painel, self._painel._chave_posicao)
 
     def _set_spin_sem_sinal(self, valor: int):
         if self._painel is None:

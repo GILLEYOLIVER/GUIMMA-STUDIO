@@ -995,8 +995,11 @@ class VisualizacaoCanvas(QWidget):
         x = max(8, self.width() - int(largura) - margem_direita)
         y = margem_topo
         if abaixo_coordenadas and self.painel_coordenadas.isVisible():
+            x = self.painel_coordenadas.x() + self.painel_coordenadas.width() - int(largura)
             y = self.painel_coordenadas.y() + self.painel_coordenadas.height() + 8
+        max_x = max(8, self.width() - int(largura) - 8)
         max_y = max(margem_topo, self.height() - int(altura) - 8)
+        x = max(8, min(x, max_x))
         y = max(margem_topo, min(y, max_y))
         return QPoint(int(x), int(y))
 

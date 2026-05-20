@@ -10,7 +10,7 @@ from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 class Ferramenta(FerramentaBase):
     id_ferramenta = "inserir_ponto"
     nome = "Adicionar Ponto"
-    descricao_painel = "Adiciona ponto auxiliar no contorno. Use Shift para adicionar ponto principal."
+    descricao_painel = "Adiciona ponto principal no molde/contorno."
 
     def __init__(self):
         super().__init__()
@@ -20,7 +20,7 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._hover_segmento = None
-        self.set_status("Clique no contorno para adicionar ponto auxiliar. Shift adiciona ponto principal.")
+        self.set_status("Clique no contorno para adicionar ponto principal.")
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
@@ -32,7 +32,7 @@ class Ferramenta(FerramentaBase):
             return False
         idx, seg_idx, ponto_contorno = alvo
         el = canvas.cena.elementos[idx]
-        principal = self._shift_pressionado(event)
+        principal = True if el.get("molde") else self._shift_pressionado(event)
 
         if el.get("molde") and self._tem_controles_molde(el):
             if not self._adicionar_controle_molde(canvas, el, ponto_contorno, seg_idx, principal=principal):
@@ -136,18 +136,109 @@ class Ferramenta(FerramentaBase):
 
     def _adicionar_controle_molde(self, canvas, el: dict, ponto: QPointF, seg_idx: int, principal: bool) -> bool:
         self._garantir_dist_canvas(canvas)
-        if principal:
-            cantos = list(el.get("controle_cantos", []) or [])
-            inserir_em = self._indice_insercao_canto(canvas, el, seg_idx)
-            cantos.insert(inserir_em, (float(ponto.x()), float(ponto.y())))
-            el["controle_cantos"] = cantos
-        else:
-            auxiliares = list(el.get("controle_auxiliares", []) or [])
-            novo = (float(ponto.x()), float(ponto.y()))
-            if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in auxiliares):
-                auxiliares.append(novo)
-            el["controle_auxiliares"] = auxiliares
+        pontos_originais = [p for p in (self._ponto_qt(item) for item in el.get("pontos", []) or []) if p is not None]
+        cantos_originais = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+        fechado = self._fechado_por_pontos(canvas, pontos_originais) or len(cantos_originais) >= 3
+        cantos = list(el.get("controle_cantos", []) or [])
+        inserir_em = self._indice_insercao_canto(canvas, el, seg_idx)
+        novo = (float(ponto.x()), float(ponto.y()))
+        if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in cantos):
+            cantos.insert(inserir_em, novo)
+        el["controle_cantos"] = cantos
+        auxiliares = []
+        for item in el.get("controle_auxiliares", []) or []:
+            aux = self._tupla_ponto(item)
+            if aux is None or self._dist_tuple(aux, novo) <= 1e-6:
+                continue
+            auxiliares.append(aux)
+        for aux in self._auxiliares_preservacao_insercao(
+            canvas,
+            pontos_originais,
+            cantos_originais,
+            QPointF(ponto),
+            seg_idx,
+            inserir_em,
+            fechado,
+        ):
+            tupla = (float(aux.x()), float(aux.y()))
+            if any(self._dist_tuple(item, tupla) <= 1e-6 for item in auxiliares):
+                continue
+            if any(self._dist_tuple(self._tupla_ponto(item), tupla) <= 1e-6 for item in cantos):
+                continue
+            auxiliares.append(tupla)
+        el["controle_auxiliares"] = auxiliares
+        el["_controles_topologia_alterada"] = True
         return self._helper._regenerar_molde_por_controles(canvas, el)
+
+    def _auxiliares_preservacao_insercao(
+        self,
+        canvas,
+        pontos: list[QPointF],
+        cantos: list[QPointF],
+        novo: QPointF,
+        seg_idx: int,
+        inserir_em: int,
+        fechado: bool,
+    ) -> list[QPointF]:
+        if len(pontos) < 2 or len(cantos) < 2:
+            return []
+        base = list(pontos)
+        if fechado and len(base) >= 2 and self._dist_canvas(canvas, base[0], base[-1]) <= 1e-6:
+            base = base[:-1]
+        if len(base) < 2:
+            return []
+        insert_idx = max(0, min(seg_idx + 1, len(base)))
+        base_com_novo = list(base)
+        base_com_novo.insert(insert_idx, QPointF(novo))
+        n = len(base_com_novo)
+
+        prev_canto = cantos[(inserir_em - 1) % len(cantos)] if fechado else cantos[max(0, min(inserir_em - 1, len(cantos) - 1))]
+        next_canto = cantos[inserir_em % len(cantos)] if fechado else cantos[max(0, min(inserir_em, len(cantos) - 1))]
+        prev_idx = self._indice_ponto_mais_proximo(canvas, base_com_novo, prev_canto)
+        novo_idx = self._indice_ponto_mais_proximo(canvas, base_com_novo, novo)
+        next_idx = self._indice_ponto_mais_proximo(canvas, base_com_novo, next_canto)
+
+        auxiliares: list[QPointF] = []
+        for a_idx, b_idx in ((prev_idx, novo_idx), (novo_idx, next_idx)):
+            trecho = self._trecho_indices(base_com_novo, a_idx, b_idx, fechado)
+            auxiliares.extend(self._amostrar_auxiliares_trecho(trecho))
+        return auxiliares
+
+    def _trecho_indices(self, pontos: list[QPointF], a_idx: int, b_idx: int, fechado: bool) -> list[QPointF]:
+        if not pontos:
+            return []
+        if not fechado:
+            lo, hi = sorted((a_idx, b_idx))
+            return [QPointF(p) for p in pontos[lo : hi + 1]]
+        saida = [QPointF(pontos[a_idx])]
+        i = a_idx
+        while i != b_idx:
+            i = (i + 1) % len(pontos)
+            saida.append(QPointF(pontos[i]))
+            if len(saida) > len(pontos) + 1:
+                break
+        return saida
+
+    def _amostrar_auxiliares_trecho(self, pontos: list[QPointF]) -> list[QPointF]:
+        if len(pontos) < 4:
+            return []
+        comprimento = sum(self._dist_qt(a, b) for a, b in zip(pontos, pontos[1:]))
+        if comprimento <= 1e-9:
+            return []
+        return [self._ponto_no_trecho_por_fracao(pontos, 1.0 / 3.0), self._ponto_no_trecho_por_fracao(pontos, 2.0 / 3.0)]
+
+    def _ponto_no_trecho_por_fracao(self, pontos: list[QPointF], fracao: float) -> QPointF:
+        alvo = sum(self._dist_qt(a, b) for a, b in zip(pontos, pontos[1:])) * max(0.0, min(1.0, fracao))
+        acumulado = 0.0
+        for a, b in zip(pontos, pontos[1:]):
+            dist = self._dist_qt(a, b)
+            if dist <= 1e-9:
+                continue
+            if acumulado + dist >= alvo:
+                t = (alvo - acumulado) / dist
+                return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+            acumulado += dist
+        return QPointF(pontos[-1])
 
     def _adicionar_controle_curva(self, canvas, el: dict, ponto: QPointF, seg_idx: int) -> bool:
         self._garantir_dist_canvas(canvas)

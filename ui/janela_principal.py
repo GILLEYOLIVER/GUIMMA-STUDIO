@@ -1298,11 +1298,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         canvas = area.canvas
-        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
-            pos_local = canvas.calcular_posicao_painel_auxiliar(janela.width(), janela.height(), abaixo_coordenadas=True)
-            pos_global = canvas.mapToGlobal(pos_local)
-            janela.move(pos_global)
-            return
         gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
         gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
         min_x = gx + 8
@@ -1315,6 +1310,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             x = max(min_x, min(pos[0], max_x))
             y = max(min_y, min(pos[1], max_y))
             janela.move(x, y)
+            return
+
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(janela.width(), janela.height(), abaixo_coordenadas=True)
+            pos_global = canvas.mapToGlobal(pos_local)
+            janela.move(pos_global)
             return
 
         x = gx + max(8, canvas.width() - janela.width() - 18)
