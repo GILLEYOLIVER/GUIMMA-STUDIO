@@ -58,7 +58,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(len(auxiliares), 4)
 
-    def test_contorno_arredondado_recebe_mais_controles_principais(self):
+    def test_contorno_quase_circular_usa_quatro_principais_e_auxiliares(self):
         ferramenta = FerramentaExtrairMolde()
         pontos = [
             (10.0 + cos((2.0 * pi * i) / 48.0) * 5.0, 8.0 + sin((2.0 * pi * i) / 48.0) * 4.4)
@@ -68,8 +68,21 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
 
         ferramenta._enriquecer_metadados_molde(molde)
 
-        self.assertGreaterEqual(len(molde["controle_cantos"]), 8)
+        self.assertEqual(len(molde["controle_cantos"]), 4)
         self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
+
+    def test_contorno_oval_largo_usa_quatro_principais_e_auxiliares(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (20.0 + cos((2.0 * pi * i) / 72.0) * 12.0, 10.0 + sin((2.0 * pi * i) / 72.0) * 5.0)
+            for i in range(72)
+        ]
+        molde = {"tipo": "molde", "pontos": [*pontos, pontos[0]]}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertEqual(len(molde["controle_cantos"]), 4)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 10)
 
     def test_trecho_curvo_longo_recebe_multiplos_auxiliares(self):
         ferramenta = FerramentaExtrairMolde()

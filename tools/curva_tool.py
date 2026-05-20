@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import sqrt
+from math import cos, pi, sin, sqrt
 from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
@@ -168,6 +168,8 @@ class Ferramenta(FerramentaBase):
             canvas._curva_np_curva_confirmada = []
         if not hasattr(canvas, "_curva_np_perimetro_confirmado"):
             canvas._curva_np_perimetro_confirmado = 0.0
+        if not hasattr(canvas, "_curva_ajustar_circulo"):
+            canvas._curva_ajustar_circulo = False
 
     def _resetar(self, canvas, manter_elementos=True):
         canvas._curva_estado = "parada"
@@ -176,6 +178,7 @@ class Ferramenta(FerramentaBase):
         canvas._curva_np_preview = []
         canvas._curva_snap_preview = None
         canvas._curva_fechando = False
+        canvas._curva_ajustar_circulo = False
         canvas._curva_np_curva_confirmada = []
         canvas._curva_np_perimetro_confirmado = 0.0
         self._atualizar_painel(canvas)
@@ -417,6 +420,30 @@ class Ferramenta(FerramentaBase):
         )
         return QPointF(x, y)
 
+    def _catmull_rom_centripeta(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
+        def tj(ti: float, a: QPointF, b: QPointF) -> float:
+            return ti + max(self._dist(a, b), 1e-6) ** 0.5
+
+        t0 = 0.0
+        t1 = tj(t0, p0, p1)
+        t2 = tj(t1, p1, p2)
+        t3 = tj(t2, p2, p3)
+        t = t1 + max(0.0, min(1.0, t)) * (t2 - t1)
+
+        def interp(a: QPointF, b: QPointF, ta: float, tb: float) -> QPointF:
+            den = max(tb - ta, 1e-9)
+            return QPointF(
+                ((tb - t) / den) * a.x() + ((t - ta) / den) * b.x(),
+                ((tb - t) / den) * a.y() + ((t - ta) / den) * b.y(),
+            )
+
+        a1 = interp(p0, p1, t0, t1)
+        a2 = interp(p1, p2, t1, t2)
+        a3 = interp(p2, p3, t2, t3)
+        b1 = interp(a1, a2, t0, t2)
+        b2 = interp(a2, a3, t1, t3)
+        return interp(b1, b2, t1, t2)
+
     def _controle_quadratico_por_ponto_medio(self, p0: QPointF, pmedio: QPointF, p2: QPointF) -> QPointF:
         x, y = quadratic_bezier_control_for_point(
             (float(p0.x()), float(p0.y())),
@@ -488,7 +515,7 @@ class Ferramenta(FerramentaBase):
                 resultado.append(QPointF(p1))
             amostras = self._amostras_por_trecho(canvas, p1, p2)
             for s in range(1, amostras + 1):
-                resultado.append(self._catmull_rom(p0, p1, p2, p3, s / float(amostras)))
+                resultado.append(self._catmull_rom_centripeta(p0, p1, p2, p3, s / float(amostras)))
 
         if fechado and resultado:
             if self._dist(resultado[0], resultado[-1]) > 0.001:
@@ -516,16 +543,147 @@ class Ferramenta(FerramentaBase):
     def _espelhar_pontos(self, pontos: List[QPointF], eixo_x: float) -> List[QPointF]:
         return [QPointF((2.0 * eixo_x) - p.x(), p.y()) for p in pontos]
 
+    def _resolver_3x3(self, matriz: list[list[float]], vetor: list[float]) -> tuple[float, float, float] | None:
+        m = [list(linha) + [float(vetor[i])] for i, linha in enumerate(matriz)]
+        for col in range(3):
+            pivo = max(range(col, 3), key=lambda i: abs(m[i][col]))
+            if abs(m[pivo][col]) <= 1e-9:
+                return None
+            if pivo != col:
+                m[col], m[pivo] = m[pivo], m[col]
+            div = m[col][col]
+            for j in range(col, 4):
+                m[col][j] /= div
+            for i in range(3):
+                if i == col:
+                    continue
+                fator = m[i][col]
+                for j in range(col, 4):
+                    m[i][j] -= fator * m[col][j]
+        return m[0][3], m[1][3], m[2][3]
+
+    def _ajustar_circulo(self, pontos: List[QPointF]) -> tuple[QPointF, float, float] | None:
+        pts = self._remover_repetidos([QPointF(p) for p in pontos], tolerancia=0.001)
+        if len(pts) >= 2 and self._dist2(pts[0], pts[-1]) <= 0.0001:
+            pts.pop()
+        if len(pts) < 4:
+            return None
+
+        sx = sy = s1 = sx2 = sy2 = sxy = sxz = syz = sz = 0.0
+        for p in pts:
+            x = float(p.x())
+            y = float(p.y())
+            z = x * x + y * y
+            sx += x
+            sy += y
+            s1 += 1.0
+            sx2 += x * x
+            sy2 += y * y
+            sxy += x * y
+            sxz += x * z
+            syz += y * z
+            sz += z
+
+        solucao = self._resolver_3x3(
+            [[sx2, sxy, sx], [sxy, sy2, sy], [sx, sy, s1]],
+            [-sxz, -syz, -sz],
+        )
+        if solucao is None:
+            return None
+
+        d, e, f = solucao
+        centro = QPointF(-d / 2.0, -e / 2.0)
+        raio2 = (centro.x() * centro.x()) + (centro.y() * centro.y()) - f
+        if raio2 <= 1e-9:
+            return None
+        raio = sqrt(raio2)
+        desvios = [abs(self._dist(centro, p) - raio) for p in pts]
+        desvio_relativo = max(desvios) / max(raio, 1e-9)
+        return centro, raio, desvio_relativo
+
+    def _gerar_circulo_ajustado(self, canvas, pontos: List[QPointF]) -> List[QPointF]:
+        ajuste = self._ajustar_circulo(pontos)
+        if ajuste is None:
+            return []
+        centro, raio, desvio = ajuste
+        if desvio > 0.18:
+            return []
+        segmentos = 160
+        curva = [
+            QPointF(
+                centro.x() + cos((2.0 * pi * i) / segmentos) * raio,
+                centro.y() + sin((2.0 * pi * i) / segmentos) * raio,
+            )
+            for i in range(segmentos + 1)
+        ]
+        curva[-1] = QPointF(curva[0])
+        return curva
+
+    def _trecho_temporario_por_nos(self, canvas, nos: List[QPointF], cursor: QPointF) -> List[QPointF]:
+        if not nos:
+            return [QPointF(cursor)]
+
+        ultimo = QPointF(nos[-1])
+        if self._dist2(ultimo, cursor) <= 1e-8:
+            return [ultimo]
+
+        if len(nos) == 1:
+            return [ultimo, QPointF(cursor)]
+
+        anterior = QPointF(nos[-2])
+
+        vx = ultimo.x() - anterior.x()
+        vy = ultimo.y() - anterior.y()
+        controle1 = QPointF(ultimo.x() + vx * 0.35, ultimo.y() + vy * 0.35)
+        controle2 = QPointF(cursor.x() - (cursor.x() - ultimo.x()) * 0.22,
+                            cursor.y() - (cursor.y() - ultimo.y()) * 0.22)
+
+        dist = self._dist(ultimo, cursor)
+        amostras = max(8, min(26, int(dist * 0.14) + 8))
+        pontos: List[QPointF] = []
+        for i in range(amostras + 1):
+            t = i / float(amostras)
+            u = 1.0 - t
+            x = (
+                (u ** 3) * ultimo.x()
+                + 3.0 * (u ** 2) * t * controle1.x()
+                + 3.0 * u * (t ** 2) * controle2.x()
+                + (t ** 3) * cursor.x()
+            )
+            y = (
+                (u ** 3) * ultimo.y()
+                + 3.0 * (u ** 2) * t * controle1.y()
+                + 3.0 * u * (t ** 2) * controle2.y()
+                + (t ** 3) * cursor.y()
+            )
+            pontos.append(QPointF(x, y))
+        pontos[0] = QPointF(ultimo)
+        pontos[-1] = QPointF(cursor)
+        return self._remover_repetidos(pontos, tolerancia=0.001)
+
+    def _gerar_curva_incremental(self, canvas, pontos: List[QPointF]) -> List[QPointF]:
+        nos = self._remover_repetidos([QPointF(p) for p in pontos], tolerancia=0.001)
+        if len(nos) <= 1:
+            return list(nos)
+        if len(nos) == 2:
+            return [QPointF(nos[0]), QPointF(nos[1])]
+
+        curva = self._gerar_parabola_3p(canvas, nos[:3])
+        for indice in range(3, len(nos)):
+            trecho = self._trecho_temporario_por_nos(canvas, nos[:indice], nos[indice])
+            if trecho:
+                curva = self._remover_repetidos([*curva, *trecho[1:]], tolerancia=0.001)
+        return curva
+
     def _curva_dos_nos_confirmados(self, canvas, fechado: bool = False) -> List[QPointF]:
         nos = self._remover_repetidos([QPointF(p) for p in getattr(canvas, "_curva_np_nos", [])], tolerancia=0.001)
         if len(nos) <= 1:
             return nos
         if len(nos) == 2:
             return [QPointF(nos[0]), QPointF(nos[1])]
-        if not fechado:
-            cache = getattr(canvas, "_curva_np_curva_confirmada", None)
-            if isinstance(cache, list) and len(cache) >= 2:
-                return [QPointF(p) for p in cache]
+        circulo = self._gerar_circulo_ajustado(canvas, nos)
+        if fechado and circulo:
+            return circulo
         return self._gerar_spline(canvas, nos, fechado)
 
     def _atualizar_curva_confirmada(self, canvas) -> List[QPointF]:
@@ -536,6 +694,8 @@ class Ferramenta(FerramentaBase):
             curva = [QPointF(nos[0]), QPointF(nos[1])]
         elif self._modo_curva_atual(canvas) == "3p" and len(nos) == 3:
             curva = self._gerar_parabola_3p(canvas, nos)
+        elif len(nos) >= 3:
+            curva = self._gerar_spline(canvas, nos, fechado=False)
         else:
             curva = self._gerar_spline(canvas, nos, fechado=False)
         canvas._curva_np_curva_confirmada = curva
@@ -571,49 +731,7 @@ class Ferramenta(FerramentaBase):
         deformando enquanto o mouse se move. Só o trecho novo acompanha o cursor.
         """
         nos = [QPointF(p) for p in getattr(canvas, "_curva_np_nos", [])]
-        if not nos:
-            return [QPointF(cursor)]
-
-        ultimo = QPointF(nos[-1])
-        if self._dist2(ultimo, cursor) <= 1e-8:
-            return [ultimo]
-
-        if len(nos) == 1:
-            return [ultimo, QPointF(cursor)]
-
-        anterior = QPointF(nos[-2])
-
-        # Tangência de saída baseada no último trecho confirmado, suave e curta.
-        vx = ultimo.x() - anterior.x()
-        vy = ultimo.y() - anterior.y()
-        controle1 = QPointF(ultimo.x() + vx * 0.35, ultimo.y() + vy * 0.35)
-
-        # Chegada no cursor com tangência leve na direção do próprio trecho.
-        controle2 = QPointF(cursor.x() - (cursor.x() - ultimo.x()) * 0.22,
-                            cursor.y() - (cursor.y() - ultimo.y()) * 0.22)
-
-        dist = self._dist(ultimo, cursor)
-        amostras = max(8, min(26, int(dist * 0.14) + 8))
-        pontos: List[QPointF] = []
-        for i in range(amostras + 1):
-            t = i / float(amostras)
-            u = 1.0 - t
-            x = (
-                (u ** 3) * ultimo.x()
-                + 3.0 * (u ** 2) * t * controle1.x()
-                + 3.0 * u * (t ** 2) * controle2.x()
-                + (t ** 3) * cursor.x()
-            )
-            y = (
-                (u ** 3) * ultimo.y()
-                + 3.0 * (u ** 2) * t * controle1.y()
-                + 3.0 * u * (t ** 2) * controle2.y()
-                + (t ** 3) * cursor.y()
-            )
-            pontos.append(QPointF(x, y))
-        pontos[0] = QPointF(ultimo)
-        pontos[-1] = QPointF(cursor)
-        return self._remover_repetidos(pontos, tolerancia=0.001)
+        return self._trecho_temporario_por_nos(canvas, nos, cursor)
 
     def _gerar_preview_profissional(self, canvas, cursor: QPointF | None = None, fechado: bool = False) -> List[QPointF]:
         """Mostra exatamente o traçado que será gravado se o usuário clicar."""
@@ -626,6 +744,10 @@ class Ferramenta(FerramentaBase):
             base.append(QPointF(cursor))
         if len(base) <= 2:
             return [QPointF(p) for p in base]
+        if fechado and getattr(canvas, "_curva_ajustar_circulo", False):
+            circulo = self._gerar_circulo_ajustado(canvas, base)
+            if circulo:
+                return circulo
         if self._modo_curva_atual(canvas) == "3p" and len(base) == 3 and not fechado:
             return self._gerar_parabola_3p(canvas, base)
         return self._gerar_spline(canvas, base, fechado=fechado)
@@ -729,6 +851,12 @@ class Ferramenta(FerramentaBase):
         elif self._modo_curva_atual(canvas) == "3p" and len(pontos_controle) == 3 and not fechado:
             curva = self._gerar_parabola_3p(canvas, pontos_controle)
             tipo_curva = "parabola_3p"
+        elif fechado and len(pontos_controle) >= 4 and getattr(canvas, "_curva_ajustar_circulo", False) and (circulo := self._gerar_circulo_ajustado(canvas, pontos_controle)):
+            curva = circulo
+            tipo_curva = "circulo_ajustado"
+        elif len(pontos_controle) >= 3 and not fechado:
+            curva = self._gerar_spline(canvas, pontos_controle, fechado=False)
+            tipo_curva = "spline_livre"
         else:
             curva = self._gerar_spline(canvas, pontos_controle, fechado)
             tipo_curva = "spline_catmull_rom"
@@ -820,10 +948,15 @@ class Ferramenta(FerramentaBase):
         # Verificar fechamento: se clicar no primeiro nó (com 3+ nós), fechar
         ponto_fechamento = self._obter_ponto_fechamento(canvas, pos)
         if ponto_fechamento is not None:
+            try:
+                canvas._curva_ajustar_circulo = bool(event.modifiers() & Qt.ShiftModifier)
+            except Exception:
+                canvas._curva_ajustar_circulo = False
             # Fecha a curva imediatamente
+            circulo_perfeito = bool(getattr(canvas, "_curva_ajustar_circulo", False))
             if self._finalizar_np(canvas, fechado=True):
                 self._resetar(canvas, manter_elementos=True)
-                self._status(canvas, "Curva fechada e finalizada.")
+                self._status(canvas, "Círculo perfeito finalizado." if circulo_perfeito else "Curva fechada e finalizada.")
             else:
                 self._resetar(canvas, manter_elementos=True)
                 self._status(canvas, "Erro ao fechar curva.")
@@ -870,6 +1003,10 @@ class Ferramenta(FerramentaBase):
                 fechando = True
 
         canvas._curva_fechando = fechando
+        try:
+            canvas._curva_ajustar_circulo = bool(fechando and (event.modifiers() & Qt.ShiftModifier))
+        except Exception:
+            canvas._curva_ajustar_circulo = False
 
         # Atualizar cursor e preview
         if canvas._curva_np_nos:

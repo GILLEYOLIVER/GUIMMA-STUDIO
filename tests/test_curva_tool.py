@@ -77,6 +77,84 @@ class CurvaToolTestCase(unittest.TestCase):
         self.assertIn((5.0, -5.0), elemento["pontos"])
         self.assertEqual(canvas.historico, 1)
 
+    def test_modo_livre_com_tres_nos_salva_spline_livre(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_np_nos = [QPointF(0.0, 0.0), QPointF(5.0, -5.0), QPointF(10.0, 0.0)]
+        ferramenta = FerramentaCurva()
+
+        self.assertTrue(ferramenta._finalizar_np(canvas, fechado=False))
+
+        elemento = canvas.cena.elementos[0]
+        self.assertEqual(elemento["tipo_curva"], "spline_livre")
+        self.assertEqual(elemento["pontos_principais"], [(0.0, 0.0), (5.0, -5.0), (10.0, 0.0)])
+
+    def test_preview_modo_livre_usa_mesma_curva_da_confirmacao(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_np_nos = [QPointF(0.0, 0.0), QPointF(5.0, -5.0), QPointF(10.0, 0.0)]
+        ferramenta = FerramentaCurva()
+        quarto = QPointF(14.0, 4.0)
+
+        preview = ferramenta._gerar_preview_profissional(canvas, cursor=quarto, fechado=False)
+        curva_confirmada = ferramenta._gerar_spline(canvas, [*canvas._curva_np_nos, quarto], fechado=False)
+
+        self.assertEqual([(p.x(), p.y()) for p in preview], [(p.x(), p.y()) for p in curva_confirmada])
+        self.assertAlmostEqual(preview[-1].x(), 14.0)
+        self.assertAlmostEqual(preview[-1].y(), 4.0)
+
+    def test_quarto_clique_confirma_exatamente_o_preview_anterior(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_np_nos = [QPointF(0.0, 0.0), QPointF(5.0, -5.0), QPointF(10.0, 0.0)]
+        ferramenta = FerramentaCurva()
+        ferramenta._atualizar_curva_confirmada(canvas)
+        quarto = QPointF(14.0, 4.0)
+        preview = ferramenta._gerar_preview_profissional(canvas, cursor=quarto, fechado=False)
+
+        canvas._curva_np_nos.append(quarto)
+        confirmada = ferramenta._atualizar_curva_confirmada(canvas)
+
+        self.assertEqual([(p.x(), p.y()) for p in confirmada], [(p.x(), p.y()) for p in preview])
+
+    def test_fechamento_livre_circular_ajusta_circulo_perfeito(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_ajustar_circulo = True
+        canvas._curva_np_nos = [
+            QPointF(10.0, 0.0),
+            QPointF(0.0, 10.0),
+            QPointF(-10.0, 0.0),
+            QPointF(0.0, -10.0),
+        ]
+        ferramenta = FerramentaCurva()
+
+        self.assertTrue(ferramenta._finalizar_np(canvas, fechado=True))
+
+        elemento = canvas.cena.elementos[0]
+        self.assertEqual(elemento["tipo_curva"], "circulo_ajustado")
+        self.assertTrue(elemento["fechado"])
+        self.assertEqual(elemento["pontos"][0], elemento["pontos"][-1])
+        raios = [((x * x) + (y * y)) ** 0.5 for x, y in elemento["pontos"][:-1]]
+        self.assertLess(max(raios) - min(raios), 1e-6)
+
+    def test_fechamento_livre_circular_sem_shift_nao_forca_circulo(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_ajustar_circulo = False
+        canvas._curva_np_nos = [
+            QPointF(10.0, 0.0),
+            QPointF(0.0, 10.0),
+            QPointF(-10.0, 0.0),
+            QPointF(0.0, -10.0),
+        ]
+        ferramenta = FerramentaCurva()
+
+        self.assertTrue(ferramenta._finalizar_np(canvas, fechado=True))
+
+        elemento = canvas.cena.elementos[0]
+        self.assertEqual(elemento["tipo_curva"], "spline_catmull_rom")
+
     def test_manipular_parabola_3p_regenera_sem_voltar_para_catmull_rom(self):
         ferramenta = FerramentaManipularPontos()
         controles = [QPointF(0.0, 0.0), QPointF(5.0, -6.0), QPointF(10.0, 0.0)]

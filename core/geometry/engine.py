@@ -135,12 +135,28 @@ def sample_quadratic_bezier_through_point(
 ) -> list[tuple[float, float]]:
     n = max(2, int(segments))
     control = quadratic_bezier_control_for_point(p0, p_mid, p2)
-    pts = sample_quadratic_bezier(p0, control, p2, n)
-    pts[0] = (float(p0[0]), float(p0[1]))
-    pts[-1] = (float(p2[0]), float(p2[1]))
     t_mid = quadratic_bezier_parameter_for_point(p0, p_mid, p2)
-    idx_mid = max(1, min(n - 1, int(round(t_mid * n))))
-    pts[idx_mid] = (float(p_mid[0]), float(p_mid[1]))
+    parametros = [i / float(n) for i in range(n + 1)]
+    if not any(abs(t - t_mid) <= 1e-9 for t in parametros):
+        parametros.append(t_mid)
+        parametros.sort()
+
+    pts = []
+    for t in parametros:
+        if abs(t) <= 1e-12:
+            pts.append((float(p0[0]), float(p0[1])))
+        elif abs(t - 1.0) <= 1e-12:
+            pts.append((float(p2[0]), float(p2[1])))
+        elif abs(t - t_mid) <= 1e-9:
+            pts.append((float(p_mid[0]), float(p_mid[1])))
+        else:
+            u = 1.0 - t
+            pts.append(
+                (
+                    (u * u * p0[0]) + (2.0 * u * t * control[0]) + (t * t * p2[0]),
+                    (u * u * p0[1]) + (2.0 * u * t * control[1]) + (t * t * p2[1]),
+                )
+            )
     return pts
 
 

@@ -21,8 +21,9 @@ else:
 
 
 class _FakeEvent:
-    def __init__(self, pos):
+    def __init__(self, pos, modifiers=Qt.NoModifier):
         self._pos = pos
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self):
@@ -30,6 +31,9 @@ class _FakeEvent:
 
     def position(self):
         return self._pos
+
+    def modifiers(self):
+        return self._modifiers
 
     def accept(self):
         self.accepted = True
@@ -84,6 +88,9 @@ class _FakeCanvas(QWidget):
     def _registrar_historico(self):
         self.historico += 1
 
+    def _dist(self, a, b):
+        return ((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2) ** 0.5
+
     def update(self):
         self.atualizou = True
 
@@ -101,11 +108,23 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["pontos"][1], (5.0, 0.0))
         self.assertIn((5.0, 0.0), molde["controle_auxiliares"])
         self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_auxiliares"])
+        self.assertEqual(len(molde["controle_cantos"]), 3)
+        self.assertNotIn((5.0, 0.0), molde["pontos"])
         self.assertEqual(canvas._selecionados, {0})
         self.assertEqual(canvas.historico, 1)
+
+    def test_shift_adiciona_ponto_principal_em_molde(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0), Qt.ShiftModifier)))
+
+        molde = canvas.cena.elementos[0]
+        self.assertIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
+        self.assertEqual(len(molde["controle_cantos"]), 4)
 
     def test_inserir_ponto_em_curva_livre_sincroniza_controles(self):
         canvas = _FakeCanvas()
@@ -121,9 +140,10 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
         curva = canvas.cena.elementos[0]
-        self.assertEqual(curva["pontos"], [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])
-        self.assertEqual(curva["pontos_controle_curva"], curva["pontos"])
-        self.assertEqual(curva["pontos_principais"], curva["pontos"])
+        self.assertIn((5.0, 0.0), curva["pontos"])
+        self.assertEqual(curva["pontos_controle_curva"], [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(curva["pontos_principais"], [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])
+        self.assertTrue(curva["pontos_tracado_real"])
 
 
 if __name__ == "__main__":

@@ -1790,8 +1790,8 @@ class Ferramenta(FerramentaBase):
     def _indices_controles_principais(self, base: list[tuple[float, float]]) -> list[int]:
         if len(base) <= 4:
             return list(range(len(base)))
-        if self._eh_quase_circulo(base):
-            return self._indices_por_amostragem(base, min(12, max(8, len(base) // 4)))
+        if self._eh_forma_fechada_suave(base):
+            return self._indices_quatro_extremos(base)
 
         candidatos = self._indices_por_angulo(base)
         minimo = self._quantidade_minima_controles_principais(base)
@@ -1896,24 +1896,50 @@ class Ferramenta(FerramentaBase):
                 cantos_agudos += 1
         return (variacao / media) <= 0.20 and cantos_agudos <= 2
 
-    def _indices_para_circulo(self, base: list[tuple[float, float]]) -> list[int]:
+    def _eh_forma_fechada_suave(self, base: list[tuple[float, float]]) -> bool:
+        if len(base) < 8:
+            return False
+        xs = [x for x, _ in base]
+        ys = [y for _, y in base]
+        largura = max(xs) - min(xs)
+        altura = max(ys) - min(ys)
+        if largura <= 1e-6 or altura <= 1e-6:
+            return False
+        razao = max(largura, altura) / max(min(largura, altura), 1e-6)
+        if razao > 3.5:
+            return False
+
+        angulos = []
+        for i in range(len(base)):
+            a = QPointF(*base[i - 1])
+            b = QPointF(*base[i])
+            c = QPointF(*base[(i + 1) % len(base)])
+            angulos.append(self._angulo_interno(a, b, c))
+        cantos_duros = sum(1 for ang in angulos if ang < 105.0)
+        cantos_visiveis = sum(1 for ang in angulos if ang < 128.0)
+        return cantos_duros == 0 and cantos_visiveis <= max(2, len(base) // 18)
+
+    def _indices_quatro_extremos(self, base: list[tuple[float, float]]) -> list[int]:
         xs = [x for x, _ in base]
         ys = [y for _, y in base]
         cx = sum(xs) / len(xs)
         cy = sum(ys) / len(ys)
         alvos = [
+            (min(xs), cy),
             (cx, min(ys)),
             (max(xs), cy),
             (cx, max(ys)),
-            (min(xs), cy),
         ]
+        usados: set[int] = set()
         indices: list[int] = []
-        usados = set()
         for ax, ay in alvos:
-            melhor_idx = min(range(len(base)), key=lambda i: ((base[i][0] - ax) ** 2 + (base[i][1] - ay) ** 2) + (1e6 if i in usados else 0.0))
-            usados.add(melhor_idx)
-            indices.append(melhor_idx)
-        return indices
+            melhor = min(
+                range(len(base)),
+                key=lambda i: ((base[i][0] - ax) ** 2 + (base[i][1] - ay) ** 2) + (1e9 if i in usados else 0.0),
+            )
+            usados.add(melhor)
+            indices.append(melhor)
+        return sorted(indices)
 
     def _calcular_auxiliares_no_contorno(self, base: list[tuple[float, float]], indices_cantos: list[int]) -> list[tuple[float, float]]:
         n = len(base)

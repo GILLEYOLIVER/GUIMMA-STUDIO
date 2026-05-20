@@ -569,7 +569,7 @@ class Ferramenta(FerramentaBase):
             dist = self._dist_pontos_local(p1, p2)
             amostras = max(8, min(22, int(dist * 0.10) + 8))
             for s in range(1, amostras + 1):
-                saida.append(self._catmull_rom(p0, p1, p2, p3, s / float(amostras)))
+                saida.append(self._catmull_rom_centripeta(p0, p1, p2, p3, s / float(amostras)))
         if fechado and saida:
             saida[-1] = QPointF(saida[0])
         return [(float(p.x()), float(p.y())) for p in saida]
@@ -606,6 +606,30 @@ class Ferramenta(FerramentaBase):
             + (-p0.y() + 3.0 * p1.y() - 3.0 * p2.y() + p3.y()) * t3
         )
         return QPointF(x, y)
+
+    def _catmull_rom_centripeta(self, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, t: float) -> QPointF:
+        def tj(ti: float, a: QPointF, b: QPointF) -> float:
+            return ti + max(self._dist_pontos_local(a, b), 1e-6) ** 0.5
+
+        t0 = 0.0
+        t1 = tj(t0, p0, p1)
+        t2 = tj(t1, p1, p2)
+        t3 = tj(t2, p2, p3)
+        t = t1 + max(0.0, min(1.0, t)) * (t2 - t1)
+
+        def interp(a: QPointF, b: QPointF, ta: float, tb: float) -> QPointF:
+            den = max(tb - ta, 1e-9)
+            return QPointF(
+                ((tb - t) / den) * a.x() + ((t - ta) / den) * b.x(),
+                ((tb - t) / den) * a.y() + ((t - ta) / den) * b.y(),
+            )
+
+        a1 = interp(p0, p1, t0, t1)
+        a2 = interp(p1, p2, t1, t2)
+        a3 = interp(p2, p3, t2, t3)
+        b1 = interp(a1, a2, t0, t2)
+        b2 = interp(a2, a3, t1, t3)
+        return interp(b1, b2, t1, t2)
 
     def _salvar_controles_curva_real(self, el: dict, controles: list[QPointF]) -> None:
         lista = [(float(p.x()), float(p.y())) for p in controles]
@@ -690,7 +714,11 @@ class Ferramenta(FerramentaBase):
             try:
                 painter.setBrush(Qt.NoBrush)
                 esp = max(1.8, float(el.get("espessura", 1.0)) + 0.8)
-                if (
+                if el.get("pontos_tracado_real"):
+                    canvas._desenhar_polilinha(
+                        painter, pontos, cor="#2da8ff", espessura=esp, estilo="solid", amplitude=1.0
+                    )
+                elif (
                     str(el.get("tipo_curva") or "").lower() == "parabola_3p"
                     and hasattr(canvas, "_desenhar_parabola_3p_elemento")
                     and canvas._desenhar_parabola_3p_elemento(
@@ -1196,6 +1224,7 @@ class Ferramenta(FerramentaBase):
         dy = destino.y() - origem_aux.y()
         pontos_originais = list(el.get("pontos", []))
         ponto_idx = self._indice_ponto_mais_proximo(canvas, pontos_originais, origem_aux)
+        aux_originais = [p for p in (self._ponto_qt(item) for item in aux) if p is not None]
         aux[controle_idx] = (destino.x(), destino.y())
         el["controle_auxiliares"] = aux
         self._atualizar_espelho_controle(el, "pontos_auxiliares", controle_idx, destino)
@@ -1207,6 +1236,15 @@ class Ferramenta(FerramentaBase):
             return
 
         if self._molde_tem_controles_curva(el):
+            self._mover_extremos_se_auxiliar_for_alca_reta(
+                canvas,
+                el,
+                controle_idx,
+                aux_originais,
+                pontos_originais,
+                dx,
+                dy,
+            )
             return
 
         a_idx, b_idx = self._segmento_indices_do_auxiliar(cantos, aux, controle_idx, origem_aux)
@@ -1250,6 +1288,49 @@ class Ferramenta(FerramentaBase):
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
         self._sincronizar_curva_suave(el)
+
+    def _mover_extremos_se_auxiliar_for_alca_reta(
+        self,
+        canvas,
+        el: dict,
+        controle_idx: int,
+        auxiliares_originais: list[QPointF],
+        pontos_originais: list,
+        dx: float,
+        dy: float,
+    ) -> None:
+        if abs(dx) <= 1e-9 and abs(dy) <= 1e-9:
+            return
+        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+        if len(cantos) < 2 or not (0 <= controle_idx < len(auxiliares_originais)):
+            return
+        fechado = self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos_originais, cantos)
+        segmentos = self._segmentos_cantos(cantos, fechado)
+        por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares_originais)
+        segmento_alvo: tuple[int, int] | None = None
+        for seg_ordem, itens in por_segmento.items():
+            if len(itens) != 1:
+                continue
+            aux_idx, _t, _pt = itens[0]
+            if aux_idx == controle_idx:
+                segmento_alvo = segmentos[seg_ordem]
+                break
+        if segmento_alvo is None:
+            return
+
+        cantos_raw = list(el.get("controle_cantos", []) or [])
+        for canto_idx in segmento_alvo:
+            if not (0 <= canto_idx < len(cantos_raw)):
+                continue
+            canto = self._ponto_qt(cantos_raw[canto_idx])
+            if canto is None:
+                continue
+            destino = QPointF(canto.x() + dx, canto.y() + dy)
+            if self._modo_discreto():
+                destino = QPointF(round(destino.x(), 2), round(destino.y(), 2))
+            cantos_raw[canto_idx] = (float(destino.x()), float(destino.y()))
+            self._atualizar_espelho_controle(el, "pontos_controle_principais", canto_idx, destino)
+        el["controle_cantos"] = cantos_raw
 
     def _redistribuir_molde_local_por_ponto(
         self,
@@ -1406,6 +1487,7 @@ class Ferramenta(FerramentaBase):
             return False
 
         auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
+        auxiliares = self._alinhar_auxiliares_unicos_as_retas(cantos, segmentos, auxiliares)
         atribuicoes = self._atribuir_auxiliares_a_segmentos(cantos, segmentos, auxiliares)
         densidades = self._densidade_segmentos_molde(canvas, pontos_anteriores, cantos, segmentos)
 
@@ -1462,8 +1544,6 @@ class Ferramenta(FerramentaBase):
     ) -> dict[int, list[QPointF]]:
         if len(auxiliares) == len(segmentos):
             return {idx: [QPointF(auxiliares[idx])] for idx in range(len(segmentos))}
-        if len(auxiliares) == len(segmentos) - 1:
-            return {idx: [QPointF(auxiliares[idx])] for idx in range(len(auxiliares))}
         saida: dict[int, list[tuple[float, QPointF]]] = {i: [] for i in range(len(segmentos))}
         for aux in auxiliares:
             melhor_seg = None
@@ -1482,6 +1562,59 @@ class Ferramenta(FerramentaBase):
             if melhor_seg is not None:
                 saida[melhor_seg].append((melhor_t, QPointF(aux)))
         return {idx: [pt for _t, pt in sorted(valores, key=lambda item: item[0])] for idx, valores in saida.items()}
+
+    def _auxiliares_por_segmento_indexados(
+        self,
+        cantos: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        auxiliares: list[QPointF],
+    ) -> dict[int, list[tuple[int, float, QPointF]]]:
+        saida: dict[int, list[tuple[int, float, QPointF]]] = {i: [] for i in range(len(segmentos))}
+        if len(auxiliares) == len(segmentos):
+            for idx, aux in enumerate(auxiliares):
+                a_idx, b_idx = segmentos[idx]
+                t = self._parametro_no_segmento(aux, cantos[a_idx], cantos[b_idx])
+                saida[idx].append((idx, t, QPointF(aux)))
+            return saida
+        for aux_idx, aux in enumerate(auxiliares):
+            melhor_seg = None
+            melhor_dist = float("inf")
+            melhor_t = 0.0
+            for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
+                a = cantos[a_idx]
+                b = cantos[b_idx]
+                t = self._parametro_no_segmento(aux, a, b)
+                proj = QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+                dist = self._dist_pontos_local(aux, proj)
+                if dist < melhor_dist:
+                    melhor_seg = seg_ordem
+                    melhor_dist = dist
+                    melhor_t = t
+            if melhor_seg is not None:
+                saida[melhor_seg].append((aux_idx, melhor_t, QPointF(aux)))
+        for seg_ordem, itens in list(saida.items()):
+            saida[seg_ordem] = sorted(itens, key=lambda item: item[1])
+        return saida
+
+    def _alinhar_auxiliares_unicos_as_retas(
+        self,
+        cantos: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        auxiliares: list[QPointF],
+    ) -> list[QPointF]:
+        ajustados = [QPointF(p) for p in auxiliares]
+        por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares)
+        for seg_ordem, itens in por_segmento.items():
+            if len(itens) != 1:
+                continue
+            aux_idx, t, _pt = itens[0]
+            if not (0 <= aux_idx < len(ajustados)):
+                continue
+            a_idx, b_idx = segmentos[seg_ordem]
+            a = cantos[a_idx]
+            b = cantos[b_idx]
+            ajustados[aux_idx] = QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+        return ajustados
 
     def _densidade_segmentos_molde(
         self,
@@ -1509,17 +1642,9 @@ class Ferramenta(FerramentaBase):
         if len(pts) <= 2:
             return pts
         if len(pts) == 3:
-            a, meio, b = pts
-            amostra = [
-                QPointF(x, y)
-                for x, y in sample_quadratic_bezier_through_point(
-                    (float(a.x()), float(a.y())),
-                    (float(meio.x()), float(meio.y())),
-                    (float(b.x()), float(b.y())),
-                    max(8, int(segmentos)),
-                )
-            ]
-            return self._limitar_trecho_ao_envelope_controles(amostra, pts)
+            # Um unico auxiliar entre dois principais sustenta uma reta.
+            # O trecho so vira curva quando ha dois ou mais auxiliares.
+            return [QPointF(pts[0]), QPointF(pts[-1])]
         saida: list[QPointF] = []
         total = len(pts)
         for i in range(total - 1):
@@ -1531,7 +1656,7 @@ class Ferramenta(FerramentaBase):
                 saida.append(QPointF(p1))
             amostras = max(6, min(24, int(segmentos / max(1, total - 1))))
             for s in range(1, amostras + 1):
-                saida.append(self._catmull_rom(p0, p1, p2, p3, s / float(amostras)))
+                saida.append(self._catmull_rom_centripeta(p0, p1, p2, p3, s / float(amostras)))
         return self._limitar_trecho_ao_envelope_controles(saida, pts)
 
     def _limitar_trecho_ao_envelope_controles(self, pontos: list[QPointF], controles: list[QPointF]) -> list[QPointF]:

@@ -222,6 +222,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         "reta",
         "cadastrar_curva",
         "manipular_pontos",
+        "inserir_ponto",
+        "excluir_ponto",
         "mover_ponto",
         "selecionar_tudo",
         "elemento_paralelo",

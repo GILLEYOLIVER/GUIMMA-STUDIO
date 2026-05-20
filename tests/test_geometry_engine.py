@@ -31,16 +31,20 @@ class GeometryEngineTestCase(unittest.TestCase):
         self.assertAlmostEqual(x, p_meio[0], places=7)
         self.assertAlmostEqual(y, p_meio[1], places=7)
 
-    def test_amostragem_forca_ponto_intermediario_clicado(self):
+    def test_amostragem_insere_ponto_intermediario_sem_quebrar_vizinhos(self):
         p0 = (0.0, 0.0)
         p_meio = (3.0, -5.0)
         p2 = (10.0, 0.0)
 
         pontos = sample_quadratic_bezier_through_point(p0, p_meio, p2, 96)
-        idx = round(quadratic_bezier_parameter_for_point(p0, p_meio, p2) * 96)
+        idx = pontos.index(p_meio)
 
         self.assertEqual(pontos[0], p0)
-        self.assertEqual(pontos[idx], p_meio)
+        self.assertGreater(len(pontos), 97)
+        self.assertGreater(p_meio[0], pontos[idx - 1][0])
+        self.assertLess(p_meio[0], pontos[idx + 1][0])
+        self.assertLess(abs(pontos[idx - 1][1] - p_meio[1]), 0.25)
+        self.assertLess(abs(pontos[idx + 1][1] - p_meio[1]), 0.25)
         self.assertEqual(pontos[-1], p2)
 
 

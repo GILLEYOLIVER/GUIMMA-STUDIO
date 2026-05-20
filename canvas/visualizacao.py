@@ -1027,11 +1027,13 @@ class VisualizacaoCanvas(QWidget):
     def _prioridade_tipo_snap(self, tipo: str) -> int:
         ordem = {
             "nó": 0,
-            "interseção": 1,
-            "centro": 2,
-            "ponto médio": 3,
+            "controle principal": 0,
+            "controle auxiliar": 1,
+            "controle": 1,
+            "interseção": 2,
+            "centro": 3,
             "borda": 4,
-            "controle": 5,
+            "ponto médio": 5,
             "coord": 6,
             "fio": 7,
             "nome": 8,
@@ -1104,12 +1106,23 @@ class VisualizacaoCanvas(QWidget):
                 ]
                 for tipo, ponto in candidatos_bezier:
                     self._adicionar_candidato_snap(candidatos, pos_cena, ponto, tipo, idx, tol_cena)
-            for chave in ("controle_cantos", "controle_auxiliares"):
+            for chave, tipo_controle in (
+                ("controle_cantos", "controle principal"),
+                ("pontos_controle_principais", "controle principal"),
+                ("controle_auxiliares", "controle auxiliar"),
+                ("pontos_auxiliares", "controle auxiliar"),
+            ):
                 for p in el.get(chave, []) or []:
-                    if not isinstance(p, (list, tuple)) or len(p) != 2:
+                    try:
+                        if isinstance(p, dict):
+                            ponto = QPointF(float(p["x"]), float(p["y"]))
+                        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                            ponto = QPointF(float(p[0]), float(p[1]))
+                        else:
+                            continue
+                    except Exception:
                         continue
-                    ponto = QPointF(float(p[0]), float(p[1]))
-                    self._adicionar_candidato_snap(candidatos, pos_cena, ponto, "controle", idx, tol_cena)
+                    self._adicionar_candidato_snap(candidatos, pos_cena, ponto, tipo_controle, idx, tol_cena)
             if el.get("molde"):
                 fio_origem = el.get("fio_origem")
                 fio_fim = el.get("fio_fim")
@@ -1581,6 +1594,12 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
+                if elemento.get("pontos_tracado_real"):
+                    self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
+                                             estilo=estilo,
+                                             amplitude=float(elemento.get("amplitude", 1.0)),
+                                             fase_inicial=float(elemento.get("fase_inicio", 0.0)))
+                    continue
                 if self._desenhar_parabola_3p_elemento(
                     painter,
                     elemento,
@@ -1668,6 +1687,18 @@ class VisualizacaoCanvas(QWidget):
             esp = max(1.0, float(elemento.get("espessura", 1.0) or 1.0))
             try:
                 if elemento.get("tipo") == "polyline":
+                    pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
+                    if elemento.get("pontos_tracado_real") and len(pontos) >= 2:
+                        self._desenhar_polilinha(
+                            painter,
+                            pontos,
+                            cor=cor,
+                            espessura=esp,
+                            estilo=str(elemento.get("estilo", "solid")),
+                            amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
+                            fase_inicial=float(elemento.get("fase_inicio", 0.0) or 0.0),
+                        )
+                        continue
                     if self._desenhar_parabola_3p_elemento(
                         painter,
                         elemento,
@@ -1677,7 +1708,6 @@ class VisualizacaoCanvas(QWidget):
                         amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
                     ):
                         continue
-                    pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", [])]
                     if len(pontos) >= 2:
                         self._desenhar_polilinha(
                             painter,
@@ -1741,7 +1771,7 @@ class VisualizacaoCanvas(QWidget):
             return
         snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
         cor = QColor("#ffd400")
-        if self._snap_resultado.tipo == "controle":
+        if self._snap_resultado.tipo in {"controle", "controle principal", "controle auxiliar"}:
             cor = QColor(getattr(self, "_cores_canvas", {}).get("selecao", "#2da8ff"))
         elif self._snap_resultado.tipo in {"borda", "ponto médio"}:
             cor = QColor("#7df9ff")

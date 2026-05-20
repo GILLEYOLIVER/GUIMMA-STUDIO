@@ -115,6 +115,27 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         )
         self.assertEqual(canvas.historico, 1)
 
+    def test_excluir_curva_editavel_remove_controle_e_nao_amostra(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "curva_editavel": True,
+            "curva_suave": True,
+            "pontos_tracado_real": True,
+            "tipo_curva": "spline_catmull_rom",
+            "pontos": [(0.0, 0.0), (2.0, 0.5), (5.0, 2.0), (8.0, 0.5), (10.0, 0.0)],
+            "pontos_principais": [(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)],
+            "pontos_controle_curva": [(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)],
+            "pontos_controle_principais": [(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)],
+        }
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
+
+        curva = canvas.cena.elementos[0]
+        self.assertEqual(curva["pontos_principais"], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(curva["pontos"], [(0.0, 0.0), (10.0, 0.0)])
+
 
 if __name__ == "__main__":
     unittest.main()

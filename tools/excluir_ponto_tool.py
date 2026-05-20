@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from tools.tool_base import FerramentaBase
+from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
 
 class Ferramenta(FerramentaBase):
@@ -10,8 +12,14 @@ class Ferramenta(FerramentaBase):
     nome = "Excluir Ponto"
     descricao_painel = "Remove pontos de controle mantendo a geometria válida."
 
+    def __init__(self):
+        super().__init__()
+        self._hover_alvo: tuple[str, int, str, int] | tuple[str, int, int] | None = None
+        self._helper = FerramentaManipularPontos()
+
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        self._hover_alvo = None
         self.set_status("Clique sobre um ponto de controle para excluir.")
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -28,6 +36,18 @@ class Ferramenta(FerramentaBase):
             canvas._registrar_historico()
             canvas.update()
             self.set_status("Controle do molde excluído e contorno regenerado.")
+            event.accept()
+            return True
+
+        alvo_curva = self._controle_curva_em_ponto(canvas, pos)
+        if alvo_curva is not None:
+            idx, controle_idx = alvo_curva
+            if not self._excluir_controle_curva(canvas, idx, controle_idx):
+                return False
+            canvas._selecionados = {idx}
+            canvas._registrar_historico()
+            canvas.update()
+            self.set_status("Ponto de controle da curva excluído.")
             event.accept()
             return True
 
@@ -75,6 +95,71 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def on_mouse_move(self, canvas, event) -> bool:
+        pos = canvas._ponto_com_snap(event.position())
+        alvo_controle = self._controle_molde_em_ponto(canvas, pos)
+        if alvo_controle is not None:
+            idx, tipo, controle_idx = alvo_controle
+            self._hover_alvo = ("molde", idx, tipo, controle_idx)
+        else:
+            alvo_curva = self._controle_curva_em_ponto(canvas, pos)
+            if alvo_curva is not None:
+                idx, controle_idx = alvo_curva
+                self._hover_alvo = ("curva", idx, controle_idx)
+            else:
+                alvo_vertice = self._vertice_em_ponto(canvas, pos)
+                if alvo_vertice is not None:
+                    idx, ponto_idx = alvo_vertice
+                    self._hover_alvo = ("vertice", idx, ponto_idx)
+                else:
+                    self._hover_alvo = None
+        canvas.update()
+        event.accept()
+        return True
+
+    def on_paint_overlay(self, canvas, painter):
+        ponto = self._ponto_hover(canvas)
+        if ponto is None:
+            return
+        tela = canvas._cena_para_tela(ponto)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor("#ffffff"), 1.2))
+        painter.setBrush(QColor("#ff3030"))
+        painter.drawEllipse(int(tela.x() - 6), int(tela.y() - 6), 12, 12)
+        painter.setPen(QPen(QColor("#ffffff"), 1.6))
+        painter.drawLine(int(tela.x() - 4), int(tela.y() - 4), int(tela.x() + 4), int(tela.y() + 4))
+        painter.drawLine(int(tela.x() - 4), int(tela.y() + 4), int(tela.x() + 4), int(tela.y() - 4))
+        painter.restore()
+
+    def _ponto_hover(self, canvas) -> QPointF | None:
+        if self._hover_alvo is None:
+            return None
+        kind = self._hover_alvo[0]
+        if kind == "molde":
+            _, idx, tipo, controle_idx = self._hover_alvo
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                return None
+            chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+            controles = canvas.cena.elementos[idx].get(chave, []) or []
+            if 0 <= controle_idx < len(controles):
+                return self._ponto_qt(controles[controle_idx])
+        if kind == "curva":
+            _, idx, controle_idx = self._hover_alvo
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                return None
+            controles = self._controles_curva(canvas.cena.elementos[idx])
+            if 0 <= controle_idx < len(controles):
+                return controles[controle_idx]
+        if kind == "vertice":
+            _, idx, ponto_idx = self._hover_alvo
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                return None
+            pontos = canvas.cena.elementos[idx].get("pontos", []) or []
+            if 0 <= ponto_idx < len(pontos):
+                return self._ponto_qt(pontos[ponto_idx])
+        return None
+
     # ------------------------------------------------------------------
     # Moldes: controle_cantos/controle_auxiliares são a autoridade.
     # ------------------------------------------------------------------
@@ -121,6 +206,9 @@ class Ferramenta(FerramentaBase):
         return True
 
     def _regenerar_molde_por_controles(self, canvas, el: dict) -> bool:
+        return self._helper._regenerar_molde_por_controles(canvas, el)
+
+    def _regenerar_molde_por_controles_legado(self, canvas, el: dict) -> bool:
         cantos = [pt for item in el.get("controle_cantos", []) or [] if (pt := self._ponto_qt(item)) is not None]
         if len(cantos) < 2:
             return False
@@ -196,18 +284,7 @@ class Ferramenta(FerramentaBase):
         if len(pts) <= 2:
             return pts
         if len(pts) == 3:
-            a, meio, b = pts
-            controle = self._controle_quadratico_passando_por_meio(a, meio, b)
-            n = max(8, int(segmentos))
-            saida: list[QPointF] = []
-            for i in range(n + 1):
-                t = i / float(n)
-                u = 1.0 - t
-                saida.append(QPointF(
-                    (u * u * a.x()) + (2.0 * u * t * controle.x()) + (t * t * b.x()),
-                    (u * u * a.y()) + (2.0 * u * t * controle.y()) + (t * t * b.y()),
-                ))
-            return self._garantir_controles_no_trecho(self._limitar_envelope(saida, pts), pts)
+            return [QPointF(pts[0]), QPointF(pts[-1])]
         saida: list[QPointF] = []
         total = len(pts)
         for i in range(total - 1):
@@ -296,6 +373,8 @@ class Ferramenta(FerramentaBase):
         for idx, el in enumerate(canvas.cena.elementos):
             if el.get("tipo") != "polyline" or el.get("molde"):
                 continue
+            if self._curva_editavel(el):
+                continue
             for p_idx, item in enumerate(el.get("pontos", []) or []):
                 pt = self._ponto_qt(item)
                 if pt is None:
@@ -305,6 +384,55 @@ class Ferramenta(FerramentaBase):
                     melhor_d = d
                     melhor = (idx, p_idx)
         return melhor
+
+    def _controle_curva_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
+        tolerancia = 8.0 / max(canvas.zoom, 0.001)
+        melhor: tuple[int, int] | None = None
+        melhor_d = tolerancia
+        for idx, el in enumerate(canvas.cena.elementos):
+            if el.get("tipo") != "polyline" or el.get("molde") or not self._curva_editavel(el):
+                continue
+            for controle_idx, pt in enumerate(self._controles_curva(el)):
+                d = canvas._dist(pt, pos)
+                if d <= melhor_d:
+                    melhor_d = d
+                    melhor = (idx, controle_idx)
+        return melhor
+
+    def _excluir_controle_curva(self, canvas, idx: int, controle_idx: int) -> bool:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+        el = canvas.cena.elementos[idx]
+        controles = self._controles_curva(el)
+        if not (0 <= controle_idx < len(controles)):
+            self.set_status("Controle inválido para exclusão.")
+            return False
+        fechado = self._fechado_por_pontos(canvas, el.get("pontos", []) or [])
+        minimo = 3 if fechado else 2
+        if len(controles) <= minimo:
+            self.set_status("A curva precisa manter pontos suficientes para continuar válida.")
+            return False
+        controles.pop(controle_idx)
+        tipo_curva = str(el.get("tipo_curva") or "spline_catmull_rom")
+        el["pontos"] = self._helper._gerar_tracado_curva_real(controles, fechado=fechado, tipo_curva=tipo_curva)
+        self._helper._salvar_controles_curva_real(el, controles)
+        el["fechado"] = fechado
+        return len(el.get("pontos", []) or []) >= 2
+
+    def _curva_editavel(self, el: dict) -> bool:
+        return bool(el.get("pontos_tracado_real") or el.get("curva_editavel") or el.get("pontos_principais") or el.get("pontos_controle_curva"))
+
+    def _controles_curva(self, el: dict) -> list[QPointF]:
+        origem = el.get("pontos_principais") or el.get("pontos_controle_curva") or el.get("pontos_controle_principais") or []
+        controles = [self._ponto_qt(p) for p in origem]
+        return [p for p in controles if p is not None]
+
+    def _fechado_por_pontos(self, canvas, pontos: list) -> bool:
+        if len(pontos) < 3:
+            return False
+        p0 = self._ponto_qt(pontos[0])
+        pn = self._ponto_qt(pontos[-1])
+        return p0 is not None and pn is not None and canvas._dist(p0, pn) <= 1e-6
 
     def _sincronizar_curva_livre(self, el: dict, removido: QPointF) -> None:
         if not (
