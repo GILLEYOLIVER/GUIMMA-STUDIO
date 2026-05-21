@@ -6,6 +6,7 @@ class FerramentaBase:
     id_ferramenta = "base"
     nome = "Ferramenta Base"
     usa_painel_auxiliar = True
+    gerencia_coordenadas_operacao = False
     descricao_painel = "Ajuste e execute esta ferramenta no canvas."
 
     def ativar(self) -> str:

@@ -381,6 +381,7 @@ class RetaToolUI(QFrame):
 class Ferramenta(FerramentaBase):
     id_ferramenta = "reta"
     nome = "Reta"
+    gerencia_coordenadas_operacao = True
 
     ANGULOS_PRINCIPAIS = [0, 30, 45, 60, 90, 120, 135, 150, 180, 210, 225, 240, 270, 300, 315, 330]
 
@@ -714,16 +715,24 @@ class Ferramenta(FerramentaBase):
                 self._terminado = False
                 self._pontos_atuais = []
                 self._adicionar_ponto(pos)
+                if hasattr(canvas, "iniciar_operacao_coordenadas"):
+                    canvas.iniciar_operacao_coordenadas(pos)
                 return True
 
             ponto_anterior = self._pontos_atuais[-1]
             novo_ponto = self._aplicar_restricoes(ponto_anterior, pos)
             novo_ponto = self._aplicar_pos_processamento(ponto_anterior, novo_ponto)
             self._adicionar_ponto(novo_ponto)
+            if hasattr(canvas, "finalizar_operacao_coordenadas"):
+                canvas.finalizar_operacao_coordenadas(novo_ponto)
+            if hasattr(canvas, "iniciar_operacao_coordenadas"):
+                canvas.iniciar_operacao_coordenadas(novo_ponto)
             return True
 
         if event.button() == Qt.RightButton:
             if self._desenhando:
+                if canvas._preview_reta is not None and hasattr(canvas, "finalizar_operacao_coordenadas"):
+                    canvas.finalizar_operacao_coordenadas(canvas._preview_reta)
                 self._finalizar_desenho()
             elif self._terminado:
                 self._sair_da_ferramenta()
@@ -757,10 +766,11 @@ class Ferramenta(FerramentaBase):
             preview = self._aplicar_pos_processamento(ponto_anterior, preview)
             canvas._preview_reta = preview
             canvas.painel_coordenadas.atualizar_preview(ponto_anterior, preview)
+            if hasattr(canvas, "atualizar_operacao_coordenadas"):
+                canvas.atualizar_operacao_coordenadas(preview)
             self._atualizar_status_preview(canvas, ponto_anterior, preview, pos_real)
         else:
             canvas._preview_reta = None
-            canvas.painel_coordenadas.atualizar_preview(None, None)
             if canvas.lbl_status and not self._terminado:
                 snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
                 if self.modo in {"paralela", "perpendicular"} and not self.reta_referencia:

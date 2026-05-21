@@ -19,6 +19,9 @@ from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 class Ferramenta(FerramentaBase):
     id_ferramenta = "manipular_pontos"
     nome = "Manipular Pontos"
+    usar_caixa_passo = False
+    arraste_por_clique = True
+    gerencia_coordenadas_operacao = True
     _dlg_global: QDialog | None = None
     _edt_dx_global: QLineEdit | None = None
     _edt_dy_global: QLineEdit | None = None
@@ -65,16 +68,23 @@ class Ferramenta(FerramentaBase):
         self._controles_selecionados.clear()
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
-        self._abrir_caixa_passo(canvas)
-        self.set_status(f"{self.nome}: arraste um ponto, use Shift para selecionar vários, ou use DX/DY para mover com precisão.")
+        if self.usar_caixa_passo:
+            self._abrir_caixa_passo(canvas)
+        self.set_status(f"{self.nome}: clique em um ponto para prender no cursor, clique de novo para soltar. Shift seleciona varios pontos.")
 
     def on_deactivate(self, canvas):
         if self._dlg_passo:
             self._dlg_passo.hide()
+        self._arrastando_ponto_poly = None
+        self._arrastando_controle_molde = None
+        self._arrastando_dobra_pontilhada = None
+        self._estado_arraste_controle = None
+        self._estado_arraste_ponto = None
         self._guia_eixo = None
 
     def on_canvas_resize(self, canvas) -> None:
-        self._reposicionar_caixa_passo(canvas)
+        if self.usar_caixa_passo:
+            self._reposicionar_caixa_passo(canvas)
 
     def _abrir_caixa_passo(self, canvas):
         cls = type(self)
@@ -190,6 +200,10 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
+        if self.arraste_por_clique and self._arraste_ativo():
+            self.on_mouse_move(canvas, event)
+            self._finalizar_arraste(canvas, event)
+            return True
         shift = self._shift_pressionado(event)
 
         dobra_pontilhada = self._dobra_pontilhada_em_ponto(canvas, pos)
@@ -198,6 +212,8 @@ class Ferramenta(FerramentaBase):
             self._hover_dobra_pontilhada = dobra_pontilhada
             self._hover_controle_molde = None
             self._hover_ponto_poly = None
+            if hasattr(canvas, "iniciar_operacao_coordenadas"):
+                canvas.iniciar_operacao_coordenadas(pos)
             event.accept()
             canvas.update()
             return True
@@ -223,6 +239,9 @@ class Ferramenta(FerramentaBase):
             self._hover_molde_idx = controle[0]
             self._ponto_selecionado = None
             self._estado_arraste_controle = self._criar_estado_arraste_controle(canvas, controle)
+            origem_coord = self.origem_coordenadas(canvas)
+            if origem_coord is not None and hasattr(canvas, "iniciar_operacao_coordenadas"):
+                canvas.iniciar_operacao_coordenadas(origem_coord)
             dx, dy = self._ler_delta_configurado()
             if abs(dx) > 1e-9 or abs(dy) > 1e-9:
                 self._mover_controles_por_delta(canvas, self._alvos_controle_para_arraste(controle), dx, -dy)
@@ -243,6 +262,9 @@ class Ferramenta(FerramentaBase):
         self._ponto_selecionado = (idx, p_idx)
         self._hover_ponto_poly = (idx, p_idx)
         self._estado_arraste_ponto = self._criar_estado_arraste_ponto(canvas, idx, p_idx)
+        origem_coord = self.origem_coordenadas(canvas)
+        if origem_coord is not None and hasattr(canvas, "iniciar_operacao_coordenadas"):
+            canvas.iniciar_operacao_coordenadas(origem_coord)
         dx, dy = self._ler_delta_configurado()
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
             delta_x = dx
@@ -415,6 +437,8 @@ class Ferramenta(FerramentaBase):
         if self._arrastando_dobra_pontilhada is not None:
             self._atualizar_dobra_pontilhada(canvas, self._arrastando_dobra_pontilhada, self._normalizar_destino(pos))
             self._hover_dobra_pontilhada = self._arrastando_dobra_pontilhada
+            if hasattr(canvas, "atualizar_operacao_coordenadas"):
+                canvas.atualizar_operacao_coordenadas(pos)
             canvas.update()
             event.accept()
             return True
@@ -441,6 +465,9 @@ class Ferramenta(FerramentaBase):
                     self._atualizar_info_angulo_controle_molde(canvas, idx, tipo, controle_idx, destino)
             self._hover_controle_molde = self._arrastando_controle_molde
             self._hover_molde_idx = idx
+            destino_coord = self.posicao_coordenadas_atual(canvas)
+            if destino_coord is not None and hasattr(canvas, "atualizar_operacao_coordenadas"):
+                canvas.atualizar_operacao_coordenadas(destino_coord)
             canvas.update()
             event.accept()
             return True
@@ -462,6 +489,9 @@ class Ferramenta(FerramentaBase):
                 self._atualizar_ponto(canvas, idx, p_idx, destino)
             self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
             self._atualizar_info_angulo(canvas, idx, p_idx, destino)
+            destino_coord = self.posicao_coordenadas_atual(canvas)
+            if destino_coord is not None and hasattr(canvas, "atualizar_operacao_coordenadas"):
+                canvas.atualizar_operacao_coordenadas(destino_coord)
             canvas.update()
             event.accept()
             return True
@@ -475,11 +505,26 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def _arraste_ativo(self) -> bool:
+        return (
+            self._arrastando_ponto_poly is not None
+            or self._arrastando_controle_molde is not None
+            or self._arrastando_dobra_pontilhada is not None
+        )
+
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        if self._arrastando_ponto_poly is None and self._arrastando_controle_molde is None and self._arrastando_dobra_pontilhada is None:
+        if not self._arraste_ativo():
             return False
+        if self.arraste_por_clique:
+            event.accept()
+            return True
+        self._finalizar_arraste(canvas, event)
+        return True
+
+    def _finalizar_arraste(self, canvas, event) -> None:
+        destino_final = self.posicao_coordenadas_atual(canvas)
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
         self._arrastando_dobra_pontilhada = None
@@ -492,10 +537,66 @@ class Ferramenta(FerramentaBase):
         self._hover_ponto_poly = None
         self._hover_controle_molde = None
         self._hover_molde_idx = None
+        if destino_final is not None and hasattr(canvas, "definir_origem_preview_coordenadas"):
+            if hasattr(canvas, "finalizar_operacao_coordenadas"):
+                canvas.finalizar_operacao_coordenadas(destino_final)
+            else:
+                canvas.definir_origem_preview_coordenadas(destino_final)
+                if hasattr(canvas, "painel_coordenadas"):
+                    canvas.painel_coordenadas.atualizar_preview(destino_final, destino_final)
         canvas._registrar_historico()
         canvas.update()
         event.accept()
-        return True
+
+    def origem_coordenadas(self, canvas) -> QPointF | None:
+        if self._estado_arraste_controle is not None:
+            origem = self._estado_arraste_controle.get("origem")
+            if isinstance(origem, QPointF):
+                return QPointF(origem)
+        if self._estado_arraste_ponto is not None:
+            origem = self._estado_arraste_ponto.get("origem")
+            if isinstance(origem, QPointF):
+                return QPointF(origem)
+        if self._arrastando_dobra_pontilhada is not None:
+            idx, lado, ponto_idx = self._arrastando_dobra_pontilhada
+            ponto = self._ponto_dobra_pontilhada(canvas, idx, lado, ponto_idx)
+            if ponto is not None:
+                return QPointF(ponto)
+        if self._hover_controle_molde is not None:
+            ponto = self._ponto_controle_molde(canvas, *self._hover_controle_molde)
+            if ponto is not None:
+                return QPointF(ponto)
+        if self._hover_ponto_poly is not None:
+            idx, p_idx = self._hover_ponto_poly
+            if 0 <= idx < len(canvas.cena.elementos):
+                pontos = canvas.cena.elementos[idx].get("pontos", []) or []
+                if 0 <= p_idx < len(pontos):
+                    try:
+                        return QPointF(float(pontos[p_idx][0]), float(pontos[p_idx][1]))
+                    except Exception:
+                        return None
+        return None
+
+    def posicao_coordenadas_atual(self, canvas) -> QPointF | None:
+        if self._arrastando_controle_molde is not None:
+            ponto = self._ponto_controle_molde(canvas, *self._arrastando_controle_molde)
+            if ponto is not None:
+                return QPointF(ponto)
+        if self._arrastando_ponto_poly is not None:
+            idx, p_idx = self._arrastando_ponto_poly
+            if 0 <= idx < len(canvas.cena.elementos):
+                pontos = canvas.cena.elementos[idx].get("pontos", []) or []
+                if 0 <= p_idx < len(pontos):
+                    try:
+                        return QPointF(float(pontos[p_idx][0]), float(pontos[p_idx][1]))
+                    except Exception:
+                        return None
+        if self._arrastando_dobra_pontilhada is not None:
+            idx, lado, ponto_idx = self._arrastando_dobra_pontilhada
+            ponto = self._ponto_dobra_pontilhada(canvas, idx, lado, ponto_idx)
+            if ponto is not None:
+                return QPointF(ponto)
+        return None
 
     def on_paint_overlay(self, canvas, painter):
         self._desenhar_linha_curva_selecionada(canvas, painter)
@@ -835,6 +936,20 @@ class Ferramenta(FerramentaBase):
                 elif p_idx == len(pontos) - 1:
                     pontos[0] = pontos[-1]
             registro[chave] = pontos
+
+    def _ponto_dobra_pontilhada(self, canvas, idx: int, reg_idx: int, p_idx: int) -> QPointF | None:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return None
+        registros = canvas.cena.elementos[idx].get("contornos_dobra_original")
+        if not isinstance(registros, list) or not (0 <= reg_idx < len(registros)):
+            return None
+        registro = registros[reg_idx]
+        if not isinstance(registro, dict):
+            return None
+        pontos = registro.get("contorno_pontilhado") or registro.get("metade_movida")
+        if not isinstance(pontos, list) or not (0 <= p_idx < len(pontos)):
+            return None
+        return self._ponto_qt(pontos[p_idx])
 
     def _pontos_lista_mesmos(self, a, b) -> bool:
         pa = self._ponto_qt(a)

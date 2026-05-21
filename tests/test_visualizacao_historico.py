@@ -10,11 +10,26 @@ if find_spec("PySide6") is None:
     QApplication = None
     VisualizacaoCanvas = None
     CenaDocumento = None
+    QPointF = None
+    Qt = None
 else:
+    from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication
 
     from canvas.cena import CenaDocumento
     from canvas.visualizacao import VisualizacaoCanvas
+
+
+class _FakeMouseEvent:
+    def __init__(self, pos: QPointF, button=None):
+        self._pos = QPointF(pos)
+        self._button = Qt.LeftButton if button is None else button
+
+    def position(self):
+        return QPointF(self._pos)
+
+    def button(self):
+        return self._button
 
 
 @unittest.skipIf(VisualizacaoCanvas is None, "PySide6 não disponível neste ambiente")
@@ -72,6 +87,56 @@ class VisualizacaoHistoricoTestCase(unittest.TestCase):
         self.assertEqual(len(canvas._historico_elementos), 2)
         canvas.refazer_acao()
         self.assertEqual(canvas.cena.elementos[0]["pontos"][0], (1.0, 0.0))
+
+    def test_limpar_e_desfazer_removem_marcacoes_de_coordenadas(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas._marcacoes_temporarias = [QPointF(1.0, 1.0), QPointF(2.0, 2.0)]
+        canvas._ponto_coordenada_aplicada = QPointF(2.0, 2.0)
+
+        canvas.desfazer_acao()
+
+        self.assertEqual(len(canvas._marcacoes_temporarias), 1)
+        self.assertEqual(canvas._ponto_coordenada_aplicada, QPointF(1.0, 1.0))
+
+        canvas._limpar_marcacoes_coordenadas()
+
+        self.assertEqual(canvas._marcacoes_temporarias, [])
+        self.assertIsNone(canvas._ponto_coordenada_aplicada)
+
+    def test_preview_coordenadas_congela_ao_finalizar_operacao(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+
+        canvas.iniciar_operacao_coordenadas(QPointF(10.0, 5.0))
+        canvas.atualizar_operacao_coordenadas(QPointF(13.0, 1.0))
+
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
+        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5.00")
+
+        canvas.finalizar_operacao_coordenadas(QPointF(13.0, 1.0))
+        canvas._atualizar_preview_coordenadas_mouse(QPointF(50.0, 50.0))
+
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
+        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5.00")
+
+    def test_ferramenta_futura_usa_ciclo_automatico_de_coordenadas(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas._runtime_tool = object()
+
+        canvas._coordenadas_auto_apos_press(_FakeMouseEvent(QPointF(4.0, 6.0)), True, False)
+        canvas.atualizar_operacao_coordenadas(QPointF(7.0, 2.0))
+
+        self.assertTrue(canvas._operacao_coordenadas_ativa)
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
+
+        canvas._coordenadas_auto_apos_release(_FakeMouseEvent(QPointF(7.0, 2.0)), True)
+        canvas._atualizar_preview_coordenadas_mouse(QPointF(50.0, 50.0))
+
+        self.assertFalse(canvas._operacao_coordenadas_ativa)
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
 
 
 if __name__ == "__main__":

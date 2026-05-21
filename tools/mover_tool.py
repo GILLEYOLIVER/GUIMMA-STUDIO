@@ -9,6 +9,7 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     id_ferramenta = "mover"
     nome = "Mover"
+    gerencia_coordenadas_operacao = True
     descricao_painel = "Arraste os elementos selecionados. Se nada estiver selecionado, clique em um elemento."
 
     def __init__(self):
@@ -38,6 +39,8 @@ class Ferramenta(FerramentaBase):
         self._arrastando = True
         self._ultimo_ponto = pos
         self._movido = False
+        if hasattr(canvas, "iniciar_operacao_coordenadas"):
+            canvas.iniciar_operacao_coordenadas(pos)
         self.set_status(f"Movendo {len(canvas._selecionados)} elemento(s)...")
         event.accept()
         return True
@@ -56,6 +59,8 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             mover_elemento_por_delta(el, dx, dy)
         self._ultimo_ponto = atual
+        if hasattr(canvas, "atualizar_operacao_coordenadas"):
+            canvas.atualizar_operacao_coordenadas(atual)
         self._movido = True
         canvas.update()
         event.accept()
@@ -74,8 +79,11 @@ class Ferramenta(FerramentaBase):
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton or not self._arrastando:
             return False
+        destino = canvas._ponto_com_snap(event.position())
         self._arrastando = False
         self._ultimo_ponto = None
+        if hasattr(canvas, "finalizar_operacao_coordenadas"):
+            canvas.finalizar_operacao_coordenadas(destino)
         if self._movido:
             canvas._registrar_historico()
             self.set_status(f"Movimento concluído ({len(canvas._selecionados)} elemento(s)).")

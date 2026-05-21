@@ -45,6 +45,17 @@ class _FakeEvent:
         self.accepted = True
 
 
+class _FakeCheck:
+    def __init__(self, checked=False):
+        self._checked = checked
+
+    def setChecked(self, checked):
+        self._checked = bool(checked)
+
+    def isChecked(self):
+        return self._checked
+
+
 class _FakeCanvas(QWidget):
     def __init__(self):
         super().__init__()
@@ -158,9 +169,9 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertGreater(len(pontos), 2)
         self.assertGreater(max(p.y() for p in pontos), 1.0)
 
-    def test_manipular_pontos_e_mover_ponto_tem_caixas_separadas(self):
+    def test_manipular_pontos_nao_abre_caixa_e_mover_ponto_mantem_caixa(self):
         if FerramentaMoverPonto is None:
-            self.skipTest("tools.mover_ponto_tool não disponível neste checkout")
+            self.skipTest("tools.mover_ponto_tool nao disponivel neste checkout")
         canvas = _FakeCanvas()
         manipular = FerramentaManipularPontos()
         mover = FerramentaMoverPonto()
@@ -168,15 +179,14 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         manipular.on_activate(canvas)
         mover.on_activate(canvas)
 
-        self.assertIsNot(manipular._dlg_passo, mover._dlg_passo)
-        self.assertEqual(manipular._dlg_passo.windowTitle(), "Manipular Pontos")
-        self.assertEqual(manipular._dlg_passo.objectName(), "guimma_manipular_pontos_dialog")
+        self.assertIsNone(manipular._dlg_passo)
+        self.assertIsNotNone(mover._dlg_passo)
         self.assertEqual(mover._dlg_passo.windowTitle(), "Mover Ponto")
         self.assertEqual(mover._dlg_passo.objectName(), "guimma_mover_ponto_dialog")
 
     def test_mover_ponto_dx_dy_negativos_movem_para_esquerda_e_baixo(self):
         if FerramentaMoverPonto is None:
-            self.skipTest("tools.mover_ponto_tool não disponível neste checkout")
+            self.skipTest("tools.mover_ponto_tool nao disponivel neste checkout")
         canvas = _FakeCanvas()
         ferramenta = FerramentaMoverPonto()
         ferramenta.on_activate(canvas)
@@ -192,7 +202,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
     def test_mover_ponto_dx_dy_positivos_movem_para_direita_e_cima(self):
         if FerramentaMoverPonto is None:
-            self.skipTest("tools.mover_ponto_tool não disponível neste checkout")
+            self.skipTest("tools.mover_ponto_tool nao disponivel neste checkout")
         canvas = _FakeCanvas()
         ferramenta = FerramentaMoverPonto()
         ferramenta.on_activate(canvas)
@@ -208,7 +218,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
     def test_mover_ponto_opcao_varios_pontos_ativa_modo_n_pontos(self):
         if FerramentaMoverPonto is None:
-            self.skipTest("tools.mover_ponto_tool não disponível neste checkout")
+            self.skipTest("tools.mover_ponto_tool nao disponivel neste checkout")
         canvas = _FakeCanvas()
         ferramenta = FerramentaMoverPonto()
         ferramenta.on_activate(canvas)
@@ -219,7 +229,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
     def test_mover_ponto_auxiliar_em_reta_move_extremos_por_dx_dy(self):
         if FerramentaMoverPonto is None:
-            self.skipTest("tools.mover_ponto_tool não disponível neste checkout")
+            self.skipTest("tools.mover_ponto_tool nao disponivel neste checkout")
         canvas = _FakeCanvas()
         ferramenta = FerramentaMoverPonto()
         ferramenta.on_activate(canvas)
@@ -242,7 +252,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][1], (12.0, 2.0))
@@ -254,6 +264,17 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(molde["pontos"], [(0.0, 0.0), (12.0, 2.0), (10.0, 5.0), (0.0, 0.0)])
 
+    def test_coordenadas_usam_origem_do_ponto_preso_na_manipulacao(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        self.assertEqual(ferramenta.origem_coordenadas(canvas), QPointF(10.0, 0.0))
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertEqual(ferramenta.origem_coordenadas(canvas), QPointF(10.0, 0.0))
+
     def test_arraste_de_controle_tem_snap_angular_suave(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()
@@ -261,7 +282,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 0.05))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(12.0, 0.05))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 0.05))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][1], (12.0, 0.0))
@@ -274,7 +295,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 1.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(12.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 1.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][1], (12.0, 1.0))
@@ -325,7 +346,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
 
         molde = canvas.cena.elementos[0]
         cantos = [QPointF(float(x), float(y)) for x, y in molde["controle_cantos"]]
@@ -376,7 +397,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         for esperado in [(12.0, 2.0), (10.0, 5.0)]:
@@ -415,7 +436,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["pontos"][0], (0.0, 2.0))
@@ -431,7 +452,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_auxiliares"][0], (5.0, 2.0))
@@ -463,7 +484,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 3.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 3.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 3.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
@@ -486,7 +507,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(3.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(8.0, 0.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(8.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(8.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertLess(molde["controle_auxiliares"][0][0], molde["controle_auxiliares"][1][0])
@@ -514,7 +535,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 5.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 8.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"], [(10.0, 0.0)])
@@ -569,7 +590,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(2.0, 1.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][0], (2.0, 1.0))
@@ -607,11 +628,12 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         }
         ferramenta = FerramentaManipularPontos()
         ferramenta.on_activate(canvas)
+        ferramenta._chk_discreto = _FakeCheck()
         ferramenta._chk_discreto.setChecked(True)
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(2.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(2.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(2.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertContemPonto(molde["pontos"], (2.0, 2.0))
@@ -649,11 +671,12 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         }
         ferramenta = FerramentaManipularPontos()
         ferramenta.on_activate(canvas)
+        ferramenta._chk_discreto = _FakeCheck()
         ferramenta._chk_discreto.setChecked(True)
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["pontos"][0], (0.0, 2.0))
@@ -670,7 +693,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 0.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, -20.0))))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
-        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(5.0, 2.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["controle_cantos"][0], (0.0, 2.0))
