@@ -11,6 +11,7 @@ from ui.posicao_janelas import salvar_posicao
 class PainelCoordenadas(QFrame):
     desfazer_ponto = Signal()
     aplicar = Signal(dict)
+    limpar = Signal()
     alternado = Signal(bool)
     posicao_alterada = Signal(int, int)
 
@@ -131,6 +132,8 @@ class PainelCoordenadas(QFrame):
     def _limpar(self):
         for field in (self.dx_input, self.dy_input, self.a_input, self.d_input):
             field.clear()
+        self.atualizar_preview(None, None)
+        self.limpar.emit()
 
     def _parse(self, txt: str) -> float | None:
         txt = txt.strip().replace(",", ".")

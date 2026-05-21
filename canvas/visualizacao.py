@@ -41,6 +41,9 @@ class VisualizacaoCanvas(QWidget):
         self._preview_reta: QPointF | None = None
         self._marcacoes_temporarias: list[QPointF] = []
         self._ponto_coordenada_aplicada: QPointF | None = None
+        self._origem_preview_coordenadas: QPointF | None = None
+        self._operacao_coordenadas_ativa = False
+        self._operacao_coordenadas_origem: QPointF | None = None
         self._cursor_tela = QPointF(0.0, 0.0)
         self._historico_elementos: list[list[dict]] = [self._elementos_serializaveis()]
         self._indice_historico = 0
@@ -128,6 +131,7 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas = PainelCoordenadas(self)
         self.painel_coordenadas.desfazer_ponto.connect(self._desfazer_ponto)
         self.painel_coordenadas.aplicar.connect(self._aplicar_coordenadas)
+        self.painel_coordenadas.limpar.connect(self._limpar_marcacoes_coordenadas)
         self.painel_coordenadas.alternado.connect(self._set_painel_coordenadas_visivel)
         self.painel_coordenadas.posicao_alterada.connect(self._registrar_posicao_painel)
         self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
@@ -141,6 +145,7 @@ class VisualizacaoCanvas(QWidget):
     def set_ferramenta_ativa(self, tool_id: str):
         if self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
             self._runtime_tool.on_deactivate(self)
+        self.cancelar_operacao_coordenadas(limpar_preview=True)
         self.ferramenta_ativa = tool_id
         self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
@@ -457,6 +462,8 @@ class VisualizacaoCanvas(QWidget):
         return elementos
 
     def desfazer_acao(self):
+        if self._remover_ultima_marcacao_coordenadas():
+            return
         if self._pontos_reta:
             self._desfazer_ponto()
             return
@@ -1156,11 +1163,14 @@ class VisualizacaoCanvas(QWidget):
 
         candidatos.extend(self._candidatos_snap_temporarios(pos_cena, tol_cena))
 
-        if self._ponto_coordenada_aplicada is not None:
-            dist = self._dist(pos_cena, self._ponto_coordenada_aplicada)
+        pontos_coord = list(getattr(self, "_marcacoes_temporarias", []) or [])
+        if self._ponto_coordenada_aplicada is not None and not pontos_coord:
+            pontos_coord.append(self._ponto_coordenada_aplicada)
+        for ponto_coord in pontos_coord:
+            dist = self._dist(pos_cena, ponto_coord)
             if dist <= tol_cena:
-                candidatos.insert(0, SnapResult(
-                    ponto=QPointF(self._ponto_coordenada_aplicada),
+                candidatos.append(SnapResult(
+                    ponto=QPointF(ponto_coord),
                     tipo="coord",
                     distancia=dist,
                     elemento_idx=None,
@@ -1313,7 +1323,7 @@ class VisualizacaoCanvas(QWidget):
         return ajustado
 
     def _aplicar_coordenadas(self, payload: dict):
-        origem = self._pontos_reta[-1] if self._pontos_reta else QPointF(0.0, 0.0)
+        origem = self._origem_coordenadas_atual()
         dx_u = payload.get("dx")
         dy_u = payload.get("dy")
         ang = payload.get("a")
@@ -1335,7 +1345,81 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.atualizar_preview(origem, destino)
         self.update()
 
+    def _origem_coordenadas_atual(self) -> QPointF:
+        if isinstance(self._operacao_coordenadas_origem, QPointF):
+            return QPointF(self._operacao_coordenadas_origem)
+        origem = None
+        if self._runtime_tool and hasattr(self._runtime_tool, "origem_coordenadas"):
+            try:
+                origem = self._runtime_tool.origem_coordenadas(self)
+            except Exception:
+                origem = None
+        if isinstance(origem, QPointF):
+            return QPointF(origem)
+        if self._pontos_reta:
+            return QPointF(self._pontos_reta[-1])
+        if isinstance(self._origem_preview_coordenadas, QPointF):
+            return QPointF(self._origem_preview_coordenadas)
+        return QPointF(0.0, 0.0)
+
+    def definir_origem_preview_coordenadas(self, origem: QPointF | None) -> None:
+        self._origem_preview_coordenadas = QPointF(origem) if isinstance(origem, QPointF) else None
+
+    def iniciar_operacao_coordenadas(self, origem: QPointF) -> None:
+        self._operacao_coordenadas_origem = QPointF(origem)
+        self._operacao_coordenadas_ativa = True
+        self.painel_coordenadas.atualizar_preview(origem, origem)
+
+    def atualizar_operacao_coordenadas(self, destino: QPointF) -> None:
+        if not self._operacao_coordenadas_ativa:
+            return
+        self.painel_coordenadas.atualizar_preview(self._origem_coordenadas_atual(), QPointF(destino))
+
+    def finalizar_operacao_coordenadas(self, destino: QPointF | None = None) -> None:
+        if not self._operacao_coordenadas_ativa:
+            return
+        origem = self._origem_coordenadas_atual()
+        destino_final = QPointF(destino) if isinstance(destino, QPointF) else origem
+        self.painel_coordenadas.atualizar_preview(origem, destino_final)
+        self._operacao_coordenadas_ativa = False
+        self._operacao_coordenadas_origem = None
+        self._origem_preview_coordenadas = QPointF(destino_final)
+
+    def cancelar_operacao_coordenadas(self, limpar_preview: bool = False) -> None:
+        self._operacao_coordenadas_ativa = False
+        self._operacao_coordenadas_origem = None
+        if limpar_preview and hasattr(self, "painel_coordenadas"):
+            self._origem_preview_coordenadas = None
+            self.painel_coordenadas.atualizar_preview(None, None)
+
+    def _atualizar_preview_coordenadas_mouse(self, destino: QPointF) -> None:
+        if not hasattr(self, "painel_coordenadas") or not self.painel_coordenadas.isVisible():
+            return
+        if not self._operacao_coordenadas_ativa:
+            return
+        self.painel_coordenadas.atualizar_preview(self._origem_coordenadas_atual(), QPointF(destino))
+
+    def _ferramenta_gerencia_coordenadas(self) -> bool:
+        return bool(getattr(self._runtime_tool, "gerencia_coordenadas_operacao", False))
+
+    def _coordenadas_auto_apos_press(self, event: QMouseEvent, aceito: bool, ativa_antes: bool) -> None:
+        if not aceito or self._ferramenta_gerencia_coordenadas() or event.button() != Qt.LeftButton:
+            return
+        pos = self._ponto_com_snap(event.position())
+        if ativa_antes and self._operacao_coordenadas_ativa:
+            self.finalizar_operacao_coordenadas(pos)
+        elif not self._operacao_coordenadas_ativa:
+            self.iniciar_operacao_coordenadas(pos)
+
+    def _coordenadas_auto_apos_release(self, event: QMouseEvent, aceito: bool) -> None:
+        if not aceito or self._ferramenta_gerencia_coordenadas() or event.button() != Qt.LeftButton:
+            return
+        if self._operacao_coordenadas_ativa:
+            self.finalizar_operacao_coordenadas(self._ponto_com_snap(event.position()))
+
     def _desfazer_ponto(self):
+        if self._remover_ultima_marcacao_coordenadas():
+            return
         if not self._pontos_reta:
             return
         self._pontos_reta.pop()
@@ -1344,6 +1428,35 @@ class VisualizacaoCanvas(QWidget):
         else:
             self._preview_reta = None
             self._guia_fechamento = None
+        self.update()
+
+    def _remover_ultima_marcacao_coordenadas(self) -> bool:
+        if self._marcacoes_temporarias:
+            self._marcacoes_temporarias.pop()
+            self._ponto_coordenada_aplicada = (
+                QPointF(self._marcacoes_temporarias[-1]) if self._marcacoes_temporarias else None
+            )
+            if self._ponto_coordenada_aplicada is None:
+                self._snap_resultado = None
+                self._snap_candidatos = []
+                self._snap_indice = 0
+            self.update()
+            return True
+        if self._ponto_coordenada_aplicada is not None:
+            self._ponto_coordenada_aplicada = None
+            self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
+            self.update()
+            return True
+        return False
+
+    def _limpar_marcacoes_coordenadas(self) -> None:
+        self._marcacoes_temporarias.clear()
+        self._ponto_coordenada_aplicada = None
+        self._snap_resultado = None
+        self._snap_candidatos = []
+        self._snap_indice = 0
         self.update()
 
     def _finalizar_reta_atual(self):
@@ -1478,7 +1591,10 @@ class VisualizacaoCanvas(QWidget):
             and hasattr(self._runtime_tool, "on_mouse_press")
         ):
             runtime_ja_processado = True
-            if self._runtime_tool.on_mouse_press(self, event):
+            ativa_antes = self._operacao_coordenadas_ativa
+            aceito = self._runtime_tool.on_mouse_press(self, event)
+            self._coordenadas_auto_apos_press(event, aceito, ativa_antes)
+            if aceito:
                 return
         if event.button() == Qt.RightButton:
             agora = monotonic()
@@ -1495,7 +1611,10 @@ class VisualizacaoCanvas(QWidget):
         elif event.button() == Qt.LeftButton:
             self._sequencia_clique_direito = 0
         if not runtime_ja_processado and self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
-            if self._runtime_tool.on_mouse_press(self, event):
+            ativa_antes = self._operacao_coordenadas_ativa
+            aceito = self._runtime_tool.on_mouse_press(self, event)
+            self._coordenadas_auto_apos_press(event, aceito, ativa_antes)
+            if aceito:
                 return
         if self.ferramenta_ativa == "selecionar" and event.button() == Qt.RightButton:
             pos = self._ponto_com_snap(event.position())
@@ -1516,7 +1635,9 @@ class VisualizacaoCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        self._ponto_com_snap(event.position())
+        pos = self._ponto_com_snap(event.position())
+        if not self._ferramenta_gerencia_coordenadas():
+            self._atualizar_preview_coordenadas_mouse(pos)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_move"):
             if self._runtime_tool.on_mouse_move(self, event):
                 self.update()
@@ -1526,7 +1647,9 @@ class VisualizacaoCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_release"):
-            if self._runtime_tool.on_mouse_release(self, event):
+            aceito = self._runtime_tool.on_mouse_release(self, event)
+            self._coordenadas_auto_apos_release(event, aceito)
+            if aceito:
                 return
         super().mouseReleaseEvent(event)
 
@@ -1630,6 +1753,9 @@ class VisualizacaoCanvas(QWidget):
 
             for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
                 self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
+
+        for marca in getattr(self, "_marcacoes_temporarias", []) or []:
+            self._desenhar_marca_x(painter, QPointF(marca), cor="#ff40ff", tamanho_px=6)
 
         self._desenhar_overlays_moldes(painter)
 

@@ -7,6 +7,8 @@ class Ferramenta(FerramentaManipularPontos):
     id_ferramenta = "mover_ponto"
     nome = "Mover Ponto"
     descricao_painel = "Mova 1 ponto ou varios pontos por arraste ou por deslocamento DX/DY."
+    usar_caixa_passo = True
+    arraste_por_clique = False
     _dlg_global = None
     _edt_dx_global = None
     _edt_dy_global = None
