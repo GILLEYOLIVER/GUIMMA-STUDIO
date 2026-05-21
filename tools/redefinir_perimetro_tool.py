@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from math import sqrt
+
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
-from tools.medicao_utils import comprimento_total_elemento, selecionar_segmento_mais_proximo
+from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -37,7 +40,7 @@ class RedefinirPerimetroDialog(QDialog):
         self.cmb_modo.addItems(["Manter extremos", "Uni-direcional", "Bi-direcional"])
         self.ed_de = QLineEdit("0")
         self.ed_de.setReadOnly(True)
-        self.ed_para = QLineEdit("10")
+        self.ed_para = QLineEdit("0")
         form.addRow("Modo", self.cmb_modo)
         form.addRow("De (cm)", self.ed_de)
         form.addRow("Para (cm)", self.ed_para)
@@ -59,9 +62,22 @@ class Ferramenta(FerramentaBase):
     _preview_ativo_por_canvas: dict[int, bool] = {}
     _snapshot_por_canvas: dict[int, dict] = {}
     _segmentos_iguais_por_canvas: dict[int, list[tuple[QPointF, QPointF]]] = {}
+    _segmento_alvo_por_canvas: dict[int, dict] = {}
+    _segmentos_originais_afetados_por_canvas: dict[int, list[tuple[QPointF, QPointF]]] = {}
+    _confirmacao_pendente_por_canvas: dict[int, bool] = {}
 
     def on_activate(self, canvas):
+        chave = id(canvas)
+        self._idx_por_canvas.pop(chave, None)
+        self._preview_ativo_por_canvas.pop(chave, None)
+        self._snapshot_por_canvas.pop(chave, None)
+        self._segmentos_iguais_por_canvas.pop(chave, None)
+        self._segmento_alvo_por_canvas.pop(chave, None)
+        self._segmentos_originais_afetados_por_canvas.pop(chave, None)
+        self._confirmacao_pendente_por_canvas.pop(chave, None)
         dialog = self._obter_dialog(canvas)
+        dialog.ed_de.setText("0")
+        dialog.ed_para.setText("0")
         dialog.adjustSize()
         fallback = None
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
@@ -80,19 +96,39 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
         self._preview_ativo_por_canvas.pop(id(canvas), None)
         self._snapshot_por_canvas.pop(id(canvas), None)
+        self._idx_por_canvas.pop(id(canvas), None)
         self._segmentos_iguais_por_canvas.pop(id(canvas), None)
+        self._segmento_alvo_por_canvas.pop(id(canvas), None)
+        self._segmentos_originais_afetados_por_canvas.pop(id(canvas), None)
+        self._confirmacao_pendente_por_canvas.pop(id(canvas), None)
 
     def on_mouse_press(self, canvas, event) -> bool:
+        chave = id(canvas)
+        if event.button() == Qt.RightButton and self._preview_ativo_por_canvas.get(chave):
+            self._cancelar_preview(canvas)
+            if getattr(canvas, "lbl_status", None) is not None:
+                canvas.lbl_status.setText("Redefinição cancelada. Clique em uma linha para recomeçar.")
+            event.accept()
+            return True
         if event.button() != Qt.LeftButton:
             return False
-        chave = id(canvas)
         if self._preview_ativo_por_canvas.get(chave):
+            if not self._confirmacao_pendente_por_canvas.get(chave, False):
+                self._confirmacao_pendente_por_canvas[chave] = True
+                if getattr(canvas, "lbl_status", None) is not None:
+                    canvas.lbl_status.setText("Prévia confirmada. Clique esquerdo mais uma vez para aplicar.")
+                event.accept()
+                return True
             canvas._registrar_historico()
             self._preview_ativo_por_canvas[chave] = False
+            self._idx_por_canvas.pop(chave, None)
             self._snapshot_por_canvas.pop(chave, None)
             self._segmentos_iguais_por_canvas.pop(chave, None)
+            self._segmento_alvo_por_canvas.pop(chave, None)
+            self._segmentos_originais_afetados_por_canvas.pop(chave, None)
+            self._confirmacao_pendente_por_canvas.pop(chave, None)
             if getattr(canvas, "lbl_status", None) is not None:
-                canvas.lbl_status.setText("Redefinição de perímetro confirmada.")
+                canvas.lbl_status.setText("Redefinição de perímetro aplicada.")
             event.accept()
             return True
         pos = canvas._ponto_com_snap(event.position())
@@ -100,11 +136,15 @@ class Ferramenta(FerramentaBase):
         if info is None:
             return True
         idx = int(info["elemento_idx"])
+        alvo_segmento = self._segmento_alvo_para_posicao(canvas, idx, pos)
+        if alvo_segmento is None:
+            return True
         self._idx_por_canvas[id(canvas)] = idx
-        per = comprimento_total_elemento(canvas.cena.elementos[idx])
+        self._segmento_alvo_por_canvas[chave] = alvo_segmento
+        per = float(alvo_segmento.get("comprimento", 0.0))
         dialog = self._obter_dialog(canvas)
         dialog.ed_de.setText(canvas.formatar_valor_unidade(per))
-        self._snapshot_por_canvas[chave] = dict(canvas.cena.elementos[idx])
+        self._snapshot_por_canvas[chave] = deepcopy(canvas.cena.elementos[idx])
         self._preview_ativo_por_canvas[chave] = True
         self._aplicar_preview(canvas)
         if getattr(canvas, "lbl_status", None) is not None:
@@ -112,6 +152,24 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         event.accept()
         return True
+
+    def _cancelar_preview(self, canvas) -> None:
+        chave = id(canvas)
+        idx = self._idx_por_canvas.get(chave)
+        snapshot = self._snapshot_por_canvas.get(chave)
+        if snapshot is not None and idx is not None and 0 <= idx < len(canvas.cena.elementos):
+            canvas.cena.elementos[idx] = deepcopy(snapshot)
+        self._preview_ativo_por_canvas.pop(chave, None)
+        self._idx_por_canvas.pop(chave, None)
+        self._snapshot_por_canvas.pop(chave, None)
+        self._segmentos_iguais_por_canvas.pop(chave, None)
+        self._segmento_alvo_por_canvas.pop(chave, None)
+        self._segmentos_originais_afetados_por_canvas.pop(chave, None)
+        self._confirmacao_pendente_por_canvas.pop(chave, None)
+        dialog = self._obter_dialog(canvas)
+        dialog.ed_de.setText("0")
+        dialog.ed_para.setText("0")
+        canvas.update()
 
     def _obter_dialog(self, canvas) -> RedefinirPerimetroDialog:
         chave = id(canvas)
@@ -130,8 +188,11 @@ class Ferramenta(FerramentaBase):
         return dialog
 
     def _aplicar(self, canvas):
+        if self._segmento_alvo_por_canvas.get(id(canvas)) is None:
+            return
         self._aplicar_preview(canvas)
-        self._preview_ativo_por_canvas[id(canvas)] = True
+        if self._segmento_alvo_por_canvas.get(id(canvas)) is not None:
+            self._preview_ativo_por_canvas[id(canvas)] = True
 
     def _aplicar_preview(self, canvas):
         chave = id(canvas)
@@ -140,75 +201,285 @@ class Ferramenta(FerramentaBase):
             return
         snapshot = self._snapshot_por_canvas.get(chave)
         if not snapshot:
-            self._snapshot_por_canvas[chave] = dict(canvas.cena.elementos[idx])
+            self._snapshot_por_canvas[chave] = deepcopy(canvas.cena.elementos[idx])
             snapshot = self._snapshot_por_canvas[chave]
+        alvo_segmento = self._segmento_alvo_por_canvas.get(chave)
+        if alvo_segmento is None:
+            return
         dialog = self._obter_dialog(canvas)
         try:
             alvo = float(str(dialog.ed_para.text()).replace(",", "."))
         except Exception:
             return
-        atual = comprimento_total_elemento(snapshot)
-        if atual <= 1e-9 or alvo <= 1e-9:
+        atual = float(alvo_segmento.get("comprimento", 0.0))
+        if atual <= 1e-9:
             return
-        fator = alvo / atual
+        if alvo <= 1e-9:
+            alvo = atual
         modo = dialog.cmb_modo.currentText().strip().lower()
-        el = dict(snapshot)
+        el = deepcopy(snapshot)
+        segmento_preview: tuple[QPointF, QPointF] | None = None
         if el.get("tipo") == "polyline":
-            pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            if not pts:
-                return
-            if "bi" in modo:
-                cx = sum(p.x() for p in pts) / len(pts)
-                cy = sum(p.y() for p in pts) / len(pts)
-                p0 = QPointF(cx, cy)
-            else:
-                p0 = pts[0]
-            novos_qt = [QPointF(p0.x() + ((p.x() - p0.x()) * fator), p0.y() + ((p.y() - p0.y()) * fator)) for p in pts]
-            if "manter" in modo and len(novos_qt) >= 2:
-                d_ini = QPointF(pts[0].x() - novos_qt[0].x(), pts[0].y() - novos_qt[0].y())
-                d_fim = QPointF(pts[-1].x() - novos_qt[-1].x(), pts[-1].y() - novos_qt[-1].y())
-                ajustados = []
-                total = max(1, len(novos_qt) - 1)
-                for i, p in enumerate(novos_qt):
-                    t = i / total
-                    dx = d_ini.x() + ((d_fim.x() - d_ini.x()) * t)
-                    dy = d_ini.y() + ((d_fim.y() - d_ini.y()) * t)
-                    ajustados.append(QPointF(p.x() + dx, p.y() + dy))
-                novos_qt = ajustados
-            novos = [(p.x(), p.y()) for p in novos_qt]
-            el["pontos"] = novos
-        elif el.get("tipo") == "bezier_quadratica":
-            p0 = QPointF(*el.get("p0", (0.0, 0.0)))
-            if "bi" in modo:
-                p2 = QPointF(*el.get("p2", (0.0, 0.0)))
-                p0 = QPointF((p0.x() + p2.x()) / 2.0, (p0.y() + p2.y()) / 2.0)
-            for chave_p in ("p0", "p1", "p2"):
-                p = QPointF(*el.get(chave_p, (0.0, 0.0)))
-                el[chave_p] = (p0.x() + ((p.x() - p0.x()) * fator), p0.y() + ((p.y() - p0.y()) * fator))
-            if "manter" in modo:
-                el["p0"] = snapshot.get("p0", el["p0"])
-                el["p2"] = snapshot.get("p2", el["p2"])
+            segmento_preview = self._aplicar_preview_segmento_polyline(canvas, el, alvo_segmento, alvo, modo)
+        if segmento_preview is None:
+            return
         canvas.cena.elementos[idx] = el
-        self._segmentos_iguais_por_canvas[chave] = self._segmentos_com_tamanho(el, alvo, tolerancia=0.03)
-        novo_per = comprimento_total_elemento(el)
-        dialog.ed_de.setText(canvas.formatar_valor_unidade(novo_per))
+        afetados = self._segmentos_originais_afetados(snapshot, el)
+        if not afetados:
+            afetados = [(QPointF(alvo_segmento["a"]), QPointF(alvo_segmento["b"]))]
+        self._segmentos_originais_afetados_por_canvas[chave] = afetados
+        self._segmentos_iguais_por_canvas[chave] = [segmento_preview]
+        self._confirmacao_pendente_por_canvas[chave] = False
         canvas.update()
         if getattr(canvas, "lbl_status", None) is not None:
-            canvas.lbl_status.setText(f"Prévia perímetro: {canvas.formatar_valor_unidade(novo_per)} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo confirma")
+            novo_per = canvas.formatar_valor_unidade(self._dist(segmento_preview[0], segmento_preview[1]))
+            canvas.lbl_status.setText(f"Prévia linha: {novo_per} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo confirma")
 
-    def _segmentos_com_tamanho(self, el: dict, tamanho: float, tolerancia: float) -> list[tuple[QPointF, QPointF]]:
-        segs: list[tuple[QPointF, QPointF]] = []
-        if el.get("tipo") == "polyline":
-            pts = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-            for a, b in zip(pts, pts[1:]):
-                comp = ((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2) ** 0.5
-                if abs(comp - tamanho) <= tolerancia:
-                    segs.append((a, b))
-        return segs
+    def _segmento_alvo_para_posicao(self, canvas, idx: int, pos: QPointF) -> dict | None:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return None
+        el = canvas.cena.elementos[idx]
+        if el.get("tipo") != "polyline":
+            return None
+        if el.get("molde"):
+            alvo = self._segmento_controle_molde_mais_proximo(canvas, el, pos)
+            if alvo is not None:
+                return alvo
+        pontos = [self._ponto_qt(p) for p in el.get("pontos", []) or []]
+        pontos = [p for p in pontos if p is not None]
+        melhor = None
+        melhor_dist = float("inf")
+        for p_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
+            dist = self._dist_ponto_segmento(pos, a, b)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor = {
+                    "tipo": "pontos",
+                    "ponto_idx": p_idx,
+                    "a": QPointF(a),
+                    "b": QPointF(b),
+                    "comprimento": self._dist(a, b),
+                    "clique_t": self._parametro_segmento(pos, a, b),
+                }
+        return melhor
+
+    def _segmento_controle_molde_mais_proximo(self, canvas, el: dict, pos: QPointF) -> dict | None:
+        cantos = [self._ponto_qt(p) for p in el.get("controle_cantos", []) or []]
+        cantos = [p for p in cantos if p is not None]
+        if len(cantos) < 2:
+            return None
+        fechado = self._molde_fechado(canvas, el, cantos)
+        limite = len(cantos) if fechado else len(cantos) - 1
+        melhor = None
+        melhor_dist = float("inf")
+        for a_idx in range(max(limite, 0)):
+            b_idx = (a_idx + 1) % len(cantos)
+            if not fechado and b_idx <= a_idx:
+                continue
+            a = cantos[a_idx]
+            b = cantos[b_idx]
+            dist = self._dist_ponto_segmento(pos, a, b)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor = {
+                    "tipo": "controle_molde",
+                    "a_idx": a_idx,
+                    "b_idx": b_idx,
+                    "a": QPointF(a),
+                    "b": QPointF(b),
+                    "comprimento": self._dist(a, b),
+                    "clique_t": self._parametro_segmento(pos, a, b),
+                }
+        return melhor
+
+    def _aplicar_preview_segmento_polyline(self, canvas, el: dict, alvo_segmento: dict, tamanho: float, modo: str) -> tuple[QPointF, QPointF] | None:
+        a = alvo_segmento.get("a")
+        b = alvo_segmento.get("b")
+        if not isinstance(a, QPointF) or not isinstance(b, QPointF):
+            return None
+        comprimento = self._dist(a, b)
+        if comprimento <= 1e-9:
+            return None
+        ux = (b.x() - a.x()) / comprimento
+        uy = (b.y() - a.y()) / comprimento
+        delta = float(tamanho) - comprimento
+        if "bi" in modo:
+            delta_a = QPointF(-(ux * delta) / 2.0, -(uy * delta) / 2.0)
+            delta_b = QPointF((ux * delta) / 2.0, (uy * delta) / 2.0)
+        elif "uni" in modo:
+            clique_t = float(alvo_segmento.get("clique_t", 0.5))
+            if clique_t <= 0.5:
+                # No unidirecional a base fica no ponto mais distante do clique.
+                novo_a_tmp = QPointF(b.x() - (ux * float(tamanho)), b.y() - (uy * float(tamanho)))
+                delta_a = QPointF(novo_a_tmp.x() - a.x(), novo_a_tmp.y() - a.y())
+                delta_b = QPointF(0.0, 0.0)
+            else:
+                delta_a = QPointF(0.0, 0.0)
+                delta_b = QPointF(ux * delta, uy * delta)
+        else:
+            delta_a = QPointF(0.0, 0.0)
+            delta_b = QPointF(ux * delta, uy * delta)
+        novo_a = QPointF(a.x() + delta_a.x(), a.y() + delta_a.y())
+        novo_b = QPointF(b.x() + delta_b.x(), b.y() + delta_b.y())
+        if alvo_segmento.get("tipo") == "controle_molde":
+            self._aplicar_segmento_controle_molde(el, alvo_segmento, a, b, novo_a, novo_b, delta_a, delta_b)
+        else:
+            self._aplicar_segmento_pontos(el, alvo_segmento, a, b, novo_a, novo_b)
+        return novo_a, novo_b
+
+    def _aplicar_segmento_controle_molde(
+        self,
+        el: dict,
+        alvo_segmento: dict,
+        a: QPointF,
+        b: QPointF,
+        novo_a: QPointF,
+        novo_b: QPointF,
+        delta_a: QPointF,
+        delta_b: QPointF,
+    ) -> None:
+        a_idx = int(alvo_segmento.get("a_idx", -1))
+        b_idx = int(alvo_segmento.get("b_idx", -1))
+        cantos = list(el.get("controle_cantos", []) or [])
+        if 0 <= a_idx < len(cantos):
+            cantos[a_idx] = (novo_a.x(), novo_a.y())
+        if 0 <= b_idx < len(cantos):
+            cantos[b_idx] = (novo_b.x(), novo_b.y())
+        el["controle_cantos"] = cantos
+        self._atualizar_lista_ponto(el, "pontos_controle_principais", a_idx, novo_a)
+        self._atualizar_lista_ponto(el, "pontos_controle_principais", b_idx, novo_b)
+
+        pontos = list(el.get("pontos", []) or [])
+        fechado = len(pontos) >= 2 and self._pontos_mesmos(pontos[0], pontos[-1])
+        novos_pontos = [self._remapear_ponto_segmento(p, a, b, novo_a, novo_b, delta_a, delta_b) for p in pontos]
+        if fechado and novos_pontos:
+            novos_pontos[-1] = novos_pontos[0]
+        el["pontos"] = novos_pontos
+
+        auxiliares = list(el.get("controle_auxiliares", []) or [])
+        novos_aux = [self._remapear_ponto_segmento(p, a, b, novo_a, novo_b, delta_a, delta_b) for p in auxiliares]
+        el["controle_auxiliares"] = novos_aux
+        el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in novos_aux]
+
+    def _aplicar_segmento_pontos(self, el: dict, alvo_segmento: dict, a: QPointF, b: QPointF, novo_a: QPointF, novo_b: QPointF) -> None:
+        p_idx = int(alvo_segmento.get("ponto_idx", -1))
+        pontos = list(el.get("pontos", []) or [])
+        if not (0 <= p_idx < len(pontos) - 1):
+            return
+        pontos[p_idx] = (novo_a.x(), novo_a.y())
+        pontos[p_idx + 1] = (novo_b.x(), novo_b.y())
+        if len(pontos) >= 2 and self._pontos_mesmos(pontos[0], pontos[-1]):
+            pontos[-1] = pontos[0]
+        el["pontos"] = pontos
+
+    def _remapear_ponto_segmento(self, item, a: QPointF, b: QPointF, novo_a: QPointF, novo_b: QPointF, delta_a: QPointF, delta_b: QPointF):
+        pt = self._ponto_qt(item)
+        if pt is None:
+            return item
+        tol = 1e-4
+        if self._dist(pt, a) <= tol:
+            return (novo_a.x(), novo_a.y())
+        if self._dist(pt, b) <= tol:
+            return (novo_b.x(), novo_b.y())
+        if self._dist_ponto_segmento(pt, a, b) <= tol:
+            t = self._parametro_segmento(pt, a, b)
+            x = novo_a.x() + ((novo_b.x() - novo_a.x()) * t)
+            y = novo_a.y() + ((novo_b.y() - novo_a.y()) * t)
+            return (x, y)
+        return item
+
+    def _atualizar_lista_ponto(self, el: dict, chave: str, idx: int, ponto: QPointF) -> None:
+        itens = el.get(chave)
+        if not isinstance(itens, list) or not (0 <= idx < len(itens)):
+            return
+        if isinstance(itens[idx], dict):
+            novo = dict(itens[idx])
+            novo["x"] = float(ponto.x())
+            novo["y"] = float(ponto.y())
+            itens[idx] = novo
+        else:
+            itens[idx] = (float(ponto.x()), float(ponto.y()))
+
+    def _molde_fechado(self, canvas, el: dict, cantos: list[QPointF]) -> bool:
+        if bool(el.get("fechado")) or len(cantos) >= 3:
+            return True
+        pontos = el.get("pontos", []) or []
+        return len(pontos) >= 2 and self._pontos_mesmos(pontos[0], pontos[-1])
+
+    def _ponto_qt(self, item) -> QPointF | None:
+        try:
+            if isinstance(item, dict):
+                return QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0)))
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                return QPointF(float(item[0]), float(item[1]))
+        except Exception:
+            return None
+        return None
+
+    def _pontos_mesmos(self, a, b) -> bool:
+        pa = self._ponto_qt(a)
+        pb = self._ponto_qt(b)
+        if pa is None or pb is None:
+            return False
+        return self._dist(pa, pb) <= 1e-7
+
+    def _dist(self, a: QPointF, b: QPointF) -> float:
+        return sqrt(((b.x() - a.x()) ** 2) + ((b.y() - a.y()) ** 2))
+
+    def _dist_ponto_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> float:
+        t = self._parametro_segmento(p, a, b)
+        proj = QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+        return self._dist(p, proj)
+
+    def _parametro_segmento(self, p: QPointF, a: QPointF, b: QPointF) -> float:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        den = (abx * abx) + (aby * aby)
+        if den <= 1e-12:
+            return 0.0
+        return max(0.0, min(1.0, (((p.x() - a.x()) * abx) + ((p.y() - a.y()) * aby)) / den))
+
+    def _segmentos_originais_afetados(self, original: dict, novo: dict) -> list[tuple[QPointF, QPointF]]:
+        segmentos_original = self._segmentos_para_comparacao(original)
+        segmentos_novo = self._segmentos_para_comparacao(novo)
+        afetados: list[tuple[QPointF, QPointF]] = []
+        for (orig_a, orig_b), (novo_a, novo_b) in zip(segmentos_original, segmentos_novo):
+            if not self._pontos_qt_mesmos(orig_a, novo_a) or not self._pontos_qt_mesmos(orig_b, novo_b):
+                afetados.append((QPointF(orig_a), QPointF(orig_b)))
+        return afetados
+
+    def _segmentos_para_comparacao(self, el: dict) -> list[tuple[QPointF, QPointF]]:
+        if el.get("molde"):
+            cantos = [self._ponto_qt(p) for p in el.get("controle_cantos", []) or []]
+            pontos = [p for p in cantos if p is not None]
+            if len(pontos) >= 2:
+                fechado = bool(el.get("fechado")) or len(pontos) >= 3
+                return self._segmentos_de_pontos(pontos, fechado=fechado)
+        pontos = [self._ponto_qt(p) for p in el.get("pontos", []) or []]
+        pontos = [p for p in pontos if p is not None]
+        if len(pontos) < 2:
+            return []
+        fechado = self._pontos_qt_mesmos(pontos[0], pontos[-1])
+        return self._segmentos_de_pontos(pontos, fechado=fechado)
+
+    def _segmentos_de_pontos(self, pontos: list[QPointF], fechado: bool) -> list[tuple[QPointF, QPointF]]:
+        if len(pontos) < 2:
+            return []
+        segmentos = [(QPointF(a), QPointF(b)) for a, b in zip(pontos, pontos[1:])]
+        if fechado and not self._pontos_qt_mesmos(pontos[0], pontos[-1]):
+            segmentos.append((QPointF(pontos[-1]), QPointF(pontos[0])))
+        return segmentos
+
+    def _pontos_qt_mesmos(self, a: QPointF, b: QPointF) -> bool:
+        return self._dist(a, b) <= 1e-7
 
     def on_paint_overlay(self, canvas, painter):
-        segs = self._segmentos_iguais_por_canvas.get(id(canvas), [])
+        chave = id(canvas)
+        if self._preview_ativo_por_canvas.get(chave):
+            for a_original, b_original in self._segmentos_originais_afetados_por_canvas.get(chave, []):
+                canvas._desenhar_segmento(painter, a_original, b_original, tracejado=True, cor="#f4f4f4", espessura=1.4)
+        segs = self._segmentos_iguais_por_canvas.get(chave, [])
         if not segs:
             return
         for a, b in segs:
-            canvas._desenhar_segmento(painter, a, b, tracejado=True, cor="#ff2a2a", espessura=2.0)
+            canvas._desenhar_segmento(painter, a, b, tracejado=True, cor="#2da8ff", espessura=2.0)

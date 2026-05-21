@@ -2212,11 +2212,7 @@ class VisualizacaoCanvas(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(int(x_ini), int(y_ini), int(largura), int(altura))
 
-        cantos = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-        if len(cantos) >= 4:
-            pontos_controle = [self._cena_para_tela(pt) for pt in cantos[:4]]
-        else:
-            pontos_controle = [self._cena_para_tela(pt) for pt in base[:4]]
+        pontos_controle = [self._cena_para_tela(pt) for pt in self._pontos_controle_selecao_molde(base, el)]
 
         painter.setPen(QPen(QColor("#ffffff"), 1.0))
         painter.setBrush(QColor("#000000"))
@@ -2229,6 +2225,18 @@ class VisualizacaoCanvas(QWidget):
                 QPoint(int(pt.x() - d), int(pt.y())),
             ])
             painter.drawPolygon(diamond)
+
+    def _pontos_controle_selecao_molde(self, base: list[QPointF], el: dict) -> list[QPointF]:
+        if "controle_cantos" in el:
+            cantos: list[QPointF] = []
+            valores = el.get("controle_cantos")
+            if isinstance(valores, list):
+                for item in valores:
+                    pt = self._qpoint_serializado(item)
+                    if pt is not None:
+                        cantos.append(QPointF(pt))
+            return cantos[:4]
+        return [QPointF(pt) for pt in base[:4]]
 
     def _desenhar_bbox_selecao_elemento(self, painter: QPainter, elemento: dict):
         pontos: list[QPointF] = []
@@ -2746,6 +2754,7 @@ class VisualizacaoCanvas(QWidget):
         return str(self.ferramenta_ativa or "") in {
             "manipular_pontos",
             "mover",
+            "mover_ponto",
             "mover_pontos",
             "editar_pontos_de_curva",
             "no_perimetro",

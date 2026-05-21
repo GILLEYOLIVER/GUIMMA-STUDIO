@@ -1342,6 +1342,15 @@ class Ferramenta(FerramentaBase):
             return
 
         if self._molde_tem_controles_curva(el):
+            self._mover_extremos_se_auxiliar_for_alca_reta(
+                canvas,
+                el,
+                controle_idx,
+                aux_originais,
+                pontos_originais,
+                dx,
+                dy,
+            )
             return
 
         a_idx, b_idx = self._segmento_indices_do_auxiliar(cantos, aux, controle_idx, origem_aux)
@@ -1487,9 +1496,16 @@ class Ferramenta(FerramentaBase):
         for seg_ordem, itens in por_segmento.items():
             if len(itens) != 1:
                 continue
-            aux_idx, _t, _pt = itens[0]
+            aux_idx, _t, pt_aux = itens[0]
             if aux_idx == controle_idx:
                 segmento_alvo = segmentos[seg_ordem]
+                a_idx, b_idx = segmento_alvo
+                a = cantos[a_idx]
+                b = cantos[b_idx]
+                desvio = self._distancia_ponto_segmento_local(pt_aux, a, b)
+                limite_reta = max(0.02, self._dist_pontos_local(a, b) * 0.002)
+                if desvio > limite_reta:
+                    return
                 break
         if segmento_alvo is None:
             return
