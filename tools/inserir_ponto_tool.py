@@ -32,7 +32,7 @@ class Ferramenta(FerramentaBase):
             return False
         idx, seg_idx, ponto_contorno = alvo
         el = canvas.cena.elementos[idx]
-        principal = True if el.get("molde") else self._shift_pressionado(event)
+        principal = self._shift_pressionado(event)
 
         if el.get("molde") and self._tem_controles_molde(el):
             if not self._adicionar_controle_molde(canvas, el, ponto_contorno, seg_idx, principal=principal):
@@ -139,9 +139,22 @@ class Ferramenta(FerramentaBase):
         pontos_originais = [p for p in (self._ponto_qt(item) for item in el.get("pontos", []) or []) if p is not None]
         cantos_originais = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
         fechado = self._fechado_por_pontos(canvas, pontos_originais) or len(cantos_originais) >= 3
+        novo = (float(ponto.x()), float(ponto.y()))
+        if not principal:
+            auxiliares = []
+            for item in el.get("controle_auxiliares", []) or []:
+                aux = self._tupla_ponto(item)
+                if aux is not None:
+                    auxiliares.append(aux)
+            if not any(self._dist_tuple(item, novo) <= 1e-6 for item in auxiliares):
+                auxiliares.append(novo)
+            el["controle_auxiliares"] = auxiliares
+            el["_controles_topologia_alterada"] = True
+            self._helper._garantir_auxiliares_minimos_curva_molde(canvas, el)
+            return self._helper._regenerar_molde_por_controles(canvas, el)
+
         cantos = list(el.get("controle_cantos", []) or [])
         inserir_em = self._indice_insercao_canto(canvas, el, seg_idx)
-        novo = (float(ponto.x()), float(ponto.y()))
         if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in cantos):
             cantos.insert(inserir_em, novo)
         el["controle_cantos"] = cantos
@@ -168,6 +181,7 @@ class Ferramenta(FerramentaBase):
             auxiliares.append(tupla)
         el["controle_auxiliares"] = auxiliares
         el["_controles_topologia_alterada"] = True
+        self._helper._garantir_auxiliares_minimos_curva_molde(canvas, el)
         return self._helper._regenerar_molde_por_controles(canvas, el)
 
     def _auxiliares_preservacao_insercao(

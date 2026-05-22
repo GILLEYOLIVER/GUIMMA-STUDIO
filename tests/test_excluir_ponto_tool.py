@@ -100,6 +100,24 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_auxiliares"], [{"x": 5.0, "y": 2.5}])
         self.assertEqual(canvas.historico, 1)
 
+    def test_hover_em_molde_selecionado_trava_em_controle_proximo(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        ferramenta = FerramentaExcluirPonto()
+
+        alvo = ferramenta._controle_molde_em_ponto(canvas, QPointF(5.8, 0.0))
+
+        self.assertEqual(alvo, (0, "aux", 0))
+
+    def test_excluir_controle_trava_hover_no_proximo_controle(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+
+        self.assertEqual(ferramenta._hover_alvo, ("molde", 0, "aux", 0))
+
     def test_excluir_canto_remove_controle_principal_espelhado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaExcluirPonto()
@@ -113,6 +131,62 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
             molde["pontos_controle_principais"],
             [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 5.0}],
         )
+        self.assertEqual(canvas.historico, 1)
+
+    def test_excluir_auxiliar_de_curva_com_dois_recompoe_tres_auxiliares(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.8),
+                    (5.0, 3.0),
+                    (8.0, 1.8),
+                    (10.0, 0.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0)],
+                "controle_auxiliares": [(3.0, 2.2), (7.0, 2.2)],
+                "pontos_controle_principais": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+                "pontos_auxiliares": [{"x": 3.0, "y": 2.2}, {"x": 7.0, "y": 2.2}],
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(3.0, 2.2))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(len(molde["controle_cantos"]), 2)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 3)
+        self.assertEqual(len(molde["pontos_auxiliares"]), len(molde["controle_auxiliares"]))
+
+    def test_excluir_canto_permite_ficar_com_um_principal_e_auxiliares(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.8),
+                    (5.0, 3.0),
+                    (8.0, 1.8),
+                    (10.0, 0.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0)],
+                "controle_auxiliares": [(3.0, 2.2), (7.0, 2.2)],
+                "pontos_controle_principais": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+                "pontos_auxiliares": [{"x": 3.0, "y": 2.2}, {"x": 7.0, "y": 2.2}],
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(10.0, 0.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0)])
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 2)
         self.assertEqual(canvas.historico, 1)
 
     def test_excluir_curva_editavel_remove_controle_e_nao_amostra(self):

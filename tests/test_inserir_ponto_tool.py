@@ -101,18 +101,18 @@ class InserirPontoToolTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_inserir_ponto_em_molde_cria_principal_manipulavel(self):
+    def test_inserir_ponto_em_molde_cria_auxiliar_manipulavel(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPonto()
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertIn((5.0, 0.0), molde["controle_cantos"])
-        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
-        self.assertNotIn((5.0, 0.0), molde["controle_auxiliares"])
-        self.assertEqual(len(molde["controle_cantos"]), 4)
-        self.assertIn((5.0, 0.0), molde["pontos"])
+        self.assertNotIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertIn((5.0, 0.0), molde["controle_auxiliares"])
+        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_auxiliares"])
+        self.assertEqual(len(molde["controle_cantos"]), 3)
+        self.assertIn((5.0, 0.0), molde["controle_auxiliares"])
         self.assertEqual(canvas._selecionados, {0})
         self.assertEqual(canvas.historico, 1)
 
@@ -156,7 +156,7 @@ class InserirPontoToolTestCase(unittest.TestCase):
         )
         ferramenta = FerramentaInserirPonto()
 
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0), Qt.ShiftModifier)))
 
         molde = canvas.cena.elementos[0]
         self.assertIn((5.0, 3.0), molde["controle_cantos"])

@@ -2,6 +2,29 @@
 
 Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDIO.
 
+## Ferramentas prontas/atualizadas
+
+Estas ferramentas já possuem comportamento implementado e devem ser usadas como referência de operação:
+
+- **Extrair Molde** (`extrair_molde`): identifica contornos fechados, compõe partes quando necessário e cria o molde com pontos principais, pontos auxiliares, fio, nome e numeração. O painel de definição abre junto da caixa de coordenadas no lado direito.
+- **Criar Molde** (`criar_molde`): transforma contornos selecionados em molde editável com metadados de modelagem.
+- **Manipular Pontos** (`manipular_pontos`): move pontos principais e auxiliares do molde, com ajuste fino, caixa de coordenadas, preservação das curvas e cancelamento do arraste com botão direito.
+- **Mover Ponto** (`mover_ponto`): variação direta da manipulação para deslocar um ou vários pontos por arraste ou por DX/DY.
+- **Inserir Ponto** (`inserir_ponto`): adiciona ponto auxiliar no molde com clique normal; com `Shift`, adiciona ponto principal.
+- **Excluir Ponto** (`excluir_ponto`): realça os pontos oficiais do molde selecionado, prende o hover no controle mais próximo e exclui pontos principais ou auxiliares mantendo a curva válida.
+- **Redefinir Perímetro** (`redefinir_perimetro`): ajusta o perímetro preservando controles e auxiliares do molde.
+- **Elemento Paralelo** (`elemento_paralelo`): cria linhas ou contornos paralelos a partir de clique ou seleção.
+- **Girar** (`girar`): gira elementos selecionados por ângulo mantendo controles, piques, fio e dados do molde.
+- **Espelhar** (`espelhar`): espelha elementos ou moldes preservando controles e metadados.
+- **Dobrar** (`dobrar`): dobra moldes como papel por reta, meio ou linha interna, preservando o original.
+- **Desdobrar** (`desdobrar`): reabre dobra preservada usando eixo original, linha interna, perímetro ou reta manual.
+- **Sentido Fio** (`sentido_fio`): define o fio do molde por dois pontos ou por ângulo.
+- **Costura** (`costura`): cria e edita margens/acabamentos de costura no molde.
+- **Remover Costura** (`remover_costura`): remove margens de costura aplicadas.
+- **Propriedades** (`propriedades`): abre a janela de propriedades do molde para editar nome, fio, numeração, grade e exibição.
+- **Auto Ajuste** (`ajuste_automatico`): reposiciona automaticamente textos, fio e informações visuais dos moldes.
+- **Ponto de Restauração** (`ponto_restauracao`) e **Restaurar** (`restaurar_copia`): salvam e restauram cópias internas de segurança do molde.
+
 ## Aba Início
 
 ### Desenho
@@ -21,9 +44,8 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 - **Selecionar Moldes** (`selecionar_moldes`): Seleciona elementos conforme o critério da ferramenta.
 
 ### Restauração
-- **Ponto de Restauração** (`ponto_restauracao`): Restaura estado anterior do trabalho usando pontos/cópias de restauração.
-- **Restaurar** (`restaurar`): Restaura estado anterior do trabalho usando pontos/cópias de restauração.
-- **Restaurar Cópia** (`restaurar_copia`): Restaura estado anterior do trabalho usando pontos/cópias de restauração.
+- **Ponto de Restauração** (`ponto_restauracao`): Cria uma cópia interna do molde selecionado para restauração posterior.
+- **Restaurar Cópia** (`restaurar_copia`): Restaura uma cópia interna salva, substituindo o molde atual ou criando uma cópia restaurada.
 
 ## Aba Construção
 
@@ -60,20 +82,21 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 ## Aba Produção
 
 ### Definir moldes
-- **Extrair Molde** (`extrair_molde`): Executa operação relacionada à criação/seleção/informação de moldes.
-- **Criar Molde** (`criar_molde`): Executa operação relacionada à criação/seleção/informação de moldes.
+- **Extrair Molde** (`extrair_molde`): Extrai contornos fechados como moldes, detectando piques, graduações e linhas auxiliares conforme a configuração.
+- **Criar Molde** (`criar_molde`): Converte contornos selecionados em molde com controles, fio, nome e metadados.
 - **Digitalizar** (`digitalizar`): Executa a ação específica indicada pelo nome da ferramenta.
-- **Sentido Fio** (`sentido_fio`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Sentido Fio** (`sentido_fio`): Define o sentido do fio com dois pontos ou por ângulo.
 
 ### Complementar moldes
 - **Encolhimento** (`encolhimento`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Linha Simetria** (`linha_simetria`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Bainha** (`bainha`): Executa a ação específica indicada pelo nome da ferramenta.
-- **Dobrar** (`dobrar`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Dobrar** (`dobrar`): Dobra moldes como papel, preservando o original e gerando linha/eixo de dobra.
+- **Desdobrar** (`desdobrar`): Reabre uma dobra preservada usando eixo original, linha interna, perímetro ou reta manual.
 
 ### Costura
 - **Costura** (`costura`): Define, altera ou remove parâmetros de costura.
-- **Remover Costura** (`remover_costura`): Define, altera ou remove parâmetros de costura.
+- **Remover Costura** (`remover_costura`): Remove margem/acabamento de costura do molde.
 - **Trocar Costura** (`trocar_costura`): Define, altera ou remove parâmetros de costura.
 
 ### Pregas e pences
@@ -119,17 +142,19 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 ### Redefinir
 - **Modificar** (`modificar`): Edita parâmetros/elementos já existentes no desenho.
 - **Editar** (`editar`): Edita parâmetros/elementos já existentes no desenho.
-- **Manipular Pontos** (`manipular_pontos`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Manipular Pontos** (`manipular_pontos`): Manipula pontos principais e auxiliares do molde, com caixa de coordenadas, ajuste fino e cancelamento por botão direito durante o arraste.
 - **Mover** (`mover`): Transforma a geometria para reposicionamento e ajuste.
+- **Mover Ponto** (`mover_ponto`): Move um ou vários pontos por arraste ou por deslocamento DX/DY.
+- **Redefinir Perímetro** (`redefinir_perimetro`): Ajusta o perímetro preservando controles oficiais do molde.
 
 ### Indicar
-- **Elemento Paralelo** (`elemento_paralelo`): Executa a ação específica indicada pelo nome da ferramenta.
-- **Girar** (`girar`): Transforma a geometria para reposicionamento e ajuste.
-- **Espelhar** (`espelhar`): Transforma a geometria para reposicionamento e ajuste.
+- **Elemento Paralelo** (`elemento_paralelo`): Cria linha ou contorno paralelo por clique ou por seleção.
+- **Girar** (`girar`): Gira elementos selecionados por ângulo, preservando controles, piques e fio.
+- **Espelhar** (`espelhar`): Espelha elementos ou moldes preservando controles e metadados.
 
 ### Manipular molde
-- **Inserir Ponto** (`inserir_ponto`): Executa a ação específica indicada pelo nome da ferramenta.
-- **Excluir Ponto** (`excluir_ponto`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Inserir Ponto** (`inserir_ponto`): Clique normal adiciona ponto auxiliar; `Shift` + clique adiciona ponto principal.
+- **Excluir Ponto** (`excluir_ponto`): Exclui pontos principais ou auxiliares, realça os controles do molde selecionado e prende o hover no ponto mais próximo.
 - **Arredondar Ou Chanfrar** (`arredondar_ou_chanfrar`): Executa a ação específica indicada pelo nome da ferramenta.
 
 ## Aba Conferência
@@ -149,7 +174,7 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 ## Aba Modelo
 
 ### Informações
-- **Propriedades** (`propriedades`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Propriedades** (`propriedades`): Abre a janela de propriedades dos moldes selecionados.
 - **Tecidos** (`tecidos`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Autor** (`autor`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Informacoes Moldes** (`informacoes_moldes`): Executa operação relacionada à criação/seleção/informação de moldes.
@@ -163,3 +188,4 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 ## Aba Usuários
 
 - Esta aba é usada para organizar a linha de usuário (atalhos personalizados).
+- **Auto Ajuste** (`ajuste_automatico`): Ferramenta fixa da barra de usuário para reorganizar automaticamente nome, fio e textos dos moldes.
