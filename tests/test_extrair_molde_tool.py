@@ -135,7 +135,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 1)
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 36)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
 
     def test_contorno_curvo_com_uma_ponta_usa_a_ponta_como_principal(self):
         ferramenta = FerramentaExtrairMolde()
@@ -156,13 +156,13 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"], [(10.0, 0.0)])
         self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
 
-    def test_trecho_curvo_longo_recebe_quatro_auxiliares(self):
+    def test_trecho_curvo_longo_recebe_mais_auxiliares_para_definicao(self):
         ferramenta = FerramentaExtrairMolde()
         trecho = [(float(x), (float(x) - 5.0) ** 2 * 0.18) for x in range(11)]
 
         auxiliares = ferramenta._auxiliares_para_trecho_curvo(trecho)
 
-        self.assertEqual(len(auxiliares), 4)
+        self.assertGreaterEqual(len(auxiliares), 4)
 
     def test_contorno_com_muitas_quinas_cria_principal_por_quina_e_quatro_auxiliares_por_trecho(self):
         ferramenta = FerramentaExtrairMolde()

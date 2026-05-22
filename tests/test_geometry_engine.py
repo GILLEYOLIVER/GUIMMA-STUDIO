@@ -7,6 +7,7 @@ from core.geometry.engine import (
     quadratic_bezier_parameter_for_point,
     sample_quadratic_bezier_through_point,
 )
+from core.geometry_bridge import polyline_from_element
 
 
 def _bezier(p0, p1, p2, t: float) -> tuple[float, float]:
@@ -46,6 +47,18 @@ class GeometryEngineTestCase(unittest.TestCase):
         self.assertLess(abs(pontos[idx - 1][1] - p_meio[1]), 0.25)
         self.assertLess(abs(pontos[idx + 1][1] - p_meio[1]), 0.25)
         self.assertEqual(pontos[-1], p2)
+
+    def test_bezier_quadratica_usa_amostras_padrao_no_contorno(self):
+        pontos = polyline_from_element(
+            {
+                "tipo": "bezier_quadratica",
+                "p0": (0.0, 0.0),
+                "p1": (5.0, 4.0),
+                "p2": (10.0, 0.0),
+            }
+        )
+
+        self.assertEqual(len(pontos), 25)
 
 
 if __name__ == "__main__":

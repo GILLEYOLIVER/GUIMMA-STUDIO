@@ -15,7 +15,7 @@ from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult
 from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
-from ui.posicao_janelas import restaurar_posicao, salvar_posicao
+from ui.posicao_janelas import salvar_posicao
 
 
 class VisualizacaoCanvas(QWidget):
@@ -993,8 +993,10 @@ class VisualizacaoCanvas(QWidget):
             return
         x = max(8, self.width() - self.painel_coordenadas.width() - 12)
         y = 16
-        if not restaurar_posicao(self.painel_coordenadas, "painel:coordenadas", fallback=QPoint(x, y)):
-            salvar_posicao(self.painel_coordenadas, "painel:coordenadas")
+        self.painel_coordenadas.move(
+            self._limitar_posicao_painel_auxiliar(QPoint(x, y), self.painel_coordenadas.width(), self.painel_coordenadas.height())
+        )
+        salvar_posicao(self.painel_coordenadas, "painel:coordenadas")
 
     def calcular_posicao_painel_auxiliar(self, largura: int, altura: int, abaixo_coordenadas: bool = True) -> QPoint:
         margem_direita = 12
@@ -1009,6 +1011,11 @@ class VisualizacaoCanvas(QWidget):
         x = max(8, min(x, max_x))
         y = max(margem_topo, min(y, max_y))
         return QPoint(int(x), int(y))
+
+    def _limitar_posicao_painel_auxiliar(self, pos: QPoint, largura: int, altura: int) -> QPoint:
+        max_x = max(8, self.width() - int(largura) - 8)
+        max_y = max(16, self.height() - int(altura) - 8)
+        return QPoint(max(8, min(int(pos.x()), max_x)), max(16, min(int(pos.y()), max_y)))
 
     def _tela_para_cena(self, ponto: QPointF) -> QPointF:
         return QPointF((ponto.x() / self.zoom) + self.origem_cena.x(),

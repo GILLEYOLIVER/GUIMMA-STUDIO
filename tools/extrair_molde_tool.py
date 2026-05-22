@@ -31,7 +31,7 @@ from core.geometry_bridge import (
 )
 from tools.tool_base import FerramentaBase
 from tools.movimento_utils import mover_elemento_por_delta
-from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+from ui.posicao_janelas import ajustar_para_area, instalar_memoria_posicao
 
 
 class Ferramenta(FerramentaBase):
@@ -1727,7 +1727,7 @@ class Ferramenta(FerramentaBase):
                 self._dialog.height(),
                 abaixo_coordenadas=True,
             )
-            restaurar_posicao(self._dialog, "dialog:extrair_molde", fallback=canvas.mapToGlobal(destino_local))
+            self._dialog.move(ajustar_para_area(self._dialog, canvas.mapToGlobal(destino_local)))
 
     def _salvar_cfg(self, *_):
         self._salvar_cfg_global()
@@ -1994,18 +1994,35 @@ class Ferramenta(FerramentaBase):
     def _auxiliares_para_trecho_curvo(self, trecho: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(trecho) < 2:
             return []
+        perimetro = sum(self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:]))
+        quantidade = 4 if perimetro <= 0 else max(4, min(12, int(round(perimetro / 3.0))))
         return self._deduplicar_pontos(
-            [self._ponto_no_trecho_por_fracao(trecho, passo / 5.0) for passo in range(1, 5)],
+            [self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1)) for passo in range(1, quantidade + 1)],
             tol=1e-4,
         )
+
+    def _trecho_praticamente_reto(self, trecho: list[tuple[float, float]]) -> bool:
+        if len(trecho) <= 2:
+            return True
+        a = (float(trecho[0][0]), float(trecho[0][1]))
+        b = (float(trecho[-1][0]), float(trecho[-1][1]))
+        comprimento = self._dist_tuple(a, b)
+        if comprimento <= 1e-9:
+            return False
+        limite = max(0.02, comprimento * 0.002)
+        for item in trecho[1:-1]:
+            p = (float(item[0]), float(item[1]))
+            if self._distancia_ponto_segmento_tuple(p, a, b) > limite:
+                return False
+        return True
 
     def _auxiliares_para_contorno_curvo_fechado(self, trecho: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(trecho) < 2:
             return []
         perimetro = sum(self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:]))
         pontos_base = max(1, len(trecho) - 1)
-        por_perimetro = int(round(perimetro / 1.8))
-        por_amostras = int(round(pontos_base / 2.0))
+        por_perimetro = int(round(perimetro / 2.0))
+        por_amostras = int(round(pontos_base * 0.5))
         quantidade = max(24, min(96, max(por_perimetro, por_amostras)))
         return self._deduplicar_pontos(
             [self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1)) for passo in range(1, quantidade + 1)],

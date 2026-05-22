@@ -45,6 +45,7 @@ class Ferramenta(FerramentaBase):
         self._controles_selecionados: set[tuple[int, str, int]] = set()
         self._estado_arraste_controle: dict | None = None
         self._estado_arraste_ponto: dict | None = None
+        self._estado_arraste_dobra: dict | None = None
         cls = type(self)
         self._dlg_passo: QDialog | None = cls._dlg_global
         self._edt_dx: QLineEdit | None = cls._edt_dx_global
@@ -68,6 +69,7 @@ class Ferramenta(FerramentaBase):
         self._controles_selecionados.clear()
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
+        self._estado_arraste_dobra = None
         if self.usar_caixa_passo:
             self._abrir_caixa_passo(canvas)
         self.set_status(f"{self.nome}: clique em um ponto para prender no cursor, clique de novo para soltar. Shift seleciona varios pontos.")
@@ -80,6 +82,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando_dobra_pontilhada = None
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
+        self._estado_arraste_dobra = None
         self._guia_eixo = None
 
     def on_canvas_resize(self, canvas) -> None:
@@ -197,6 +200,9 @@ class Ferramenta(FerramentaBase):
         el["renderizacao"] = "curva_suave"
 
     def on_mouse_press(self, canvas, event) -> bool:
+        if event.button() == Qt.RightButton and self._arraste_ativo():
+            self._cancelar_arraste(canvas, event)
+            return True
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
@@ -210,6 +216,7 @@ class Ferramenta(FerramentaBase):
         if dobra_pontilhada is not None:
             self._arrastando_dobra_pontilhada = dobra_pontilhada
             self._hover_dobra_pontilhada = dobra_pontilhada
+            self._estado_arraste_dobra = self._criar_estado_arraste_dobra(canvas, dobra_pontilhada)
             self._hover_controle_molde = None
             self._hover_ponto_poly = None
             if hasattr(canvas, "iniciar_operacao_coordenadas"):
@@ -433,7 +440,7 @@ class Ferramenta(FerramentaBase):
         return out
 
     def on_mouse_move(self, canvas, event) -> bool:
-        pos = canvas._ponto_com_snap(event.position())
+        pos = self._posicao_arraste_livre(canvas, event)
         if self._arrastando_dobra_pontilhada is not None:
             self._atualizar_dobra_pontilhada(canvas, self._arrastando_dobra_pontilhada, self._normalizar_destino(pos))
             self._hover_dobra_pontilhada = self._arrastando_dobra_pontilhada
@@ -530,6 +537,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando_dobra_pontilhada = None
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
+        self._estado_arraste_dobra = None
         self._guia_ponto_poly = None
         self._guia_eixo = None
         self._angulo_info = None
@@ -545,6 +553,29 @@ class Ferramenta(FerramentaBase):
                 if hasattr(canvas, "painel_coordenadas"):
                     canvas.painel_coordenadas.atualizar_preview(destino_final, destino_final)
         canvas._registrar_historico()
+        canvas.update()
+        event.accept()
+
+    def _cancelar_arraste(self, canvas, event) -> None:
+        for estado in (self._estado_arraste_controle, self._estado_arraste_ponto, self._estado_arraste_dobra):
+            if estado is not None:
+                self._restaurar_estado_arraste(canvas, estado)
+        self._arrastando_ponto_poly = None
+        self._arrastando_controle_molde = None
+        self._arrastando_dobra_pontilhada = None
+        self._estado_arraste_controle = None
+        self._estado_arraste_ponto = None
+        self._estado_arraste_dobra = None
+        self._guia_ponto_poly = None
+        self._guia_eixo = None
+        self._angulo_info = None
+        self._ponto_selecionado = None
+        self._hover_ponto_poly = None
+        self._hover_controle_molde = None
+        self._hover_dobra_pontilhada = None
+        self._hover_molde_idx = None
+        if hasattr(canvas, "cancelar_operacao_coordenadas"):
+            canvas.cancelar_operacao_coordenadas(limpar_preview=True)
         canvas.update()
         event.accept()
 
@@ -1234,11 +1265,17 @@ class Ferramenta(FerramentaBase):
 
     def _destino_com_snap_e_eixos(self, canvas, origem: QPointF, destino: QPointF) -> QPointF:
         ajustado = QPointF(destino)
-        if not self._snap_exato_ativo(canvas):
-            ajustado = self._snap_angular_suave(origem, ajustado)
         ajustado = self._normalizar_destino(ajustado)
         self._guia_eixo = (QPointF(origem), QPointF(ajustado))
         return ajustado
+
+    def _posicao_arraste_livre(self, canvas, event) -> QPointF:
+        if self._arraste_ativo() and hasattr(canvas, "_tela_para_cena"):
+            canvas._snap_resultado = None
+            canvas._snap_candidatos = []
+            canvas._snap_indice = 0
+            return canvas._tela_para_cena(event.position())
+        return canvas._ponto_com_snap(event.position())
 
     def _snap_angular_suave(self, origem: QPointF, destino: QPointF) -> QPointF:
         dx = destino.x() - origem.x()
@@ -1274,6 +1311,7 @@ class Ferramenta(FerramentaBase):
             "alvos": set(alvos),
             "elementos": self._capturar_elementos(canvas, indices),
             "mapas_auxiliares": self._mapas_auxiliares_arraste(canvas, indices),
+            "auxiliares_retos": self._auxiliares_retos_arraste(canvas, indices),
         }
 
     def _criar_estado_arraste_ponto(self, canvas, idx: int, p_idx: int) -> dict | None:
@@ -1294,6 +1332,14 @@ class Ferramenta(FerramentaBase):
             "elementos": self._capturar_elementos(canvas, {idx}),
         }
 
+    def _criar_estado_arraste_dobra(self, canvas, alvo: tuple[int, int, int]) -> dict | None:
+        idx, _reg_idx, _p_idx = alvo
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return None
+        return {
+            "elementos": self._capturar_elementos(canvas, {idx}),
+        }
+
     def _capturar_elementos(self, canvas, indices: set[int]) -> dict[int, dict]:
         capturados: dict[int, dict] = {}
         for idx in indices:
@@ -1308,12 +1354,18 @@ class Ferramenta(FerramentaBase):
         mapas_auxiliares = estado.get("mapas_auxiliares", {})
         if not isinstance(mapas_auxiliares, dict):
             mapas_auxiliares = {}
+        auxiliares_retos = estado.get("auxiliares_retos", {})
+        if not isinstance(auxiliares_retos, dict):
+            auxiliares_retos = {}
         for idx, elemento in elementos.items():
             if 0 <= int(idx) < len(canvas.cena.elementos):
                 restaurado = deepcopy(elemento)
                 mapa = mapas_auxiliares.get(int(idx))
                 if mapa is not None:
                     restaurado["_segmentos_auxiliares_arraste"] = list(mapa)
+                retos = auxiliares_retos.get(int(idx))
+                if retos is not None:
+                    restaurado["_auxiliares_retos_arraste"] = list(retos)
                 canvas.cena.elementos[int(idx)] = restaurado
 
     def _mapas_auxiliares_arraste(self, canvas, indices: set[int]) -> dict[int, list[int]]:
@@ -1327,6 +1379,18 @@ class Ferramenta(FerramentaBase):
                 mapas[int(idx)] = mapa
         return mapas
 
+    def _auxiliares_retos_arraste(self, canvas, indices: set[int]) -> dict[int, list[bool]]:
+        retos: dict[int, list[bool]] = {}
+        for idx in indices:
+            if not (0 <= int(idx) < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[int(idx)]
+            mapa = self._mapa_segmentos_auxiliares_molde(canvas, el)
+            valores = self._mapa_auxiliares_sobre_retas_molde(canvas, el, mapa)
+            if valores:
+                retos[int(idx)] = valores
+        return retos
+
     def _mapa_segmentos_auxiliares_molde(self, canvas, el: dict) -> list[int]:
         if not self._molde_tem_controles_curva(el):
             return []
@@ -1339,8 +1403,16 @@ class Ferramenta(FerramentaBase):
         segmentos = self._segmentos_cantos(cantos, fechado)
         if not segmentos:
             return []
-        if len(auxiliares) == len(segmentos):
-            return list(range(len(auxiliares)))
+        mapa_por_ordem = self._mapa_segmentos_auxiliares_por_ordem_pontos(
+            canvas,
+            pontos,
+            cantos,
+            auxiliares,
+            segmentos,
+            fechado,
+        )
+        if mapa_por_ordem:
+            return mapa_por_ordem
         por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=False)
         mapa = [-1 for _ in auxiliares]
         for seg_ordem, itens in por_segmento.items():
@@ -1348,6 +1420,86 @@ class Ferramenta(FerramentaBase):
                 if 0 <= aux_idx < len(mapa):
                     mapa[aux_idx] = int(seg_ordem)
         return mapa if all(seg >= 0 for seg in mapa) else []
+
+    def _mapa_segmentos_auxiliares_por_ordem_pontos(
+        self,
+        canvas,
+        pontos: list,
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        fechado: bool,
+    ) -> list[int]:
+        if len(pontos) < 2 or not auxiliares:
+            return []
+        n = len(pontos) - 1 if fechado and len(pontos) >= 2 else len(pontos)
+        if n <= 0:
+            return []
+        pontos_base = pontos[:n]
+        indices_cantos: list[int | None] = []
+        for canto in cantos:
+            indices_cantos.append(self._indice_ponto_mais_proximo(canvas, pontos_base, canto))
+        if any(idx is None for idx in indices_cantos):
+            return []
+
+        mapa = [-1 for _ in auxiliares]
+        for aux_idx, aux in enumerate(auxiliares):
+            aresta_aux = self._aresta_contorno_mais_proxima(pontos_base, aux, fechado)
+            if aresta_aux is None:
+                return []
+            aresta_a, aresta_b = aresta_aux
+            candidatos: list[tuple[float, int]] = []
+            for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
+                inicio = indices_cantos[a_idx]
+                fim = indices_cantos[b_idx]
+                if inicio is None or fim is None:
+                    return []
+                indices = self._indices_intervalo(int(inicio), int(fim), n, fechado)
+                if int(aresta_a) in indices and int(aresta_b) in indices:
+                    a = cantos[a_idx]
+                    b = cantos[b_idx]
+                    candidatos.append((self._distancia_ponto_segmento_local(aux, a, b), seg_ordem))
+            if not candidatos:
+                return []
+            mapa[aux_idx] = min(candidatos, key=lambda item: item[0])[1]
+        return mapa if all(seg >= 0 for seg in mapa) else []
+
+    def _aresta_contorno_mais_proxima(self, pontos: list, aux: QPointF, fechado: bool) -> tuple[int, int] | None:
+        pts = [self._ponto_qt(item) for item in pontos]
+        pts = [pt for pt in pts if pt is not None]
+        if len(pts) < 2:
+            return None
+        limite = len(pts) if fechado else len(pts) - 1
+        melhor: tuple[int, int] | None = None
+        melhor_dist = float("inf")
+        for i in range(limite):
+            j = (i + 1) % len(pts)
+            if not fechado and j <= i:
+                continue
+            dist = self._distancia_ponto_segmento_local(aux, pts[i], pts[j])
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor = (i, j)
+        return melhor
+
+    def _mapa_auxiliares_sobre_retas_molde(self, canvas, el: dict, mapa: list[int]) -> list[bool]:
+        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+        auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
+        if len(cantos) < 2 or not auxiliares:
+            return []
+        pontos = list(el.get("pontos", []) or [])
+        fechado = self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
+        segmentos = self._segmentos_cantos(cantos, fechado)
+        if not self._mapa_auxiliares_valido(mapa, auxiliares, segmentos):
+            return []
+        saida: list[bool] = []
+        for aux_idx, aux in enumerate(auxiliares):
+            a_idx, b_idx = segmentos[int(mapa[aux_idx])]
+            a = cantos[a_idx]
+            b = cantos[b_idx]
+            limite_reta = max(0.02, self._dist_pontos_local(a, b) * 0.002)
+            saida.append(self._distancia_ponto_segmento_local(aux, a, b) <= limite_reta)
+        return saida
 
     def _ponto_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> QPointF | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -1575,7 +1727,8 @@ class Ferramenta(FerramentaBase):
         proximos = [t for t in vizinhos if t > atual_t]
         limite_min = max(anteriores) if anteriores else 0.0
         limite_max = min(proximos) if proximos else 1.0
-        folga = min(0.04, 1.0 / max(20.0, float((len(vizinhos) + 1) * 5)))
+        comprimento = max(sqrt(den), 1e-9)
+        folga = min(0.005, 0.05 / comprimento)
         limite_min += folga
         limite_max -= folga
         if limite_min > limite_max:
@@ -1755,11 +1908,6 @@ class Ferramenta(FerramentaBase):
         total = len(cantos)
         if total < 2:
             return None, None
-        fechado = total >= 3 and len(auxiliares) == total
-        if fechado and 0 <= controle_idx < total:
-            return controle_idx, (controle_idx + 1) % total
-        if len(auxiliares) == total - 1 and 0 <= controle_idx < total - 1:
-            return controle_idx, controle_idx + 1
         return self._segmento_controle_mais_proximo(cantos, origem_aux)
 
     def _bezier_quadratica(self, a: QPointF, controle: QPointF, b: QPointF, t: float) -> QPointF:
@@ -1781,6 +1929,126 @@ class Ferramenta(FerramentaBase):
         auxiliares = el.get("controle_auxiliares", [])
         return isinstance(cantos, list) and len(cantos) >= 1 and isinstance(auxiliares, list)
 
+    def _garantir_auxiliares_minimos_curva_molde(
+        self,
+        canvas,
+        el: dict,
+        recompor_segmentos: set[int] | None = None,
+    ) -> None:
+        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+        if not cantos:
+            return
+        pontos = [p for p in (self._ponto_qt(item) for item in el.get("pontos", []) or []) if p is not None]
+        fechado = self._molde_fechado_por_pontos_ou_controles(canvas, el, el.get("pontos", []) or [], cantos)
+        segmentos = self._segmentos_cantos(cantos, fechado)
+        if not segmentos:
+            return
+        auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
+        por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=False)
+        recompor_segmentos = set(recompor_segmentos or set())
+        novos_aux: list[QPointF] = []
+        alterou = False
+
+        for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
+            existentes = [QPointF(pt) for _idx, _t, pt in por_segmento.get(seg_ordem, [])]
+            trecho = self._trecho_contorno_molde(canvas, pontos, cantos, a_idx, b_idx, fechado)
+            curva = self._segmento_molde_eh_curvo(cantos[a_idx], cantos[b_idx], trecho, existentes)
+            precisa_recompor = curva and (seg_ordem in recompor_segmentos or len(existentes) < 2)
+            if precisa_recompor:
+                amostrados = self._amostrar_auxiliares_minimos_trecho(trecho, cantos[a_idx], cantos[b_idx], quantidade=3)
+                if len(amostrados) >= 2:
+                    novos_aux.extend(amostrados)
+                    alterou = True
+                    continue
+            novos_aux.extend(existentes)
+
+        if alterou:
+            el["controle_auxiliares"] = [(float(p.x()), float(p.y())) for p in novos_aux]
+            el["pontos_auxiliares"] = [{"x": float(p.x()), "y": float(p.y())} for p in novos_aux]
+
+    def _trecho_contorno_molde(
+        self,
+        canvas,
+        pontos: list[QPointF],
+        cantos: list[QPointF],
+        a_idx: int,
+        b_idx: int,
+        fechado: bool,
+    ) -> list[QPointF]:
+        if not pontos:
+            a = cantos[a_idx]
+            b = cantos[b_idx]
+            return [QPointF(a), QPointF(b)]
+        base = [QPointF(p) for p in pontos]
+        if len(base) >= 2 and self._dist_pontos_local(base[0], base[-1]) <= 1e-6:
+            base = base[:-1]
+        if not base:
+            return []
+        if a_idx == b_idx and fechado:
+            return [*base, QPointF(base[0])]
+        n = len(base)
+        inicio = self._indice_ponto_mais_proximo(canvas, base, cantos[a_idx])
+        fim = self._indice_ponto_mais_proximo(canvas, base, cantos[b_idx])
+        if inicio is None or fim is None:
+            return [QPointF(cantos[a_idx]), QPointF(cantos[b_idx])]
+        return [QPointF(base[i]) for i in self._indices_intervalo(inicio, fim, n, fechado)]
+
+    def _segmento_molde_eh_curvo(
+        self,
+        a: QPointF,
+        b: QPointF,
+        trecho: list[QPointF],
+        auxiliares: list[QPointF],
+    ) -> bool:
+        if self._dist_pontos_local(a, b) <= 1e-9:
+            return True
+        limite = max(0.02, self._dist_pontos_local(a, b) * 0.002)
+        for pt in auxiliares:
+            if self._distancia_ponto_segmento_local(pt, a, b) > limite:
+                return True
+        if len(trecho) <= 2:
+            return False
+        return any(self._distancia_ponto_segmento_local(pt, a, b) > limite for pt in trecho[1:-1])
+
+    def _amostrar_auxiliares_minimos_trecho(
+        self,
+        trecho: list[QPointF],
+        a: QPointF,
+        b: QPointF,
+        quantidade: int,
+    ) -> list[QPointF]:
+        caminho = [QPointF(p) for p in trecho if p is not None]
+        if len(caminho) < 2:
+            caminho = [QPointF(a), QPointF(b)]
+        if len(caminho) >= 2 and self._dist_pontos_local(caminho[0], caminho[-1]) <= 1e-9:
+            total = sum(self._dist_pontos_local(x, y) for x, y in zip(caminho, caminho[1:]))
+            if total <= 1e-9:
+                return []
+        return [
+            self._ponto_em_caminho_por_fracao(caminho, i / float(quantidade + 1))
+            for i in range(1, quantidade + 1)
+        ]
+
+    def _ponto_em_caminho_por_fracao(self, caminho: list[QPointF], fracao: float) -> QPointF:
+        if not caminho:
+            return QPointF()
+        if len(caminho) == 1:
+            return QPointF(caminho[0])
+        total = sum(self._dist_pontos_local(a, b) for a, b in zip(caminho, caminho[1:]))
+        if total <= 1e-9:
+            return QPointF(caminho[0])
+        alvo = total * max(0.0, min(1.0, fracao))
+        acumulado = 0.0
+        for a, b in zip(caminho, caminho[1:]):
+            dist = self._dist_pontos_local(a, b)
+            if dist <= 1e-9:
+                continue
+            if acumulado + dist >= alvo:
+                t = (alvo - acumulado) / dist
+                return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+            acumulado += dist
+        return QPointF(caminho[-1])
+
     def _regenerar_molde_por_controles(self, canvas, el: dict) -> bool:
         if not self._molde_tem_controles_curva(el):
             return False
@@ -1798,6 +2066,7 @@ class Ferramenta(FerramentaBase):
         auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
         topologia_alterada = bool(el.pop("_controles_topologia_alterada", False))
         mapa_arraste = el.pop("_segmentos_auxiliares_arraste", None)
+        auxiliares_retos_arraste = el.pop("_auxiliares_retos_arraste", None)
         auxiliar_arrastado_idx = el.pop("_auxiliar_arrastado_idx", None)
         if self._mapa_auxiliares_valido(mapa_arraste, auxiliares, segmentos) and not topologia_alterada:
             auxiliares = self._alinhar_auxiliares_por_mapa(
@@ -1806,6 +2075,7 @@ class Ferramenta(FerramentaBase):
                 auxiliares,
                 mapa_arraste,
                 preservar_idx=auxiliar_arrastado_idx,
+                auxiliares_retos=auxiliares_retos_arraste,
             )
             atribuicoes = self._atribuir_auxiliares_por_mapa(cantos, segmentos, auxiliares, mapa_arraste)
         else:
@@ -1815,6 +2085,7 @@ class Ferramenta(FerramentaBase):
                 auxiliares,
                 preferir_ordem=not topologia_alterada,
                 preservar_idx=auxiliar_arrastado_idx,
+                auxiliares_retos=auxiliares_retos_arraste,
             )
             atribuicoes = self._atribuir_auxiliares_a_segmentos(cantos, segmentos, auxiliares, preferir_ordem=not topologia_alterada)
         densidades = self._densidade_segmentos_molde(canvas, pontos_anteriores, cantos, segmentos)
@@ -1878,6 +2149,7 @@ class Ferramenta(FerramentaBase):
         auxiliares: list[QPointF],
         mapa: list[int],
         preservar_idx: int | None = None,
+        auxiliares_retos=None,
     ) -> list[QPointF]:
         ajustados = [QPointF(p) for p in auxiliares]
         contagem: dict[int, int] = {}
@@ -1888,6 +2160,8 @@ class Ferramenta(FerramentaBase):
                 continue
             seg_ordem = int(mapa[aux_idx])
             if contagem.get(seg_ordem, 0) != 1:
+                continue
+            if not self._auxiliar_deve_alinhar_reta(aux_idx, aux, cantos, segmentos[seg_ordem], auxiliares_retos):
                 continue
             a_idx, b_idx = segmentos[seg_ordem]
             a = cantos[a_idx]
@@ -1922,7 +2196,7 @@ class Ferramenta(FerramentaBase):
         auxiliares: list[QPointF],
         preferir_ordem: bool = False,
     ) -> dict[int, list[QPointF]]:
-        if preferir_ordem and len(auxiliares) == len(segmentos):
+        if preferir_ordem and self._ordem_auxiliares_compativel(cantos, segmentos, auxiliares):
             return {idx: [QPointF(auxiliares[idx])] for idx in range(len(segmentos))}
         saida: dict[int, list[tuple[float, QPointF]]] = {i: [] for i in range(len(segmentos))}
         for aux in auxiliares:
@@ -1951,7 +2225,7 @@ class Ferramenta(FerramentaBase):
         preferir_ordem: bool = False,
     ) -> dict[int, list[tuple[int, float, QPointF]]]:
         saida: dict[int, list[tuple[int, float, QPointF]]] = {i: [] for i in range(len(segmentos))}
-        if preferir_ordem and len(auxiliares) == len(segmentos):
+        if preferir_ordem and self._ordem_auxiliares_compativel(cantos, segmentos, auxiliares):
             for idx, aux in enumerate(auxiliares):
                 a_idx, b_idx = segmentos[idx]
                 t = self._parametro_no_segmento(aux, cantos[a_idx], cantos[b_idx])
@@ -1977,6 +2251,28 @@ class Ferramenta(FerramentaBase):
             saida[seg_ordem] = sorted(itens, key=lambda item: item[1])
         return saida
 
+    def _ordem_auxiliares_compativel(
+        self,
+        cantos: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        auxiliares: list[QPointF],
+    ) -> bool:
+        if len(auxiliares) != len(segmentos):
+            return False
+        for aux_idx, aux in enumerate(auxiliares):
+            melhor_seg = None
+            melhor_dist = float("inf")
+            for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
+                a = cantos[a_idx]
+                b = cantos[b_idx]
+                dist = self._distancia_ponto_segmento_local(aux, a, b)
+                if dist < melhor_dist:
+                    melhor_seg = seg_ordem
+                    melhor_dist = dist
+            if melhor_seg != aux_idx:
+                return False
+        return True
+
     def _alinhar_auxiliares_unicos_as_retas(
         self,
         cantos: list[QPointF],
@@ -1984,6 +2280,7 @@ class Ferramenta(FerramentaBase):
         auxiliares: list[QPointF],
         preferir_ordem: bool = False,
         preservar_idx: int | None = None,
+        auxiliares_retos=None,
     ) -> list[QPointF]:
         ajustados = [QPointF(p) for p in auxiliares]
         por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=preferir_ordem)
@@ -1995,11 +2292,31 @@ class Ferramenta(FerramentaBase):
                 continue
             if preservar_idx is not None and aux_idx == int(preservar_idx):
                 continue
+            if not self._auxiliar_deve_alinhar_reta(aux_idx, ajustados[aux_idx], cantos, segmentos[seg_ordem], auxiliares_retos):
+                continue
             a_idx, b_idx = segmentos[seg_ordem]
             a = cantos[a_idx]
             b = cantos[b_idx]
             ajustados[aux_idx] = QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
         return ajustados
+
+    def _auxiliar_deve_alinhar_reta(
+        self,
+        aux_idx: int,
+        aux: QPointF,
+        cantos: list[QPointF],
+        segmento: tuple[int, int],
+        auxiliares_retos,
+    ) -> bool:
+        if isinstance(auxiliares_retos, list) and 0 <= aux_idx < len(auxiliares_retos):
+            return bool(auxiliares_retos[aux_idx])
+        a_idx, b_idx = segmento
+        if not (0 <= a_idx < len(cantos) and 0 <= b_idx < len(cantos)):
+            return False
+        a = cantos[a_idx]
+        b = cantos[b_idx]
+        limite_reta = max(0.02, self._dist_pontos_local(a, b) * 0.002)
+        return self._distancia_ponto_segmento_local(aux, a, b) <= limite_reta
 
     def _densidade_segmentos_molde(
         self,
