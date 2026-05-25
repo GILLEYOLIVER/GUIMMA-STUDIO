@@ -79,16 +79,21 @@ class Ferramenta(FerramentaBase):
         p3 = self._preview
         p2 = QPointF(p3.x(), p1.y())
         p4 = QPointF(p1.x(), p3.y())
-        canvas._desenhar_polilinha(
-            painter,
-            [p1, p2, p3, p4, p1],
-            cor=canvas._linha_cor,
-            espessura=canvas._linha_espessura,
-            estilo=canvas._linha_estilo,
-            amplitude=canvas._linha_amplitude,
-        )
-        self._desenhar_cota_preview(canvas, painter, p1, p2)
-        self._desenhar_cota_preview(canvas, painter, p2, p3)
+        painter.save()
+        try:
+            painter.setBrush(Qt.NoBrush)
+            canvas._desenhar_polilinha(
+                painter,
+                [p1, p2, p3, p4, p1],
+                cor=canvas._linha_cor,
+                espessura=canvas._linha_espessura,
+                estilo=canvas._linha_estilo,
+                amplitude=canvas._linha_amplitude,
+            )
+            self._desenhar_cota_preview(canvas, painter, p1, p2)
+            self._desenhar_cota_preview(canvas, painter, p2, p3)
+        finally:
+            painter.restore()
 
     def _desenhar_cota_preview(self, canvas, painter, inicio: QPointF, fim: QPointF):
         p1 = canvas._cena_para_tela(inicio)
@@ -143,9 +148,14 @@ class Ferramenta(FerramentaBase):
             self._inicio = None
             self._preview = None
             return
-        p2 = QPointF(p3.x(), p1.y())
-        p4 = QPointF(p1.x(), p3.y())
-        cantos = [p1, p2, p3, p4]
+        min_x, max_x = sorted((p1.x(), p3.x()))
+        min_y, max_y = sorted((p1.y(), p3.y()))
+        cantos = [
+            QPointF(min_x, max_y),
+            QPointF(max_x, max_y),
+            QPointF(max_x, min_y),
+            QPointF(min_x, min_y),
+        ]
         if self._criar_molde:
             pontos_fechados = [*cantos, cantos[0]]
             try:
@@ -158,7 +168,6 @@ class Ferramenta(FerramentaBase):
                 return
             xs = [pt.x() for pt in cantos]
             ys = [pt.y() for pt in cantos]
-            min_x, max_x = min(xs), max(xs)
             cx = sum(xs) / len(xs)
             cy = sum(ys) / len(ys)
             largura = max_x - min_x

@@ -32,7 +32,7 @@ class Ferramenta(FerramentaBase):
             return False
         idx, seg_idx, ponto_contorno = alvo
         el = canvas.cena.elementos[idx]
-        principal = self._shift_pressionado(event)
+        principal = True
 
         if el.get("molde") and self._tem_controles_molde(el):
             if not self._adicionar_controle_molde(canvas, el, ponto_contorno, seg_idx, principal=principal):
@@ -52,7 +52,7 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = {idx}
         canvas._registrar_historico()
         canvas.update()
-        self.set_status("Ponto principal adicionado." if principal else "Ponto auxiliar adicionado.")
+        self.set_status("Ponto principal adicionado.")
         event.accept()
         return True
 
@@ -104,12 +104,12 @@ class Ferramenta(FerramentaBase):
 
     def _sincronizar_controles_apos_insercao(self, el: dict, ponto: QPointF) -> None:
         if el.get("molde"):
-            auxiliares = list(el.get("controle_auxiliares", []) or [])
             novo = (float(ponto.x()), float(ponto.y()))
-            if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in auxiliares):
-                auxiliares.append(novo)
-            el["controle_auxiliares"] = auxiliares
-            el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
+            cantos = list(el.get("controle_cantos", []) or [])
+            if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in cantos):
+                cantos.append(novo)
+            el["controle_cantos"] = cantos
+            el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
             return
 
         if not (

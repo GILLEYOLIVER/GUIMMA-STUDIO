@@ -97,12 +97,19 @@ class _FakeCanvas(QWidget):
         self.atualizou = False
         self.coordenadas_canceladas = False
         self.snap_override = None
+        self.ignorar_snap_movimento = []
+        self.sombras_snap_movimento = []
         self.lbl_status = None
 
     def _ponto_com_snap(self, pos):
         if self.snap_override is not None:
             return QPointF(self.snap_override)
         return QPointF(pos)
+
+    def _ponto_com_snap_movimento(self, pos, ignorar_elementos=None, elementos_sombra=None):
+        self.ignorar_snap_movimento.append(set(ignorar_elementos or []))
+        self.sombras_snap_movimento.append(elementos_sombra)
+        return self._ponto_com_snap(pos)
 
     def _tela_para_cena(self, pos):
         return QPointF(pos)
@@ -276,6 +283,23 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(molde["pontos"], [(0.0, 0.0), (12.0, 2.0), (10.0, 5.0), (0.0, 0.0)])
 
+    def test_arraste_mantem_snapshot_original_ate_confirmar(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        estado = ferramenta._estado_arraste_controle
+        self.assertIsNotNone(estado)
+        self.assertEqual(estado["elementos"][0]["controle_cantos"][1], (10.0, 0.0))
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (12.0, 2.0))
+        self.assertEqual(estado["elementos"][0]["controle_cantos"][1], (10.0, 0.0))
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertIsNone(ferramenta._estado_arraste_controle)
+
     def test_botao_direito_cancela_arraste_em_andamento_sem_gravar_historico(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()
@@ -326,7 +350,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][1], (12.0, 0.05))
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 12.0, "y": 0.05})
 
-    def test_arraste_ignora_snap_de_borda_para_permitir_ajuste_fino(self):
+    def test_arraste_de_controle_respeita_snap_de_borda(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()
         ferramenta.on_activate(canvas)
@@ -334,11 +358,12 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
         canvas.snap_override = QPointF(12.0, 0.0)
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 0.6))))
-        canvas.snap_override = None
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 0.6))))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["controle_cantos"][1], (12.0, 0.6))
+        self.assertEqual(molde["controle_cantos"][1], (12.0, 0.0))
+        self.assertEqual(canvas.ignorar_snap_movimento[-1], {0})
+        self.assertEqual(canvas.sombras_snap_movimento[-1][0]["controle_cantos"][1], (10.0, 0.0))
 
     def test_arraste_de_controle_nao_trava_forte_no_angulo(self):
         canvas = _FakeCanvas()
@@ -593,7 +618,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_auxiliares"][0], (5.0, 3.0))
         self.assertContemPonto(molde["pontos"], (5.0, 3.0))
 
-    def test_auxiliar_nao_ultrapassa_outro_auxiliar_do_mesmo_trecho(self):
+    def test_auxiliar_pode_ultrapassar_outro_auxiliar_do_mesmo_trecho(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
             {
@@ -611,7 +636,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(8.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
-        self.assertLess(molde["controle_auxiliares"][0][0], molde["controle_auxiliares"][1][0])
+        self.assertEqual(molde["controle_auxiliares"][0], (8.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][1], (6.0, 0.0))
         self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0)])
 

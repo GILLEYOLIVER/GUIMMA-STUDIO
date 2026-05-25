@@ -512,27 +512,36 @@ class Ferramenta(FerramentaBase):
             return []
         if len(pts) == 2:
             return [QPointF(pts[0]), QPointF(pts[1])]
+        if fechado:
+            return self._gerar_spline_fechada_com_canto(canvas, pts)
 
         resultado: List[QPointF] = []
         total = len(pts)
-        limite = total if fechado else total - 1
+        limite = total - 1
         for i in range(limite):
-            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p0 = pts[i - 1] if i > 0 else pts[i]
             p1 = pts[i]
-            p2 = pts[(i + 1) % total]
-            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
+            p2 = pts[i + 1]
+            p3 = pts[i + 2] if i + 2 < total else p2
             if i == 0:
                 resultado.append(QPointF(p1))
             amostras = self._amostras_por_trecho(canvas, p1, p2)
             for s in range(1, amostras + 1):
                 resultado.append(self._catmull_rom_centripeta(p0, p1, p2, p3, s / float(amostras)))
 
-        if fechado and resultado:
-            if self._dist(resultado[0], resultado[-1]) > 0.001:
-                resultado.append(QPointF(resultado[0]))
-            else:
-                resultado[-1] = QPointF(resultado[0])
+        return self._remover_repetidos(resultado, tolerancia=0.001)
 
+    def _gerar_spline_fechada_com_canto(self, canvas, pts: List[QPointF]) -> List[QPointF]:
+        resultado = self._gerar_spline(canvas, pts, fechado=False)
+        if len(pts) < 3:
+            return resultado
+        ultimo = QPointF(pts[-1])
+        primeiro = QPointF(pts[0])
+        amostras = self._amostras_por_trecho(canvas, ultimo, primeiro)
+        for s in range(1, amostras + 1):
+            resultado.append(self._catmull_rom_centripeta(ultimo, ultimo, primeiro, primeiro, s / float(amostras)))
+        if resultado:
+            resultado[-1] = QPointF(primeiro)
         return self._remover_repetidos(resultado, tolerancia=0.001)
 
     # -------------------------------------------------------------------------

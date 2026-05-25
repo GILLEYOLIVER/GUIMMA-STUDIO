@@ -53,6 +53,9 @@ class _FakeCanvas:
         )
         self._selecionados = set()
         self._snap_resultado = None
+        self.snap_points = []
+        self.ignorar_snap_movimento = []
+        self.sombras_snap_movimento = []
         self.historico = 0
         self.atualizou = False
 
@@ -60,7 +63,14 @@ class _FakeCanvas:
         return QPointF(pos)
 
     def _ponto_com_snap(self, pos):
+        if self.snap_points:
+            return QPointF(self.snap_points.pop(0))
         return QPointF(pos)
+
+    def _ponto_com_snap_movimento(self, pos, ignorar_elementos=None, elementos_sombra=None):
+        self.ignorar_snap_movimento.append(set(ignorar_elementos or []))
+        self.sombras_snap_movimento.append(elementos_sombra)
+        return self._ponto_com_snap(pos)
 
     def _indice_molde_em_ponto(self, pos):
         return 0
@@ -112,7 +122,10 @@ class SelecionarToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(1.0, 1.0))))
         self.assertEqual(canvas._selecionados, {0, 1})
+        self.assertEqual(ferramenta._originais_arraste[0]["pontos"][0], (0.0, 0.0))
+        self.assertEqual(ferramenta._originais_arraste[1]["p0"], (20.0, 0.0))
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(4.0, 3.0))))
+        self.assertEqual(ferramenta._originais_arraste[0]["pontos"][0], (0.0, 0.0))
         self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(4.0, 3.0))))
 
         molde = canvas.cena.elementos[0]
@@ -123,7 +136,24 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertEqual(curva["p0"], (23.0, 2.0))
         self.assertEqual(curva["p1"], (28.0, 7.0))
         self.assertEqual(curva["p2"], (33.0, 2.0))
+        self.assertEqual(ferramenta._originais_arraste, {})
         self.assertEqual(canvas.historico, 1)
+
+    def test_arraste_de_selecao_usa_ponto_snapado_como_destino(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        canvas.snap_points = [QPointF(0.0, 0.0), QPointF(10.0, 0.0)]
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(1.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(4.0, 3.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["pontos"][0], (10.0, 0.0))
+        self.assertEqual(molde["controle_cantos"][0], (10.0, 0.0))
+        self.assertEqual(canvas.ignorar_snap_movimento[-1], {0})
+        self.assertEqual(canvas.sombras_snap_movimento[-1][0]["pontos"][0], (0.0, 0.0))
 
 
 if __name__ == "__main__":

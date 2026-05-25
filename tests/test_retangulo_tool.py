@@ -48,6 +48,7 @@ class _FakeCanvas(QWidget):
         self._linha_amplitude = 1.0
         self.historico = 0
         self.atualizou = False
+        self.brushes_preview = []
 
     def _ponto_com_snap(self, pos):
         return QPointF(pos)
@@ -57,6 +58,26 @@ class _FakeCanvas(QWidget):
 
     def update(self):
         self.atualizou = True
+
+    def _desenhar_polilinha(self, painter, pontos, **_kwargs):
+        self.brushes_preview.append(getattr(painter, "brush_atual", None))
+        self.pontos_preview = list(pontos)
+
+
+class _FakePainter:
+    def __init__(self):
+        self.brush_atual = "preenchido"
+        self.salvou = 0
+        self.restaurou = 0
+
+    def save(self):
+        self.salvou += 1
+
+    def restore(self):
+        self.restaurou += 1
+
+    def setBrush(self, brush):  # noqa: N802
+        self.brush_atual = brush
 
 
 @unittest.skipIf(FerramentaRetangulo is None, "PySide6 não disponível neste ambiente")
@@ -75,13 +96,31 @@ class RetanguloToolTestCase(unittest.TestCase):
 
         self.assertEqual(len(canvas.cena.elementos), 1)
         molde = canvas.cena.elementos[0]
+        self.assertEqual(
+            molde["controle_cantos"],
+            [(0.0, 4.0), (10.0, 4.0), (10.0, 0.0), (0.0, 0.0)],
+        )
         auxiliares = molde["controle_auxiliares"]
         self.assertEqual(len(auxiliares), 4)
-        self.assertIn((5.0, 0.0), auxiliares)
-        self.assertIn((10.0, 2.0), auxiliares)
         self.assertIn((5.0, 4.0), auxiliares)
+        self.assertIn((10.0, 2.0), auxiliares)
+        self.assertIn((5.0, 0.0), auxiliares)
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
+
+    def test_preview_retangulo_nao_usa_preenchimento_herdado_do_painter(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRetangulo()
+        ferramenta._inicio = QPointF(0.0, 0.0)
+        ferramenta._preview = QPointF(10.0, 4.0)
+        ferramenta._desenhar_cota_preview = lambda *_args, **_kwargs: None
+        painter = _FakePainter()
+
+        ferramenta._desenhar_preview(canvas, painter)
+
+        self.assertEqual(canvas.brushes_preview, [Qt.NoBrush])
+        self.assertEqual(painter.salvou, 1)
+        self.assertEqual(painter.restaurou, 1)
 
 
 if __name__ == "__main__":
