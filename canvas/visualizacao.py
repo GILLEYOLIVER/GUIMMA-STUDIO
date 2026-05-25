@@ -290,6 +290,7 @@ class VisualizacaoCanvas(QWidget):
                     normalizadas[str(chave)] = {
                         "ativo": bool(valor.get("ativo", False)),
                         "cor": self._cor_hex_segura(valor.get("cor"), "#efefef"),
+                        "forma": str(valor.get("forma", "") or ""),
                     }
         self._cores_moldes = normalizadas
         if estilo_linha_costura is not None:
@@ -321,6 +322,50 @@ class VisualizacaoCanvas(QWidget):
         if isinstance(cfg, dict) and bool(cfg.get("ativo", False)):
             return self._cor_hex_segura(cfg.get("cor"), padrao)
         return str(padrao)
+
+    def _config_forma_molde(self, chave: str, padrao: str) -> str:
+        cfg = getattr(self, "_cores_moldes", {}).get(chave, {})
+        if isinstance(cfg, dict):
+            forma = str(cfg.get("forma") or "").strip()
+            if forma:
+                return forma
+        return str(padrao)
+
+    def _desenhar_ponto_molde_configurado(
+        self,
+        painter: QPainter,
+        ponto: QPointF,
+        chave: str,
+        cor_padrao: str,
+        forma_padrao: str,
+        tamanho_px: int,
+    ) -> None:
+        tela = self._cena_para_tela(ponto)
+        meio = max(2, int(round(tamanho_px / 2)))
+        forma = self._normalizar_forma_ponto(self._config_forma_molde(chave, forma_padrao))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor(self._config_cor_molde(chave, cor_padrao)))
+        if forma == "quadrado":
+            painter.drawRect(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+        elif forma == "losango":
+            diamond = QPolygon([
+                QPoint(int(tela.x()), int(tela.y() - meio)),
+                QPoint(int(tela.x() + meio), int(tela.y())),
+                QPoint(int(tela.x()), int(tela.y() + meio)),
+                QPoint(int(tela.x() - meio), int(tela.y())),
+            ])
+            painter.drawPolygon(diamond)
+        else:
+            painter.drawEllipse(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+
+    @staticmethod
+    def _normalizar_forma_ponto(forma: str) -> str:
+        texto = str(forma or "").lower()
+        if "quadr" in texto:
+            return "quadrado"
+        if "los" in texto:
+            return "losango"
+        return "circulo"
 
     def set_modo_curva(self, modo: str):
         modo_txt = str(modo).lower().strip()
@@ -1759,7 +1804,14 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
             for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
-                self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
+                self._desenhar_ponto_molde_configurado(
+                    painter,
+                    QPointF(float(mx), float(my)),
+                    "ponto_pique",
+                    "#ff2f2f",
+                    "Quadrado preenchido",
+                    8,
+                )
 
         for marca in getattr(self, "_marcacoes_temporarias", []) or []:
             self._desenhar_marca_x(painter, QPointF(marca), cor="#ff40ff", tamanho_px=6)
@@ -2116,7 +2168,14 @@ class VisualizacaoCanvas(QWidget):
                 afastamento = max(2.0, float(distancia_num_cm) * max(float(getattr(self, "zoom", 1.0)), 0.01))
                 for i, pt in enumerate(cantos, start=1):
                     pt_tela = self._cena_para_tela(pt)
-                    painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
+                    self._desenhar_ponto_molde_configurado(
+                        painter,
+                        pt,
+                        "ponto_controle",
+                        "#ffffff",
+                        "Circulo preenchido",
+                        7,
+                    )
                     dx = pt.x() - cx
                     dy = pt.y() - cy
                     mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
@@ -2136,11 +2195,15 @@ class VisualizacaoCanvas(QWidget):
                     painter.drawText(int(round(x_txt)), int(round(y_txt)), texto_num)
                 if el.get("mostrar_controles", True) and self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-                    painter.setPen(QPen(QColor("#ff3b30"), 1.0))
-                    painter.setBrush(QColor("#ff3b30"))
                     for pt in aux:
-                        pt_tela = self._cena_para_tela(pt)
-                        painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+                        self._desenhar_ponto_molde_configurado(
+                            painter,
+                            pt,
+                            "ponto_nao_graduado",
+                            "#ff3b30",
+                            "Losango",
+                            6,
+                        )
 
     def _pontos_serializados_para_qpoint(self, origem) -> list[QPointF]:
         pontos: list[QPointF] = []
@@ -3133,15 +3196,20 @@ class VisualizacaoCanvas(QWidget):
                             espessura: float = 1.0, estilo: str = "solid", amplitude: float = 1.0,
                             fase_inicial: float = 0.0):
         if len(pontos) >= 2 and not is_geometric_line_style(estilo):
-            path = QPainterPath(self._cena_para_tela(pontos[0]))
-            for p in pontos[1:]:
-                path.lineTo(self._cena_para_tela(p))
-            pen = QPen(QColor(cor), espessura)
-            self._aplicar_estilo_caneta(pen, estilo)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.drawPath(path)
+            painter.save()
+            try:
+                path = QPainterPath(self._cena_para_tela(pontos[0]))
+                for p in pontos[1:]:
+                    path.lineTo(self._cena_para_tela(p))
+                pen = QPen(QColor(cor), espessura)
+                self._aplicar_estilo_caneta(pen, estilo)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPath(path)
+            finally:
+                painter.restore()
             return
         fase = fase_inicial
         for inicio, fim in zip(pontos, pontos[1:]):

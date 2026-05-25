@@ -83,6 +83,33 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
 
+    def test_retangulo_molde_numera_cantos_em_ordem_horaria_visual(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRetangulo()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(
+            molde["controle_cantos"],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)],
+        )
+        self.assertEqual(
+            molde["pontos_controle_principais"],
+            [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 4.0},
+                {"x": 0.0, "y": 4.0},
+            ],
+        )
+        self.assertEqual(
+            molde["pontos"],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0), (0.0, 0.0)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

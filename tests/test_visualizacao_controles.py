@@ -12,7 +12,8 @@ if find_spec("PySide6") is None:
     VisualizacaoCanvas = None
     CenaDocumento = None
 else:
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
     from canvas.cena import CenaDocumento
@@ -53,6 +54,32 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         controles = canvas._pontos_controle_selecao_molde(base, {})
 
         self.assertEqual([(p.x(), p.y()) for p in controles], [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)])
+
+    def test_polilinha_fechada_nao_herda_brush_preenchido(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        image = QImage(140, 100, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        try:
+            painter.setBrush(QColor("#ff00ff"))
+            canvas._desenhar_polilinha(
+                painter,
+                [
+                    QPointF(2.0, 2.0),
+                    QPointF(10.0, 2.0),
+                    QPointF(10.0, 7.0),
+                    QPointF(2.0, 7.0),
+                    QPointF(2.0, 2.0),
+                ],
+                cor="#ffffff",
+                espessura=1.0,
+                estilo="solid",
+            )
+        finally:
+            painter.end()
+
+        self.assertEqual(image.pixelColor(60, 45).alpha(), 0)
 
 
 if __name__ == "__main__":

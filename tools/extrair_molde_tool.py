@@ -968,6 +968,7 @@ class Ferramenta(FerramentaBase):
                 continue
             cantos.append((float(ref[0]), float(ref[1])))
         cantos = self._deduplicar_pontos(cantos, tol=1e-4)
+        cantos = self._ordenar_controles_principais_extraidos(cantos)
         molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
 
         usar_auxiliares = bool(self._cfg.get("usar_auxiliares", True))
@@ -979,6 +980,11 @@ class Ferramenta(FerramentaBase):
         molde["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
         molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
         molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
+
+    def _ordenar_controles_principais_extraidos(self, cantos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(cantos) != 2:
+            return cantos
+        return sorted(cantos, key=lambda pt: (float(pt[0]), float(pt[1])))
 
     def _coletar_pontos_controle_existentes(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if not contorno:
@@ -1995,9 +2001,15 @@ class Ferramenta(FerramentaBase):
         if len(trecho) < 2:
             return []
         perimetro = sum(self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:]))
-        quantidade = 4 if perimetro <= 0 else max(4, min(12, int(round(perimetro / 3.0))))
+        if perimetro <= 0:
+            quantidade = 4
+        elif self._trecho_praticamente_reto(trecho):
+            quantidade = 4
+        else:
+            curvatura = self._mudanca_angular_total_trecho(trecho, fechado=False)
+            quantidade = max(4, min(16, int(round((perimetro / 4.0) + (curvatura * 2.5)))))
         return self._deduplicar_pontos(
-            [self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1)) for passo in range(1, quantidade + 1)],
+            self._pontos_no_trecho_por_curvatura(trecho, quantidade, fechado=False),
             tol=1e-4,
         )
 
@@ -2021,13 +2033,125 @@ class Ferramenta(FerramentaBase):
             return []
         perimetro = sum(self._dist_tuple(a, b) for a, b in zip(trecho, trecho[1:]))
         pontos_base = max(1, len(trecho) - 1)
-        por_perimetro = int(round(perimetro / 2.0))
-        por_amostras = int(round(pontos_base * 0.5))
-        quantidade = max(24, min(96, max(por_perimetro, por_amostras)))
+        curvatura = self._mudanca_angular_total_trecho(trecho, fechado=True)
+        por_perimetro = perimetro / 5.0
+        por_curvatura = curvatura * 2.0
+        por_amostras = pontos_base * 0.12
+        quantidade = max(8, min(64, int(round(max(por_amostras, por_perimetro + por_curvatura)))))
         return self._deduplicar_pontos(
-            [self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1)) for passo in range(1, quantidade + 1)],
+            self._pontos_no_trecho_por_curvatura(trecho, quantidade, fechado=True),
             tol=1e-4,
         )
+
+    def _pontos_no_trecho_por_curvatura(
+        self,
+        trecho: list[tuple[float, float]],
+        quantidade: int,
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        quantidade = int(quantidade)
+        if quantidade <= 0 or len(trecho) < 2:
+            return []
+        pontos = [(float(x), float(y)) for x, y in trecho]
+        if fechado and len(pontos) >= 3 and self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6:
+            pontos_base = pontos[:-1]
+        else:
+            pontos_base = pontos
+        if len(pontos_base) < 2:
+            return []
+
+        caminho = [*pontos_base, pontos_base[0]] if fechado else pontos_base
+        curvaturas = self._curvaturas_vertices_trecho(pontos_base, fechado)
+        max_curvatura = max(curvaturas) if curvaturas else 0.0
+        pesos: list[float] = []
+        for idx, (a, b) in enumerate(zip(caminho, caminho[1:])):
+            comprimento = self._dist_tuple(a, b)
+            if comprimento <= 1e-9:
+                pesos.append(0.0)
+                continue
+            curva_a = curvaturas[idx % len(pontos_base)] if curvaturas else 0.0
+            if fechado:
+                curva_b = curvaturas[(idx + 1) % len(pontos_base)] if curvaturas else 0.0
+            else:
+                curva_b = curvaturas[idx + 1] if curvaturas and idx + 1 < len(curvaturas) else 0.0
+            curva_local = (curva_a + curva_b) / 2.0
+            if max_curvatura > 1e-9:
+                proporcao = max(0.0, min(1.0, curva_local / max_curvatura))
+                densidade = 0.35 + (proporcao ** 1.25) * 6.5
+            else:
+                densidade = 0.35
+            pesos.append(comprimento * densidade)
+
+        total = sum(pesos)
+        if total <= 1e-9:
+            return [
+                self._ponto_no_trecho_por_fracao(trecho, passo / float(quantidade + 1))
+                for passo in range(1, quantidade + 1)
+            ]
+
+        saida: list[tuple[float, float]] = []
+        for passo in range(1, quantidade + 1):
+            alvo = total * (passo / float(quantidade + 1))
+            saida.append(self._ponto_no_caminho_por_peso(caminho, pesos, alvo))
+        return saida
+
+    def _curvaturas_vertices_trecho(self, pontos: list[tuple[float, float]], fechado: bool) -> list[float]:
+        n = len(pontos)
+        if n < 3:
+            return [0.0 for _ in pontos]
+        saida: list[float] = []
+        for idx, atual in enumerate(pontos):
+            if not fechado and idx in {0, n - 1}:
+                saida.append(0.0)
+                continue
+            anterior = pontos[idx - 1]
+            proximo = pontos[(idx + 1) % n]
+            if self._dist_tuple(anterior, atual) <= 1e-9 or self._dist_tuple(atual, proximo) <= 1e-9:
+                saida.append(0.0)
+                continue
+            ang_entrada = atan2(float(atual[1]) - float(anterior[1]), float(atual[0]) - float(anterior[0]))
+            ang_saida = atan2(float(proximo[1]) - float(atual[1]), float(proximo[0]) - float(atual[0]))
+            saida.append(abs(self._normalizar_delta_angular(ang_saida - ang_entrada)))
+        return saida
+
+    def _ponto_no_caminho_por_peso(
+        self,
+        caminho: list[tuple[float, float]],
+        pesos: list[float],
+        alvo: float,
+    ) -> tuple[float, float]:
+        acumulado = 0.0
+        for (a, b), peso in zip(zip(caminho, caminho[1:]), pesos):
+            if peso <= 1e-9:
+                continue
+            if acumulado + peso >= alvo:
+                t = (alvo - acumulado) / peso
+                return (
+                    float(a[0]) + ((float(b[0]) - float(a[0])) * t),
+                    float(a[1]) + ((float(b[1]) - float(a[1])) * t),
+                )
+            acumulado += peso
+        return (float(caminho[-1][0]), float(caminho[-1][1]))
+
+    def _mudanca_angular_total_trecho(self, trecho: list[tuple[float, float]], fechado: bool) -> float:
+        segmentos: list[float] = []
+        for a, b in zip(trecho, trecho[1:]):
+            if self._dist_tuple(a, b) <= 1e-9:
+                continue
+            segmentos.append(atan2(float(b[1]) - float(a[1]), float(b[0]) - float(a[0])))
+        if len(segmentos) < 2:
+            return 0.0
+        pares = list(zip(segmentos, segmentos[1:]))
+        if fechado:
+            pares.append((segmentos[-1], segmentos[0]))
+        return sum(abs(self._normalizar_delta_angular(b - a)) for a, b in pares)
+
+    def _normalizar_delta_angular(self, delta: float) -> float:
+        while delta <= -pi:
+            delta += 2.0 * pi
+        while delta > pi:
+            delta -= 2.0 * pi
+        return delta
 
     def _ponto_no_trecho_por_fracao(self, trecho: list[tuple[float, float]], fracao: float) -> tuple[float, float]:
         if len(trecho) == 1:

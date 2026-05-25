@@ -430,6 +430,8 @@ class Ferramenta(FerramentaBase):
             if a <= b:
                 return list(range(a, b + 1))
             return list(range(b, a + 1))
+        if a == b:
+            return list(range(a, n)) + list(range(0, a + 1))
         out = [a]
         i = a
         while i != b:
@@ -2065,10 +2067,28 @@ class Ferramenta(FerramentaBase):
 
         auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
         topologia_alterada = bool(el.pop("_controles_topologia_alterada", False))
+        preservar_ordem_contorno = bool(el.pop("_preservar_ordem_contorno_auxiliares", False))
         mapa_arraste = el.pop("_segmentos_auxiliares_arraste", None)
         auxiliares_retos_arraste = el.pop("_auxiliares_retos_arraste", None)
         auxiliar_arrastado_idx = el.pop("_auxiliar_arrastado_idx", None)
-        if self._mapa_auxiliares_valido(mapa_arraste, auxiliares, segmentos) and not topologia_alterada:
+        atribuicoes_contorno = None
+        if preservar_ordem_contorno:
+            atribuicoes_contorno = self._atribuir_auxiliares_por_contorno_anterior(
+                canvas,
+                pontos_anteriores,
+                cantos,
+                segmentos,
+                auxiliares,
+                fechado,
+            )
+        if atribuicoes_contorno is not None:
+            atribuicoes = atribuicoes_contorno
+            auxiliares = [
+                QPointF(pt)
+                for seg_ordem in range(len(segmentos))
+                for pt in atribuicoes.get(seg_ordem, [])
+            ]
+        elif self._mapa_auxiliares_valido(mapa_arraste, auxiliares, segmentos) and not topologia_alterada:
             auxiliares = self._alinhar_auxiliares_por_mapa(
                 cantos,
                 segmentos,
@@ -2117,6 +2137,84 @@ class Ferramenta(FerramentaBase):
         el["pontos_auxiliares"] = [{"x": float(p.x()), "y": float(p.y())} for p in auxiliares]
         self._sincronizar_curva_suave(el)
         return True
+
+    def _atribuir_auxiliares_por_contorno_anterior(
+        self,
+        canvas,
+        pontos_anteriores: list,
+        cantos: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        auxiliares: list[QPointF],
+        fechado: bool,
+    ) -> dict[int, list[QPointF]] | None:
+        if not fechado or not auxiliares or not segmentos:
+            return None
+        pontos = [p for p in (self._ponto_qt(item) for item in pontos_anteriores or []) if p is not None]
+        if len(pontos) < 3:
+            return None
+        if self._dist_pontos_local(pontos[0], pontos[-1]) <= 1e-6:
+            pontos = pontos[:-1]
+        if len(pontos) < 3:
+            return None
+        n = len(pontos)
+        indices_cantos = [self._indice_ponto_mais_proximo_sem_tolerancia(pontos, canto) for canto in cantos]
+        if any(indice is None for indice in indices_cantos):
+            return None
+
+        intervalos: dict[int, list[int]] = {}
+        posicoes: dict[int, dict[int, int]] = {}
+        for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
+            inicio = int(indices_cantos[a_idx])
+            fim = int(indices_cantos[b_idx])
+            indices = self._indices_intervalo(inicio, fim, n, fechado)
+            if len(indices) < 2:
+                return None
+            intervalos[seg_ordem] = indices
+            posicoes[seg_ordem] = {indice: pos for pos, indice in enumerate(indices)}
+
+        saida: dict[int, list[tuple[int, int, QPointF]]] = {seg_ordem: [] for seg_ordem in range(len(segmentos))}
+        for aux_ordem, aux in enumerate(auxiliares):
+            indice_aux = self._indice_ponto_mais_proximo_sem_tolerancia(pontos, aux)
+            if indice_aux is None:
+                return None
+            melhor_seg = None
+            melhor_pos = 0
+            melhor_dist = float("inf")
+            for seg_ordem, indices in intervalos.items():
+                mapa_pos = posicoes[seg_ordem]
+                if indice_aux in mapa_pos:
+                    melhor_seg = seg_ordem
+                    melhor_pos = mapa_pos[indice_aux]
+                    melhor_dist = 0.0
+                    break
+                for pos, indice in enumerate(indices):
+                    dist = abs(indice_aux - indice)
+                    dist = min(dist, n - dist)
+                    if dist < melhor_dist:
+                        melhor_dist = dist
+                        melhor_seg = seg_ordem
+                        melhor_pos = pos
+            if melhor_seg is None:
+                return None
+            saida[melhor_seg].append((melhor_pos, aux_ordem, QPointF(aux)))
+
+        return {
+            seg_ordem: [pt for _pos, _aux_ordem, pt in sorted(itens, key=lambda item: (item[0], item[1]))]
+            for seg_ordem, itens in saida.items()
+        }
+
+    def _indice_ponto_mais_proximo_sem_tolerancia(self, pontos: list, alvo: QPointF) -> int | None:
+        melhor_idx = None
+        melhor_dist = float("inf")
+        for idx, item in enumerate(pontos or []):
+            pt = self._ponto_qt(item)
+            if pt is None:
+                continue
+            dist = self._dist_pontos_local(pt, alvo)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_idx = idx
+        return melhor_idx
 
     def _mapa_auxiliares_valido(self, mapa, auxiliares: list[QPointF], segmentos: list[tuple[int, int]]) -> bool:
         if not isinstance(mapa, list) or len(mapa) != len(auxiliares):
@@ -2347,15 +2445,7 @@ class Ferramenta(FerramentaBase):
         if len(pts) <= 2:
             return pts
         if len(pts) == 3:
-            desvio = self._distancia_ponto_segmento_local(pts[1], pts[0], pts[2])
-            if desvio <= max(0.02, self._dist_pontos_local(pts[0], pts[2]) * 0.002):
-                return [QPointF(pts[0]), QPointF(pts[-1])]
-            controle = self._controle_quadratico_passando_por_meio(pts[0], pts[1], pts[2])
-            amostras = max(16, min(160, int(segmentos)))
-            return [
-                self._bezier_quadratica(pts[0], controle, pts[2], i / float(amostras))
-                for i in range(amostras + 1)
-            ]
+            return [QPointF(pts[0]), QPointF(pts[-1])]
         saida: list[QPointF] = []
         total = len(pts)
         for i in range(total - 1):

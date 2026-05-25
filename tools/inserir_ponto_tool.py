@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 
 from tools.tool_base import FerramentaBase
 from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
@@ -15,18 +15,33 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._hover_segmento: tuple[int, int, QPointF] | None = None
+        self._hover_principal = False
         self._helper = FerramentaManipularPontos()
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._hover_segmento = None
-        self.set_status("Clique no contorno para adicionar ponto principal.")
+        self._hover_principal = False
+        self.set_status("Clique em um molde para selecionar; depois clique no contorno para adicionar o ponto.")
+        canvas.update()
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
         pos = canvas._ponto_com_snap(event.position())
-        alvo = self._segmento_mais_proximo(canvas, pos)
+        molde_alvo = self._molde_em_ponto(canvas, pos)
+        moldes_selecionados = self._indices_moldes_selecionados(canvas)
+        if molde_alvo is not None and molde_alvo not in moldes_selecionados:
+            canvas._selecionados = {molde_alvo}
+            self._hover_principal = self._shift_pressionado(event)
+            self._hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=[molde_alvo])
+            canvas.update()
+            self.set_status("Molde selecionado. Mova o mouse pelo contorno e clique novamente para inserir.")
+            event.accept()
+            return True
+
+        indices = moldes_selecionados or None
+        alvo = self._segmento_mais_proximo(canvas, pos, indices=indices)
         if alvo is None:
             self.set_status("Nenhum segmento encontrado sob o cursor.")
             return False
@@ -58,7 +73,13 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
-        self._hover_segmento = self._segmento_mais_proximo(canvas, pos)
+        self._hover_principal = self._shift_pressionado(event)
+        moldes_selecionados = self._indices_moldes_selecionados(canvas)
+        self._hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=moldes_selecionados or None)
+        if self._hover_segmento is not None and not moldes_selecionados:
+            idx, _seg_idx, _ponto = self._hover_segmento
+            if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("molde"):
+                self._hover_segmento = None
         canvas.update()
         event.accept()
         return True
@@ -77,17 +98,18 @@ class Ferramenta(FerramentaBase):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(QPen(QColor("#00a6ff"), 2.0, Qt.DashLine))
         painter.drawLine(canvas._cena_para_tela(pontos[seg_idx]), canvas._cena_para_tela(pontos[seg_idx + 1]))
-        tela = canvas._cena_para_tela(ponto)
-        painter.setPen(QPen(QColor("#ffffff"), 1.2))
-        painter.setBrush(QColor("#00a6ff"))
-        painter.drawEllipse(int(tela.x() - 5), int(tela.y() - 5), 10, 10)
+        self._desenhar_ponto_preview(canvas, painter, ponto)
         painter.restore()
 
-    def _segmento_mais_proximo(self, canvas, pos: QPointF) -> tuple[int, int, QPointF] | None:
+    def _segmento_mais_proximo(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int, QPointF] | None:
         tolerancia = 10.0 / max(canvas.zoom, 0.001)
         melhor: tuple[int, int, QPointF] | None = None
         melhor_dist = tolerancia
-        for idx, el in enumerate(canvas.cena.elementos):
+        candidatos = indices if indices is not None else range(len(canvas.cena.elementos))
+        for idx in candidatos:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
             pontos = [self._ponto_qt(p) for p in el.get("pontos", []) or []]
@@ -101,6 +123,80 @@ class Ferramenta(FerramentaBase):
                     melhor_dist = d
                     melhor = (idx, seg_idx, projetado)
         return melhor
+
+    def _indices_moldes_selecionados(self, canvas) -> list[int]:
+        saida: list[int] = []
+        for idx in getattr(canvas, "_selecionados", set()) or set():
+            try:
+                idx_int = int(idx)
+            except Exception:
+                continue
+            if 0 <= idx_int < len(canvas.cena.elementos) and canvas.cena.elementos[idx_int].get("molde"):
+                saida.append(idx_int)
+        return saida
+
+    def _molde_em_ponto(self, canvas, pos: QPointF) -> int | None:
+        if hasattr(canvas, "_indice_molde_em_ponto"):
+            try:
+                return canvas._indice_molde_em_ponto(pos)
+            except Exception:
+                pass
+        alvo = self._segmento_mais_proximo(canvas, pos)
+        if alvo is None:
+            return None
+        idx, _seg_idx, _ponto = alvo
+        if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("molde"):
+            return idx
+        return None
+
+    def _desenhar_ponto_preview(self, canvas, painter, ponto: QPointF) -> None:
+        chave = "ponto_controle" if self._hover_principal else "ponto_nao_graduado"
+        cor = self._cor_ponto_config(canvas, chave, "#00a6ff")
+        forma = self._forma_ponto_config(canvas, chave, "Circulo preenchido")
+        self._desenhar_marcador_configurado(canvas, painter, ponto, cor, forma, 10)
+
+    def _cor_ponto_config(self, canvas, chave: str, padrao: str) -> str:
+        if hasattr(canvas, "_config_cor_molde"):
+            try:
+                return canvas._config_cor_molde(chave, padrao)
+            except Exception:
+                return padrao
+        return padrao
+
+    def _forma_ponto_config(self, canvas, chave: str, padrao: str) -> str:
+        if hasattr(canvas, "_config_forma_molde"):
+            try:
+                return canvas._config_forma_molde(chave, padrao)
+            except Exception:
+                return padrao
+        return padrao
+
+    def _desenhar_marcador_configurado(self, canvas, painter, ponto: QPointF, cor: str, forma: str, tamanho: int) -> None:
+        tela = canvas._cena_para_tela(ponto)
+        meio = max(3, int(round(tamanho / 2)))
+        forma_norm = self._normalizar_forma(forma)
+        painter.setPen(QPen(QColor("#ffffff"), 1.2))
+        painter.setBrush(QColor(cor))
+        if forma_norm == "quadrado":
+            painter.drawRect(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+        elif forma_norm == "losango":
+            painter.drawPolygon(QPolygon([
+                QPoint(int(tela.x()), int(tela.y() - meio)),
+                QPoint(int(tela.x() + meio), int(tela.y())),
+                QPoint(int(tela.x()), int(tela.y() + meio)),
+                QPoint(int(tela.x() - meio), int(tela.y())),
+            ]))
+        else:
+            painter.drawEllipse(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+
+    @staticmethod
+    def _normalizar_forma(forma: str) -> str:
+        texto = str(forma or "").lower()
+        if "quadr" in texto:
+            return "quadrado"
+        if "los" in texto:
+            return "losango"
+        return "circulo"
 
     def _sincronizar_controles_apos_insercao(self, el: dict, ponto: QPointF) -> None:
         if el.get("molde"):

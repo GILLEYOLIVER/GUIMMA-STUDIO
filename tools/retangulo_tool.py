@@ -134,6 +134,18 @@ class Ferramenta(FerramentaBase):
             auxiliares.append(((float(atual[0]) + float(proximo[0])) / 2.0, (float(atual[1]) + float(proximo[1])) / 2.0))
         return auxiliares
 
+    def _cantos_horarios_retangulo(self, p1: QPointF, p3: QPointF) -> list[tuple[float, float]]:
+        min_x = min(float(p1.x()), float(p3.x()))
+        max_x = max(float(p1.x()), float(p3.x()))
+        min_y = min(float(p1.y()), float(p3.y()))
+        max_y = max(float(p1.y()), float(p3.y()))
+        return [
+            (min_x, min_y),
+            (max_x, min_y),
+            (max_x, max_y),
+            (min_x, max_y),
+        ]
+
     def _finalizar(self, canvas):
         if self._inicio is None or self._preview is None:
             return
@@ -165,12 +177,13 @@ class Ferramenta(FerramentaBase):
             altura = max(ys) - min(ys)
             margem = largura * 0.20
             y_fio = min(max(ys) - max(0.15, altura * 0.06), cy + max(0.25, altura * 0.08))
-            controle_cantos = [(float(x), float(y)) for x, y in payload["controle_cantos"]]
+            controle_cantos = self._cantos_horarios_retangulo(p1, p3)
             controle_auxiliares = self._pontos_auxiliares_entre_cantos(controle_cantos)
+            pontos = [*controle_cantos, controle_cantos[0]]
             canvas.cena.elementos.append(
                 {
                     "tipo": "polyline",
-                    "pontos": payload["pontos"],
+                    "pontos": pontos,
                     "cor": canvas._linha_cor,
                     "espessura": canvas._linha_espessura,
                     "estilo": canvas._linha_estilo,

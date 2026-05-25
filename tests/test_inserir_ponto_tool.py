@@ -85,6 +85,16 @@ class _FakeCanvas(QWidget):
         py = a.y() + (aby * t)
         return ((p.x() - px) ** 2 + (p.y() - py) ** 2) ** 0.5
 
+    def _indice_molde_em_ponto(self, pos):
+        tolerancia = 10.0 / max(self.zoom, 0.001)
+        for idx, el in enumerate(self.cena.elementos):
+            if not el.get("molde"):
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+            if any(self._distancia_ponto_segmento(a, b, pos) <= tolerancia for a, b in zip(pontos, pontos[1:])):
+                return idx
+        return None
+
     def _registrar_historico(self):
         self.historico += 1
 
@@ -106,6 +116,9 @@ class InserirPontoToolTestCase(unittest.TestCase):
         ferramenta = FerramentaInserirPonto()
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertEqual(canvas.historico, 0)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
         molde = canvas.cena.elementos[0]
         self.assertNotIn((5.0, 0.0), molde["controle_cantos"])
@@ -120,6 +133,8 @@ class InserirPontoToolTestCase(unittest.TestCase):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPonto()
 
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0), Qt.ShiftModifier)))
+        self.assertEqual(canvas.historico, 0)
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0), Qt.ShiftModifier)))
 
         molde = canvas.cena.elementos[0]
@@ -156,6 +171,8 @@ class InserirPontoToolTestCase(unittest.TestCase):
         )
         ferramenta = FerramentaInserirPonto()
 
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0), Qt.ShiftModifier)))
+        self.assertEqual(canvas.historico, 0)
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0), Qt.ShiftModifier)))
 
         molde = canvas.cena.elementos[0]

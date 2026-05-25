@@ -122,7 +122,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 1)
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 16)
 
     def test_contorno_oval_largo_usa_um_principal_e_varios_auxiliares(self):
         ferramenta = FerramentaExtrairMolde()
@@ -135,7 +135,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 1)
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 20)
 
     def test_contorno_curvo_com_uma_ponta_usa_a_ponta_como_principal(self):
         ferramenta = FerramentaExtrairMolde()
@@ -154,7 +154,76 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(molde["controle_cantos"], [(10.0, 0.0)])
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 16)
+
+    def test_auxiliares_de_contorno_curvo_fechado_usam_densidade_por_curvatura(self):
+        ferramenta = FerramentaExtrairMolde()
+        trecho = [
+            (0.0, 0.0),
+            (8.0, 0.0),
+            (10.0, 0.5),
+            (10.2, 1.5),
+            (10.0, 2.5),
+            (8.0, 3.0),
+            (0.0, 3.0),
+            (-0.5, 1.5),
+            (0.0, 0.0),
+        ]
+
+        auxiliares = ferramenta._auxiliares_para_contorno_curvo_fechado(trecho)
+
+        def dist(a, b):
+            return ((float(a[0]) - float(b[0])) ** 2 + (float(a[1]) - float(b[1])) ** 2) ** 0.5
+
+        segmentos = list(zip(trecho, trecho[1:]))
+        perimetro = sum(dist(a, b) for a, b in segmentos)
+
+        def posicao_no_trecho(ponto):
+            acumulado = 0.0
+            melhor_dist = float("inf")
+            melhor_pos = 0.0
+            for a, b in segmentos:
+                ax, ay = float(a[0]), float(a[1])
+                bx, by = float(b[0]), float(b[1])
+                px, py = float(ponto[0]), float(ponto[1])
+                dx = bx - ax
+                dy = by - ay
+                den = (dx * dx) + (dy * dy)
+                t = 0.0 if den <= 1e-12 else max(0.0, min(1.0, (((px - ax) * dx) + ((py - ay) * dy)) / den))
+                proj = (ax + (dx * t), ay + (dy * t))
+                distancia = dist(proj, ponto)
+                posicao = acumulado + (dist(a, b) * t)
+                if distancia < melhor_dist:
+                    melhor_dist = distancia
+                    melhor_pos = posicao
+                acumulado += dist(a, b)
+            return melhor_pos
+
+        posicoes = [posicao_no_trecho(pt) for pt in auxiliares]
+        intervalos = [posicoes[0], *[b - a for a, b in zip(posicoes, posicoes[1:])], perimetro - posicoes[-1]]
+        self.assertLess(min(intervalos), max(intervalos) * 0.8)
+
+    def test_contorno_curvo_com_duas_pontas_numera_esquerda_antes_da_direita(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (10.0, 0.0),
+            (7.0, 2.4),
+            (2.0, 3.5),
+            (-4.0, 3.1),
+            (-10.0, 0.0),
+            (-4.0, -3.1),
+            (2.0, -3.5),
+            (7.0, -2.4),
+        ]
+        molde = {"tipo": "molde", "pontos": [*pontos, pontos[0]]}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertEqual(molde["controle_cantos"], [(-10.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(
+            molde["pontos_controle_principais"],
+            [{"x": -10.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+        )
 
     def test_trecho_curvo_longo_recebe_mais_auxiliares_para_definicao(self):
         ferramenta = FerramentaExtrairMolde()
