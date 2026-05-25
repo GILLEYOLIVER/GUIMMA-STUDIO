@@ -5,6 +5,7 @@ from copy import deepcopy
 from importlib import import_module
 from math import acos, atan2, cos, degrees, log10, radians, sin, sqrt
 from time import monotonic
+from types import SimpleNamespace
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, \
     QPolygon, QWheelEvent
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
-from canvas.snap import SnapManager, SnapResult
+from canvas.snap import SnapManager, SnapResult, rotulo_tipo_snap, tipo_snap_movimento_fluido
 from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from ui.posicao_janelas import salvar_posicao
@@ -64,6 +65,7 @@ class VisualizacaoCanvas(QWidget):
         self._snap_resultado: SnapResult | None = None
         self._snap_candidatos: list[SnapResult] = []
         self._snap_indice = 0
+        self._ultimo_status_snap: str | None = None
         self._guia_fechamento: tuple[QPointF, QPointF] | None = None
         self._guias_alinhamento: list[tuple[QPointF, QPointF]] = []
         self._linha_cor = "#ffffff"
@@ -205,6 +207,7 @@ class VisualizacaoCanvas(QWidget):
             self._snap_resultado = None
             self._snap_candidatos = []
             self._snap_indice = 0
+            self._ultimo_status_snap = None
         self.snap_changed.emit(ativo)
         self.update()
 
@@ -1041,6 +1044,26 @@ class VisualizacaoCanvas(QWidget):
             return
         candidatos.append(SnapResult(ponto=QPointF(ponto), tipo=tipo, distancia=dist, elemento_idx=elemento_idx))
 
+    def _rotulo_snap_resultado(self, resultado: SnapResult | None = None) -> str:
+        resultado = self._snap_resultado if resultado is None else resultado
+        return rotulo_tipo_snap(getattr(resultado, "tipo", None))
+
+    def descricao_snap_atual(self) -> str:
+        if not self._snap_resultado:
+            return ""
+        return f"Snap: {self._rotulo_snap_resultado(self._snap_resultado)}"
+
+    def _atualizar_status_snap(self) -> None:
+        if not self._snap_resultado:
+            self._ultimo_status_snap = None
+            return
+        texto = self.descricao_snap_atual()
+        if not texto or texto == self._ultimo_status_snap:
+            return
+        self._ultimo_status_snap = texto
+        if getattr(self, "lbl_status", None) is not None:
+            self.lbl_status.setText(texto)
+
     def _prioridade_tipo_snap(self, tipo: str) -> int:
         ordem = {
             "nó": 0,
@@ -1102,6 +1125,7 @@ class VisualizacaoCanvas(QWidget):
             self._snap_resultado = None
             self._snap_candidatos = []
             self._snap_indice = 0
+            self._ultimo_status_snap = None
             return pos_cena
 
         tol_px = self._tolerancia_snap_px()
@@ -1197,9 +1221,80 @@ class VisualizacaoCanvas(QWidget):
         else:
             self._snap_resultado = None
             self._snap_indice = 0
+        self._atualizar_status_snap()
         if self._snap_resultado:
             return self._snap_resultado.ponto
         return pos_cena
+
+    def _ponto_com_snap_movimento(self, pos_tela: QPointF, ignorar_elementos=None, elementos_sombra=None) -> QPointF:
+        pos_cena = self._tela_para_cena(pos_tela)
+        if not self._snap_ativo:
+            self._snap_resultado = None
+            self._snap_candidatos = []
+            self._snap_indice = 0
+            self._ultimo_status_snap = None
+            return pos_cena
+
+        tol_px = self._tolerancia_snap_px()
+        self._ponto_com_snap(pos_tela)
+        ignorados: set[int] = set()
+        for idx in ignorar_elementos or []:
+            try:
+                ignorados.add(int(idx))
+            except Exception:
+                continue
+
+        candidatos = [
+            c for c in self._snap_candidatos
+            if tipo_snap_movimento_fluido(c.tipo)
+            and (c.elemento_idx is None or int(c.elemento_idx) not in ignorados)
+        ]
+        candidatos.extend(self._candidatos_snap_sombra(elementos_sombra, pos_cena, tol_px))
+        candidatos.sort(key=lambda c: (self._prioridade_tipo_snap(c.tipo), c.distancia))
+        self._snap_candidatos = candidatos
+        if candidatos:
+            self._snap_indice = min(self._snap_indice, len(candidatos) - 1)
+            self._snap_resultado = candidatos[self._snap_indice]
+            self._atualizar_status_snap()
+            return self._snap_resultado.ponto
+
+        self._snap_resultado = None
+        self._snap_indice = 0
+        self._ultimo_status_snap = None
+        return pos_cena
+
+    def _candidatos_snap_sombra(self, elementos_sombra, pos_cena: QPointF, tol_px: float) -> list[SnapResult]:
+        elementos = self._normalizar_elementos_sombra(elementos_sombra)
+        if not elementos:
+            return []
+        try:
+            candidatos = self._snap_manager.calcular_candidatos(
+                SimpleNamespace(elementos=elementos),
+                pos_cena,
+                self.zoom,
+                tolerancia_px=tol_px,
+            )
+        except Exception:
+            return []
+        return [
+            SnapResult(ponto=QPointF(c.ponto), tipo=c.tipo, distancia=c.distancia, elemento_idx=None)
+            for c in candidatos
+            if tipo_snap_movimento_fluido(c.tipo)
+        ]
+
+    @staticmethod
+    def _normalizar_elementos_sombra(elementos_sombra) -> list[dict]:
+        if not elementos_sombra:
+            return []
+        fonte = elementos_sombra.values() if isinstance(elementos_sombra, dict) else elementos_sombra
+        saida: list[dict] = []
+        for item in fonte:
+            el = item
+            if isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], dict):
+                el = item[1]
+            if isinstance(el, dict):
+                saida.append(el)
+        return saida
 
     def _tolerancia_snap_px(self) -> float:
         dpi = float(self.logicalDpiX()) if self.logicalDpiX() > 0 else 96.0
@@ -1919,6 +2014,27 @@ class VisualizacaoCanvas(QWidget):
         painter.drawEllipse(snap_tela, 6, 6)
         painter.drawLine(QPointF(snap_tela.x() - 8, snap_tela.y()), QPointF(snap_tela.x() + 8, snap_tela.y()))
         painter.drawLine(QPointF(snap_tela.x(), snap_tela.y() - 8), QPointF(snap_tela.x(), snap_tela.y() + 8))
+        rotulo = self._rotulo_snap_resultado(self._snap_resultado)
+        if rotulo:
+            fonte = painter.font()
+            fonte.setPointSize(max(8, fonte.pointSize()))
+            fonte.setBold(True)
+            painter.setFont(fonte)
+            metrics = QFontMetrics(fonte)
+            largura = metrics.horizontalAdvance(rotulo) + 12
+            altura = metrics.height() + 6
+            x = snap_tela.x() + 10
+            y = snap_tela.y() - altura - 10
+            if x + largura > self.width() - 4:
+                x = snap_tela.x() - largura - 10
+            if y < 4:
+                y = snap_tela.y() + 12
+            caixa = QRectF(float(x), float(y), float(largura), float(altura))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 185))
+            painter.drawRoundedRect(caixa, 4, 4)
+            painter.setPen(QPen(cor, 1.0))
+            painter.drawText(caixa.adjusted(6, 2, -6, -2), Qt.AlignCenter, rotulo)
 
     def _ferramenta_dobra_ativa(self) -> bool:
         ferramenta = str(getattr(self, "ferramenta_ativa", "") or "").strip().lower()
@@ -3141,6 +3257,7 @@ class VisualizacaoCanvas(QWidget):
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
             return
         fase = fase_inicial

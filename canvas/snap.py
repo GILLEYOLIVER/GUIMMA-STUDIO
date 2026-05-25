@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import hypot
+from unicodedata import normalize
 
 from PySide6.QtCore import QPointF
 
@@ -14,6 +15,45 @@ class SnapResult:
     tipo: str
     distancia: float
     elemento_idx: int | None = None
+
+
+def rotulo_tipo_snap(tipo: str | None) -> str:
+    chave = chave_tipo_snap(tipo)
+    rotulos = {
+        "no": "Nó",
+        "controle": "Nó",
+        "controle principal": "Nó principal",
+        "controle auxiliar": "Nó auxiliar",
+        "borda": "Borda",
+        "ponto medio": "Ponto mediano",
+        "centro": "Centro",
+        "intersecao": "Interseção",
+        "grade": "Grade",
+        "coord": "Coordenada",
+        "fio": "Fio",
+        "nome": "Nome",
+    }
+    if chave.startswith("angulo "):
+        return "Ângulo"
+    return rotulos.get(chave, str(tipo or "Snap").strip() or "Snap")
+
+
+def chave_tipo_snap(tipo: str | None) -> str:
+    texto = str(tipo or "").strip().lower()
+    texto = normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return " ".join(texto.split())
+
+
+def tipo_snap_movimento_fluido(tipo: str | None) -> bool:
+    """Tipos que podem travar enquanto o usuário arrasta algo."""
+    return chave_tipo_snap(tipo) in {
+        "no",
+        "controle",
+        "controle principal",
+        "controle auxiliar",
+        "borda",
+        "ponto medio",
+    }
 
 
 class SnapManager:

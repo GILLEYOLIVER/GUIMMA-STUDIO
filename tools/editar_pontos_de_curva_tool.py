@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from math import hypot
 from typing import Any
 
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.geometry.engine import point_segment_distance, sample_quadratic_bezier_through_point
+from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -191,6 +193,7 @@ class Ferramenta(FerramentaBase):
         self._quantidade_pontos = 5
         self._pontos_exibidos: list[QPointF] = []
         self._ultima_pos_arraste: QPointF | None = None
+        self._original_arraste: dict[int, dict] = {}
 
     def on_activate(self, canvas):
         # Não chama super().on_activate(canvas), porque ele cria o painel auxiliar intruso.
@@ -199,6 +202,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando = None
         self._pontos_exibidos = []
         self._ultima_pos_arraste = None
+        self._original_arraste = {}
         self._fechar_paineis_intrusos(canvas)
         self._mostrar_painel(canvas)
         self.set_status("Clique em uma linha ou curva para editar os pontos.")
@@ -214,6 +218,7 @@ class Ferramenta(FerramentaBase):
         self._arrastando = None
         self._pontos_exibidos = []
         self._ultima_pos_arraste = None
+        self._original_arraste = {}
         try:
             canvas.removeEventFilter(self)
             canvas.update()
@@ -263,6 +268,8 @@ class Ferramenta(FerramentaBase):
         if alca is not None:
             self._arrastando = alca
             self._ultima_pos_arraste = QPointF(pos)
+            idx_alca, _indice_alca = alca
+            self._original_arraste = self._capturar_original_arraste(canvas, idx_alca)
             self.set_status("Arraste o ponto vermelho para ajustar a curva.")
             event.accept()
             return True
@@ -311,7 +318,14 @@ class Ferramenta(FerramentaBase):
         self._gravar_pontos_no_elemento(el, pontos, curva=(len(pontos) > 2))
         self._idx_elemento = idx
         self._pontos_exibidos = self._pontos_controle_do_elemento(el)
-        self.set_status(f"Movendo ponto {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}")
+        snap_info = ""
+        if hasattr(canvas, "descricao_snap_atual"):
+            try:
+                descricao = canvas.descricao_snap_atual()
+                snap_info = f" | {descricao}" if descricao else ""
+            except Exception:
+                snap_info = ""
+        self.set_status(f"Movendo ponto {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}{snap_info}")
         canvas.update()
         event.accept()
         return True
@@ -321,6 +335,7 @@ class Ferramenta(FerramentaBase):
             return False
         self._arrastando = None
         self._ultima_pos_arraste = None
+        self._original_arraste = {}
         self._atualizar_texto_painel()
         self._registrar_historico_seguro(canvas)
         self._emitir_alteracao_segura(canvas)
@@ -343,6 +358,7 @@ class Ferramenta(FerramentaBase):
         if len(pontos_controle) < 2:
             return
 
+        desenhar_elementos_originais(canvas, painter, self._original_arraste)
         painter.save()
         try:
             painter.setRenderHint(QPainter.Antialiasing, True)
@@ -361,6 +377,11 @@ class Ferramenta(FerramentaBase):
                 painter.drawEllipse(pt, raio, raio)
         finally:
             painter.restore()
+
+    def _capturar_original_arraste(self, canvas, idx: int) -> dict[int, dict]:
+        if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
+            return {idx: deepcopy(canvas.cena.elementos[idx])}
+        return {}
 
     def eventFilter(self, obj, event):
         if obj is self._canvas and event.type() in (QEvent.Resize, QEvent.Show):
@@ -466,8 +487,22 @@ class Ferramenta(FerramentaBase):
             pass
 
     def _ponto_mouse_cena(self, canvas, event) -> QPointF:
+        if self._arrastando is not None and hasattr(canvas, "_ponto_com_snap_movimento"):
+            try:
+                return canvas._ponto_com_snap_movimento(
+                    event.position(),
+                    ignorar_elementos={self._arrastando[0]},
+                    elementos_sombra=self._original_arraste,
+                )
+            except Exception:
+                pass
+        if self._arrastando is not None and hasattr(canvas, "_ponto_com_snap"):
+            try:
+                return canvas._ponto_com_snap(event.position())
+            except Exception:
+                pass
         try:
-            # Não força snap para escolher/arrastar ponto: o clique deve bater na linha real.
+            # Para escolher, o clique deve bater na linha real.
             return canvas._tela_para_cena(event.position())
         except Exception:
             return canvas._ponto_com_snap(event.position())

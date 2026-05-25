@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from math import atan2, cos, degrees, isfinite, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from tools.movimento_utils import mover_elemento_por_delta
+from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 
 
@@ -25,6 +27,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_ponto_arrasto: QPointF | None = None
         self._movido = False
         self._hover_idx: int | None = None
+        self._originais_arraste: dict[int, dict] = {}
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -34,6 +37,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_ponto_arrasto = None
         self._movido = False
         self._hover_idx = None
+        self._originais_arraste = {}
         self.set_status("Clique para selecionar. Arraste para seleção por área. RMB cicla sobrepostos.")
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -70,14 +74,16 @@ class Ferramenta(FerramentaBase):
                     canvas._selecionados.add(selecionado)
                 self._arrastando_selecao = False
                 self._ultimo_ponto_arrasto = None
+                self._originais_arraste = {}
             else:
                 if selecionado not in canvas._selecionados:
                     canvas._selecionados = {selecionado}
                 # Inicia arraste já no primeiro clique pressionado sobre o elemento
                 # para evitar exigir um segundo clique para mover.
                 self._arrastando_selecao = True
-                self._ultimo_ponto_arrasto = pos_sem_snap
+                self._ultimo_ponto_arrasto = pos
                 self._movido = False
+                self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
             self._inicio_caixa = None
             self._fim_caixa = None
             self.set_status(f"{len(canvas._selecionados)} elemento(s) selecionado(s).")
@@ -96,23 +102,25 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos_sem_snap = canvas._tela_para_cena(event.position())
-        pos = canvas._ponto_com_snap(event.position())
-        self._hover_idx = (canvas._indices_elementos_em_ponto(pos) or [None])[0]
         if self._arrastando_selecao and self._ultimo_ponto_arrasto is not None:
-            dx = pos_sem_snap.x() - self._ultimo_ponto_arrasto.x()
-            dy = pos_sem_snap.y() - self._ultimo_ponto_arrasto.y()
+            pos = self._ponto_movimento(canvas, event)
+            self._hover_idx = None
+            dx = pos.x() - self._ultimo_ponto_arrasto.x()
+            dy = pos.y() - self._ultimo_ponto_arrasto.y()
             if abs(dx) > 1e-9 or abs(dy) > 1e-9:
                 self._mover_selecionados(canvas, dx, dy)
-                self._ultimo_ponto_arrasto = pos_sem_snap
+                self._ultimo_ponto_arrasto = pos
                 self._movido = True
-            snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
+            snap_info = f" | {canvas.descricao_snap_atual()}" if hasattr(canvas, "descricao_snap_atual") and canvas.descricao_snap_atual() else ""
             self.set_status(f"Movendo seleção ({len(canvas._selecionados)} elemento(s)){snap_info}")
             canvas.update()
             event.accept()
             return True
+        pos = canvas._ponto_com_snap(event.position())
+        self._hover_idx = (canvas._indices_elementos_em_ponto(pos) or [None])[0]
         if self._inicio_caixa is None:
             if canvas.lbl_status:
-                snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
+                snap_info = f" | {canvas.descricao_snap_atual()}" if hasattr(canvas, "descricao_snap_atual") and canvas.descricao_snap_atual() else ""
                 canvas.lbl_status.setText(f"Selecionar | X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
                 self.set_status(f"Cursor X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
             canvas.update()
@@ -122,10 +130,21 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def _ponto_movimento(self, canvas, event) -> QPointF:
+        ignorar = self._indices_para_mover(canvas)
+        if hasattr(canvas, "_ponto_com_snap_movimento"):
+            return canvas._ponto_com_snap_movimento(
+                event.position(),
+                ignorar_elementos=ignorar,
+                elementos_sombra=self._originais_arraste,
+            )
+        return canvas._ponto_com_snap(event.position())
+
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() == Qt.LeftButton and self._arrastando_selecao:
             self._arrastando_selecao = False
             self._ultimo_ponto_arrasto = None
+            self._originais_arraste = {}
             if self._movido:
                 canvas._registrar_historico()
                 self.set_status(f"Movimento concluído ({len(canvas._selecionados)} elemento(s)).")
@@ -203,6 +222,8 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_paint_overlay(self, canvas, painter):
+        if self._arrastando_selecao:
+            desenhar_elementos_originais(canvas, painter, self._originais_arraste)
         self._desenhar_realce_elementos(canvas, painter)
         if self._inicio_caixa is None or self._fim_caixa is None:
             return
@@ -264,6 +285,13 @@ class Ferramenta(FerramentaBase):
                     if el.get("molde"):
                         indices.update(canvas._indices_costuras_vinculadas(idx))
         return sorted(indices)
+
+    def _capturar_originais(self, canvas, indices: list[int]) -> dict[int, dict]:
+        originais: dict[int, dict] = {}
+        for idx in indices:
+            if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
+                originais[idx] = deepcopy(canvas.cena.elementos[idx])
+        return originais
 
     def _girar_molde_para_fio(self, el: dict, pivo: QPointF, angulo: float) -> None:
         a = radians(angulo)

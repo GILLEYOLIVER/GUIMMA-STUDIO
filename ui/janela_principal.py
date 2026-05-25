@@ -6072,6 +6072,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.btn_snap.blockSignals(True)
             self.btn_snap.setChecked(area.canvas.snap_ativo())
             self.btn_snap.blockSignals(False)
+            self._atualizar_botao_snap_visual(area.canvas.snap_ativo())
             self.action_coordenadas.blockSignals(True)
             self.action_coordenadas.setChecked(area.canvas.painel_coordenadas_visivel())
             self.action_coordenadas.blockSignals(False)
@@ -6562,6 +6563,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._snap_ativo_global = bool(ativo)
         self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
         self._salvar_preferencias_app()
+        self._atualizar_botao_snap_visual(ativo)
         area = self._area_documento_atual()
         if not area:
             self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
@@ -6579,7 +6581,50 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._snap_ativo_global = bool(ativo)
         self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
         self._salvar_preferencias_app()
+        self._atualizar_botao_snap_visual(ativo)
         self.lbl_status.setText("Snap ativo" if ativo else "Snap desativado")
+
+    def _atualizar_botao_snap_visual(self, ativo: bool) -> None:
+        btn = getattr(self, "btn_snap", None)
+        if btn is None:
+            return
+        icone_snap = ICONS_DIR / "snap.svg"
+        if icone_snap.exists():
+            btn.setIcon(self._icone_snap_estado(bool(ativo)))
+            btn.setText("")
+        else:
+            btn.setText("S" if ativo else "X")
+        btn.setToolTip("Snap ativo" if ativo else "Snap desativado")
+
+    def _icone_snap_estado(self, ativo: bool) -> QIcon:
+        tamanho = QSize(22, 22)
+        icone_snap = ICONS_DIR / "snap.svg"
+        if icone_snap.exists():
+            pix = QIcon(str(icone_snap)).pixmap(tamanho)
+        else:
+            pix = QPixmap(tamanho)
+            pix.fill(Qt.transparent)
+        if pix.isNull():
+            pix = QPixmap(tamanho)
+            pix.fill(Qt.transparent)
+        if not icone_snap.exists():
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor("#2f5f7d"), 2.2))
+            painter.drawArc(5, 4, 12, 14, 35 * 16, 290 * 16)
+            painter.drawLine(5, 11, 5, 16)
+            painter.drawLine(17, 11, 17, 16)
+            painter.end()
+        if not ativo:
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            pen = QPen(QColor("#e02020"), 2.8)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(5, 5, 17, 17)
+            painter.drawLine(17, 5, 5, 17)
+            painter.end()
+        return QIcon(pix)
 
     def _alternar_coordenadas_canvas_atual(self, visivel: bool):
         area = self._area_documento_atual()
@@ -6669,8 +6714,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_snap.setToolTip("Ativar/Desativar snap (ímã)")
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
-            self.btn_snap.setIcon(QIcon(str(icone_snap)))
+            self.btn_snap.setIcon(self._icone_snap_estado(self._snap_ativo_global))
             self.btn_snap.setText("")
+        elif not self._snap_ativo_global:
+            self.btn_snap.setText("X")
         self.btn_snap.toggled.connect(self._alternar_snap_canvas_atual)
         self.btn_snap.setStyleSheet(estilo_botao_icone)
         row.addWidget(self.btn_snap)

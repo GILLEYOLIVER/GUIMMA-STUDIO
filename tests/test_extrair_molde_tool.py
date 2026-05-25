@@ -75,7 +75,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_enriquecer_molde_reto_insere_quatro_auxiliares_por_trecho(self):
+    def test_enriquecer_molde_reto_insere_um_auxiliar_por_trecho(self):
         ferramenta = FerramentaExtrairMolde()
         molde = {
             "tipo": "molde",
@@ -86,11 +86,11 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         auxiliares = molde["controle_auxiliares"]
-        self.assertEqual(len(auxiliares), 16)
-        self.assertIn((2.0, 0.0), auxiliares)
-        self.assertIn((4.0, 0.0), auxiliares)
-        self.assertIn((6.0, 0.0), auxiliares)
-        self.assertIn((8.0, 0.0), auxiliares)
+        self.assertEqual(len(auxiliares), 4)
+        self.assertIn((5.0, 0.0), auxiliares)
+        self.assertIn((10.0, 2.0), auxiliares)
+        self.assertIn((5.0, 4.0), auxiliares)
+        self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
 
     def test_auxiliares_detectados_na_curva_preservam_trecho_sem_ponto_extra(self):
@@ -105,11 +105,11 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
 
         auxiliares = ferramenta._calcular_auxiliares_no_contorno(base, [0, 2, 3, 4])
 
-        self.assertIn((2.0, 0.0), auxiliares)
-        self.assertIn((4.0, 0.0), auxiliares)
-        self.assertIn((6.0, 0.0), auxiliares)
-        self.assertIn((8.0, 0.0), auxiliares)
-        self.assertEqual(len(auxiliares), 16)
+        self.assertIn((5.0, 0.0), auxiliares)
+        self.assertIn((10.0, 2.0), auxiliares)
+        self.assertIn((5.0, 4.0), auxiliares)
+        self.assertIn((0.0, 2.0), auxiliares)
+        self.assertEqual(len(auxiliares), 4)
 
     def test_contorno_quase_circular_usa_um_principal_e_varios_auxiliares(self):
         ferramenta = FerramentaExtrairMolde()
@@ -122,7 +122,8 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 1)
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
+        self.assertLessEqual(len(molde["controle_auxiliares"]), 24)
 
     def test_contorno_oval_largo_usa_um_principal_e_varios_auxiliares(self):
         ferramenta = FerramentaExtrairMolde()
@@ -135,7 +136,8 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 1)
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
+        self.assertLessEqual(len(molde["controle_auxiliares"]), 24)
 
     def test_contorno_curvo_com_uma_ponta_usa_a_ponta_como_principal(self):
         ferramenta = FerramentaExtrairMolde()
@@ -154,7 +156,8 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(molde["controle_cantos"], [(10.0, 0.0)])
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
+        self.assertLessEqual(len(molde["controle_auxiliares"]), 24)
 
     def test_trecho_curvo_longo_recebe_mais_auxiliares_para_definicao(self):
         ferramenta = FerramentaExtrairMolde()
@@ -162,9 +165,10 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
 
         auxiliares = ferramenta._auxiliares_para_trecho_curvo(trecho)
 
-        self.assertGreaterEqual(len(auxiliares), 4)
+        self.assertGreaterEqual(len(auxiliares), 2)
+        self.assertLessEqual(len(auxiliares), 6)
 
-    def test_contorno_com_muitas_quinas_cria_principal_por_quina_e_quatro_auxiliares_por_trecho(self):
+    def test_contorno_com_muitas_quinas_cria_principal_por_quina_e_um_auxiliar_por_trecho(self):
         ferramenta = FerramentaExtrairMolde()
         pontos = [
             (0.0, 0.0),
@@ -179,7 +183,27 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertEqual(len(molde["controle_cantos"]), 6)
-        self.assertEqual(len(molde["controle_auxiliares"]), 24)
+        self.assertEqual(len(molde["controle_auxiliares"]), 6)
+
+    def test_encontro_de_linhas_no_contorno_vira_ponto_principal(self):
+        ferramenta = FerramentaExtrairMolde()
+        canvas = SimpleNamespace(
+            cena=SimpleNamespace(
+                elementos=[
+                    {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]},
+                    {"tipo": "polyline", "pontos": [(10.0, 0.0), (10.0, 8.0)]},
+                    {"tipo": "polyline", "pontos": [(10.0, 8.0), (0.0, 8.0), (0.0, 0.0)]},
+                ]
+            )
+        )
+        contorno = [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)]
+
+        encontros = ferramenta._coletar_interseccoes_no_contorno(canvas, contorno)
+
+        self.assertIn((10.0, 0.0), encontros)
+        molde = {"tipo": "molde", "pontos": contorno, "pontos_interseccao_referencia": encontros}
+        ferramenta._enriquecer_metadados_molde(molde)
+        self.assertIn((10.0, 0.0), molde["controle_cantos"])
 
     def test_arraste_do_molde_extraido_nao_usa_snap_para_evitar_tremor(self):
         canvas = _FakeCanvasExtracao()
