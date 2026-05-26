@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <line x1="20" y1="60" x2="66" y2="26" stroke="#4a4a4a" stroke-width="3.2" stroke-linecap="round" /><line x1="30" y1="70" x2="76" y2="36" stroke="#69c7c3" stroke-width="3" stroke-linecap="round" />
-    </svg>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Transformed by: SVG Repo Mixer Tools -->
+<svg width="256px" height="256px" viewBox="0 0 117.00 117.00" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000">
+<g id="SVGRepo_bgCarrier" stroke-width="0"/>
+<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round" stroke="#CCCCCC" stroke-width="4.914"> <title/> <desc/> <defs/> <g fill="none" fill-rule="evenodd" id="Page-1" stroke-width="4.329"> <g fill-rule="nonzero" id="screen"> <path d="M9.58416031,52.8 L107.51584,52.8 C112.611832,52.8 116.6,51 116.6,48.7 L116.6,4.5 C116.6,2.2 112.611832,0.4 107.51584,0.4 L9.58416031,0.4 C4.48816794,0.4 0.5,2.2 0.5,4.5 L0.5,48.7 C0.5,51 4.48816794,52.8 9.58416031,52.8 Z M18.4467557,8.6 L98.2101145,8.6 L98.2101145,44.6 L18.4467557,44.6 L18.4467557,8.6 Z" fill="#170042" id="Shape"/> <path d="M4.6,76.4 C2.3,76.4 0.5,78.2 0.5,80.5 C0.5,82.8 2.3,84.6 4.6,84.6 L112.5,84.7 C114.8,84.7 116.6,82.9 116.6,80.6 C116.6,78.3 114.8,76.5 112.5,76.5 L4.6,76.4 C4.6,76.4 4.6,76.4 4.6,76.4 Z" fill="#7a13aa" id="Shape"/> <path d="M4.5,116.4 L112.4,116.5 C114.7,116.5 116.5,114.7 116.5,112.4 C116.5,110.1 114.7,108.3 112.4,108.3 L4.5,108.2 C2.2,108.2 0.4,110 0.4,112.3 C0.4,114.6 2.3,116.4 4.5,116.4 Z" fill="#7a13aa" id="Shape"/> </g> </g> </g>
+<g id="SVGRepo_iconCarrier"> <title/> <desc/> <defs/> <g fill="none" fill-rule="evenodd" id="Page-1" stroke-width="4.329"> <g fill-rule="nonzero" id="screen"> <path d="M9.58416031,52.8 L107.51584,52.8 C112.611832,52.8 116.6,51 116.6,48.7 L116.6,4.5 C116.6,2.2 112.611832,0.4 107.51584,0.4 L9.58416031,0.4 C4.48816794,0.4 0.5,2.2 0.5,4.5 L0.5,48.7 C0.5,51 4.48816794,52.8 9.58416031,52.8 Z M18.4467557,8.6 L98.2101145,8.6 L98.2101145,44.6 L18.4467557,44.6 L18.4467557,8.6 Z" fill="#170042" id="Shape"/> <path d="M4.6,76.4 C2.3,76.4 0.5,78.2 0.5,80.5 C0.5,82.8 2.3,84.6 4.6,84.6 L112.5,84.7 C114.8,84.7 116.6,82.9 116.6,80.6 C116.6,78.3 114.8,76.5 112.5,76.5 L4.6,76.4 C4.6,76.4 4.6,76.4 4.6,76.4 Z" fill="#7a13aa" id="Shape"/> <path d="M4.5,116.4 L112.4,116.5 C114.7,116.5 116.5,114.7 116.5,112.4 C116.5,110.1 114.7,108.3 112.4,108.3 L4.5,108.2 C2.2,108.2 0.4,110 0.4,112.3 C0.4,114.6 2.3,116.4 4.5,116.4 Z" fill="#7a13aa" id="Shape"/> </g> </g> </g>
+</svg>
