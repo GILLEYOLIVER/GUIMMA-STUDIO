@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <path d="M50 22 C30 22,22 36,26 48 C30 62,50 64,58 54 C68 42,64 26,46 28" stroke="#4a4a4a" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" /><path d="M18 62 C28 22, 52 22, 62 62" stroke="#4a4a4a" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" /><circle cx="18" cy="62" r="3.5" stroke="#69c7c3" stroke-width="0" fill="#69c7c3" /><circle cx="62" cy="62" r="3.5" stroke="#69c7c3" stroke-width="0" fill="#69c7c3" />
-    </svg>
+  <path d="M7 76 C18 14, 62 8, 86 54" stroke="#4a4a4a" stroke-width="5.2" stroke-linecap="round" fill="none"/>
+  <path d="M49 75 C80 76, 91 48, 74 31 C57 14, 25 25, 25 51 C25 72, 51 80, 62 64 C72 49, 56 38, 45 48" stroke="#4a4a4a" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M7 76 L22 18 M86 54 L84 10" stroke="#8a8a8a" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+  <circle cx="7" cy="76" r="6" fill="#69c7c3"/>
+  <circle cx="86" cy="54" r="6" fill="#69c7c3"/>
+  <circle cx="22" cy="18" r="4.8" fill="#8a8a8a"/>
+  <circle cx="84" cy="10" r="4.8" fill="#8a8a8a"/>
+  <circle cx="45" cy="48" r="4.8" fill="#ffffff" stroke="#4a4a4a" stroke-width="2.6"/>
+</svg>

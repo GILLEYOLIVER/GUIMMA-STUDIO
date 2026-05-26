@@ -921,7 +921,7 @@
       "title": "Estender até elemento",
       "module": "tools/construcao.py",
       "class": "FerramentaEstenderAteElemento",
-      "icon": "reta.svg"
+      "icon": "estender_até_elemento.svg"
     },
     "estender_duas_retas": {
       "title": "Estender duas retas",

@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <circle cx="48" cy="48" r="24" stroke="#4a4a4a" stroke-width="3.2" fill="none" /><line x1="48" y1="48" x2="70" y2="36" stroke="#69c7c3" stroke-width="3.2" stroke-linecap="round" /><circle cx="48" cy="48" r="3" stroke="#96a0a8" stroke-width="0" fill="#96a0a8" />
-    </svg>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Transformed by: SVG Repo Mixer Tools -->
+<svg fill="#2c0094" height="800px" width="800px" version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512.002 512.002" xml:space="preserve" stroke="#2c0094">
+<g id="SVGRepo_bgCarrier" stroke-width="0"/>
+<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="SVGRepo_iconCarrier"> <g> <g> <path d="M511.169,235.133c-9.882-123.989-110.319-224.427-234.3-234.3C119.327-11.72-11.72,119.327,0.833,276.869 c9.882,123.981,110.319,224.418,234.3,234.3C392.675,523.722,523.722,392.675,511.169,235.133z M494.623,268.131 c-5.897,118.69-100.71,216.602-219.17,226.022C128.423,505.853,6.141,383.57,17.84,236.541 c9.421-118.46,107.332-213.274,226.022-219.179C311.412,14,373.296,38.875,418.727,81.191L278.064,221.863h-47.667 c-4.71,0-8.533,3.823-8.533,8.533v51.2c0,4.71,3.823,8.533,8.533,8.533h51.2c4.71,0,8.533-3.823,8.533-8.533V233.93 L430.794,93.266C473.11,138.698,497.985,200.581,494.623,268.131z"/> </g> </g> </g>
+</svg>

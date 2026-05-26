@@ -1,62 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1280" width="1280" height="1280" role="img" aria-label="Camiseta azul com setas pretas de rotação">
-  <defs>
-    <linearGradient id="azulEsquerda" x1="0" y1="0" x2="640" y2="1280" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#BDE5FF"/>
-      <stop offset="1" stop-color="#8FCEFB"/>
-    </linearGradient>
-    <linearGradient id="azulDireita" x1="640" y1="0" x2="1280" y2="1280" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7DCAFA"/>
-      <stop offset="1" stop-color="#5CB8F1"/>
-    </linearGradient>
-    <filter id="sombraSuave" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.10"/>
-    </filter>
-    <path id="camiseta" d="
-      M 186 138
-      H 467
-      C 496 138 518 160 518 188
-      C 518 248 565 298 624 298
-      C 684 298 731 248 731 188
-      C 731 160 754 138 782 138
-      H 1055
-      C 1092 138 1114 146 1137 169
-      L 1163 195
-      C 1178 211 1186 231 1186 253
-      V 422
-      C 1186 475 1143 518 1089 518
-      H 984
-      V 981
-      C 984 1053 925 1112 853 1112
-      H 394
-      C 322 1112 263 1053 263 981
-      V 518
-      H 159
-      C 106 518 63 475 63 422
-      V 253
-      C 63 231 72 211 88 195
-      L 115 169
-      C 137 148 157 138 186 138
-      Z"/>
-    <clipPath id="recorteCamiseta">
-      <use href="#camiseta"/>
-    </clipPath>
-  </defs>
-
-  <g filter="url(#sombraSuave)">
-    <g clip-path="url(#recorteCamiseta)">
-      <rect x="0" y="0" width="624" height="1280" fill="url(#azulEsquerda)"/>
-      <rect x="624" y="0" width="656" height="1280" fill="url(#azulDireita)"/>
-      <rect x="618" y="136" width="12" height="978" fill="#58AFE9" opacity="0.13"/>
-    </g>
-  </g>
-
-  <g fill="none" stroke="#000000" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Seta superior -->
-    <path d="M 434 586 V 515 C 434 455 482 409 523 409 H 733 C 778 409 814 446 814 491 V 582"/>
-    <path d="M 768 535 L 814 582 L 861 535"/>
-
-    <!-- Seta inferior -->
-    <path d="M 814 687 V 763 C 814 817 773 863 721 863 H 520 C 471 863 433 823 433 775 V 696"/>
-    <path d="M 388 735 L 433 690 L 479 735"/>
-  </g>
-</svg>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Transformed by: SVG Repo Mixer Tools -->
+<svg fill="#5000b3" width="800px" height="800px" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" stroke="#5000b3">
+<g id="SVGRepo_bgCarrier" stroke-width="0"/>
+<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="SVGRepo_iconCarrier">
+<path d="M493.556 -.063c-265.602 0 -482.306 209.741 -493.5 472.594 -.765 18.027 13 19.031 13 19.031l83.813 0c16.291 0 19.146 -9.297 19.531 -17.625 9.228 -199.317 175.315 -357.688 377.156 -357.688 107.739 0 204.915 45.163 273.719 117.563l-58.813 56.875c-10.23 12.319 -10.043 27.275 5.063 31.5l247.125 49.75c21.15 5.281 46.288 -10.747 37.656 -43.656l-58.375 -227.563c-1.482 -8.615 -15.924 -22.024 -29.406 -12.406l-64.094 60.031c-89.659 -91.567 -214.627 -148.406 -352.875 -148.406zm409.625 508.5c-16.291 0 -19.146 9.297 -19.531 17.625 -9.228 199.317 -175.315 357.688 -377.156 357.688 -107.739 0 -204.915 -45.132 -273.719 -117.531l58.813 -56.906c10.229 -12.319 10.043 -27.275 -5.063 -31.5l-247.125 -49.75c-21.15 -5.281 -46.288 10.747 -37.656 43.656l58.375 227.563c1.482 8.615 15.924 22.024 29.406 12.406l64.094 -60.031c89.659 91.567 214.627 148.406 352.875 148.406 265.602 0 482.306 -209.741 493.5 -472.594 .765 -18.027 -13 -19.031 -13 -19.031l-83.813 0z"/>
+</g>
+</svg>

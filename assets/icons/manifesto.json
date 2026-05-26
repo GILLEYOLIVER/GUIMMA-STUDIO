@@ -72,8 +72,8 @@
     "rotulo": "estender reta"
   },
   {
-    "arquivo": "estender_ate_elemento.svg",
-    "rotulo": "estender ate elemento"
+    "arquivo": "estender_até_elemento.svg",
+    "rotulo": "estender até elemento"
   },
   {
     "arquivo": "estender_duas_retas.svg",
@@ -230,6 +230,10 @@
   {
     "arquivo": "remover_pique.svg",
     "rotulo": "remover pique"
+  },
+  {
+    "arquivo": "mover_pique.svg",
+    "rotulo": "mover pique"
   },
   {
     "arquivo": "pique_texto.svg",

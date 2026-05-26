@@ -1822,6 +1822,8 @@ class VisualizacaoCanvas(QWidget):
                 pontos = self._pontos_render_elemento(elemento)
                 if len(pontos) < 2:
                     continue
+                if is_molde:
+                    self._desenhar_preenchimento_molde(painter, elemento, pontos)
                 if elemento.get("pontos_tracado_real"):
                     self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
                                              estilo=estilo,
@@ -1904,6 +1906,32 @@ class VisualizacaoCanvas(QWidget):
             painter.restore()
         except Exception:
             return
+
+    def _desenhar_preenchimento_molde(self, painter: QPainter, elemento: dict, pontos: list[QPointF]):
+        if not bool(elemento.get("visual_preencher", False)):
+            return
+        if len(pontos) < 3:
+            return
+        base = pontos[:-1] if pontos[0] == pontos[-1] else pontos
+        if len(base) < 3:
+            return
+        cor = self._cor_preenchimento_molde(elemento)
+        path = QPainterPath(self._cena_para_tela(base[0]))
+        for pt in base[1:]:
+            path.lineTo(self._cena_para_tela(pt))
+        path.closeSubpath()
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(cor)
+        painter.drawPath(path)
+        painter.restore()
+
+    @staticmethod
+    def _cor_preenchimento_molde(elemento: dict) -> QColor:
+        cor = QColor(str(elemento.get("cor") or "#ffffff"))
+        if not cor.isValid():
+            cor = QColor("#ffffff")
+        return cor
 
     def _desenhar_visualizacao_instantanea(self, painter: QPainter):
         elementos = getattr(self, "_visualizacao_instantanea_elementos", []) or []
@@ -2230,7 +2258,8 @@ class VisualizacaoCanvas(QWidget):
                     self.DISTANCIA_NUMERO_PADRAO_CM,
                 )
                 afastamento = max(2.0, float(distancia_num_cm) * max(float(getattr(self, "zoom", 1.0)), 0.01))
-                for i, pt in enumerate(cantos, start=1):
+                cantos_numeracao = self._cantos_para_numeracao_horaria_tela(cantos)
+                for i, pt in enumerate(cantos_numeracao, start=1):
                     pt_tela = self._cena_para_tela(pt)
                     painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
                     dx = pt.x() - cx
@@ -2257,6 +2286,28 @@ class VisualizacaoCanvas(QWidget):
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    @staticmethod
+    def _cantos_para_numeracao_horaria_tela(cantos: list[QPointF]) -> list[QPointF]:
+        if len(cantos) <= 1:
+            return list(cantos)
+        if len(cantos) == 2:
+            primeiro, segundo = cantos
+            dx = abs(primeiro.x() - segundo.x())
+            dy = abs(primeiro.y() - segundo.y())
+            if dx >= dy:
+                ordenados = sorted(cantos, key=lambda p: (p.x(), p.y()))
+            else:
+                ordenados = sorted(cantos, key=lambda p: (p.y(), p.x()))
+            return [QPointF(p) for p in ordenados]
+        area = 0.0
+        total = len(cantos)
+        for i, atual in enumerate(cantos):
+            proximo = cantos[(i + 1) % total]
+            area += (atual.x() * proximo.y()) - (proximo.x() * atual.y())
+        if area < 0.0:
+            return [QPointF(cantos[0]), *[QPointF(p) for p in reversed(cantos[1:])]]
+        return [QPointF(p) for p in cantos]
 
     def _pontos_serializados_para_qpoint(self, origem) -> list[QPointF]:
         pontos: list[QPointF] = []

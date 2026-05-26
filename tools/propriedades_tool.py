@@ -486,9 +486,12 @@ class PreviewMoldeWidget(QWidget):
             path.closeSubpath()
 
         if bool(self._molde.get("visual_preencher", False)):
+            cor_preenchimento = QColor(str(self._molde.get("cor") or "#ffffff"))
+            if not cor_preenchimento.isValid():
+                cor_preenchimento = QColor("#ffffff")
             painter.save()
             painter.setPen(Qt.NoPen)
-            painter.setBrush(cor_desenho)
+            painter.setBrush(cor_preenchimento)
             painter.drawPath(path)
             painter.restore()
             painter.setPen(pen)
