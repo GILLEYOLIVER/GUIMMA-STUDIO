@@ -513,7 +513,7 @@ class Ferramenta(FerramentaBase):
         if len(pts) == 2:
             return [QPointF(pts[0]), QPointF(pts[1])]
         if fechado:
-            return self._gerar_spline_fechada_com_canto(canvas, pts)
+            return self._gerar_spline_fechada_suave(canvas, pts)
 
         resultado: List[QPointF] = []
         total = len(pts)
@@ -531,17 +531,28 @@ class Ferramenta(FerramentaBase):
 
         return self._remover_repetidos(resultado, tolerancia=0.001)
 
-    def _gerar_spline_fechada_com_canto(self, canvas, pts: List[QPointF]) -> List[QPointF]:
-        resultado = self._gerar_spline(canvas, pts, fechado=False)
+    def _gerar_spline_fechada_suave(self, canvas, pts: List[QPointF]) -> List[QPointF]:
+        pts = self._remover_repetidos([QPointF(p) for p in pts], tolerancia=0.001)
+        if len(pts) >= 2 and self._dist2(pts[0], pts[-1]) <= 0.001 * 0.001:
+            pts.pop()
         if len(pts) < 3:
-            return resultado
-        ultimo = QPointF(pts[-1])
-        primeiro = QPointF(pts[0])
-        amostras = self._amostras_por_trecho(canvas, ultimo, primeiro)
-        for s in range(1, amostras + 1):
-            resultado.append(self._catmull_rom_centripeta(ultimo, ultimo, primeiro, primeiro, s / float(amostras)))
+            return self._gerar_spline(canvas, pts, fechado=False)
+
+        resultado: List[QPointF] = []
+        total = len(pts)
+        for i in range(total):
+            p0 = pts[(i - 1) % total]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total]
+            if i == 0:
+                resultado.append(QPointF(p1))
+            amostras = self._amostras_por_trecho(canvas, p1, p2)
+            for s in range(1, amostras + 1):
+                resultado.append(self._catmull_rom_centripeta(p0, p1, p2, p3, s / float(amostras)))
+
         if resultado:
-            resultado[-1] = QPointF(primeiro)
+            resultado[-1] = QPointF(resultado[0])
         return self._remover_repetidos(resultado, tolerancia=0.001)
 
     # -------------------------------------------------------------------------

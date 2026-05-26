@@ -428,6 +428,18 @@ class Ferramenta(FerramentaBase):
             for seg_idx, (a_idx, b_idx) in enumerate(segmentos_antigos)
             if a_idx == controle_idx or b_idx == controle_idx
         }
+        pontos_qt = [p for p in (self._ponto_qt(item) for item in pontos) if p is not None]
+        trecho_curvo_afetado = False
+        for seg_idx in segmentos_afetados:
+            if not (0 <= seg_idx < len(segmentos_antigos)):
+                continue
+            a_idx, b_idx = segmentos_antigos[seg_idx]
+            existentes = [QPointF(pt) for _aux_idx, _t, pt in por_segmento.get(seg_idx, [])]
+            trecho = self._helper._trecho_contorno_molde(canvas, pontos_qt, cantos, a_idx, b_idx, fechado)
+            if self._helper._segmento_molde_eh_curvo(cantos[a_idx], cantos[b_idx], trecho, existentes):
+                trecho_curvo_afetado = True
+                break
+
         auxiliares_preservados: list[QPointF] = []
         for seg_idx, itens in por_segmento.items():
             if seg_idx in segmentos_afetados:
@@ -438,7 +450,26 @@ class Ferramenta(FerramentaBase):
         if len(novos_cantos) >= 2:
             anterior = cantos[(controle_idx - 1) % len(cantos)]
             proximo = cantos[(controle_idx + 1) % len(cantos)]
-            auxiliares_preservados.append(self._ponto_medio(anterior, proximo))
+            if trecho_curvo_afetado:
+                trecho_unido = self._helper._trecho_contorno_molde(
+                    canvas,
+                    pontos_qt,
+                    cantos,
+                    (controle_idx - 1) % len(cantos),
+                    (controle_idx + 1) % len(cantos),
+                    fechado,
+                )
+                for aux in self._helper._amostrar_auxiliares_minimos_trecho(
+                    trecho_unido,
+                    anterior,
+                    proximo,
+                    quantidade=6,
+                ):
+                    if self._dist_local(aux, anterior) <= 1e-6 or self._dist_local(aux, proximo) <= 1e-6:
+                        continue
+                    auxiliares_preservados.append(aux)
+            else:
+                auxiliares_preservados.append(self._ponto_medio(anterior, proximo))
 
         auxiliares_final = self._garantir_um_auxiliar_em_cada_reta(canvas, el, novos_cantos, auxiliares_preservados)
         el["controle_cantos"] = [(float(p.x()), float(p.y())) for p in novos_cantos]

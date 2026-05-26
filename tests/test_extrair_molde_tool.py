@@ -205,6 +205,77 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
         self.assertIn((10.0, 0.0), molde["controle_cantos"])
 
+    def test_emenda_colinear_de_trechos_distintos_vira_principal_sem_vertices_internos(self):
+        ferramenta = FerramentaExtrairMolde()
+        canvas = SimpleNamespace(
+            cena=SimpleNamespace(
+                elementos=[
+                    {"tipo": "polyline", "pontos": [(0.0, 0.0), (5.0, 0.0)]},
+                    {"tipo": "polyline", "pontos": [(5.0, 0.0), (10.0, 0.0)]},
+                    {"tipo": "polyline", "pontos": [(10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]},
+                ]
+            )
+        )
+        contorno = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]
+
+        encontros = ferramenta._coletar_interseccoes_no_contorno(canvas, contorno)
+        molde = {"tipo": "molde", "pontos": contorno, "pontos_interseccao_referencia": encontros}
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertIn((5.0, 0.0), encontros)
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])
+        self.assertIn((2.5, 0.0), molde["controle_auxiliares"])
+
+    def test_controles_da_curva_de_origem_nao_viram_principais_na_extracao(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [
+            (0.0, 0.0),
+            (4.0, -2.0),
+            (8.0, 0.0),
+            (10.0, 5.0),
+            (5.0, 8.0),
+            (0.0, 5.0),
+            (0.0, 0.0),
+        ]
+        canvas = SimpleNamespace(
+            cena=SimpleNamespace(
+                elementos=[
+                    {
+                        "tipo": "polyline",
+                        "pontos": contorno,
+                        "curva_suave": True,
+                        "pontos_tracado_real": True,
+                        "pontos_controle_principais": [
+                            {"x": 4.0, "y": -2.0},
+                            {"x": 10.0, "y": 5.0},
+                        ],
+                    }
+                ]
+            )
+        )
+
+        refs = ferramenta._coletar_pontos_controle_existentes(canvas, contorno)
+
+        self.assertEqual(refs, [])
+
+    def test_referencia_de_emenda_suprime_principais_inferidos_por_curvatura(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [
+            (0.0, 0.0),
+            (4.0, -2.0),
+            (8.0, 0.0),
+            (10.0, 5.0),
+            (5.0, 8.0),
+            (0.0, 5.0),
+            (0.0, 0.0),
+        ]
+        molde = {"tipo": "molde", "pontos": contorno, "pontos_interseccao_referencia": [(8.0, 0.0)]}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertEqual(molde["controle_cantos"], [(8.0, 0.0)])
+        self.assertIn((4.0, -2.0), molde["controle_auxiliares"])
+
     def test_arraste_do_molde_extraido_nao_usa_snap_para_evitar_tremor(self):
         canvas = _FakeCanvasExtracao()
         ferramenta = FerramentaExtrairMolde()

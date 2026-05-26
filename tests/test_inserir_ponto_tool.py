@@ -126,19 +126,20 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
         self.assertEqual(len(molde["controle_cantos"]), 4)
 
-    def test_inserir_principal_em_curva_do_molde_preserva_auxiliares_do_trecho(self):
+    def test_inserir_principal_em_curva_do_molde_nao_deforma_contorno(self):
         canvas = _FakeCanvas()
+        pontos_originais = [
+            (0.0, 0.0),
+            (2.0, 1.6),
+            (5.0, 3.0),
+            (8.0, 1.6),
+            (10.0, 0.0),
+            (10.0, 8.0),
+            (0.0, 0.0),
+        ]
         canvas.cena.elementos[0].update(
             {
-                "pontos": [
-                    (0.0, 0.0),
-                    (2.0, 1.6),
-                    (5.0, 3.0),
-                    (8.0, 1.6),
-                    (10.0, 0.0),
-                    (10.0, 8.0),
-                    (0.0, 0.0),
-                ],
+                "pontos": list(pontos_originais),
                 "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)],
                 "controle_auxiliares": [(5.0, 3.0), (10.0, 4.0), (5.0, 4.0)],
                 "pontos_controle_principais": [
@@ -160,8 +161,40 @@ class InserirPontoToolTestCase(unittest.TestCase):
         molde = canvas.cena.elementos[0]
         self.assertIn((5.0, 3.0), molde["controle_cantos"])
         self.assertNotIn((5.0, 3.0), molde["controle_auxiliares"])
-        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 4)
-        self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 3.0)
+        self.assertEqual(molde["pontos"], pontos_originais)
+        self.assertEqual(
+            molde["pontos_controle_principais"],
+            [
+                {"x": 0.0, "y": 0.0},
+                {"x": 5.0, "y": 3.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 8.0},
+            ],
+        )
+        self.assertEqual(len(molde["controle_auxiliares"]), 8)
+        self.assertEqual(len(molde["pontos_auxiliares"]), 8)
+        self.assertIn((10.0, 4.0), molde["controle_auxiliares"])
+        self.assertIn((5.0, 4.0), molde["controle_auxiliares"])
+        auxiliares_novos = [pt for pt in molde["controle_auxiliares"] if pt not in {(10.0, 4.0), (5.0, 4.0)}]
+        self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] < 5.0]), 3)
+        self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] > 5.0]), 3)
+
+    def test_inserir_principal_em_segmento_do_molde_apenas_divide_segmento(self):
+        canvas = _FakeCanvas()
+        pontos_originais = list(canvas.cena.elementos[0]["pontos"])
+        ferramenta = FerramentaInserirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(
+            molde["pontos"],
+            [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+        )
+        self.assertEqual(molde["pontos"][0], pontos_originais[0])
+        self.assertEqual(molde["pontos"][2:], pontos_originais[1:])
+        self.assertIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
 
     def test_inserir_ponto_em_curva_livre_sincroniza_controles(self):
         canvas = _FakeCanvas()

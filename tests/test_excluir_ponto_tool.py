@@ -166,6 +166,54 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         )
         self.assertEqual(canvas.historico, 1)
 
+    def test_excluir_canto_em_curva_mantem_trecho_curvo(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.8),
+                    (5.0, 3.0),
+                    (8.0, 1.8),
+                    (10.0, 0.0),
+                    (12.0, 1.8),
+                    (15.0, 3.0),
+                    (18.0, 1.8),
+                    (20.0, 0.0),
+                    (20.0, 8.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 8.0)],
+                "controle_auxiliares": [(5.0, 3.0), (15.0, 3.0), (20.0, 4.0), (10.0, 4.0)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 20.0, "y": 0.0},
+                    {"x": 20.0, "y": 8.0},
+                ],
+                "pontos_auxiliares": [
+                    {"x": 5.0, "y": 3.0},
+                    {"x": 15.0, "y": 3.0},
+                    {"x": 20.0, "y": 4.0},
+                    {"x": 10.0, "y": 4.0},
+                ],
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "canto", 1))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (20.0, 0.0), (20.0, 8.0)])
+        auxiliares_curva = [
+            pt
+            for pt in molde["controle_auxiliares"]
+            if 0.0 < pt[0] < 20.0 and pt[1] > 0.1
+        ]
+        self.assertGreaterEqual(len(auxiliares_curva), 6)
+        self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 0.1)
+
     def test_excluir_canto_em_reta_bloqueia_minimo_de_tres_principais(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
