@@ -58,8 +58,19 @@ def _desenhar_linha_simples(canvas, painter, el: dict) -> None:
 
 
 def _desenhar_controles(canvas, painter, el: dict) -> None:
-    for chave, raio in (("controle_cantos", 4), ("pontos_controle_principais", 4), ("controle_auxiliares", 3)):
-        valores = el.get(chave, []) if isinstance(el.get(chave), list) else []
+    grupos: list[tuple[list, int]] = []
+    cantos = el.get("controle_cantos") if isinstance(el.get("controle_cantos"), list) else []
+    principais = el.get("pontos_controle_principais") if isinstance(el.get("pontos_controle_principais"), list) else []
+    auxiliares = el.get("controle_auxiliares") if isinstance(el.get("controle_auxiliares"), list) else []
+
+    if cantos:
+        grupos.append((cantos, 4))
+    elif principais:
+        grupos.append((principais, 4))
+    if auxiliares:
+        grupos.append((auxiliares, 3))
+
+    for valores, raio in grupos:
         for item in valores:
             pt = _ponto_qt(item)
             if pt is None:

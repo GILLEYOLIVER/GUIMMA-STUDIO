@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from math import acos, degrees, hypot
 import unittest
 from importlib.util import find_spec
 from types import SimpleNamespace
@@ -37,6 +38,20 @@ class _FakeCanvas:
 
 @unittest.skipIf(FerramentaCurva is None, "PySide6 nao disponivel neste ambiente")
 class CurvaToolTestCase(unittest.TestCase):
+    def assertAnguloSuaveNoFechamento(self, pontos, limite_graus=15.0):
+        entrada = (
+            pontos[0].x() - pontos[-2].x(),
+            pontos[0].y() - pontos[-2].y(),
+        )
+        saida = (
+            pontos[1].x() - pontos[0].x(),
+            pontos[1].y() - pontos[0].y(),
+        )
+        denom = hypot(*entrada) * hypot(*saida)
+        self.assertGreater(denom, 1e-9)
+        cosseno = max(-1.0, min(1.0, ((entrada[0] * saida[0]) + (entrada[1] * saida[1])) / denom))
+        self.assertLess(degrees(acos(cosseno)), limite_graus)
+
     def test_modo_3p_gera_parabola_unica_passando_pelo_ponto_do_meio(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaCurva()
@@ -154,6 +169,26 @@ class CurvaToolTestCase(unittest.TestCase):
 
         elemento = canvas.cena.elementos[0]
         self.assertEqual(elemento["tipo_curva"], "spline_catmull_rom")
+
+    def test_fechamento_spline_livre_mantem_suavidade_no_primeiro_no(self):
+        canvas = _FakeCanvas()
+        canvas._modo_curva = "np"
+        canvas._curva_np_nos = [
+            QPointF(0.0, 0.0),
+            QPointF(2.0, -5.0),
+            QPointF(10.0, -4.0),
+            QPointF(12.0, 4.0),
+            QPointF(4.0, 6.0),
+        ]
+        ferramenta = FerramentaCurva()
+
+        self.assertTrue(ferramenta._finalizar_np(canvas, fechado=True))
+
+        elemento = canvas.cena.elementos[0]
+        pontos = [QPointF(x, y) for x, y in elemento["pontos"]]
+        self.assertTrue(elemento["fechado"])
+        self.assertEqual(pontos[0], pontos[-1])
+        self.assertAnguloSuaveNoFechamento(pontos)
 
     def test_manipular_parabola_3p_regenera_sem_voltar_para_catmull_rom(self):
         ferramenta = FerramentaManipularPontos()

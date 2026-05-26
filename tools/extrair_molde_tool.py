@@ -953,17 +953,23 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("molde_pronto", True)
         molde.setdefault("permitir_alteracoes_encaixe", True)
 
+        refs_controle = list(molde.get("pontos_controle_referencia", []) or [])
+        refs_interseccao = list(molde.get("pontos_interseccao_referencia", []) or [])
+        refs_explicitas = bool(refs_controle or refs_interseccao)
+
         if bool(molde.get("preservar_todos_vertices_controle")):
             indices_cantos = list(range(len(base)))
+        elif refs_explicitas:
+            indices_cantos = []
         else:
             indices_cantos = self._indices_controles_principais(base)
-        for ref in molde.get("pontos_controle_referencia", []) or []:
+        for ref in refs_controle:
             if not isinstance(ref, (list, tuple)) or len(ref) != 2:
                 continue
             idx_ref = self._indice_mais_proximo_no_contorno((float(ref[0]), float(ref[1])), base)
             if idx_ref is not None:
                 indices_cantos.append(idx_ref)
-        for ref in molde.get("pontos_interseccao_referencia", []) or []:
+        for ref in refs_interseccao:
             if not isinstance(ref, (list, tuple)) or len(ref) != 2:
                 continue
             idx_ref = self._indice_mais_proximo_no_contorno((float(ref[0]), float(ref[1])), base)
@@ -988,6 +994,8 @@ class Ferramenta(FerramentaBase):
             return []
         pontos_ref: list[tuple[float, float]] = []
         for el in canvas.cena.elementos:
+            if not el.get("molde"):
+                continue
             candidatos: list[tuple[float, float]] = []
             for x, y in el.get("controle_cantos", []) or []:
                 candidatos.append((float(x), float(y)))
@@ -1032,8 +1040,8 @@ class Ferramenta(FerramentaBase):
         min_x, max_x = min(xs) - 0.2, max(xs) + 0.2
         min_y, max_y = min(ys) - 0.2, max(ys) + 0.2
 
-        segmentos: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        for el in canvas.cena.elementos:
+        segmentos: list[tuple[tuple[float, float], tuple[float, float], int]] = []
+        for el_idx, el in enumerate(canvas.cena.elementos):
             pts = polyline_from_element(el)
             for a, b in zip(pts, pts[1:]):
                 seg_min_x = min(a[0], b[0])
@@ -1042,14 +1050,16 @@ class Ferramenta(FerramentaBase):
                 seg_max_y = max(a[1], b[1])
                 if seg_max_x < min_x or seg_min_x > max_x or seg_max_y < min_y or seg_min_y > max_y:
                     continue
-                segmentos.append((a, b))
+                segmentos.append((a, b, el_idx))
 
         inters: list[tuple[float, float]] = self._coletar_encontros_linhas_no_contorno(segmentos, contorno)
 
         for i in range(len(segmentos)):
-            a, b = segmentos[i]
+            a, b, origem_a = segmentos[i]
             for j in range(i + 1, len(segmentos)):
-                c, d = segmentos[j]
+                c, d, origem_b = segmentos[j]
+                if origem_a == origem_b:
+                    continue
                 pt = self._intersecao_segmentos(a, b, c, d, tol=1e-7)
                 if pt is None:
                     continue
@@ -1059,31 +1069,44 @@ class Ferramenta(FerramentaBase):
 
     def _coletar_encontros_linhas_no_contorno(
         self,
-        segmentos: list[tuple[tuple[float, float], tuple[float, float]]],
+        segmentos: list[tuple],
         contorno: list[tuple[float, float]],
     ) -> list[tuple[float, float]]:
-        grupos: dict[tuple[int, int], list[tuple[tuple[float, float], tuple[float, float]]]] = {}
+        grupos: dict[tuple[int, int], list[tuple[tuple[float, float], tuple[float, float], int | None]]] = {}
         tol = 1e-4
-        for a, b in segmentos:
+        for item in segmentos:
+            if len(item) >= 3:
+                a, b, origem_idx = item[0], item[1], int(item[2])
+            else:
+                a, b = item[0], item[1]
+                origem_idx = None
             if self._dist_tuple(a, b) <= 1e-7:
                 continue
             for ponto, vizinho in ((a, b), (b, a)):
                 chave = (round(float(ponto[0]) / tol), round(float(ponto[1]) / tol))
-                grupos.setdefault(chave, []).append(((float(ponto[0]), float(ponto[1])), (float(vizinho[0]), float(vizinho[1]))))
+                grupos.setdefault(chave, []).append(
+                    ((float(ponto[0]), float(ponto[1])), (float(vizinho[0]), float(vizinho[1])), origem_idx)
+                )
 
         encontros: list[tuple[float, float]] = []
         for itens in grupos.values():
             if len(itens) < 2:
                 continue
-            px = sum(p[0] for p, _vizinho in itens) / len(itens)
-            py = sum(p[1] for p, _vizinho in itens) / len(itens)
+            px = sum(p[0] for p, _vizinho, _origem in itens) / len(itens)
+            py = sum(p[1] for p, _vizinho, _origem in itens) / len(itens)
             ponto = (px, py)
             if not self._ponto_no_contorno(ponto, contorno, tol=0.08):
                 continue
+            origens = {origem for _p, _vizinho, origem in itens if origem is not None}
+            if len(origens) >= 2:
+                encontros.append(ponto)
+                continue
+            if origens:
+                continue
             direcoes: list[tuple[float, float]] = []
-            for origem, vizinho in itens:
-                dx = float(vizinho[0]) - float(origem[0])
-                dy = float(vizinho[1]) - float(origem[1])
+            for origem_ponto, vizinho, _origem_idx in itens:
+                dx = float(vizinho[0]) - float(origem_ponto[0])
+                dy = float(vizinho[1]) - float(origem_ponto[1])
                 comp = sqrt((dx * dx) + (dy * dy))
                 if comp > 1e-7:
                     direcoes.append((dx / comp, dy / comp))

@@ -2,16 +2,31 @@
 
 Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDIO.
 
+## Como ler este manual
+
+- Ferramentas com módulo em `tools/` estão disponíveis no programa atual.
+- Ferramentas citadas como **em desenvolvimento** existem no mapa do ribbon ou na pasta `FERRAMENTAS NAO PRONTAS`, mas ainda não têm implementação final em `tools/`.
+- Quando uma ferramenta altera moldes, o comportamento esperado é preservar controles principais, controles auxiliares, fio, piques, nome e metadados sempre que esses dados existirem no molde.
+
+## Atualizações recentes de comportamento
+
+- **Curva**: ao fechar uma figura em modo curva, o fechamento passa a ser suave; o último ponto não deve quebrar a curva formando quina indevida.
+- **Extrair Molde**: ao extrair um molde, pontos principais devem representar nós reais, emendas ou encontros de segmentos. Curvas continuam sustentadas por pontos auxiliares, evitando excesso de pontos principais no molde extraído.
+- **Prévia/sombra do molde original**: sombras e prévias devem respeitar os controles atuais do molde e não exibir pontos antigos que já não fazem parte da estrutura oficial.
+- **Simplificar Contorno**: remove pontos redundantes da amostragem do contorno, mas mantém controles principais e auxiliares que definem a forma.
+
 ## Ferramentas prontas/atualizadas
 
 Estas ferramentas já possuem comportamento implementado e devem ser usadas como referência de operação:
 
 - **Extrair Molde** (`extrair_molde`): identifica contornos fechados, compõe partes quando necessário e cria o molde com pontos principais, pontos auxiliares, fio, nome e numeração. O painel de definição abre junto da caixa de coordenadas no lado direito.
 - **Criar Molde** (`criar_molde`): transforma contornos selecionados em molde editável com metadados de modelagem.
+- **Curva** (`curva`): desenha curvas por pontos de controle e fecha figuras com continuidade suave no ponto de fechamento.
 - **Manipular Pontos** (`manipular_pontos`): move pontos principais e auxiliares do molde, com ajuste fino, caixa de coordenadas, preservação das curvas e cancelamento do arraste com botão direito.
 - **Mover Ponto** (`mover_ponto`): variação direta da manipulação para deslocar um ou vários pontos por arraste ou por DX/DY.
-- **Inserir Ponto** (`inserir_ponto`): adiciona ponto auxiliar no molde com clique normal; com `Shift`, adiciona ponto principal.
+- **Inserir Ponto** (`inserir_ponto`): adiciona ponto principal no molde/contorno preservando auxiliares necessários à curva.
 - **Excluir Ponto** (`excluir_ponto`): realça os pontos oficiais do molde selecionado, prende o hover no controle mais próximo e exclui pontos principais ou auxiliares mantendo a curva válida.
+- **Simplificar Contorno** (`simplificar_contorno`): simplifica contornos selecionados ou clicados, removendo amostras redundantes e preservando controles oficiais.
 - **Redefinir Perímetro** (`redefinir_perimetro`): ajusta o perímetro preservando controles e auxiliares do molde.
 - **Elemento Paralelo** (`elemento_paralelo`): cria linhas ou contornos paralelos a partir de clique ou seleção.
 - **Girar** (`girar`): gira elementos selecionados por ângulo mantendo controles, piques, fio e dados do molde.
@@ -27,8 +42,14 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 
 ## Aba Início
 
+### Ações rápidas
+- **Desfazer** (`desfazer`): volta a última alteração registrada no histórico.
+- **Refazer** (`refazer`): reaplica uma alteração desfeita.
+- **Salvar** (`salvar`): salva o projeto atual no arquivo associado.
+- **Salvar como** (`salvar_como`): salva o projeto atual em um novo arquivo/caminho.
+
 ### Desenho
-- **Cor** (`cor`): Define cor, estilo e espessura do traço de desenho.
+- **Cor** (`cor`): define cor, estilo e espessura do traço de desenho. Em desenvolvimento como módulo independente.
 - **Colar** (`colar`): Cola no desenho o conteúdo copiado.
 - **Selecionar** (`selecionar`): Seleciona elementos para editar, mover ou excluir.
 
@@ -45,7 +66,16 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 
 ### Restauração
 - **Ponto de Restauração** (`ponto_restauracao`): Cria uma cópia interna do molde selecionado para restauração posterior.
+- **Restaurar** (`restaurar`): restaura um ponto de restauração salvo. Em desenvolvimento como ferramenta separada.
 - **Restaurar Cópia** (`restaurar_copia`): Restaura uma cópia interna salva, substituindo o molde atual ou criando uma cópia restaurada.
+
+### Configuração
+- **Cores** (`cores`): abre/aciona ajustes de cores do programa. Em desenvolvimento como módulo independente.
+- **Unidade** (`unidade_medidas`): alterna ou configura unidade de medida usada no projeto. Em desenvolvimento como módulo independente.
+
+### Saída
+- **Imprimir** (`imprimir`): prepara saída impressa do projeto. Em desenvolvimento.
+- **Plotar** (`plotar`): prepara envio para plotter. Em desenvolvimento.
 
 ## Aba Construção
 
@@ -58,7 +88,7 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 - **Estender duas retas** (`estender_duas_retas`): Estende duas retas até o ponto de encontro.
 
 ### Curvas
-- **Curva** (`curva`): Desenha curva por pontos de controle.
+- **Curva** (`curva`): Desenha curva por pontos de controle; no fechamento, mantém continuidade suave para evitar quina indevida no último ponto.
 - **Dividir Curva** (`dividir_curva`): Divide uma curva em segmentos menores.
 - **Espiral e Curvas** (`espiral_e_curvas`): Cria espirais e curvas especiais.
 - **Cadastrar curvas** (`cadastrar_curva`): Salva/cadastra um modelo de curva para reuso.
@@ -82,7 +112,7 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 ## Aba Produção
 
 ### Definir moldes
-- **Extrair Molde** (`extrair_molde`): Extrai contornos fechados como moldes, detectando piques, graduações e linhas auxiliares conforme a configuração.
+- **Extrair Molde** (`extrair_molde`): Extrai contornos fechados como moldes, detectando piques, graduações e linhas auxiliares conforme a configuração. Emendas, encontros de segmentos e nós reais viram controles principais; curvas seguem sustentadas por auxiliares.
 - **Criar Molde** (`criar_molde`): Converte contornos selecionados em molde com controles, fio, nome e metadados.
 - **Digitalizar** (`digitalizar`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Sentido Fio** (`sentido_fio`): Define o sentido do fio com dois pontos ou por ângulo.
@@ -97,7 +127,7 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 ### Costura
 - **Costura** (`costura`): Define, altera ou remove parâmetros de costura.
 - **Remover Costura** (`remover_costura`): Remove margem/acabamento de costura do molde.
-- **Trocar Costura** (`trocar_costura`): Define, altera ou remove parâmetros de costura.
+- **Trocar Costura** (`trocar_costura`): troca ou redefine o tipo de costura aplicado. Em desenvolvimento.
 
 ### Pregas e pences
 - **Pregas** (`pregas`): Aplica operações de pences e pregas no molde.
@@ -145,17 +175,30 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 - **Manipular Pontos** (`manipular_pontos`): Manipula pontos principais e auxiliares do molde, com caixa de coordenadas, ajuste fino e cancelamento por botão direito durante o arraste.
 - **Mover** (`mover`): Transforma a geometria para reposicionamento e ajuste.
 - **Mover Ponto** (`mover_ponto`): Move um ou vários pontos por arraste ou por deslocamento DX/DY.
+- **Manipulação rápida** (`manipulacao_rapida`): reúne ações rápidas de manipulação geométrica. Em desenvolvimento.
 - **Redefinir Perímetro** (`redefinir_perimetro`): Ajusta o perímetro preservando controles oficiais do molde.
+- **Dividir elementos** (`dividir_elementos`): divide elementos selecionados em partes independentes. Em desenvolvimento.
 
 ### Indicar
 - **Elemento Paralelo** (`elemento_paralelo`): Cria linha ou contorno paralelo por clique ou por seleção.
 - **Girar** (`girar`): Gira elementos selecionados por ângulo, preservando controles, piques e fio.
+- **Copiar** (`copiar`): copia elementos selecionados para o buffer interno.
+- **Dimensionar** (`dimensionar`): escala ou redimensiona elementos/molde selecionado. Em desenvolvimento.
 - **Espelhar** (`espelhar`): Espelha elementos ou moldes preservando controles e metadados.
 
+### Cerca
+- **Definir cerca** (`definir_cerca`): define uma área/cerca de seleção ou manipulação. Em desenvolvimento.
+- **Mover cerca** (`mover_cerca`): desloca a cerca definida e seus elementos relacionados. Em desenvolvimento.
+
 ### Manipular molde
-- **Inserir Ponto** (`inserir_ponto`): Clique normal adiciona ponto auxiliar; `Shift` + clique adiciona ponto principal.
+- **Definir curva** (`definir_curva`): converte ou ajusta trecho de molde para comportamento de curva. Em desenvolvimento.
+- **Inserir Ponto** (`inserir_ponto`): adiciona ponto principal no contorno do molde, atualizando controles e preservando auxiliares de curva.
 - **Excluir Ponto** (`excluir_ponto`): Exclui pontos principais ou auxiliares, realça os controles do molde selecionado e prende o hover no ponto mais próximo.
+- **Transformar em elementos** (`transformar_em_elementos`): transforma molde/estrutura em elementos editáveis independentes. Em desenvolvimento.
+- **Alinhar** (`alinhar`): alinha ou distribui elementos selecionados.
+- **Copiar ou trocar elemento** (`copiar_ou_trocar_elemento`): copia ou substitui elemento do molde. Em desenvolvimento.
 - **Arredondar Ou Chanfrar** (`arredondar_ou_chanfrar`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Simplificar contorno** (`simplificar_contorno`): remove pontos redundantes da linha do contorno sem apagar controles principais/auxiliares oficiais.
 
 ## Aba Conferência
 
@@ -164,6 +207,7 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 - **Conferir Multiplos** (`conferir_multiplos`): Confere medidas e consistência do molde.
 - **Controle Curvas** (`controle_curvas`): Executa operação de criação, ajuste ou conferência de curvas.
 - **Cota Perimetro** (`cota_perimetro`): Mede ou compara distâncias no desenho.
+- **Perimetro** (`perimetro`): consulta ou calcula perímetro do elemento/molde. Em desenvolvimento.
 
 ### Distância
 - **Cota Distancia** (`cota_distancia`): Mede ou compara distâncias no desenho.
