@@ -145,11 +145,7 @@ def _amostrar_curva_suave(pontos_base: list[QPointF], segmentos_por_trecho: int 
 
 
 def pontos_de_elemento(elemento: dict, canvas=None) -> list[QPointF]:
-    """Retorna os pontos reais/amostrados usados para medir e realçar o elemento.
-
-    O objetivo da ferramenta de perímetro é medir a linha inteira clicada,
-    incluindo curvas, e não apenas o pequeno segmento amostrado sob o cursor.
-    """
+    """Retorna os pontos reais/amostrados usados para medir e realçar o elemento."""
     if not isinstance(elemento, dict):
         return []
 
@@ -186,8 +182,6 @@ def pontos_de_elemento(elemento: dict, canvas=None) -> list[QPointF]:
 
     pontos = _pontos_lista(elemento.get("pontos"))
 
-    # Quando o canvas tem um render próprio para pontos originais do EMF,
-    # respeitamos esse modo sem obrigar a ferramenta a conhecer todo o desenho.
     if canvas is not None and hasattr(canvas, "_pontos_render_elemento") and tipo == "polyline":
         try:
             render = canvas._pontos_render_elemento(elemento)
@@ -207,6 +201,123 @@ def pontos_de_elemento(elemento: dict, canvas=None) -> list[QPointF]:
     return pontos
 
 
+def _fechado(pontos: list[QPointF]) -> bool:
+    return len(pontos) >= 3 and _dist(pontos[0], pontos[-1]) <= 1e-6
+
+
+def _controles_limite_medicao(elemento: dict) -> list[QPointF]:
+    """Pontos que quebram um molde em trechos de perímetro.
+
+    Em moldes, a medida não deve pegar o contorno inteiro: ela deve ir do ponto
+    de controle/canto até o próximo ponto de controle/canto, como nos sistemas de
+    modelagem. Para linhas soltas, a ponta inicial e a ponta final continuam
+    sendo a referência.
+    """
+    if not isinstance(elemento, dict):
+        return []
+    if not bool(elemento.get("molde")) and not elemento.get("controle_cantos"):
+        return []
+
+    for chave in (
+        "controle_cantos",
+        "pontos_controle_principais",
+        "pontos_principais",
+        "pontos_controle",
+    ):
+        pontos = _pontos_lista(elemento.get(chave))
+        if len(pontos) >= 2:
+            # Remove duplicações próximas preservando a ordem original.
+            saida: list[QPointF] = []
+            for ponto in pontos:
+                if not saida or _dist(saida[-1], ponto) > 1e-6:
+                    saida.append(QPointF(ponto))
+            if len(saida) >= 2 and _dist(saida[0], saida[-1]) <= 1e-6:
+                saida = saida[:-1]
+            if len(saida) >= 2:
+                return saida
+    return []
+
+
+def _indice_mais_proximo(pontos: list[QPointF], alvo: QPointF) -> int | None:
+    if not pontos:
+        return None
+    melhor_idx = 0
+    melhor_dist = _dist(pontos[0], alvo)
+    for idx, ponto in enumerate(pontos[1:], start=1):
+        d = _dist(ponto, alvo)
+        if d < melhor_dist:
+            melhor_idx = idx
+            melhor_dist = d
+    return melhor_idx
+
+
+def _indices_controle_no_contorno(elemento: dict, pontos: list[QPointF]) -> list[int]:
+    controles = _controles_limite_medicao(elemento)
+    if len(controles) < 2 or len(pontos) < 2:
+        return []
+    base = pontos[:-1] if _fechado(pontos) else pontos
+    if len(base) < 2:
+        return []
+
+    indices: list[int] = []
+    for controle in controles:
+        idx = _indice_mais_proximo(base, controle)
+        if idx is None:
+            continue
+        if idx not in indices:
+            indices.append(idx)
+    indices.sort()
+    return indices if len(indices) >= 2 else []
+
+
+def _trecho_fechado_entre_controles(pontos: list[QPointF], controles_idx: list[int], indice_segmento: int) -> list[QPointF]:
+    base = pontos[:-1] if _fechado(pontos) else pontos
+    total = len(base)
+    if total < 2 or len(controles_idx) < 2:
+        return [QPointF(p) for p in pontos]
+
+    seg_idx = max(0, min(int(indice_segmento), total - 1))
+    controles = sorted(set(int(i) % total for i in controles_idx))
+
+    inicio = controles[0]
+    fim = controles[1]
+    for pos, atual in enumerate(controles):
+        proximo = controles[(pos + 1) % len(controles)]
+        if atual <= proximo:
+            dentro = atual <= seg_idx < proximo
+        else:
+            dentro = seg_idx >= atual or seg_idx < proximo
+        if dentro:
+            inicio = atual
+            fim = proximo
+            break
+
+    if inicio <= fim:
+        trecho = [QPointF(p) for p in base[inicio:fim + 1]]
+    else:
+        trecho = [QPointF(p) for p in base[inicio:]] + [QPointF(p) for p in base[:fim + 1]]
+
+    if len(trecho) < 2:
+        return [QPointF(p) for p in pontos]
+    return trecho
+
+
+def pontos_medicao_para_segmento(elemento: dict, pontos: list[QPointF], indice_segmento: int) -> list[QPointF]:
+    """Retorna exatamente o trecho que deve ser medido.
+
+    - Linha/curva solta: mede de uma ponta até a outra.
+    - Molde fechado: mede do ponto de controle/canto anterior até o próximo.
+    """
+    if not isinstance(elemento, dict) or len(pontos) < 2:
+        return []
+
+    controles_idx = _indices_controle_no_contorno(elemento, pontos)
+    if bool(elemento.get("molde")) and controles_idx and _fechado(pontos):
+        return _trecho_fechado_entre_controles(pontos, controles_idx, indice_segmento)
+
+    return [QPointF(p) for p in pontos]
+
+
 def segmentos_de_elemento(elemento: dict, canvas=None) -> list[tuple[QPointF, QPointF]]:
     pts = pontos_de_elemento(elemento, canvas=canvas)
     return [(a, b) for a, b in zip(pts, pts[1:]) if _dist(a, b) > _EPS]
@@ -221,12 +332,11 @@ def _comprimento_pontos(pontos: list[QPointF]) -> float:
 
 
 def selecionar_segmento_mais_proximo(canvas, pos: QPointF, tolerancia_px: float = 10.0) -> dict | None:
-    """Seleciona a linha/curva mais próxima do clique.
+    """Seleciona o perímetro/trecho mais próximo do clique ou do cursor.
 
-    Mantém as chaves antigas de segmento para compatibilidade, mas também
-    retorna a geometria completa do elemento em ``pontos_elemento`` e o
-    comprimento total em ``perimetro_total``. Assim a ferramenta consegue
-    realçar a curva inteira e escrever a medida ao lado do clique.
+    A chave ``pontos_elemento`` passa a representar o trecho medido. Para linhas
+    soltas, é a linha inteira. Para molde com controle_cantos, é somente o trecho
+    entre um ponto de controle e o próximo.
     """
     tolerancia_cena = float(tolerancia_px) / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
     elementos = list(getattr(getattr(canvas, "cena", None), "elementos", []) or [])
@@ -236,31 +346,39 @@ def selecionar_segmento_mais_proximo(canvas, pos: QPointF, tolerancia_px: float 
         el = elementos[idx]
         if not isinstance(el, dict):
             continue
-        pontos = pontos_de_elemento(el, canvas=canvas)
-        if len(pontos) < 2:
+        if str(el.get("tipo") or "").lower() in {"cota_perimetro", "cota_distancia", "texto"}:
             continue
-        total = _comprimento_pontos(pontos)
-        if total <= _EPS:
+        pontos_completos = pontos_de_elemento(el, canvas=canvas)
+        if len(pontos_completos) < 2:
             continue
 
-        for indice_segmento, (a, b) in enumerate(zip(pontos, pontos[1:])):
+        for indice_segmento, (a, b) in enumerate(zip(pontos_completos, pontos_completos[1:])):
             d = _dist_ponto_segmento(a, b, pos)
             if d > tolerancia_cena:
                 continue
+
+            pontos_medicao = pontos_medicao_para_segmento(el, pontos_completos, indice_segmento)
+            total = _comprimento_pontos(pontos_medicao)
+            if total <= _EPS:
+                continue
+
             proj = _projetar_ponto_segmento(a, b, pos)
             seg_len = _dist(a, b)
             if melhor is None or d < melhor["dist"]:
                 melhor = {
                     "elemento_idx": idx,
                     "elemento": el,
-                    "pontos_elemento": [QPointF(p) for p in pontos],
-                    "ponto_inicial": QPointF(pontos[0]),
-                    "ponto_final": QPointF(pontos[-1]),
+                    "pontos_elemento": [QPointF(p) for p in pontos_medicao],
+                    "pontos_medicao": [QPointF(p) for p in pontos_medicao],
+                    "pontos_contorno_completo": [QPointF(p) for p in pontos_completos],
+                    "ponto_inicial": QPointF(pontos_medicao[0]),
+                    "ponto_final": QPointF(pontos_medicao[-1]),
                     "segmento_indice": indice_segmento,
                     "segmento_inicio": QPointF(a),
                     "segmento_fim": QPointF(b),
                     "segmento_comprimento": seg_len,
                     "perimetro_total": total,
+                    "perimetro_medicao": total,
                     "ponto_mais_proximo": proj,
                     "dist": d,
                 }
