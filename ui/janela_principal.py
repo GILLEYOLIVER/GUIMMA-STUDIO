@@ -179,6 +179,145 @@ class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
     PERFIL_USUARIO_PADRAO = "1"
+    TEMA_INTERFACE_PADRAO = "classico_padrao"
+    TEMAS_INTERFACE = {
+        "classico_padrao": {
+            "nome": "Clássico padrão",
+            "janela": "#eef2f6",
+            "area": "#eceff3",
+            "painel": "#ffffff",
+            "faixa": "#f4f6f8",
+            "texto": "#111111",
+            "texto_suave": "#4a5568",
+            "borda": "#c8d1da",
+            "aba": "#e8edf3",
+            "aba_hover": "#dfe8f2",
+            "primaria": "#0b7fb8",
+            "primaria_escura": "#0a74aa",
+            "hover": "#d9edf9",
+            "hover_menu": "#e9f3ff",
+            "selecionado": "#c5e4f6",
+        },
+        "azul_neblina": {
+            "nome": "Azul neblina",
+            "janela": "#edf6fb",
+            "area": "#e4f0f8",
+            "painel": "#fbfdff",
+            "faixa": "#eaf4fb",
+            "texto": "#102033",
+            "texto_suave": "#476173",
+            "borda": "#bfd6e6",
+            "aba": "#d9ebf6",
+            "aba_hover": "#c8e2f2",
+            "primaria": "#2478a7",
+            "primaria_escura": "#1b628b",
+            "hover": "#d5ecf8",
+            "hover_menu": "#dff1fb",
+            "selecionado": "#bfe2f5",
+        },
+        "azul_gelo": {
+            "nome": "Azul gelo",
+            "janela": "#f3f8fb",
+            "area": "#eaf3f8",
+            "painel": "#ffffff",
+            "faixa": "#eef7fb",
+            "texto": "#14212d",
+            "texto_suave": "#526b7c",
+            "borda": "#cadde8",
+            "aba": "#e2f0f7",
+            "aba_hover": "#d4eaf5",
+            "primaria": "#4a91b8",
+            "primaria_escura": "#357699",
+            "hover": "#dff0f8",
+            "hover_menu": "#e5f4fa",
+            "selecionado": "#c9e8f6",
+        },
+        "verde_menta": {
+            "nome": "Verde menta",
+            "janela": "#eef8f3",
+            "area": "#e4f2eb",
+            "painel": "#fbfffd",
+            "faixa": "#edf8f2",
+            "texto": "#10251d",
+            "texto_suave": "#4a6b5e",
+            "borda": "#c1dccd",
+            "aba": "#dcf0e6",
+            "aba_hover": "#cde8dc",
+            "primaria": "#2f8f68",
+            "primaria_escura": "#247451",
+            "hover": "#d6efe3",
+            "hover_menu": "#e0f5eb",
+            "selecionado": "#bfe7d4",
+        },
+        "verde_salvia": {
+            "nome": "Verde sálvia",
+            "janela": "#f1f6f1",
+            "area": "#e9f0e8",
+            "painel": "#fcfffb",
+            "faixa": "#f0f6ef",
+            "texto": "#1c281f",
+            "texto_suave": "#5e6f60",
+            "borda": "#cad9c7",
+            "aba": "#e0eadc",
+            "aba_hover": "#d2e1ce",
+            "primaria": "#5b8f58",
+            "primaria_escura": "#477343",
+            "hover": "#e0efdc",
+            "hover_menu": "#e8f4e5",
+            "selecionado": "#cfe7c9",
+        },
+        "cinza_perola": {
+            "nome": "Cinza pérola",
+            "janela": "#f1f3f5",
+            "area": "#e7ebef",
+            "painel": "#ffffff",
+            "faixa": "#f6f7f8",
+            "texto": "#191f25",
+            "texto_suave": "#5d6872",
+            "borda": "#cfd6dd",
+            "aba": "#e8ecef",
+            "aba_hover": "#dde4e9",
+            "primaria": "#607d94",
+            "primaria_escura": "#4d6679",
+            "hover": "#e0e8ee",
+            "hover_menu": "#edf2f5",
+            "selecionado": "#d2e0e8",
+        },
+        "lavanda_clara": {
+            "nome": "Lavanda clara",
+            "janela": "#f5f2fb",
+            "area": "#ece7f5",
+            "painel": "#fffdff",
+            "faixa": "#f5f0fb",
+            "texto": "#231b31",
+            "texto_suave": "#675a7c",
+            "borda": "#d6cbe6",
+            "aba": "#eadff6",
+            "aba_hover": "#dfd0f0",
+            "primaria": "#8065a8",
+            "primaria_escura": "#665087",
+            "hover": "#e8ddf4",
+            "hover_menu": "#f0e8fa",
+            "selecionado": "#ddcff1",
+        },
+        "areia_clara": {
+            "nome": "Areia clara",
+            "janela": "#f7f4ee",
+            "area": "#eee9df",
+            "painel": "#fffdf8",
+            "faixa": "#f8f4eb",
+            "texto": "#2b241b",
+            "texto_suave": "#756857",
+            "borda": "#ded2bf",
+            "aba": "#eee4d4",
+            "aba_hover": "#e4d7c4",
+            "primaria": "#9a7a4f",
+            "primaria_escura": "#7c633f",
+            "hover": "#efe4d2",
+            "hover_menu": "#f6ead8",
+            "selecionado": "#e5d5bd",
+        },
+    }
     CORES_CANVAS_PADRAO = {
         "desenho": "#ffffff",
         "fundo": "#000000",
@@ -327,6 +466,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._perfis_usuarios: dict[str, list[str]] = {}
         self._perfis_usuarios_cfg: dict[str, dict] = {}
         self._perfil_usuario_atual = self.PERFIL_USUARIO_PADRAO
+        self._tema_interface_id = self._normalizar_tema_interface(
+            self.projeto_atual.preferencias_usuario.get("tema_interface", self.TEMA_INTERFACE_PADRAO)
+        )
+        self._acoes_tema_interface: dict[str, list[QAction]] = {}
         self._indice_layout_organizacao_moldes = 0
         self._indice_visualizacao_proximo_molde = -1
         self._pendente_centralizar_indicado = False
@@ -354,6 +497,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._timer_vigiar_submenu_backstage.timeout.connect(self._processar_hover_backstage_global)
         self.setWindowTitle("GUIMMA STUDIO")
         self._configurar_interface()
+        self._aplicar_tema_interface()
         self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         self._limpar_abas_documentos()
         self._configurar_atalhos()
@@ -386,6 +530,223 @@ class GuimmaStudioMainWindow(QMainWindow):
             )
         except Exception:
             pass
+
+    def _normalizar_tema_interface(self, tema_id: object) -> str:
+        tema = str(tema_id or "").strip()
+        return tema if tema in self.TEMAS_INTERFACE else self.TEMA_INTERFACE_PADRAO
+
+    def _tema_interface(self) -> dict[str, str]:
+        return self.TEMAS_INTERFACE[self._normalizar_tema_interface(getattr(self, "_tema_interface_id", ""))]
+
+    def _estilo_botao_menu_topo(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QToolButton {{ color:{tema['texto']}; font-weight:400; font-size:13px; "
+            "padding:0 6px; border:none; background:transparent; }"
+            "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
+            f"QToolButton:hover {{ color:{tema['primaria_escura']}; background:{tema['hover']}; }}"
+        )
+
+    def _estilo_menu_popup_topo(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QMenu {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; padding:4px; }}"
+            f"QMenu::item {{ color:{tema['texto']}; padding:6px 12px; }}"
+            f"QMenu::item:selected {{ background:{tema['hover_menu']}; color:{tema['primaria_escura']}; }}"
+            f"QMenu::separator {{ height:1px; background:{tema['borda']}; margin:4px 8px; }}"
+        )
+
+    def _estilo_botoes_rodape(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QPushButton {{ color:{tema['texto']}; background:transparent; border:none; padding:1px 6px; min-width:22px; }}"
+            f"QPushButton:hover {{ background:{tema['hover']}; border:none; }}"
+            f"QPushButton:checked {{ background:{tema['selecionado']}; border:none; color:{tema['primaria_escura']}; font-weight:700; }}"
+        )
+
+    def _estilo_abas_documentos(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QTabWidget::pane {{ border: 1px solid {tema['borda']}; }}"
+            "QTabWidget::tab-bar { alignment: left; }"
+            f"QTabBar {{ background: {tema['faixa']}; }}"
+            f"QTabBar::tab {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; "
+            "padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
+            f"QTabBar::tab:hover {{ background:{tema['hover']}; }}"
+            f"QTabBar::tab:selected {{ background:{tema['painel']}; border-bottom:2px solid {tema['primaria']}; }}"
+        )
+
+    def _sincronizar_acoes_tema_interface(self):
+        if not hasattr(self, "_acoes_tema_interface"):
+            return
+        atual = self._normalizar_tema_interface(getattr(self, "_tema_interface_id", ""))
+        for tema_id, acoes in self._acoes_tema_interface.items():
+            for acao in list(acoes):
+                try:
+                    acao.blockSignals(True)
+                    acao.setChecked(tema_id == atual)
+                    acao.blockSignals(False)
+                except RuntimeError:
+                    continue
+                except Exception:
+                    continue
+
+    def _criar_submenu_temas_interface(self, parent_menu: QMenu) -> QMenu:
+        submenu = parent_menu.addMenu("Tema")
+        submenu.setStyleSheet(self._estilo_menu_popup_topo())
+        grupo = QActionGroup(self)
+        grupo.setExclusive(True)
+        self._acoes_tema_interface = {
+            tema_id: [acao for acao in acoes if self._qt_widget_vivo(acao)]
+            for tema_id, acoes in getattr(self, "_acoes_tema_interface", {}).items()
+        }
+        for tema_id, cfg in self.TEMAS_INTERFACE.items():
+            acao = QAction(str(cfg["nome"]), self)
+            acao.setCheckable(True)
+            acao.setChecked(tema_id == self._tema_interface_id)
+            acao.triggered.connect(
+                lambda marcado=False, tid=tema_id: self._definir_tema_interface(tid) if marcado else None
+            )
+            grupo.addAction(acao)
+            submenu.addAction(acao)
+            self._acoes_tema_interface.setdefault(tema_id, []).append(acao)
+        return submenu
+
+    def _definir_tema_interface(self, tema_id: str, salvar: bool = True):
+        tema_id = self._normalizar_tema_interface(tema_id)
+        self._tema_interface_id = tema_id
+        self.projeto_atual.preferencias_usuario["tema_interface"] = tema_id
+        self._aplicar_tema_interface()
+        if salvar:
+            self._sincronizar_perfil_usuario_atual()
+            self.lbl_status.setText(f"Tema aplicado: {self.TEMAS_INTERFACE[tema_id]['nome']}")
+
+    def _aplicar_tema_interface(self):
+        if not hasattr(self, "ribbon"):
+            return
+        tema = self._tema_interface()
+        self.setStyleSheet(
+            f"""
+            QMainWindow {{ background: {tema['janela']}; }}
+            QWidget {{
+                color: {tema['texto']};
+            }}
+            QLabel, QCheckBox, QRadioButton, QPushButton, QToolButton, QLineEdit, QComboBox, QMenu {{
+                color: {tema['texto']};
+            }}
+            QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+            }}
+            QToolTip {{
+                background-color: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+            }}
+            QTabBar::tab {{
+                background: {tema['aba']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                font-size: 14px;
+                font-weight: 600;
+                padding: 6px 20px;
+            }}
+            QTabBar::tab:selected {{
+                background: {tema['painel']};
+                color: {tema['primaria_escura']};
+                border-bottom: 2px solid {tema['primaria']};
+            }}
+            QTabBar::tab:hover {{ background: {tema['aba_hover']}; }}
+            QTabBar::tab:selected:hover {{
+                background: {tema['painel']};
+                color: {tema['primaria_escura']};
+                border-bottom: 2px solid {tema['primaria']};
+            }}
+            """
+        )
+        if hasattr(self, "botao_arquivo"):
+            self.botao_arquivo.setStyleSheet(
+                f"background:{tema['primaria']};color:white;font-weight:400;border:1px solid {tema['primaria_escura']};"
+                "font-size:13px;border-radius:0;padding:0 8px;"
+            )
+        for btn_name in ("btn_visao", "btn_opcoes", "btn_janelas"):
+            btn = getattr(self, btn_name, None)
+            if btn is not None:
+                btn.setStyleSheet(self._estilo_botao_menu_topo())
+        for menu_name in ("menu_visao", "menu_opcoes", "menu_janelas"):
+            menu = getattr(self, menu_name, None)
+            if menu is not None:
+                menu.setStyleSheet(self._estilo_menu_popup_topo())
+        if hasattr(self, "ribbon"):
+            self.ribbon.setStyleSheet(f"background:{tema['painel']}; color:{tema['texto']};")
+            self.ribbon.tabbar.setStyleSheet(
+                f"""
+                QTabBar::tab {{
+                    background: {tema['aba']};
+                    color: {tema['texto']};
+                    border: 1px solid {tema['borda']};
+                    font-size: 13px;
+                    font-weight: 400;
+                    padding: 6px 16px;
+                }}
+                QTabBar::tab:selected {{
+                    background: {tema['primaria']};
+                    color: #ffffff;
+                    border: 1px solid {tema['primaria_escura']};
+                }}
+                QTabBar::tab:hover {{ background: {tema['aba_hover']}; }}
+                QTabBar::tab:selected:hover {{
+                    background: {tema['primaria']};
+                    color: #ffffff;
+                    border: 1px solid {tema['primaria_escura']};
+                }}
+                """
+            )
+        if hasattr(self, "area_documento_widget"):
+            self.area_documento_widget.setStyleSheet(f"background: {tema['area']};")
+        if hasattr(self, "abas_documentos"):
+            self.abas_documentos.setStyleSheet(self._estilo_abas_documentos())
+        if hasattr(self, "backstage"):
+            self.backstage.setStyleSheet(
+                f"QFrame#BackstagePanel {{ background: {tema['painel']}; border: 1px solid {tema['borda']}; }}"
+                f"QFrame#BackstageLeft {{ background: {tema['faixa']}; border-right: 1px solid {tema['borda']}; }}"
+                f"QFrame#BackstageRight {{ background: {tema['painel']}; }}"
+                f"QLabel#BackstageTitle {{ color: {tema['primaria_escura']}; font-size: 18px; font-weight: 800; padding: 0 14px 10px 16px; }}"
+                f"QLabel#BackstageHeader {{ color: {tema['texto']}; font-size: 19px; font-weight: 700; }}"
+                f"QListWidget {{ background: {tema['painel']}; color: {tema['texto']}; border: 1px solid {tema['borda']}; }}"
+                f"QListWidget::item:hover {{ background: {tema['hover']}; }}"
+            )
+            for nome_obj, estilo in {
+                "BackstageLeft": f"background: {tema['faixa']}; border-right: 1px solid {tema['borda']};",
+                "BackstageRight": f"background: {tema['painel']};",
+            }.items():
+                widget = self.backstage.findChild(QFrame, nome_obj)
+                if widget is not None:
+                    widget.setStyleSheet(estilo)
+            for nome_obj, estilo in {
+                "BackstageTitle": f"color: {tema['primaria_escura']}; font-size: 18px; font-weight: 800; padding: 0 14px 10px 16px;",
+                "BackstageHeader": f"font-size: 19px; font-weight: 700; color: {tema['texto']};",
+            }.items():
+                label = self.backstage.findChild(QLabel, nome_obj)
+                if label is not None:
+                    label.setStyleSheet(estilo)
+            self._aplicar_estilo_hover_backstage_arquivo()
+        if hasattr(self, "barra_atalhos_rodape"):
+            self.barra_atalhos_rodape.setStyleSheet(
+                f"background:{tema['faixa']}; border-top:1px solid {tema['borda']}; border-bottom:1px solid {tema['borda']};"
+            )
+            for btn in self.barra_atalhos_rodape.findChildren(QPushButton):
+                btn.setStyleSheet(self._estilo_botoes_rodape())
+        if hasattr(self, "barra_mensagem"):
+            self.barra_mensagem.setStyleSheet(
+                f"background: {tema['primaria']}; border-top: 1px solid {tema['primaria_escura']}; color: white;"
+            )
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setStyleSheet("color: white;")
+        if hasattr(self, "lbl_escala"):
+            self.lbl_escala.setStyleSheet("color: white; font-weight: 600; padding-right: 2px;")
+        self._sincronizar_acoes_tema_interface()
 
     def _cor_hex_valida(self, valor: object, padrao: str) -> str:
         cor = QColor(str(valor or ""))
@@ -478,6 +839,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 for nome, cfg in self._esquemas_cores_usuario.items()
                 if isinstance(cfg, dict)
             },
+            "tema_interface": self._normalizar_tema_interface(self._tema_interface_id),
         }
 
     def _aplicar_configuracoes_perfil(self, cfg: dict):
@@ -514,8 +876,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                 for nome, valor in esquemas.items()
                 if isinstance(valor, dict)
             }
+        self._tema_interface_id = self._normalizar_tema_interface(cfg.get("tema_interface", self._tema_interface_id))
+        self.projeto_atual.preferencias_usuario["tema_interface"] = self._tema_interface_id
         self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
         if hasattr(self, "ribbon"):
+            self._aplicar_tema_interface()
             self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
         if hasattr(self, "abas_documentos"):
             self._aplicar_config_visualizacao_nos_canvas()
@@ -613,16 +978,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         sup.addWidget(self.ribbon.tabbar, 0, Qt.AlignLeft)
         sup.addStretch(1)
 
-        menu_btn_style = (
-            "QToolButton { color:#1b1b1b; font-weight:400; font-size:13px; padding:0 6px; border:none; background:transparent; }"
-            "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: right center; }"
-            "QToolButton:hover { color:#0b5f9e; }"
-        )
-        menu_popup_style = (
-            "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; padding:4px; }"
-            "QMenu::item { color:#111111; padding:6px 12px; }"
-            "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
-        )
+        menu_btn_style = self._estilo_botao_menu_topo()
+        menu_popup_style = self._estilo_menu_popup_topo()
 
         self.btn_visao = QToolButton()
         self.btn_visao.setText("VISÃO")
@@ -736,11 +1093,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_opcoes.setMinimumWidth(86)
         self.btn_opcoes.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_opcoes.setStyleSheet(menu_btn_style)
-        menu_opcoes = QMenu(self)
-        menu_opcoes.setStyleSheet(menu_popup_style)
-        menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
-        menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
-        self.btn_opcoes.setMenu(menu_opcoes)
+        self.menu_opcoes = QMenu(self)
+        self.menu_opcoes.setStyleSheet(menu_popup_style)
+        self.menu_opcoes.addAction("Preferências", lambda: self.lbl_status.setText("Preferências (em breve)"))
+        self._criar_submenu_temas_interface(self.menu_opcoes)
+        self.menu_opcoes.addAction("Atalhos", lambda: self.lbl_status.setText("Atalhos (em breve)"))
+        self.btn_opcoes.setMenu(self.menu_opcoes)
         sup.addWidget(self.btn_opcoes)
 
         self.btn_janelas = QToolButton()
@@ -750,11 +1108,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_janelas.setMinimumWidth(92)
         self.btn_janelas.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_janelas.setStyleSheet(menu_btn_style)
-        menu_janelas = QMenu(self)
-        menu_janelas.setStyleSheet(menu_popup_style)
-        menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
-        menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
-        self.btn_janelas.setMenu(menu_janelas)
+        self.menu_janelas = QMenu(self)
+        self.menu_janelas.setStyleSheet(menu_popup_style)
+        self.menu_janelas.addAction("Organizar janelas", lambda: self.lbl_status.setText("Organização de janelas (em breve)"))
+        self.menu_janelas.addAction("Resetar layout", lambda: self.lbl_status.setText("Reset de layout (em breve)"))
+        self.btn_janelas.setMenu(self.menu_janelas)
         sup.addWidget(self.btn_janelas)
 
         for texto, dica in [("?", "Ajuda"), ("i", "Sobre")]:
@@ -1335,11 +1693,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         O hover é controlado manualmente para não ficar travado quando um QMenu
         abre por cima da janela e captura os eventos do mouse.
         """
-        fundo = "#d9edf9" if ativo else "transparent"
+        tema = self._tema_interface()
+        fundo = tema["hover"] if ativo else "transparent"
         return f"""
             QPushButton {{
                 background: {fundo};
-                color: #111111;
+                color: {tema['texto']};
                 border: none;
                 border-radius: 0px;
                 text-align: left;
@@ -1348,12 +1707,12 @@ class GuimmaStudioMainWindow(QMainWindow):
                 font-weight: 400;
             }}
             QPushButton:pressed {{
-                background: #c6e2f4;
-                color: #000000;
+                background: {tema['selecionado']};
+                color: {tema['texto']};
             }}
             QPushButton:disabled {{
                 background: transparent;
-                color: #777777;
+                color: {tema['texto_suave']};
             }}
         """
 
@@ -1772,6 +2131,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu_regras.addAction("Regras de Graduação - Nomes...", lambda: self.lbl_status.setText("Regras de Graduação - Nomes (em breve)"))
         menu_regras.addAction("Regras de Graduação - Valores...", lambda: self.lbl_status.setText("Regras de Graduação - Valores (em breve)"))
         _add_menu_acao("Cores", self._abrir_dialogo_cores, "cores_rapido.svg")
+        self._criar_submenu_temas_interface(menu)
         menu.addAction("Grade", lambda: self.lbl_status.setText("Grade (em breve)"))
         menu_snap = menu.addMenu("Snap")
         menu_snap_classico = menu_snap.addMenu("Clássico")
@@ -1805,11 +2165,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         return menu
 
     def _estilo_menu_backstage(self) -> str:
+        tema = self._tema_interface()
         return (
-            "QMenu { background:#ffffff; color:#111111; border:1px solid #c8d0d8; padding:3px; }"
-            "QMenu::item { color:#111111; padding:7px 22px 7px 18px; min-width:220px; }"
-            "QMenu::item:selected { background:#e6f2ff; color:#0b4f82; }"
-            "QMenu::separator { height:1px; background:#d8dee6; margin:4px 8px; }"
+            f"QMenu {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; padding:3px; }}"
+            f"QMenu::item {{ color:{tema['texto']}; padding:7px 22px 7px 18px; min-width:220px; }}"
+            f"QMenu::item:selected {{ background:{tema['hover_menu']}; color:{tema['primaria_escura']}; }}"
+            f"QMenu::separator {{ height:1px; background:{tema['borda']}; margin:4px 8px; }}"
             "QMenu::right-arrow { width:10px; height:10px; }"
         )
 
@@ -4928,7 +5289,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _criar_area_documento(self) -> QWidget:
         area = QWidget()
-        area.setStyleSheet("background: #eceff3;")
+        self.area_documento_widget = area
+        area.setStyleSheet(f"background: {self._tema_interface()['area']};")
         area.setMinimumSize(0, 0)
 
         layout_externo = QHBoxLayout(area)
@@ -4964,13 +5326,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.abas_documentos.tabBar().setUsesScrollButtons(True)
         self.abas_documentos.currentChanged.connect(self._on_aba_documento_alterada)
         self.abas_documentos.tabBar().tabMoved.connect(lambda _from, _to: self._reconfigurar_botoes_fechar_abas())
-        self.abas_documentos.setStyleSheet(
-            "QTabWidget::pane { border: 1px solid #d7dbe1; }"
-            "QTabWidget::tab-bar { alignment: left; }"
-            "QTabBar { background: #f9f9f9; }"
-            "QTabBar::tab { background:#ffffff; border:1px solid #d7dbe1; padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
-            "QTabBar::tab:selected { background:#ffffff; border-bottom:2px solid #0b8dd1; }"
-        )
+        self.abas_documentos.setStyleSheet(self._estilo_abas_documentos())
         self.painel_menu_moldes = self._criar_painel_menu_moldes()
         self.splitter_documentos = QSplitter(Qt.Horizontal)
         self.splitter_documentos.setChildrenCollapsible(False)
@@ -5828,6 +6184,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 self._perfis_usuarios_cfg[self.PERFIL_USUARIO_PADRAO] = self._perfis_usuarios_cfg.pop("Usuário 1")
         else:
             self._perfis_usuarios_cfg = {}
+        self._perfis_usuarios_cfg.setdefault(
+            self.PERFIL_USUARIO_PADRAO,
+            {"tema_interface": self.TEMA_INTERFACE_PADRAO},
+        )
         self._aplicar_configuracoes_perfil(self._perfis_usuarios_cfg.get(self._perfil_usuario_atual, {}))
 
     def _persistir_perfis_usuarios(self):
@@ -6695,17 +7055,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.setSpacing(0)
 
         atalhos = QFrame()
+        self.barra_atalhos_rodape = atalhos
         atalhos.setFixedHeight(24)
-        atalhos.setStyleSheet("background:#f4f6f8; border-top:1px solid #c8d1da; border-bottom:1px solid #dce2e8;")
+        tema = self._tema_interface()
+        atalhos.setStyleSheet(
+            f"background:{tema['faixa']}; border-top:1px solid {tema['borda']}; border-bottom:1px solid {tema['borda']};"
+        )
         row = QHBoxLayout(atalhos)
         row.setContentsMargins(8, 2, 8, 2)
         row.setSpacing(4)
 
-        estilo_botao_icone = (
-            "QPushButton { color:#1f1f1f; background:transparent; border:none; padding:1px 6px; min-width:22px; }"
-            "QPushButton:hover { background:#d9edf9; border:none; }"
-            "QPushButton:checked { background:#c5e4f6; border:none; color:#0a4f82; font-weight:700; }"
-        )
+        estilo_botao_icone = self._estilo_botoes_rodape()
 
         self.btn_snap = _BotaoRodapeHover("🧲", "Ativa ou desativa o snap")
         self.btn_snap.setCheckable(True)
@@ -6826,7 +7186,9 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         barra = QFrame()
         barra.setFixedHeight(22)
-        barra.setStyleSheet("background: #0b88b6; border-top: 1px solid #0a7aa2; color: white;")
+        barra.setStyleSheet(
+            f"background: {tema['primaria']}; border-top: 1px solid {tema['primaria_escura']}; color: white;"
+        )
         l = QHBoxLayout(barra)
         l.setContentsMargins(10, 0, 10, 0)
         self.lbl_status = QLabel("Pronto")

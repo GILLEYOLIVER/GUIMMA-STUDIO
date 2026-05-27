@@ -5,4 +5,4 @@ from tools.tool_base import FerramentaBase
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "separar"
-    nome = "Separar"
+    nome = "Separar Tamanhos"

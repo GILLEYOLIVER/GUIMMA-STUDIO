@@ -1,5 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect x="4" y="4" width="56" height="56" rx="10" fill="#4a7fc1"/>
-  <rect x="10" y="10" width="44" height="44" rx="8" fill="#eef4ff"/>
-  <text x="32" y="38" text-anchor="middle" font-size="16" font-family="Arial" fill="#305f99">IM</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
+  <path d="M24 15 H62 L76 29 V81 H24 Z" fill="#f8fafc" stroke="#111111" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M62 15 V29 H76" stroke="#111111" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M40 34 C36 41 34 51 36 62 C38 73 46 78 52 78 C58 78 66 73 68 62 C70 51 68 41 64 34 C60 38 56 40 52 40 C48 40 44 38 40 34 Z" fill="#4c1d95" stroke="#111111" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M52 42 V76" stroke="#166534" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="33" cy="30" r="8" fill="#1e3a8a" stroke="#111111" stroke-width="4"/>
+  <path d="M33 39 V58" stroke="#1e3a8a" stroke-width="6" stroke-linecap="round"/>
 </svg>

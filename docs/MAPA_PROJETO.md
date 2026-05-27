@@ -110,7 +110,7 @@ flowchart LR
 | Graduação | Graduar | `regras` | Regras | `tools/regras_tool.py` | `Ferramenta` | `regras.svg` |
 | Graduação | Graduar | `criar_regra` | Criar Regra | `tools/criar_regra_tool.py` | `Ferramenta` | `criar_regra.svg` |
 | Graduação | Manipular graduação | `remover_graduacao` | Remover Graduacao | `tools/remover_graduacao_tool.py` | `Ferramenta` | `remover_graduacao.svg` |
-| Graduação | Manipular graduação | `separar` | Separar | `tools/separar_tool.py` | `Ferramenta` | `separar.svg` |
+| Graduação | Manipular graduação | `separar` | Separar Tamanhos | `tools/separar_tool.py` | `Ferramenta` | `separar.svg` |
 | Graduação | Manipular graduação | `agrupar` | Agrupar | `tools/agrupar_tool.py` | `Ferramenta` | `agrupar.svg` |
 | Graduação | Manipular graduação | `graduar_curva` | Graduar Curva | `tools/graduar_curva_tool.py` | `Ferramenta` | `graduar_curva.svg` |
 | Manipulação | Redefinir | `modificar` | Modificar | `tools/modificar_tool.py` | `Ferramenta` | `modificar.svg` |
