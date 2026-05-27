@@ -10,14 +10,15 @@ from tools.tool_base import FerramentaBase
 class Ferramenta(FerramentaBase):
     """Ferramenta simples de leitura de perímetro.
 
-    Esta ferramenta é independente da Cota Perímetro. Ela apenas destaca a
-    linha/curva clicada em azul e mostra a medida ao lado do clique, sem criar
-    uma cota permanente no desenho.
+    Perímetro é consulta rápida: ao clicar ou passar o mouse sobre uma linha,
+    curva ou trecho de molde, o trecho fica azul e a medida aparece ao lado.
+    Ela não cria cota permanente no desenho.
     """
 
     id_ferramenta = "perimetro"
     nome = "Perímetro"
-    descricao_painel = "Clique em uma linha ou curva para ver o perímetro ao lado do ponto clicado."
+    descricao_painel = "Clique ou passe o mouse em uma linha/curva para ver o perímetro do trecho."
+    gerencia_coordenadas_operacao = True
 
     COR_REALCE = "#2da8ff"
     COR_TEXTO = "#ffffff"
@@ -26,17 +27,20 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._medicao: dict | None = None
+        self._fixado = False
 
     def on_activate(self, canvas) -> None:
         super().on_activate(canvas)
         self._medicao = None
-        texto = "Perímetro: clique em uma linha ou curva para medir de ponto a ponto."
+        self._fixado = False
+        texto = "Perímetro: passe o mouse ou clique em uma linha/curva para medir o trecho."
         self.set_status(texto)
         mensagem_status(canvas, texto)
         canvas.update()
 
     def on_deactivate(self, canvas) -> None:
         self._medicao = None
+        self._fixado = False
         canvas.update()
         super().on_deactivate(canvas)
 
@@ -50,22 +54,16 @@ class Ferramenta(FerramentaBase):
             return False
 
         pos = canvas._ponto_com_snap(event.position())
-        info = selecionar_segmento_mais_proximo(canvas, pos, tolerancia_px=14.0)
-        if info is None:
-            texto = "Perímetro: nenhum segmento encontrado no clique."
-            self.set_status(texto)
-            mensagem_status(canvas, texto)
-            event.accept()
-            return True
-
-        self._medicao = info
-        medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
-        texto = f"Perímetro: {medida}"
-        self.set_status(texto)
-        mensagem_status(canvas, texto)
-        canvas.update()
+        self._atualizar_medicao(canvas, pos, fixar=True)
         event.accept()
         return True
+
+    def on_mouse_move(self, canvas, event) -> bool:
+        if self._fixado:
+            return False
+        pos = canvas._ponto_com_snap(event.position())
+        mudou = self._atualizar_medicao(canvas, pos, fixar=False, silencioso=True)
+        return mudou
 
     def on_paint_overlay(self, canvas, painter) -> None:
         if not self._medicao:
@@ -88,9 +86,34 @@ class Ferramenta(FerramentaBase):
         finally:
             painter.restore()
 
+    def _atualizar_medicao(self, canvas, pos: QPointF, fixar: bool, silencioso: bool = False) -> bool:
+        info = selecionar_segmento_mais_proximo(canvas, pos, tolerancia_px=14.0)
+        anterior = self._medicao
+        if info is None:
+            if not silencioso:
+                texto = "Perímetro: nenhum segmento encontrado no clique."
+                self.set_status(texto)
+                mensagem_status(canvas, texto)
+            if anterior is not None and not self._fixado:
+                self._medicao = None
+                canvas.update()
+                return True
+            return False
+
+        self._medicao = info
+        self._fixado = bool(fixar)
+        medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
+        texto = f"Perímetro: {medida}"
+        self.set_status(texto)
+        if not silencioso:
+            mensagem_status(canvas, texto)
+        canvas.update()
+        return True
+
     def _limpar(self, canvas) -> None:
         self._medicao = None
-        texto = "Perímetro: medição limpa. Clique em outra linha ou curva."
+        self._fixado = False
+        texto = "Perímetro: medição limpa. Passe o mouse ou clique em outra linha/curva."
         self.set_status(texto)
         mensagem_status(canvas, texto)
         canvas.update()
@@ -139,7 +162,7 @@ class Ferramenta(FerramentaBase):
         if not self._medicao:
             return
 
-        texto = f"Perímetro {self._formatar_medida(canvas, float(self._medicao.get('perimetro_total', 0.0)))}"
+        texto = f"P {self._formatar_medida(canvas, float(self._medicao.get('perimetro_total', 0.0)))}"
         base = self._medicao.get("ponto_mais_proximo")
         if base is None:
             base = pontos[len(pontos) // 2]
