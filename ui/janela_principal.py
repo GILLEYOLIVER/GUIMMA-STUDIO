@@ -11,7 +11,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -489,6 +489,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._menu_backstage_hover_origem: str | None = None
         self._menu_backstage_hover_botao: QWidget | None = None
         self._menus_backstage_hover: list[QMenu] = []
+        self._ajuste_restauracao_maximizado_pendente = False
         self._timer_fechar_submenu_backstage = QTimer(self)
         self._timer_fechar_submenu_backstage.setSingleShot(True)
         self._timer_fechar_submenu_backstage.timeout.connect(self._fechar_submenu_backstage_se_cursor_fora)
@@ -506,12 +507,42 @@ class GuimmaStudioMainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._ativar_ferramenta_global("selecionar"))
 
     def exibir_inicial(self):
+        self._aplicar_geometria_normal_padrao()
         self.setWindowState(self.windowState() | Qt.WindowMaximized)
         self.show()
         self._agendar_reencaixe_janela_canvas()
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
+        self._agendar_reencaixe_janela_canvas()
+
+    def changeEvent(self, event):  # noqa: N802
+        super().changeEvent(event)
+        if event.type() != QEvent.WindowStateChange:
+            return
+        saiu_do_maximizado = bool(event.oldState() & Qt.WindowMaximized) and not self.isMaximized()
+        if saiu_do_maximizado and not self.isMinimized():
+            self._ajuste_restauracao_maximizado_pendente = True
+            QTimer.singleShot(0, self._aplicar_geometria_restaurada_do_maximizado)
+
+    def _geometria_normal_padrao(self) -> QRect:
+        tela = self.screen() or QApplication.primaryScreen()
+        area = tela.availableGeometry() if tela is not None else QRect(0, 0, 1388, 893)
+        margem = 24
+        largura = min(1388, max(900, area.width() - margem))
+        altura = min(893, max(620, area.height() - margem))
+        x = area.x() + max(0, (area.width() - largura) // 2)
+        y = area.y() + max(0, (area.height() - altura) // 2)
+        return QRect(x, y, largura, altura)
+
+    def _aplicar_geometria_normal_padrao(self):
+        self.setGeometry(self._geometria_normal_padrao())
+
+    def _aplicar_geometria_restaurada_do_maximizado(self):
+        if not self._ajuste_restauracao_maximizado_pendente or self.isMaximized() or self.isMinimized():
+            return
+        self._ajuste_restauracao_maximizado_pendente = False
+        self._aplicar_geometria_normal_padrao()
         self._agendar_reencaixe_janela_canvas()
 
     def _carregar_preferencias_app(self) -> dict:
@@ -571,10 +602,85 @@ class GuimmaStudioMainWindow(QMainWindow):
             "QTabWidget::tab-bar { alignment: left; }"
             f"QTabBar {{ background: {tema['faixa']}; }}"
             f"QTabBar::tab {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; "
-            "padding:2px 20px 2px 9px; margin-right:1px; min-height:18px; }"
+            "padding:0 16px 0 7px; margin-right:1px; min-height:14px; font-size:12px; }"
             f"QTabBar::tab:hover {{ background:{tema['hover']}; }}"
             f"QTabBar::tab:selected {{ background:{tema['painel']}; border-bottom:2px solid {tema['primaria']}; }}"
         )
+
+    def _estilo_botoes_usuario(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QPushButton {{ background: transparent; border: 1px solid transparent; color: {tema['texto']}; "
+            "font-weight: 400; font-size: 12px; padding: 0 8px; border-radius: 3px; }}"
+            f"QPushButton:hover {{ background: {tema['hover']}; border-color: {tema['borda']}; color: {tema['primaria_escura']}; }}"
+            f"QPushButton:pressed {{ background: {tema['selecionado']}; border-color: {tema['primaria']}; }}"
+            f"QPushButton:disabled {{ color: {tema['texto_suave']}; background: transparent; border-color: transparent; }}"
+        )
+
+    def _estilo_combo_usuario(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QComboBox {{ color:{tema['texto']}; background:{tema['painel']}; border:1px solid {tema['borda']}; "
+            "padding: 2px 8px; font-weight: 400; }}"
+            f"QComboBox:hover {{ border-color:{tema['primaria']}; background:{tema['hover_menu']}; }}"
+            f"QComboBox QAbstractItemView {{ color:{tema['texto']}; background:{tema['painel']}; "
+            f"selection-background-color:{tema['hover_menu']}; selection-color:{tema['primaria_escura']}; }}"
+        )
+
+    def _estilo_botao_linha_usuario(self) -> str:
+        tema = self._tema_interface()
+        return (
+            "QToolButton { border: 1px solid transparent; background: transparent; padding: 0px; margin: 0px; border-radius: 4px; }"
+            f"QToolButton:hover {{ border-color: {tema['borda']}; background: {tema['hover']}; }}"
+            f"QToolButton:pressed {{ border-color: {tema['primaria']}; background: {tema['selecionado']}; }}"
+            f"QToolButton:checked {{ border-color: {tema['primaria']}; background: {tema['selecionado']}; }}"
+        )
+
+    def _estilo_barra_lateral_usuario(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QFrame#BarraLateralFerramentas {{ background: {tema['faixa']}; border: 1px solid {tema['borda']}; border-radius: 6px; }}"
+            f"QLabel#TituloBarraLateralFerramentas {{ color: {tema['primaria_escura']}; font-size: 12px; font-weight: 700; padding: 8px 8px 4px 8px; }}"
+            f"QLabel#GrupoBarraLateralFerramentas {{ color: {tema['texto_suave']}; font-size: 10px; font-weight: 700; padding: 8px 8px 2px 8px; }}"
+            "QScrollArea { background: transparent; border: none; }"
+        )
+
+    def _estilo_botao_barra_lateral_usuario(self) -> str:
+        tema = self._tema_interface()
+        return (
+            f"QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 5px; color: {tema['texto']}; "
+            "font-size: 12px; font-weight: 400; padding: 3px 6px; text-align: left; }}"
+            f"QToolButton:hover {{ background: {tema['hover']}; border: 1px solid {tema['borda']}; color: {tema['primaria_escura']}; }}"
+            f"QToolButton:pressed {{ background: {tema['selecionado']}; }}"
+            f"QToolButton:checked {{ background: {tema['selecionado']}; border: 1px solid {tema['primaria']}; color: {tema['primaria_escura']}; font-weight: 600; }}"
+        )
+
+    def _aplicar_tema_barra_usuario(self):
+        if hasattr(self, "faixa_usuarios"):
+            tema = self._tema_interface()
+            self.faixa_usuarios.setStyleSheet(
+                f"QFrame {{ background:{tema['faixa']}; border:1px solid {tema['borda']}; }}"
+            )
+            for btn in self.faixa_usuarios.findChildren(QPushButton):
+                btn.setStyleSheet(self._estilo_botoes_usuario())
+            for combo in self.faixa_usuarios.findChildren(QComboBox):
+                combo.setStyleSheet(self._estilo_combo_usuario())
+            for label in self.faixa_usuarios.findChildren(QLabel):
+                label.setStyleSheet(f"color:{tema['texto']}; font-size:12px; font-weight:400;")
+            for btn in self.faixa_usuarios.findChildren(_BotaoFerramentaUsuario):
+                btn.setStyleSheet(self._estilo_botao_linha_usuario())
+        if hasattr(self, "barra_lateral_ferramentas") and self.barra_lateral_ferramentas is not None:
+            self.barra_lateral_ferramentas.setStyleSheet(self._estilo_barra_lateral_usuario())
+            for btn in self.barra_lateral_ferramentas.findChildren(QToolButton):
+                btn.setStyleSheet(self._estilo_botao_barra_lateral_usuario())
+
+    def _aplicar_tema_areas_documento(self):
+        if not hasattr(self, "abas_documentos"):
+            return
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.aplicar_tema(self._tema_interface())
 
     def _sincronizar_acoes_tema_interface(self):
         if not hasattr(self, "_acoes_tema_interface"):
@@ -679,32 +785,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             if menu is not None:
                 menu.setStyleSheet(self._estilo_menu_popup_topo())
         if hasattr(self, "ribbon"):
-            self.ribbon.setStyleSheet(f"background:{tema['painel']}; color:{tema['texto']};")
-            self.ribbon.tabbar.setStyleSheet(
-                f"""
-                QTabBar::tab {{
-                    background: {tema['aba']};
-                    color: {tema['texto']};
-                    border: 1px solid {tema['borda']};
-                    font-size: 13px;
-                    font-weight: 400;
-                    padding: 6px 16px;
-                }}
-                QTabBar::tab:selected {{
-                    background: {tema['primaria']};
-                    color: #ffffff;
-                    border: 1px solid {tema['primaria_escura']};
-                }}
-                QTabBar::tab:hover {{ background: {tema['aba_hover']}; }}
-                QTabBar::tab:selected:hover {{
-                    background: {tema['primaria']};
-                    color: #ffffff;
-                    border: 1px solid {tema['primaria_escura']};
-                }}
-                """
-            )
+            self.ribbon.aplicar_tema(tema)
         if hasattr(self, "area_documento_widget"):
             self.area_documento_widget.setStyleSheet(f"background: {tema['area']};")
+        self._aplicar_tema_areas_documento()
+        self._aplicar_tema_barra_usuario()
         if hasattr(self, "abas_documentos"):
             self.abas_documentos.setStyleSheet(self._estilo_abas_documentos())
         if hasattr(self, "backstage"):
@@ -5355,31 +5440,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         painel.setObjectName("BarraLateralFerramentas")
         painel.setFixedWidth(154)
         painel.setMinimumHeight(0)
-        painel.setStyleSheet(
-            """
-            QFrame#BarraLateralFerramentas {
-                background: #f8fafc;
-                border: 1px solid #d6dde6;
-                border-radius: 6px;
-            }
-            QLabel#TituloBarraLateralFerramentas {
-                color: #1f2937;
-                font-size: 12px;
-                font-weight: 700;
-                padding: 8px 8px 4px 8px;
-            }
-            QLabel#GrupoBarraLateralFerramentas {
-                color: #64748b;
-                font-size: 10px;
-                font-weight: 700;
-                padding: 8px 8px 2px 8px;
-            }
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
-            """
-        )
+        painel.setStyleSheet(self._estilo_barra_lateral_usuario())
 
         layout_painel = QVBoxLayout(painel)
         layout_painel.setContentsMargins(0, 0, 0, 0)
@@ -5431,33 +5492,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             else:
                 btn.setFixedHeight(31)
                 btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            btn.setStyleSheet(
-                """
-                QToolButton {
-                    background: transparent;
-                    border: 1px solid transparent;
-                    border-radius: 5px;
-                    color: #111827;
-                    font-size: 12px;
-                    font-weight: 400;
-                    padding: 3px 6px;
-                    text-align: left;
-                }
-                QToolButton:hover {
-                    background: #eef5ff;
-                    border: 1px solid #d7e8fb;
-                }
-                QToolButton:pressed {
-                    background: #e2effc;
-                }
-                QToolButton:checked {
-                    background: #e7f1ff;
-                    border: 1px solid #9dc9f4;
-                    color: #0b5f9e;
-                    font-weight: 600;
-                }
-                """
-            )
+            btn.setStyleSheet(self._estilo_botao_barra_lateral_usuario())
             btn.clicked.connect(lambda _=False, tid=tool_id: self._abrir_pagina_ferramenta(tid))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
             btn.customContextMenuRequested.connect(lambda _pos, tid=tool_id: self._remover_ferramenta_usuario(tid))
@@ -5876,7 +5911,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         faixa = QFrame()
         faixa.setFixedHeight(42)
-        faixa.setStyleSheet("QFrame { background:#f5f9fe; border:1px solid #c9dbef; }")
+        tema = self._tema_interface()
+        faixa.setStyleSheet(f"QFrame {{ background:{tema['faixa']}; border:1px solid {tema['borda']}; }}")
         lay = QHBoxLayout(faixa)
         lay.setContentsMargins(8, 2, 8, 2)
         lay.setSpacing(6)
@@ -5885,41 +5921,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_usuario_add_all.setCursor(Qt.PointingHandCursor)
         self.btn_usuario_add_all.setFixedHeight(26)
         self.btn_usuario_add_all.clicked.connect(self._adicionar_todas_ferramentas_da_aba)
-        self.btn_usuario_add_all.setStyleSheet(
-            """
-            QPushButton {
-                background: transparent;
-                border: none;
-                color: #111111;
-                font-weight: 400;
-                font-size: 12px;
-                padding: 0 8px;
-            }
-            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
-            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
-            QPushButton:disabled { color: #555555; background: transparent; }
-            """
-        )
+        self.btn_usuario_add_all.setStyleSheet(self._estilo_botoes_usuario())
 
         self.btn_usuario_limpar = QPushButton("Limpar linha")
         self.btn_usuario_limpar.setCursor(Qt.PointingHandCursor)
         self.btn_usuario_limpar.setFixedHeight(26)
         self.btn_usuario_limpar.clicked.connect(self._limpar_ferramentas_usuario)
-        self.btn_usuario_limpar.setStyleSheet(
-            """
-            QPushButton {
-                background: transparent;
-                border: none;
-                color: #111111;
-                font-weight: 400;
-                font-size: 12px;
-                padding: 0 8px;
-            }
-            QPushButton:hover { background: rgba(20, 120, 200, 0.10); }
-            QPushButton:pressed { background: rgba(20, 120, 200, 0.16); }
-            QPushButton:disabled { color: #555555; background: transparent; }
-            """
-        )
+        self.btn_usuario_limpar.setStyleSheet(self._estilo_botoes_usuario())
 
         self.linha_usuario = _LinhaUsuarioDropArea(self)
         self.layout_linha_usuario = QHBoxLayout(self.linha_usuario)
@@ -5933,28 +5941,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         controles_layout.setSpacing(4)
 
         lbl_usuario = QLabel("Usuário:")
-        lbl_usuario.setStyleSheet("color:#111111; font-size:12px; font-weight:400;")
+        lbl_usuario.setStyleSheet(f"color:{tema['texto']}; font-size:12px; font-weight:400;")
         controles_layout.addWidget(lbl_usuario, 0)
 
         self.combo_perfil_usuario = QComboBox()
         self.combo_perfil_usuario.setMinimumWidth(130)
-        self.combo_perfil_usuario.setStyleSheet(
-            """
-            QComboBox {
-                color:#111111;
-                background:#ffffff;
-                border:1px solid #b7b7b7;
-                padding: 2px 8px;
-                font-weight: 400;
-            }
-            QComboBox QAbstractItemView {
-                color:#111111;
-                background:#ffffff;
-                selection-background-color:#e9f3ff;
-                selection-color:#111111;
-            }
-            """
-        )
+        self.combo_perfil_usuario.setStyleSheet(self._estilo_combo_usuario())
         self.combo_perfil_usuario.currentTextChanged.connect(self._trocar_perfil_usuario)
         controles_layout.addWidget(self.combo_perfil_usuario, 0)
 
@@ -6286,7 +6278,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 widget.deleteLater()
         if not self._ferramentas_usuario_ids:
             vazio = QLabel("Sem ferramentas ainda. Clique com o botão direito em qualquer ferramenta e selecione 'Adicionar à linha Usuários'.")
-            vazio.setStyleSheet("color:#111111; font-size:11px; font-weight:400;")
+            tema = self._tema_interface()
+            vazio.setStyleSheet(f"color:{tema['texto_suave']}; font-size:11px; font-weight:400;")
             self.layout_linha_usuario.addWidget(vazio)
             self.layout_linha_usuario.addStretch(1)
             return
@@ -6301,24 +6294,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             btn.setFixedSize(30, 30)
             btn.setToolTip(tool.title)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(
-                """
-                QToolButton {
-                    border: none;
-                    background: transparent;
-                    padding: 0px;
-                    margin: 0px;
-                }
-                QToolButton:hover {
-                    border: none;
-                    background: rgba(20, 120, 200, 0.10);
-                }
-                QToolButton:pressed {
-                    border: none;
-                    background: rgba(20, 120, 200, 0.16);
-                }
-                """
-            )
+            btn.setStyleSheet(self._estilo_botao_linha_usuario())
             btn.clicked.connect(lambda _=False, tid=tool_id: self._abrir_pagina_ferramenta(tid))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
             btn.customContextMenuRequested.connect(
@@ -6387,6 +6363,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
         area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
         area_doc.canvas.set_precisao_medida(self._precisao_medida)
+        area_doc.aplicar_tema(self._tema_interface())
         area_doc.canvas.installEventFilter(self)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
         self._marcar_area_como_salva(area_doc)
@@ -6457,11 +6434,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         botao = QPushButton("×")
         botao.setCursor(Qt.PointingHandCursor)
         botao.setFlat(True)
-        botao.setFixedSize(18, 18)
+        botao.setFixedSize(14, 14)
         botao.setToolTip("Fechar aba")
         botao.setStyleSheet(
-            "QPushButton { border:none; padding:0; font-size:14px; color:#c62828; font-weight:700; }"
-            "QPushButton:hover { background:#ffe9e9; border-radius:9px; color:#9a0000; }"
+            "QPushButton { border:none; padding:0; font-size:12px; color:#c62828; font-weight:700; }"
+            "QPushButton:hover { background:#ffe9e9; border-radius:7px; color:#9a0000; }"
         )
         botao.clicked.connect(lambda _=False, i=index: self._fechar_aba_documento(i))
         barra.setTabButton(index, QTabBar.RightSide, botao)
@@ -6618,6 +6595,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)
             area_doc.canvas.set_unidade_quadrado(self._unidade_area, self._fator_unidade_sigla(self._unidade_area))
             area_doc.canvas.set_precisao_medida(self._precisao_medida)
+            area_doc.aplicar_tema(self._tema_interface())
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             if "painel_coordenadas_visivel" in doc:
                 area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))

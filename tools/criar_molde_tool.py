@@ -45,6 +45,7 @@ class Ferramenta(FerramentaBase):
             el["controle_cantos"] = self._estimar_cantos(pontos)
             alterou = True
         if alterou:
+            canvas._selecionados.clear()
             canvas._registrar_historico()
             canvas.update()
             self.set_status("Molde criado/atualizado com sucesso.")

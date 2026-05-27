@@ -784,7 +784,7 @@ class Ferramenta(FerramentaBase):
         if novos_indices:
             self._idx_selecionado = novos_indices[-1]
             self._selecoes_manuais = set(novos_indices)
-            canvas._selecionados = set(novos_indices)
+            canvas._selecionados = set()
         self._molde_criado = criou
         return criou
 
@@ -827,7 +827,7 @@ class Ferramenta(FerramentaBase):
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
-        canvas._selecionados = {self._idx_selecionado}
+        canvas._selecionados = set()
         self._molde_criado = True
         return True
 
@@ -857,7 +857,7 @@ class Ferramenta(FerramentaBase):
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
-        canvas._selecionados = {self._idx_selecionado}
+        canvas._selecionados = set()
         self._molde_criado = True
         if limpar_estado:
             self._contornos_auto_coords = []

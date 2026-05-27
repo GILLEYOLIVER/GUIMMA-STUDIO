@@ -190,7 +190,10 @@ class Ferramenta(FerramentaBase):
             return
 
         try:
-            canvas._selecionados = set(novos_indices)
+            canvas._selecionados = {
+                idx for idx in novos_indices
+                if 0 <= idx < len(elementos) and not elementos[idx].get("molde")
+            }
         except Exception:
             pass
         self._finalizar_alteracao(canvas)

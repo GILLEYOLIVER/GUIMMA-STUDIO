@@ -107,6 +107,7 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertIn((5.0, 0.0), auxiliares)
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
+        self.assertEqual(canvas._selecionados, set())
 
     def test_preview_retangulo_nao_usa_preenchimento_herdado_do_painter(self):
         canvas = _FakeCanvas()

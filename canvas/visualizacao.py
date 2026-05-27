@@ -39,6 +39,7 @@ class VisualizacaoCanvas(QWidget):
         self.origem_cena = QPointF(0.0, 0.0)
         self.ferramenta_ativa: str | None = None
         self._pontos_reta: list[QPointF] = []
+        self._pontos_reta_finalizados = False
         self._preview_reta: QPointF | None = None
         self._marcacoes_temporarias: list[QPointF] = []
         self._ponto_coordenada_aplicada: QPointF | None = None
@@ -465,9 +466,15 @@ class VisualizacaoCanvas(QWidget):
         return elementos
 
     def desfazer_acao(self):
+        if self._runtime_tool and hasattr(self._runtime_tool, "desfazer_etapa"):
+            try:
+                if self._runtime_tool.desfazer_etapa(self):
+                    return
+            except Exception:
+                pass
         if self._remover_ultima_marcacao_coordenadas():
             return
-        if self._pontos_reta:
+        if self._pontos_reta and not (self._pontos_reta_finalizados and len(self._pontos_reta) == 1):
             self._desfazer_ponto()
             return
         self._garantir_estado_atual_no_historico()
@@ -1524,6 +1531,7 @@ class VisualizacaoCanvas(QWidget):
             return
         if not self._pontos_reta:
             return
+        self._pontos_reta_finalizados = False
         self._pontos_reta.pop()
         if self._pontos_reta:
             self._preview_reta = self._pontos_reta[-1]
@@ -1583,9 +1591,10 @@ class VisualizacaoCanvas(QWidget):
                     "fase_inicio": fase,
                 })
                 fase += comprimento
-            self._registrar_historico()
+                self._registrar_historico()
             ultimo_ponto = self._pontos_reta[-1]
             self._pontos_reta = [ultimo_ponto]
+            self._pontos_reta_finalizados = True
             self._preview_reta = ultimo_ponto
             self._guia_fechamento = None
             self._guias_alinhamento = []
@@ -2494,7 +2503,7 @@ class VisualizacaoCanvas(QWidget):
             return
         pontos_bbox = list(base)
         pontos_bbox.extend(self._pontos_costuras_vinculadas(el))
-        margem_cm = 0.5
+        margem_cm = 1.5
         min_x = min(pt.x() for pt in pontos_bbox) - margem_cm
         max_x = max(pt.x() for pt in pontos_bbox) + margem_cm
         min_y = min(pt.y() for pt in pontos_bbox) - margem_cm

@@ -209,7 +209,7 @@ class Ferramenta(FerramentaBase):
                     "pontos_auxiliares": [{"x": float(x), "y": float(y)} for x, y in controle_auxiliares],
                 }
             )
-            canvas._selecionados = {len(canvas.cena.elementos) - 1}
+            canvas._selecionados = set()
         else:
             pontos = [p1, p2, p3, p4, p1]
             fase = 0.0

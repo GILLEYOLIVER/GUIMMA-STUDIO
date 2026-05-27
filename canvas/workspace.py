@@ -20,10 +20,25 @@ class ReguaWidget(QWidget):
         self.unidade_sigla = "cm"
         self._fator_unidade = 1.0  # 1 unidade de cena = 1 cm
         self.passo_preferido_unidade = 0.5
+        self._cores_tema = {
+            "fundo": "#f2f2f2",
+            "texto": "#222222",
+            "linha": "#222222",
+            "borda": "#cdd6df",
+        }
         if horizontal:
             self.setFixedHeight(20)
         else:
             self.setFixedWidth(28)
+
+    def aplicar_tema(self, tema: dict[str, str]):
+        self._cores_tema = {
+            "fundo": tema.get("faixa", "#f2f2f2"),
+            "texto": tema.get("texto", "#222222"),
+            "linha": tema.get("primaria_escura", "#222222"),
+            "borda": tema.get("borda", "#cdd6df"),
+        }
+        self.update()
 
     def atualizar_viewport(self, zoom: float, origem_x: float, origem_y: float):
         self.zoom = max(0.1, zoom)
@@ -43,8 +58,8 @@ class ReguaWidget(QWidget):
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#f2f2f2"))
-        painter.setPen(QPen(QColor("#222222"), 1))
+        painter.fillRect(self.rect(), QColor(self._cores_tema["fundo"]))
+        painter.setPen(QPen(QColor(self._cores_tema["linha"]), 1))
 
         pixel_step = max(25, int(40 * self.zoom))
         passo_unidade = self._passo_principal()
@@ -138,6 +153,18 @@ class AreaDocumentoWidget(QWidget):
         layout.setRowStretch(1, 1)
         self._reguas_visiveis = True
         self.aplicar_config_unidade("cm", 0.5)
+
+    def aplicar_tema(self, tema: dict[str, str]):
+        self.setStyleSheet(f"background: {tema.get('area', '#eceff3')};")
+        self.regua_h.aplicar_tema(tema)
+        self.regua_v.aplicar_tema(tema)
+        self.canto.setStyleSheet(
+            f"QToolButton {{ background:{tema.get('faixa', '#f8f8f8')}; color:{tema.get('texto', '#111111')}; "
+            f"border-right:1px solid {tema.get('borda', '#cdd6df')}; "
+            f"border-bottom:1px solid {tema.get('borda', '#cdd6df')}; font-size:10px; }}"
+            f"QToolButton:hover {{ background:{tema.get('hover', '#eaf5ff')}; color:{tema.get('primaria_escura', '#0a74aa')}; }}"
+            f"QToolButton:pressed {{ background:{tema.get('selecionado', '#c5e4f6')}; }}"
+        )
 
     def _on_zoom_changed(self, zoom: float):
         self.regua_h.atualizar_viewport(zoom, self.canvas.origem_cena.x(), self.canvas.origem_cena.y())

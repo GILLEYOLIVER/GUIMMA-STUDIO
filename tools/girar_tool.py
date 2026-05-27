@@ -209,7 +209,13 @@ class Ferramenta(FerramentaBase):
                 novos_indices.append(len(canvas.cena.elementos) - 1)
             else:
                 novos_indices.append(idx)
-        canvas._selecionados = set(novos_indices)
+        if copiar:
+            canvas._selecionados = {
+                idx for idx in novos_indices
+                if 0 <= idx < len(canvas.cena.elementos) and not canvas.cena.elementos[idx].get("molde")
+            }
+        else:
+            canvas._selecionados = set(novos_indices)
         canvas._registrar_historico()
         canvas.update()
         self._operacao_finalizada = True

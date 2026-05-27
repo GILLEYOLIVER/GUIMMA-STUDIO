@@ -1,33 +1,36 @@
 {
-  "arquivo_emf": "C:\\Users\\User\\Área de Trabalho\\GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\\GIL 132 3.emf",
-  "records_emf_total": 9751,
+  "arquivo_emf": "C:\\Users\\User\\Desktop\\UUUUU.emf",
+  "records_emf_total": 342,
   "records_emf_tipos": {
     "1": 1,
     "14": 1,
-    "18": 1310,
-    "25": 706,
-    "37": 2669,
-    "39": 706,
-    "40": 1410,
-    "43": 655,
-    "87": 1589,
-    "95": 704
+    "18": 23,
+    "25": 23,
+    "35": 14,
+    "36": 14,
+    "37": 49,
+    "39": 23,
+    "40": 40,
+    "43": 9,
+    "86": 2,
+    "87": 126,
+    "95": 17
   },
-  "quantidade_polyline": 1589,
-  "quantidade_polygon": 0,
+  "quantidade_polyline": 126,
+  "quantidade_polygon": 2,
   "quantidade_polybezier": 0,
   "quantidade_textos": 0,
-  "elementos_vetoriais_convertidos": 481,
-  "contornos_fechados": 20,
-  "moldes_reais_criados": 20,
-  "pecas_xml_lidas": 20,
-  "pecas_xml_associadas": 20,
-  "pecas_xml_sem_associacao": 0,
+  "elementos_vetoriais_convertidos": 45,
+  "contornos_fechados": 2,
+  "moldes_reais_criados": 2,
+  "pecas_xml_lidas": 7,
+  "pecas_xml_associadas": 2,
+  "pecas_xml_sem_associacao": 5,
   "bounds_emf": [
-    -42.520975065779396,
-    -42.520975065779396,
-    13337.412512299472,
-    9099.48866407679
+    0.0,
+    0.0,
+    3118.5730289170106,
+    9236.937715535441
   ],
   "escala_usada": {
     "sx": 1.0,
@@ -35,47 +38,48 @@
     "frame_cm": [
       0.0,
       0.0,
-      25.892,
+      4.996,
       17.75
     ]
   },
-  "escala_manual_aplicada": 14.1736583552598,
-  "medida_guimma_referencia_mm": 544.28,
-  "medida_audaces_referencia_mm": 400.17,
-  "fator_escala_final": 14.1736583552598,
-  "unidade_resultado": "cm_calibrado_por_referencia_mm",
+  "escala_manual_aplicada": 15.667555154719603,
+  "medida_guimma_referencia_mm": null,
+  "medida_audaces_referencia_mm": null,
+  "fator_escala_final": 15.667555154719603,
+  "unidade_resultado": "cm_calibrado_por_xml",
   "records_nao_suportados": {
     "14": 1,
-    "18": 1310,
-    "25": 706,
-    "39": 706,
-    "95": 704
+    "18": 23,
+    "25": 23,
+    "39": 23,
+    "95": 17
   },
   "avisos": [
-    "Escala calibrada manualmente aplicada ao EMF: fator 14.17365836."
+    "Alguns contornos EMF não puderam ser associados automaticamente às peças do XML.",
+    "Escala calibrada aplicada ao EMF: X 16.85715151, Y 14.47795880."
   ],
   "diagnostico_antes": {
-    "elementos_emf": 481,
-    "segmentos_soltos": 481,
-    "contorno": 0,
+    "elementos_emf": 45,
+    "segmentos_soltos": 41,
+    "contorno": 4,
     "costura": 0,
-    "linha_interna": 481
+    "linha_interna": 41
   },
   "diagnostico_depois": {
-    "segmentos_unidos": 366,
-    "contornos_fechados_encontrados": 48,
-    "contornos_classificados_como_contorno": 20,
-    "contornos_classificados_como_costura": 12,
-    "contornos_classificados_como_linha_interna": 70,
-    "contornos_ignorados": 13,
-    "contornos_abertos_restantes": 67,
-    "curvas_reconstruidas": 32,
-    "elementos_canvas_final": 115,
-    "moldes_reais_criados": 20
+    "segmentos_unidos": 20,
+    "contornos_fechados_encontrados": 6,
+    "contornos_classificados_como_contorno": 2,
+    "contornos_classificados_como_costura": 2,
+    "contornos_classificados_como_linha_interna": 21,
+    "contornos_ignorados": 0,
+    "contornos_abertos_restantes": 19,
+    "curvas_reconstruidas": 2,
+    "elementos_canvas_final": 25,
+    "moldes_reais_criados": 2
   },
-  "mensagem_final": "Audaces EMF + XML importado: 20 moldes reais criados, 366 contornos unidos, 32 curvas reconstruídas.",
+  "mensagem_final": "Audaces EMF + XML importado: 2 moldes reais criados, 20 contornos unidos, 2 curvas reconstruídas.",
   "mensagem_diagnostico": null,
   "canvas_origem": "moldes_reais",
-  "canvas_moldes_renderizados": 20,
+  "canvas_moldes_renderizados": 2,
   "canvas_elementos_emf_renderizados": 0
 }

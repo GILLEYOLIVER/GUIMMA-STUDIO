@@ -66,6 +66,7 @@ class RibbonButton(QToolButton):
     ):
         super().__init__(parent)
         self.ferramenta = ferramenta
+        self.compacto = compacto
         self.destaque = destaque
         self.setCursor(Qt.PointingHandCursor)
         self.setCheckable(True)
@@ -84,9 +85,9 @@ class RibbonButton(QToolButton):
 
         if compacto and not destaque:
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(16, 16))
-            self.setFixedHeight(28)
-            self.setMinimumWidth(118)
+            self.setIconSize(QSize(14, 14))
+            self.setFixedHeight(22)
+            self.setMinimumWidth(112)
             self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             self.setStyleSheet(
                 """
@@ -95,7 +96,7 @@ class RibbonButton(QToolButton):
                     background: transparent;
                     border: none;
                     color: #1e1e1e;
-                    font-size: 13px;
+                    font-size: 12px;
                     font-weight: 400;
                     padding: 0 4px;
                     border-radius: 4px;
@@ -132,6 +133,8 @@ class RibbonButton(QToolButton):
         else:
             self.setIconSize(QSize(20, 20))
             self.setMinimumSize(64, 52)
+            self.setFixedHeight(52)
+            self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.setStyleSheet(
             """
             QToolButton {
@@ -163,6 +166,45 @@ class RibbonButton(QToolButton):
                 """
             )
 
+    def aplicar_tema(self, tema: dict[str, str]):
+        fundo = "transparent" if self.compacto else tema.get("painel", "#ffffff")
+        borda = "none"
+        raio = "4px"
+        padding = "0 4px" if self.compacto else ("1px" if self.destaque else "3px")
+        fonte = "12px" if self.compacto else ("12px" if self.destaque else "13px")
+        alinhamento = "text-align: left;" if self.compacto else ""
+        if self.destaque and self.compacto:
+            borda = f"2px solid {tema.get('borda', '#d1d7de')}"
+            fundo = tema.get("painel", "#ffffff")
+        self.setStyleSheet(
+            f"""
+            QToolButton {{
+                {alinhamento}
+                background: {fundo};
+                border: {borda};
+                border-radius: {raio};
+                color: {tema.get('texto', '#1e1e1e')};
+                font-size: {fonte};
+                font-weight: 400;
+                padding: {padding};
+            }}
+            QToolButton:hover {{
+                background: {tema.get('hover', '#eef5ff')};
+                border: {borda};
+                color: {tema.get('primaria_escura', '#0f4f86')};
+            }}
+            QToolButton:pressed {{
+                background: {tema.get('selecionado', '#e6eefb')};
+                border: {borda};
+            }}
+            QToolButton:checked {{
+                background: {tema.get('selecionado', '#e7f1ff')};
+                border: {borda};
+                color: {tema.get('primaria_escura', '#0f4f86')};
+            }}
+            """
+        )
+
     def _abrir_menu_contexto(self, pos: QPoint):
         menu = QMenu(self)
         adicionar = menu.addAction("Adicionar à linha Usuários")
@@ -178,6 +220,7 @@ class _RibbonPageScrollArea(QScrollArea):
         self.setWidgetResizable(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.horizontalScrollBar().setFixedHeight(7)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         pagina.resize(pagina.sizeHint())
         self.setWidget(pagina)
@@ -186,7 +229,7 @@ class _RibbonPageScrollArea(QScrollArea):
     def _altura_com_barra_horizontal(self) -> int:
         widget = self.widget()
         altura_widget = widget.sizeHint().height() if widget is not None else super().sizeHint().height()
-        return int(altura_widget + self.horizontalScrollBar().sizeHint().height() + 2)
+        return int(altura_widget + self.horizontalScrollBar().height() + 1)
 
     def sizeHint(self):  # noqa: N802
         return QSize(0, self._altura_com_barra_horizontal())
@@ -202,6 +245,14 @@ class ColorControlWidget(QFrame):
         super().__init__(parent)
         self.setObjectName("ColorControlWidget")
         self._cor = "#ffffff"
+        self._tema = {
+            "painel": "#ffffff",
+            "faixa": "#f8fafc",
+            "texto": "#2f4f6f",
+            "borda": "#d1d7de",
+            "hover": "#eef5fd",
+            "primaria_escura": "#1f5f99",
+        }
         self._estilo = "solid"
         self._espessura = 1.0
         self._amplitude = 1.0
@@ -289,6 +340,33 @@ class ColorControlWidget(QFrame):
                 rotulo,
                 lambda _=False, v=valor: self._selecionar_amplitude(float(v)),
             )
+        self._atualizar_preview_cor()
+
+    def aplicar_tema(self, tema: dict[str, str]):
+        self._tema = dict(tema)
+        self.setStyleSheet(
+            f"""
+            QFrame#ColorControlWidget {{ background:{tema.get('painel', '#ffffff')}; border:1px solid transparent; }}
+            QToolButton {{
+                border:1px solid {tema.get('borda', '#d1d7de')};
+                background:{tema.get('faixa', '#f8fafc')};
+                color:{tema.get('texto_suave', tema.get('texto', '#2f4f6f'))};
+                font-size:10px;
+            }}
+            QToolButton:hover {{
+                background:{tema.get('hover', '#eef5fd')};
+                color:{tema.get('primaria_escura', '#1f5f99')};
+            }}
+            """
+        )
+        menu_style = (
+            f"QMenu {{ background:{tema.get('painel', '#ffffff')}; color:{tema.get('texto', '#111111')}; "
+            f"border:1px solid {tema.get('borda', '#d1d7de')}; }}"
+            f"QMenu::item:selected {{ background:{tema.get('hover_menu', tema.get('hover', '#eef5fd'))}; }}"
+        )
+        self._menu_estilo.setStyleSheet(menu_style)
+        self._menu_espessura.setStyleSheet(menu_style)
+        self._menu_amplitude.setStyleSheet(menu_style)
         self._atualizar_preview_cor()
 
     def _abrir_menu_estilo(self):
@@ -443,8 +521,10 @@ class ColorControlWidget(QFrame):
         self.estilo_changed.emit(self.valor())
 
     def _atualizar_preview_cor(self):
+        tema = self._tema
         self.btn_cor.setStyleSheet(
-            f"QPushButton {{ background:{self._cor}; border:1px solid #6b7480; }} QPushButton:hover {{ border:1px solid #1f5f99; }}"
+            f"QPushButton {{ background:{self._cor}; border:1px solid {tema.get('borda', '#6b7480')}; }}"
+            f"QPushButton:hover {{ border:1px solid {tema.get('primaria_escura', '#1f5f99')}; }}"
         )
 
     def valor(self) -> dict:
@@ -474,12 +554,12 @@ class RibbonGroup(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName("RibbonGroup")
-        self.setFixedHeight(100)
+        self.setFixedHeight(91)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(4, 3, 4, 1)
-        raiz.setSpacing(2)
+        raiz.setContentsMargins(4, 0, 4, 0)
+        raiz.setSpacing(0)
 
         destaque_tools = {
             "reta",
@@ -498,12 +578,14 @@ class RibbonGroup(QFrame):
 
         if compactar and len(tools) > 4:
             corpo = QHBoxLayout()
+            corpo.setContentsMargins(0, 0, 0, 0)
             corpo.setSpacing(4)
             principais = [tool for tool in tools if tool.tool_id in destaque_tools]
             secundarios = [tool for tool in tools if tool.tool_id not in destaque_tools]
 
             if principais:
                 bloco_principais = QHBoxLayout()
+                bloco_principais.setContentsMargins(0, 0, 0, 0)
                 bloco_principais.setSpacing(2)
                 for tool in principais:
                     botao = RibbonButton(tool, destaque=True)
@@ -516,8 +598,9 @@ class RibbonGroup(QFrame):
 
             if secundarios:
                 grade_secundarios = QGridLayout()
+                grade_secundarios.setContentsMargins(0, 0, 0, 0)
                 grade_secundarios.setHorizontalSpacing(6)
-                grade_secundarios.setVerticalSpacing(4)
+                grade_secundarios.setVerticalSpacing(2)
                 for index, tool in enumerate(secundarios):
                     botao = RibbonButton(tool, compacto=True)
                     botao.acionada.connect(self.tool_selected.emit)
@@ -531,6 +614,7 @@ class RibbonGroup(QFrame):
             corpo.addSpacing(0)
         else:
             corpo = QHBoxLayout()
+            corpo.setContentsMargins(0, 0, 0, 0)
             corpo.setSpacing(4)
 
             if titulo == "Editar":
@@ -601,16 +685,34 @@ class RibbonGroup(QFrame):
                         botao.adicionar_usuario.connect(self.adicionar_usuario.emit)
                         corpo.addWidget(botao)
 
-        raiz.addLayout(corpo)
+        corpo_widget = QWidget()
+        corpo_widget.setFixedHeight(77)
+        corpo_widget.setLayout(corpo)
+        raiz.addWidget(corpo_widget)
 
         rodape = QLabel(titulo)
+        self.rodape = rodape
         rodape.setAlignment(Qt.AlignCenter)
-        rodape.setFixedHeight(16)
+        rodape.setFixedHeight(14)
         rodape.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        rodape.setStyleSheet("color: #303030; font-size: 12px; font-weight: 400; border-top: 1px solid #d9d9d9;")
+        rodape.setStyleSheet("color: #303030; font-size: 11px; font-weight: 500; border-top: 1px solid #d9d9d9;")
         raiz.addWidget(rodape)
 
         self.setStyleSheet("QFrame#RibbonGroup { background: #ffffff; border-right: 1px solid #dddddd; }")
+
+    def aplicar_tema(self, tema: dict[str, str]):
+        self.setStyleSheet(
+            f"QFrame#RibbonGroup {{ background: {tema.get('painel', '#ffffff')}; "
+            f"border-right: 1px solid {tema.get('borda', '#dddddd')}; }}"
+        )
+        self.rodape.setStyleSheet(
+            f"color: {tema.get('texto_suave', '#303030')}; font-size: 11px; font-weight: 500; "
+            f"border-top: 1px solid {tema.get('borda', '#d9d9d9')};"
+        )
+        for botao in self.findChildren(RibbonButton):
+            botao.aplicar_tema(tema)
+        for controle in self.findChildren(ColorControlWidget):
+            controle.aplicar_tema(tema)
 
 
 class RibbonPage(QWidget):
@@ -625,7 +727,7 @@ class RibbonPage(QWidget):
     ):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 1, 5, 1)
+        layout.setContentsMargins(5, 0, 5, 0)
         layout.setSpacing(0)
         for titulo, tools in grupos:
             group = RibbonGroup(titulo, tools, compactar=compactar_grupos)
@@ -650,6 +752,20 @@ class RibbonWidget(QWidget):
     def __init__(self, parent: QWidget | None = None, include_tabbar: bool = True):
         super().__init__(parent)
         self._tabs, self._tools = carregar_mapa_ribbon()
+        self._tema_interface = {
+            "painel": "#ffffff",
+            "faixa": "#f4f6f8",
+            "texto": "#111111",
+            "texto_suave": "#4a5568",
+            "borda": "#c8d1da",
+            "aba": "#e8edf3",
+            "aba_hover": "#dfe8f2",
+            "primaria": "#0b7fb8",
+            "primaria_escura": "#0a74aa",
+            "hover": "#d9edf9",
+            "hover_menu": "#e9f3ff",
+            "selecionado": "#c5e4f6",
+        }
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -700,6 +816,7 @@ class RibbonWidget(QWidget):
             """
         )
         self._atualizar_destaque_aba(self.tabbar.currentIndex())
+        self.aplicar_tema(self._tema_interface)
 
     def tool_def(self, tool_id: str) -> ToolDef | None:
         return self._tools.get(tool_id)
@@ -728,6 +845,7 @@ class RibbonWidget(QWidget):
         self.paginas.insertWidget(index, self._criar_viewport_pagina(pagina))
         if pagina_atual == index:
             self.paginas.setCurrentIndex(index)
+        self.aplicar_tema(self._tema_interface)
 
     def _on_tool_selected(self, tool_id: str):
         self.set_active_tool(tool_id)
@@ -740,14 +858,14 @@ class RibbonWidget(QWidget):
             botao.blockSignals(False)
 
     def _atualizar_destaque_aba(self, index: int):
+        tema = getattr(self, "_tema_interface", {})
         if 0 <= index < len(self._tabs):
             self.tab_changed.emit(self._tabs[index].tab_id)
         for i in range(self.paginas.count()):
             pagina = self._pagina_em(i)
-            if i == index:
-                pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
-            else:
-                pagina.setStyleSheet("background: #ffffff; border-top: 1px solid #dfe4ea;")
+            pagina.setStyleSheet(
+                f"background: {tema.get('painel', '#ffffff')}; border-top: none;"
+            )
 
     def _criar_viewport_pagina(self, pagina: RibbonPage) -> _RibbonPageScrollArea:
         return _RibbonPageScrollArea(pagina)
@@ -781,6 +899,43 @@ class RibbonWidget(QWidget):
     def aplicar_estilo(self, estilo: dict):
         for controle in self.findChildren(ColorControlWidget):
             controle.set_valor(estilo)
+
+    def aplicar_tema(self, tema: dict[str, str]):
+        self._tema_interface = dict(tema)
+        self.setStyleSheet(f"background:{tema.get('painel', '#ffffff')}; color:{tema.get('texto', '#111111')};")
+        self.tabbar.setStyleSheet(
+            f"""
+            QTabBar::tab {{
+                background: {tema.get('aba', '#e8edf3')};
+                color: {tema.get('texto', '#0d2746')};
+                border: 1px solid {tema.get('borda', '#cfd8e2')};
+                font-size: 13px;
+                font-weight: 400;
+                padding: 6px 16px;
+            }}
+            QTabBar::tab:selected {{
+                background: {tema.get('primaria', '#0b7fb8')};
+                color: #ffffff;
+                border: 1px solid {tema.get('primaria_escura', '#0a74aa')};
+            }}
+            QTabBar::tab:hover {{ background: {tema.get('aba_hover', '#dfe8f2')}; }}
+            QTabBar::tab:selected:hover {{
+                background: {tema.get('primaria', '#0b7fb8')};
+                color: #ffffff;
+                border: 1px solid {tema.get('primaria_escura', '#0a74aa')};
+            }}
+            """
+        )
+        for area in self.findChildren(_RibbonPageScrollArea):
+            area.setStyleSheet(
+                f"QScrollArea {{ background:{tema.get('painel', '#ffffff')}; border:none; }}"
+                f"QScrollBar:horizontal {{ background:{tema.get('faixa', '#f4f6f8')}; height:7px; }}"
+                f"QScrollBar::handle:horizontal {{ background:{tema.get('borda', '#c8d1da')}; min-width:24px; }}"
+                f"QScrollBar::handle:horizontal:hover {{ background:{tema.get('primaria', '#0b7fb8')}; }}"
+            )
+        for grupo in self.findChildren(RibbonGroup):
+            grupo.aplicar_tema(tema)
+        self._atualizar_destaque_aba(self.tabbar.currentIndex())
 
 
 def carregar_mapa_ribbon() -> tuple[list[TabDef], dict[str, ToolDef]]:

@@ -605,6 +605,7 @@ class Ferramenta(FerramentaBase):
             return
         self._pontos_atuais.append(QPointF(ponto))
         self.canvas._pontos_reta = [QPointF(p) for p in self._pontos_atuais]
+        self.canvas._pontos_reta_finalizados = False
         self.canvas._preview_reta = QPointF(ponto)
         self.canvas.painel_coordenadas.atualizar_preview(
             self._pontos_atuais[-2] if len(self._pontos_atuais) >= 2 else None,
@@ -626,6 +627,42 @@ class Ferramenta(FerramentaBase):
             self.canvas.lbl_status.setText(msg)
         if self.ui_flutuante:
             self.ui_flutuante.atualizar_status_operacao(msg)
+
+    def desfazer_etapa(self, canvas: VisualizacaoCanvas) -> bool:
+        self.canvas = canvas
+        if not self._pontos_atuais:
+            return False
+
+        ponto_removido = self._pontos_atuais.pop()
+        self._desenhando = bool(self._pontos_atuais)
+        self._terminado = False
+        canvas._pontos_reta = [QPointF(p) for p in self._pontos_atuais]
+        canvas._pontos_reta_finalizados = False
+        canvas._preview_reta = QPointF(self._pontos_atuais[-1]) if self._pontos_atuais else None
+        canvas._guia_fechamento = None
+        canvas._guias_alinhamento = []
+
+        if self._pontos_atuais:
+            origem = self._pontos_atuais[-1]
+            canvas.iniciar_operacao_coordenadas(origem)
+            canvas.painel_coordenadas.atualizar_preview(origem, origem)
+            msg = f"Último clique desfeito. Próximo ponto parte do ponto {len(self._pontos_atuais)}."
+        else:
+            canvas.cancelar_operacao_coordenadas(limpar_preview=True)
+            canvas._origem_preview_coordenadas = None
+            msg = "Primeiro clique desfeito. Clique novamente para começar a reta."
+
+        if canvas._marcacoes_temporarias:
+            ultima = canvas._marcacoes_temporarias[-1]
+            if abs(ultima.x() - ponto_removido.x()) < 1e-6 and abs(ultima.y() - ponto_removido.y()) < 1e-6:
+                canvas._remover_ultima_marcacao_coordenadas()
+
+        if canvas.lbl_status:
+            canvas.lbl_status.setText(msg)
+        if self.ui_flutuante:
+            self.ui_flutuante.atualizar_status_operacao(msg)
+        canvas.update()
+        return True
 
     def _finalizar_desenho(self):
         if not self.canvas:

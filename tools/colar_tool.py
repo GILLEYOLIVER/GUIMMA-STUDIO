@@ -67,7 +67,10 @@ class Ferramenta(FerramentaBase):
         inicio = len(canvas.cena.elementos)
         canvas.cena.elementos.extend(novos)
         indices_novos = list(range(inicio, inicio + len(novos)))
-        canvas._selecionados = set(indices_novos)
+        canvas._selecionados = {
+            idx for idx in indices_novos
+            if 0 <= idx < len(canvas.cena.elementos) and not canvas.cena.elementos[idx].get("molde")
+        }
 
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()

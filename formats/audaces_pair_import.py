@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from statistics import median
 from pathlib import Path
 
 from core.projeto import Documento, Molde, Parte, Ponto, Projeto
@@ -21,7 +22,202 @@ class AudacesPairImport:
     ESCALA_CALIBRACAO_PADRAO = 14.1736583552598
 
     @staticmethod
+    def _dimensoes_elemento(elemento) -> tuple[float, float, float, float]:
+        if not getattr(elemento, "pontos", None):
+            return 0.0, 0.0, 0.0, 0.0
+        xs = [float(x) for x, _ in elemento.pontos]
+        ys = [float(y) for _, y in elemento.pontos]
+        largura = max(xs) - min(xs)
+        altura = max(ys) - min(ys)
+        perimetro = AudacesEMFImport._comprimento_polyline(elemento.pontos)
+        area = abs(AudacesEMFImport._area_assinada(elemento.pontos))
+        return largura, altura, perimetro, area
+
+    @staticmethod
+    def _dimensoes_peca_xml(peca) -> dict | None:
+        tamanhos = list(getattr(peca, "tamanhos", None) or [])
+        tamanho = tamanhos[0] if tamanhos else None
+        base = str(getattr(peca, "tamanho_base", "") or "").strip()
+        if base:
+            for item in tamanhos:
+                if str(getattr(item, "tamanho", "") or "").strip() == base:
+                    tamanho = item
+                    break
+        if tamanho is None:
+            return None
+        largura = float(tamanho.largura or 0.0)
+        altura = float(tamanho.altura or 0.0)
+        perimetro = float(tamanho.perimetro or 0.0)
+        area = float(tamanho.area or 0.0)
+        if largura <= 0 or altura <= 0:
+            return None
+        return {
+            "nome": peca.nome,
+            "largura": largura,
+            "altura": altura,
+            "perimetro": perimetro,
+            "area": area,
+        }
+
+    @classmethod
+    def _candidatos_fechados_validos(cls, elementos) -> list:
+        fechados = [e for e in elementos if e.fechado and len(e.pontos) >= 4]
+        if not fechados:
+            return []
+        areas = [cls._dimensoes_elemento(e)[3] for e in fechados]
+        area_ref = max(areas) if areas else 0.0
+        area_min = max(0.002, area_ref * 0.0008)
+        return [e for e in fechados if cls._dimensoes_elemento(e)[3] >= area_min]
+
+    @staticmethod
+    def _erro_dimensional(cand_dims: tuple[float, float, float, float], xml_dims: dict, escala: float) -> float:
+        cw, ch, cp, _ca = cand_dims
+        xw = float(xml_dims.get("largura") or 0.0)
+        xh = float(xml_dims.get("altura") or 0.0)
+        xp = float(xml_dims.get("perimetro") or 0.0)
+        if cw <= 0 or ch <= 0 or xw <= 0 or xh <= 0:
+            return 999.0
+        erro = abs((cw * escala) - xw) / xw
+        erro += abs((ch * escala) - xh) / xh
+        if cp > 0 and xp > 0:
+            erro += 0.35 * abs((cp * escala) - xp) / xp
+        return erro
+
+    @classmethod
+    def _parear_contornos_com_xml(cls, elementos, xml_doc, escala: float = 1.0) -> list[tuple[int, int, float]]:
+        xml_dims = [cls._dimensoes_peca_xml(p) for p in getattr(xml_doc, "pecas", []) or []]
+        xml_dims = [d for d in xml_dims if d is not None]
+        if not xml_dims:
+            return []
+        candidatos = cls._candidatos_fechados_validos(elementos)
+        if not candidatos:
+            return []
+        itens = []
+        for idx_cand, cand in enumerate(candidatos):
+            dims = cls._dimensoes_elemento(cand)
+            for idx_xml, xdim in enumerate(xml_dims):
+                erro = cls._erro_dimensional(dims, xdim, escala)
+                if erro <= 0.75:
+                    itens.append((erro, idx_cand, idx_xml))
+        itens.sort(key=lambda item: item[0])
+        usados_cand: set[int] = set()
+        usados_xml: set[int] = set()
+        pares: list[tuple[int, int, float]] = []
+        for erro, idx_cand, idx_xml in itens:
+            if idx_cand in usados_cand or idx_xml in usados_xml:
+                continue
+            usados_cand.add(idx_cand)
+            usados_xml.add(idx_xml)
+            pares.append((idx_cand, idx_xml, erro))
+            if len(pares) >= min(len(candidatos), len(xml_dims)):
+                break
+        return pares
+
+    @classmethod
+    def _fator_escala_por_xml(cls, xml_doc, elementos_unidos) -> tuple[float, dict]:
+        xml_dims = [cls._dimensoes_peca_xml(p) for p in getattr(xml_doc, "pecas", []) or []]
+        xml_dims = [d for d in xml_dims if d is not None]
+        candidatos = cls._candidatos_fechados_validos(elementos_unidos)
+        if not xml_dims or not candidatos:
+            return (cls.ESCALA_CALIBRACAO_PADRAO, cls.ESCALA_CALIBRACAO_PADRAO), {
+                "metodo": "fallback_fixo",
+                "motivo": "sem_dimensoes_xml_ou_contornos",
+                "fator": cls.ESCALA_CALIBRACAO_PADRAO,
+                "fator_x": cls.ESCALA_CALIBRACAO_PADRAO,
+                "fator_y": cls.ESCALA_CALIBRACAO_PADRAO,
+            }
+
+        sementes: list[float] = []
+        for cand in candidatos:
+            cw, ch, cp, _ca = cls._dimensoes_elemento(cand)
+            if cw <= 0 or ch <= 0:
+                continue
+            for xdim in xml_dims:
+                rw = xdim["largura"] / cw
+                rh = xdim["altura"] / ch
+                if rw <= 0 or rh <= 0:
+                    continue
+                proporcao = max(rw, rh) / max(min(rw, rh), 1e-9)
+                if proporcao <= 1.28:
+                    valores = [rw, rh]
+                    if cp > 0 and xdim.get("perimetro", 0.0) > 0:
+                        valores.append(xdim["perimetro"] / cp)
+                    sementes.append(float(median(valores)))
+
+        if not sementes:
+            return (cls.ESCALA_CALIBRACAO_PADRAO, cls.ESCALA_CALIBRACAO_PADRAO), {
+                "metodo": "fallback_fixo",
+                "motivo": "sem_pares_dimensionais_confiaveis",
+                "fator": cls.ESCALA_CALIBRACAO_PADRAO,
+                "fator_x": cls.ESCALA_CALIBRACAO_PADRAO,
+                "fator_y": cls.ESCALA_CALIBRACAO_PADRAO,
+            }
+
+        melhor = None
+        for fator in sementes:
+            pares = cls._parear_contornos_com_xml(candidatos, xml_doc, escala=fator)
+            if not pares:
+                continue
+            erro_total = sum(p[2] for p in pares)
+            score = (len(pares), -erro_total)
+            if melhor is None or score > melhor["score"]:
+                melhor = {
+                    "fator": float(fator),
+                    "pares": pares,
+                    "erro_total": float(erro_total),
+                    "score": score,
+                }
+
+        if melhor is None:
+            fator = float(median(sementes))
+            pares = cls._parear_contornos_com_xml(candidatos, xml_doc, escala=fator)
+            erro_total = sum(p[2] for p in pares)
+        else:
+            fator = melhor["fator"]
+            pares = melhor["pares"]
+            erro_total = melhor["erro_total"]
+
+        ratios_x: list[float] = []
+        ratios_y: list[float] = []
+        pares_info = []
+        for idx_cand, idx_xml, erro in pares:
+            cand = candidatos[idx_cand]
+            xdim = xml_dims[idx_xml]
+            cw, ch, cp, ca = cls._dimensoes_elemento(cand)
+            if erro <= 0.45 and cw > 0 and ch > 0:
+                ratios_x.append(float(xdim["largura"]) / cw)
+                ratios_y.append(float(xdim["altura"]) / ch)
+            pares_info.append({
+                "peca": xdim["nome"],
+                "largura_xml_cm": xdim["largura"],
+                "altura_xml_cm": xdim["altura"],
+                "largura_vetor_cm": cw,
+                "altura_vetor_cm": ch,
+                "largura_importada_cm": cw * fator,
+                "altura_importada_cm": ch * fator,
+                "perimetro_vetor_cm": cp,
+                "area_vetor_cm2": ca,
+                "erro": erro,
+            })
+        fator_x = float(median(ratios_x)) if ratios_x else fator
+        fator_y = float(median(ratios_y)) if ratios_y else fator
+        fator_medio = (fator_x + fator_y) / 2.0
+        return (fator_x, fator_y), {
+            "metodo": "xml_dimensoes_auto",
+            "fator": fator_medio,
+            "fator_x": fator_x,
+            "fator_y": fator_y,
+            "pares_usados": pares_info,
+            "pares": len(pares),
+            "pecas_xml": len(xml_dims),
+            "contornos_candidatos": len(candidatos),
+            "erro_total": erro_total,
+        }
+
+    @staticmethod
     def _classificar_contornos_unidos(elementos, xml_doc=None):
+        if xml_doc is not None and getattr(xml_doc, "pecas", None):
+            return AudacesPairImport._classificar_contornos_por_dimensoes_xml(elementos, xml_doc)
         fechados = [e for e in elementos if e.fechado and len(e.pontos) >= 4]
         abertos = [e for e in elementos if not e.fechado and len(e.pontos) >= 2]
         if not fechados:
@@ -55,6 +251,57 @@ class AudacesPairImport:
         for e in abertos:
             e.metadados["subtipo_audaces"] = "linha_interna"
         return elementos, len(principais), costuras, internas + len(abertos), ignorados
+
+    @classmethod
+    def _classificar_contornos_por_dimensoes_xml(cls, elementos, xml_doc):
+        candidatos = cls._candidatos_fechados_validos(elementos)
+        abertos = [e for e in elementos if not e.fechado and len(e.pontos) >= 2]
+        pares = cls._parear_contornos_com_xml(candidatos, xml_doc, escala=1.0)
+        xml_pecas = list(getattr(xml_doc, "pecas", []) or [])
+        principais = {id(candidatos[idx_cand]) for idx_cand, _idx_xml, _erro in pares}
+        xml_por_contorno = {
+            id(candidatos[idx_cand]): (idx_xml, xml_pecas[idx_xml] if idx_xml < len(xml_pecas) else None, erro)
+            for idx_cand, idx_xml, erro in pares
+        }
+        if not principais:
+            return cls._classificar_contornos_unidos(elementos, None)
+
+        costuras = 0
+        internas = 0
+        ignorados = 0
+        contornos_principais = [e for e in candidatos if id(e) in principais]
+        for e in elementos:
+            if not e.fechado:
+                e.metadados["subtipo_audaces"] = "linha_interna"
+                continue
+            if id(e) in principais:
+                e.metadados["subtipo_audaces"] = "contorno"
+                idx_xml, peca_xml, erro = xml_por_contorno.get(id(e), (None, None, None))
+                if idx_xml is not None:
+                    e.metadados["xml_pattern_index"] = idx_xml
+                if peca_xml is not None:
+                    e.metadados["xml_pattern_name"] = getattr(peca_xml, "nome", "")
+                if erro is not None:
+                    e.metadados["xml_match_error"] = float(erro)
+                continue
+            area = cls._dimensoes_elemento(e)[3]
+            if area < 0.002:
+                e.metadados["subtipo_audaces"] = "linha_interna"
+                ignorados += 1
+                continue
+            pt = e.pontos[0] if e.pontos else None
+            dentro_de_principal = bool(
+                pt is not None and any(AudacesEMFImport._ponto_em_poligono(pt, p.pontos) for p in contornos_principais)
+            )
+            if dentro_de_principal:
+                e.metadados["subtipo_audaces"] = "costura"
+                costuras += 1
+            else:
+                e.metadados["subtipo_audaces"] = "linha_interna"
+                internas += 1
+        for e in abertos:
+            e.metadados["subtipo_audaces"] = "linha_interna"
+        return elementos, len(contornos_principais), costuras, internas + len(abertos), ignorados
 
     @staticmethod
     def _converter_moldes_para_canvas(moldes: list[Molde]) -> list[dict]:
@@ -100,8 +347,12 @@ class AudacesPairImport:
         xml_doc = AudacesXMLImport.abrir(xml_path)
         emf_doc = AudacesEMFImport.abrir(emf_path)
 
-        fator_escala_final = cls._fator_escala_calibrado(xml_doc, emf_doc)
-        cls._aplicar_escala_emf_doc(emf_doc, fator_escala_final)
+        parser_pre_escala = AudacesEMFImport(b"", emf_path)
+        unidos_pre_escala = parser_pre_escala._unir_segmentos_em_contornos(emf_doc.elementos)
+        fatores_escala, diagnostico_escala = cls._fator_escala_por_xml(xml_doc, unidos_pre_escala)
+        fator_escala_x, fator_escala_y = fatores_escala
+        fator_escala_final = (float(fator_escala_x) + float(fator_escala_y)) / 2.0
+        cls._aplicar_escala_emf_doc(emf_doc, fatores_escala)
 
         projeto.nome = xml_doc.nome_modelo or projeto.nome
         if not projeto.documentos:
@@ -140,6 +391,13 @@ class AudacesPairImport:
             "elementos_canvas_final": len(elementos_canvas),
         }
         contornos = [el for el in emf_doc.elementos if el.fechado and len(el.pontos) >= 4 and el.metadados.get("subtipo_audaces") == "contorno"]
+        contornos = sorted(
+            contornos,
+            key=lambda el: (
+                int(el.metadados.get("xml_pattern_index", 10**9)),
+                -abs(AudacesEMFImport._area_assinada(el.pontos)),
+            ),
+        )
         avisos: list[str] = []
         aplicados = 0
         total_assoc = min(len(contornos), len(xml_doc.pecas))
@@ -204,10 +462,11 @@ class AudacesPairImport:
             "bounds_emf": emf_doc.bounds,
             "escala": dict(emf_doc.relatorio.get("escala", {})),
             "escala_manual_aplicada": fator_escala_final,
-            "medida_guimma_referencia_mm": 544.28,
-            "medida_audaces_referencia_mm": 400.17,
+            "escala_x_aplicada": fator_escala_x,
+            "escala_y_aplicada": fator_escala_y,
+            "diagnostico_escala": diagnostico_escala,
             "fator_escala_final": fator_escala_final,
-            "unidade_resultado": "cm_calibrado_por_referencia_mm",
+            "unidade_resultado": "cm_calibrado_por_xml",
         }
         projeto.preferencias_usuario["audaces_emf_xml_importacao"]["diagnostico_antes"] = antes
         projeto.preferencias_usuario["audaces_emf_xml_importacao"]["diagnostico_depois"] = {
@@ -333,22 +592,30 @@ class AudacesPairImport:
 
     @staticmethod
     def _aplicar_escala_emf_doc(emf_doc, fator: float):
-        fator = float(fator or 1.0)
-        if abs(fator - 1.0) < 1e-12:
+        if isinstance(fator, (tuple, list)):
+            fator_x = float(fator[0] or 1.0)
+            fator_y = float(fator[1] or fator_x)
+        else:
+            fator_x = float(fator or 1.0)
+            fator_y = fator_x
+        fator_medio = (fator_x + fator_y) / 2.0
+        if abs(fator_x - 1.0) < 1e-12 and abs(fator_y - 1.0) < 1e-12:
             return
 
         def _scale_pt(pt):
             x, y = pt
-            return float(x) * fator, float(y) * fator
+            return float(x) * fator_x, float(y) * fator_y
 
         for el in getattr(emf_doc, "elementos", []):
             el.pontos = [_scale_pt(p) for p in el.pontos]
             if el.pontos:
                 xs = [p[0] for p in el.pontos]
                 ys = [p[1] for p in el.pontos]
-                el.bbox = (min(xs), min(ys), max(xs), max(ys))
-            el.metadados["escala_manual_aplicada"] = fator
-            el.metadados["unidade_resultado"] = "cm_calibrado"
+            el.bbox = (min(xs), min(ys), max(xs), max(ys))
+            el.metadados["escala_manual_aplicada"] = fator_medio
+            el.metadados["escala_x_aplicada"] = fator_x
+            el.metadados["escala_y_aplicada"] = fator_y
+            el.metadados["unidade_resultado"] = "cm_calibrado_por_xml"
 
         for tx in getattr(emf_doc, "textos", []):
             if "pos" in tx:
@@ -356,7 +623,7 @@ class AudacesPairImport:
 
         try:
             l, t, r, b = emf_doc.bounds
-            emf_doc.bounds = (l * fator, t * fator, r * fator, b * fator)
+            emf_doc.bounds = (l * fator_x, t * fator_y, r * fator_x, b * fator_y)
             emf_doc.largura = max(emf_doc.bounds[2] - emf_doc.bounds[0], 0.0)
             emf_doc.altura = max(emf_doc.bounds[3] - emf_doc.bounds[1], 0.0)
         except Exception:
@@ -364,13 +631,13 @@ class AudacesPairImport:
 
         rel = getattr(emf_doc, "relatorio", {})
         if isinstance(rel, dict):
-            rel["escala_manual_aplicada"] = fator
-            rel["medida_guimma_referencia_mm"] = 544.28
-            rel["medida_audaces_referencia_mm"] = 400.17
-            rel["fator_escala_final"] = fator
-            rel["unidade_resultado"] = "cm_calibrado_por_referencia_mm"
+            rel["escala_manual_aplicada"] = fator_medio
+            rel["escala_x_aplicada"] = fator_x
+            rel["escala_y_aplicada"] = fator_y
+            rel["fator_escala_final"] = fator_medio
+            rel["unidade_resultado"] = "cm_calibrado_por_xml"
             rel.setdefault("avisos", []).append(
-                f"Escala calibrada manualmente aplicada ao EMF: fator {fator:.8f}."
+                f"Escala calibrada aplicada ao EMF: X {fator_x:.8f}, Y {fator_y:.8f}."
             )
 
     @staticmethod

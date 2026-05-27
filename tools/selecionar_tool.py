@@ -238,8 +238,9 @@ class Ferramenta(FerramentaBase):
         painter.drawRect(int(x), int(y), int(w), int(h))
 
     def _desenhar_realce_elementos(self, canvas, painter):
-        idxs = set(canvas._selecionados)
-        if self._hover_idx is not None:
+        selecionados = set(canvas._selecionados)
+        idxs = set()
+        if self._hover_idx is not None and self._hover_idx not in selecionados:
             idxs.add(self._hover_idx)
         for idx in idxs:
             if idx is None or idx < 0 or idx >= len(canvas.cena.elementos):

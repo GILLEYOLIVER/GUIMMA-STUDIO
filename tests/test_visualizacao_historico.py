@@ -138,6 +138,42 @@ class VisualizacaoHistoricoTestCase(unittest.TestCase):
         self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
         self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
 
+    def test_desfazer_consulta_ferramenta_ativa_antes_de_marcacoes(self):
+        class _Ferramenta:
+            def __init__(self):
+                self.chamadas = 0
+
+            def desfazer_etapa(self, canvas):
+                self.chamadas += 1
+                return True
+
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        ferramenta = _Ferramenta()
+        canvas._runtime_tool = ferramenta
+        canvas._marcacoes_temporarias = [QPointF(1.0, 1.0)]
+
+        canvas.desfazer_acao()
+
+        self.assertEqual(ferramenta.chamadas, 1)
+        self.assertEqual(len(canvas._marcacoes_temporarias), 1)
+
+    def test_finalizar_reta_grava_cada_segmento_no_historico(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas._pontos_reta = [
+            QPointF(0.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 5.0),
+            QPointF(3.0, 5.0),
+        ]
+
+        canvas._finalizar_reta_atual()
+
+        self.assertEqual(len(canvas.cena.elementos), 3)
+        canvas.desfazer_acao()
+        self.assertEqual(len(canvas.cena.elementos), 2)
+        canvas.desfazer_acao()
+        self.assertEqual(len(canvas.cena.elementos), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,7 @@ class AudacesXMLPattern:
     dobra_vertical: int | None
     piques: int | None
     piques_internos: int | None
+    tamanho_base: str | None = None
     tamanhos: list[AudacesXMLPatternSize] = field(default_factory=list)
 
 
@@ -113,6 +114,10 @@ class AudacesXMLImport:
         pecas: list[AudacesXMLPattern] = []
         for pat in self.raiz.findall(".//PATTERNS/PATTERN"):
             tamanhos: list[AudacesXMLPatternSize] = []
+            sizes_p = pat.find(".//SIZES_P")
+            tamanho_base = ""
+            if sizes_p is not None:
+                tamanho_base = self._norm_size((self._txt(sizes_p, "BASE_NAME", default="") or "").replace('"', ""))
             for sp in pat.findall(".//SIZES_P/SIZE_P"):
                 tamanhos.append(
                     AudacesXMLPatternSize(
@@ -137,6 +142,7 @@ class AudacesXMLImport:
                     dobra_vertical=self._int(self._txt(pat, "FOLD_VER", "VERTICAL_FOLD_P")),
                     piques=self._int(self._txt(pat, "NOTCHES_COUNT", "NOTCHS_P", "NOTCHES_P")),
                     piques_internos=self._int(self._txt(pat, "INTERNAL_NOTCHES_COUNT", "INTERNAL_NOTCHS_P")),
+                    tamanho_base=tamanho_base or None,
                     tamanhos=[t for t in tamanhos if t.tamanho],
                 )
             )

@@ -69,6 +69,18 @@ class _FakeCanvasExtracao:
         self.atualizou = True
 
 
+class _FakeCanvasCriacaoMolde:
+    def __init__(self):
+        self.cena = SimpleNamespace(elementos=[])
+        self._selecionados = {99}
+
+    def _registrar_historico(self):
+        pass
+
+    def update(self):
+        pass
+
+
 @unittest.skipIf(FerramentaExtrairMolde is None, "PySide6 não disponível neste ambiente")
 class ExtrairMoldeToolTestCase(unittest.TestCase):
     @classmethod
@@ -288,6 +300,34 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.snap_usado, 0)
         self.assertEqual(canvas.cena.elementos[0]["pontos"], [(10.0, 0.0), (20.0, 0.0)])
         self.assertTrue(canvas.atualizou)
+
+    def test_molde_extraido_por_contorno_nasce_sem_selecao_no_canvas(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        ferramenta = FerramentaExtrairMolde()
+
+        ok = ferramenta._criar_molde_de_contorno_extraido(
+            canvas,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(len(canvas.cena.elementos), 1)
+        self.assertEqual(canvas._selecionados, set())
+        self.assertEqual(ferramenta._selecoes_manuais, {0})
+
+    def test_molde_composto_nasce_sem_selecao_no_canvas(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [
+            {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]},
+            {"tipo": "polyline", "pontos": [(10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]},
+        ]
+        ferramenta = FerramentaExtrairMolde()
+
+        ok = ferramenta._criar_molde_composto(canvas, [0, 1])
+
+        self.assertTrue(ok)
+        self.assertEqual(canvas._selecionados, set())
+        self.assertEqual(ferramenta._selecoes_manuais, {2})
 
 
 if __name__ == "__main__":
