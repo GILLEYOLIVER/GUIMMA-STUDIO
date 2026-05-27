@@ -56,6 +56,10 @@
     "rotulo": "abrir"
   },
   {
+    "arquivo": "exportar.svg",
+    "rotulo": "exportar"
+  },
+  {
     "arquivo": "reta.svg",
     "rotulo": "reta"
   },
@@ -301,7 +305,7 @@
   },
   {
     "arquivo": "separar.svg",
-    "rotulo": "separar"
+    "rotulo": "separar tamanhos"
   },
   {
     "arquivo": "agrupar.svg",

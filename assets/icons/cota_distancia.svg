@@ -1,8 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <line x1="20" y1="48" x2="76" y2="48" stroke="#4a4a4a" stroke-width="3" stroke-linecap="round" /><polyline points="20,48 29,41 29,55" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><polyline points="76,48 67,41 67,55" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><line x1="20" y1="34" x2="20" y2="62" stroke="#96a0a8" stroke-width="2" stroke-linecap="round" /><line x1="76" y1="34" x2="76" y2="62" stroke="#96a0a8" stroke-width="2" stroke-linecap="round" />
-    </svg>
+  <path d="M21 24 V73 M75 24 V73" stroke="#111111" stroke-width="5" stroke-linecap="round"/>
+  <path d="M21 49 H75" stroke="#1e3a8a" stroke-width="7" stroke-linecap="round"/>
+  <path d="M21 49 L34 36 M21 49 L34 62 M75 49 L62 36 M75 49 L62 62" stroke="#166534" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="34" y="18" width="28" height="14" rx="3" fill="#4c1d95" stroke="#111111" stroke-width="4"/>
+</svg>

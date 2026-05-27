@@ -163,7 +163,7 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 
 ### Manipular graduação
 - **Remover Graduacao** (`remover_graduacao`): Transforma a geometria para reposicionamento e ajuste.
-- **Separar** (`separar`): Executa a ação específica indicada pelo nome da ferramenta.
+- **Separar Tamanhos** (`separar`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Agrupar** (`agrupar`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Graduar Curva** (`graduar_curva`): Executa operação de criação, ajuste ou conferência de curvas.
 

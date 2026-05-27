@@ -672,7 +672,7 @@
       "icon": "remover_graduacao.svg"
     },
     "separar": {
-      "title": "Separar",
+      "title": "Separar Tamanhos",
       "module": "tools/separar_tool.py",
       "class": "Ferramenta",
       "icon": "separar.svg"
@@ -915,7 +915,7 @@
       "title": "Estender reta",
       "module": "tools/construcao.py",
       "class": "FerramentaEstenderReta",
-      "icon": "reta.svg"
+      "icon": "estender_reta.svg"
     },
     "estender_ate_elemento": {
       "title": "Estender até elemento",
@@ -927,7 +927,7 @@
       "title": "Estender duas retas",
       "module": "tools/construcao.py",
       "class": "FerramentaEstenderDuasRetas",
-      "icon": "reta.svg"
+      "icon": "estender_duas_retas.svg"
     },
     "ponto_restauracao": {
       "title": "Ponto de Restauração",

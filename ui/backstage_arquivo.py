@@ -43,6 +43,7 @@ class BackstageArquivoPanel(QFrame):
         raiz.setSpacing(0)
 
         menu_esquerdo = QFrame()
+        menu_esquerdo.setObjectName("BackstageLeft")
         menu_esquerdo.setFixedWidth(190)
         menu_esquerdo.setStyleSheet("background: #f3f3f3; border-right: 1px solid #d8dde3;")
         menu_layout = QVBoxLayout(menu_esquerdo)
@@ -50,6 +51,7 @@ class BackstageArquivoPanel(QFrame):
         menu_layout.setSpacing(1)
 
         titulo = QLabel("ARQUIVO")
+        titulo.setObjectName("BackstageTitle")
         titulo.setStyleSheet("color: #104f90; font-size: 18px; font-weight: 800; padding: 0 14px 10px 16px;")
         menu_layout.addWidget(titulo)
 
@@ -75,7 +77,7 @@ class BackstageArquivoPanel(QFrame):
             "Salvar como": "salvar_como.svg",
             "Modelo ▸": "molde-pronto.svg",
             "Importar ▸": "abrir.svg",
-            "Exportar ▸": "plotar_rapido.svg",
+            "Exportar ▸": "exportar.svg",
             "Plotar": "plotar_rapido.svg",
             "Imprimir": "imprimir_rapido.svg",
             "Configurações ▸": "cores_rapido.svg",
@@ -119,12 +121,14 @@ class BackstageArquivoPanel(QFrame):
         menu_layout.addStretch(0)
 
         painel_direito = QFrame()
+        painel_direito.setObjectName("BackstageRight")
         painel_direito.setStyleSheet("background: #ffffff;")
         direito = QVBoxLayout(painel_direito)
         direito.setContentsMargins(18, 18, 18, 18)
         direito.setSpacing(12)
 
         cab = QLabel("Arquivos Recentes")
+        cab.setObjectName("BackstageHeader")
         cab.setStyleSheet("font-size: 19px; font-weight: 700; color: #1e1e1e;")
         direito.addWidget(cab)
 

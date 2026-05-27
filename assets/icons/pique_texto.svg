@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <polygon points="31.2,19.7 38.8,15.9 46.4,19.7 42.599999999999994,31.099999999999998 52.1,46.3 44.5,72.9 33.099999999999994,72.9 25.5,46.3 35.0,31.099999999999998" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><circle cx="38.8" cy="23.5" r="2.375" stroke="#69c7c3" stroke-width="0" fill="#69c7c3" /><text x="72" y="32" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" fill="#69c7c3" text-anchor="middle">Aa</text>
-    </svg>
+  <path d="M16 72 C28 33, 61 31, 80 58" stroke="#172554" stroke-width="5.5" stroke-linecap="round" fill="none"/>
+  <path d="M38 50 L48 68 L58 50 Z" fill="#4c1d95" stroke="#111111" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M20 22 H66" stroke="#111111" stroke-width="5" stroke-linecap="round"/>
+  <path d="M43 22 V46 M32 22 L30 30 M54 22 L56 30" stroke="#166534" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="80" cy="58" r="5.5" fill="#0f766e"/>
+</svg>

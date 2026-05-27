@@ -1,8 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <path d="M22 58 C24 30,70 26,72 54 C72 66,58 72,40 70 C28 68,20 64,22 58 Z" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><path d="M22 58 C24 30,70 26,72 54 C72 66,58 72,40 70 C28 68,20 64,22 58 Z" stroke="#69c7c3" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 5"/>
-    </svg>
+  <path d="M20 48 C22 20 71 17 77 45 C82 68 60 79 40 75 C26 72 18 62 20 48 Z" fill="#f8fafc" stroke="#111111" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M29 49 C31 31 62 29 68 47 C72 60 58 67 43 65 C34 63 28 57 29 49 Z" stroke="#1e3a8a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M25 37 L32 27 M64 25 L73 34 M76 58 L66 69 M32 70 L23 61" stroke="#166534" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="48" cy="66" r="6" fill="#4c1d95" stroke="#111111" stroke-width="3"/>
+</svg>
