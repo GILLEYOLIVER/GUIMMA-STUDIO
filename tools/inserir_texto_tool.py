@@ -22,17 +22,38 @@ from tools.texto_persistente_utils import aplicar_patch_canvas_textos
 from tools.tool_base import FerramentaBase
 
 
+FONTES_TEXTO = [
+    "Arial",
+    "Calibri",
+    "Times New Roman",
+    "Verdana",
+    "Tahoma",
+    "Georgia",
+    "Courier New",
+    "Segoe UI",
+    "Trebuchet MS",
+    "Century Gothic",
+    "Consolas",
+    "Lucida Sans Unicode",
+]
+
+
 class TextoDialog(QDialog):
     def __init__(self, canvas, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Criar texto")
         self.setModal(True)
-        self.resize(520, 360)
+        self.resize(560, 390)
         configurar_texto_canvas(canvas)
 
         self.txt_texto = QTextEdit(self)
         self.txt_texto.setPlainText("Texto")
         self.txt_texto.selectAll()
+
+        self.combo_fonte = QComboBox(self)
+        self.combo_fonte.addItems(FONTES_TEXTO)
+        fonte_atual = str(getattr(canvas, "_texto_fonte", "Arial") or "Arial")
+        self.combo_fonte.setCurrentText(fonte_atual if fonte_atual in FONTES_TEXTO else "Arial")
 
         self.spin_angulo = QDoubleSpinBox(self)
         self.spin_angulo.setRange(-360.0, 360.0)
@@ -69,22 +90,25 @@ class TextoDialog(QDialog):
 
         layout = QGridLayout(self)
         layout.addWidget(self.txt_texto, 0, 0, 1, 6)
-        layout.addWidget(QLabel("Ângulo"), 1, 0)
-        layout.addWidget(QLabel("Altura (cm)"), 1, 2)
-        layout.addWidget(QLabel("Espaço entre linhas (cm)"), 1, 4)
-        layout.addWidget(self.spin_angulo, 2, 0, 1, 2)
-        layout.addWidget(self.spin_altura, 2, 2, 1, 2)
-        layout.addWidget(self.spin_espaco, 2, 4, 1, 2)
-        layout.addWidget(QLabel("Referência"), 3, 0)
-        layout.addWidget(QLabel("Justificação"), 3, 3)
-        layout.addWidget(self.combo_referencia, 4, 0, 1, 3)
-        layout.addWidget(self.combo_justificacao, 4, 3, 1, 3)
+        layout.addWidget(QLabel("Fonte"), 1, 0)
+        layout.addWidget(QLabel("Ângulo"), 1, 2)
+        layout.addWidget(QLabel("Altura (cm)"), 1, 4)
+        layout.addWidget(self.combo_fonte, 2, 0, 1, 2)
+        layout.addWidget(self.spin_angulo, 2, 2, 1, 2)
+        layout.addWidget(self.spin_altura, 2, 4, 1, 2)
+        layout.addWidget(QLabel("Espaço entre linhas (cm)"), 3, 0)
+        layout.addWidget(QLabel("Referência"), 3, 2)
+        layout.addWidget(QLabel("Justificação"), 3, 4)
+        layout.addWidget(self.spin_espaco, 4, 0, 1, 2)
+        layout.addWidget(self.combo_referencia, 4, 2, 1, 2)
+        layout.addWidget(self.combo_justificacao, 4, 4, 1, 2)
         layout.addWidget(botoes, 5, 0, 1, 6)
         layout.setRowStretch(0, 1)
 
     def valores(self) -> dict:
         return {
             "texto": self.txt_texto.toPlainText(),
+            "fonte_texto": self.combo_fonte.currentText(),
             "angulo": float(self.spin_angulo.value()),
             "altura_cm": float(self.spin_altura.value()),
             "espaco_linhas_cm": float(self.spin_espaco.value()),
@@ -129,6 +153,7 @@ class Ferramenta(FerramentaBase):
             if dlg.exec() == QDialog.Accepted:
                 valores = dlg.valores()
                 configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
+                canvas._texto_fonte = valores["fonte_texto"]
                 cor_texto = self._cor_atual_para_texto(canvas)
                 cor_fundo = self._cor_fundo_canvas(canvas)
                 if self._cores_iguais_ou_muito_parecidas(cor_texto, cor_fundo):
@@ -286,6 +311,8 @@ class Ferramenta(FerramentaBase):
         return {
             "tipo": "texto",
             "texto": texto,
+            "fonte_texto": str(valores.get("fonte_texto") or "Arial"),
+            "fonte": str(valores.get("fonte_texto") or "Arial"),
             "posicao": (float(pos.x()), float(pos.y())),
             "ponto": (float(pos.x()), float(pos.y())),
             "origem": (float(pos.x()), float(pos.y())),
