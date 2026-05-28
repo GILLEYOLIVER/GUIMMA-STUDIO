@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # Instala o desenho nativo de textos no canvas antes de abrir a aplicação.
 try:
     import canvas.visualizacao_texto_nativo_patch  # noqa: F401
+    import canvas.visualizacao_texto_sem_borda_patch  # noqa: F401
 except Exception:
     pass
 
