@@ -177,8 +177,7 @@ class Ferramenta(FerramentaBase):
                     self._alertar_cor_invisivel(canvas, cor_texto, cor_fundo)
                     texto = "Texto não inserido: cor igual ou muito parecida com o fundo."
                 else:
-                    pos = self._centro_canvas(canvas)
-                    elementos = self._criar_elementos_vetor_texto(canvas, valores, pos, cor_texto)
+                    elementos = self._criar_elementos_vetor_texto(canvas, valores, self._centro_canvas(canvas), cor_texto)
                     if elementos:
                         canvas.cena.elementos.extend(elementos)
                         if hasattr(canvas, "_registrar_historico"):
@@ -244,10 +243,37 @@ class Ferramenta(FerramentaBase):
             canvas,
             "Cor do texto invisível",
             "A cor escolhida para o texto está igual ou muito parecida com a cor do fundo do canvas.\n\n"
-            f"Cor do texto: {cor_texto}\n"
-            f"Cor do fundo: {cor_fundo}\n\n"
+            f"Cor do texto: {cor_texto}\nCor do fundo: {cor_fundo}\n\n"
             "Escolha outra cor em Cor antes de inserir o texto.",
         )
+
+    def _cores_dos_controles_cor_visiveis(self, janela) -> list[str]:
+        cores: list[str] = []
+        try:
+            widgets = list(janela.findChildren(QWidget))
+        except Exception:
+            widgets = []
+        controles = [w for w in widgets if w.__class__.__name__ == "ColorControlWidget" and hasattr(w, "valor")]
+        controles_visiveis = []
+        controles_ocultos = []
+        for widget in controles:
+            try:
+                if widget.isVisible() and not widget.isHidden():
+                    controles_visiveis.append(widget)
+                else:
+                    controles_ocultos.append(widget)
+            except Exception:
+                controles_ocultos.append(widget)
+        for widget in controles_visiveis + controles_ocultos:
+            try:
+                valor = widget.valor()
+                if isinstance(valor, dict):
+                    cor = QColor(str(valor.get("cor") or ""))
+                    if cor.isValid():
+                        cores.append(cor.name())
+            except Exception:
+                pass
+        return cores
 
     def _cor_atual_para_texto(self, canvas) -> str:
         candidatos: list[object] = []
@@ -258,19 +284,13 @@ class Ferramenta(FerramentaBase):
             janela = None
 
         if janela is not None:
+            candidatos.extend(self._cores_dos_controles_cor_visiveis(janela))
+
+        candidatos.append(getattr(canvas, "_linha_cor", None))
+        if janela is not None:
             estilo_janela = getattr(janela, "_estilo_desenho_atual", None)
             if isinstance(estilo_janela, dict):
                 candidatos.append(estilo_janela.get("cor"))
-            try:
-                for widget in janela.findChildren(QWidget):
-                    if widget.__class__.__name__ == "ColorControlWidget" and hasattr(widget, "valor"):
-                        valor = widget.valor()
-                        if isinstance(valor, dict):
-                            candidatos.append(valor.get("cor"))
-            except Exception:
-                pass
-
-        candidatos.append(getattr(canvas, "_linha_cor", None))
         cores_canvas = getattr(canvas, "_cores_canvas", None)
         if isinstance(cores_canvas, dict):
             candidatos.append(cores_canvas.get("desenho"))
