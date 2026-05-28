@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import sqrt
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
@@ -29,9 +31,7 @@ def _set_qpoint(elemento: dict, ponto: QPointF) -> None:
 
 def _cor(valor, padrao: str = "#ffffff") -> QColor:
     c = QColor(str(valor or ""))
-    if c.isValid():
-        return c
-    return QColor(padrao)
+    return c if c.isValid() else QColor(padrao)
 
 
 def _texto_posicao(elemento: dict) -> QPointF:
@@ -81,9 +81,11 @@ def _flags_justificacao(justificacao: str):
 def _fonte_texto(canvas: VisualizacaoCanvas, elemento: dict) -> QFont:
     zoom = max(float(getattr(canvas, "zoom", 1.0) or 1.0), 0.01)
     altura_px = max(10, min(900, int(round(_texto_cm(elemento, canvas) * zoom))))
-    fonte = QFont("Arial")
+    familia = str(elemento.get("fonte_texto") or elemento.get("fonte") or "Arial")
+    fonte = QFont(familia)
     fonte.setPixelSize(altura_px)
-    fonte.setBold(False)
+    fonte.setBold(bool(elemento.get("negrito", False)))
+    fonte.setItalic(bool(elemento.get("italico", False)))
     fonte.setStyleStrategy(QFont.PreferAntialias)
     return fonte
 
@@ -125,6 +127,22 @@ def indice_texto_em_ponto(canvas: VisualizacaoCanvas, pos_tela: QPointF) -> int 
         if rect.isValid() and rect.contains(pos_tela):
             return idx
     return None
+
+
+def indices_texto_em_retangulo(canvas: VisualizacaoCanvas, inicio_cena: QPointF, fim_cena: QPointF) -> set[int]:
+    p1 = canvas._cena_para_tela(inicio_cena)
+    p2 = canvas._cena_para_tela(fim_cena)
+    rect = QRectF(min(p1.x(), p2.x()), min(p1.y(), p2.y()), abs(p2.x() - p1.x()), abs(p2.y() - p1.y())).normalized()
+    selecionados: set[int] = set()
+    if rect.width() < 3 and rect.height() < 3:
+        return selecionados
+    for idx, elemento in enumerate(list(getattr(getattr(canvas, "cena", None), "elementos", []) or [])):
+        if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
+            continue
+        rect_texto = texto_rect_tela(canvas, elemento).adjusted(-5, -5, 5, 5)
+        if rect_texto.isValid() and rect.intersects(rect_texto):
+            selecionados.add(idx)
+    return selecionados
 
 
 def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
@@ -192,9 +210,22 @@ def transladar_texto_elemento(elemento: dict, dx: float, dy: float) -> None:
     _set_qpoint(elemento, QPointF(p.x() + dx, p.y() + dy))
 
 
+def _texto_mao_idx(canvas) -> int | None:
+    idx = getattr(canvas, "_texto_em_maos_idx", None)
+    try:
+        idx_int = int(idx)
+    except Exception:
+        return None
+    if 0 <= idx_int < len(getattr(getattr(canvas, "cena", None), "elementos", []) or []):
+        el = canvas.cena.elementos[idx_int]
+        if isinstance(el, dict) and str(el.get("tipo") or "").lower() == "texto":
+            return idx_int
+    return None
+
+
 def aplicar_patch_texto_nativo_canvas() -> None:
     global _PATCH_APLICADO
-    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas_v4", False):
+    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas_v6", False):
         return
 
     original_paint = VisualizacaoCanvas.paintEvent
@@ -224,10 +255,33 @@ def aplicar_patch_texto_nativo_canvas() -> None:
                 pass
 
     def mousePressEvent_com_texto(self, event):  # noqa: N802
+        idx_mao = _texto_mao_idx(self)
+        if idx_mao is not None:
+            if event.button() == Qt.LeftButton:
+                self._texto_em_maos_idx = None
+                self._texto_em_maos_cancelavel = False
+                self._selecionados = {idx_mao}
+                if hasattr(self, "_registrar_historico"):
+                    self._registrar_historico()
+                self.update()
+                event.accept()
+                return
+            if event.button() == Qt.RightButton:
+                try:
+                    self.cena.elementos.pop(idx_mao)
+                except Exception:
+                    pass
+                self._texto_em_maos_idx = None
+                self._texto_em_maos_cancelavel = False
+                self._selecionados.clear()
+                self.update()
+                event.accept()
+                return
+
         if event.button() == Qt.LeftButton and str(getattr(self, "ferramenta_ativa", "selecionar") or "selecionar") in {"selecionar", ""}:
             idx = indice_texto_em_ponto(self, event.position())
             if idx is not None:
-                if event.modifiers() & Qt.ControlModifier:
+                if event.modifiers() & Qt.ControlModifier or event.modifiers() & Qt.ShiftModifier:
                     if idx in self._selecionados:
                         self._selecionados.remove(idx)
                     else:
@@ -244,16 +298,25 @@ def aplicar_patch_texto_nativo_canvas() -> None:
         original_press(self, event)
 
     def mouseMoveEvent_com_texto(self, event):  # noqa: N802
+        idx_mao = _texto_mao_idx(self)
+        if idx_mao is not None:
+            _set_qpoint(self.cena.elementos[idx_mao], self._tela_para_cena(event.position()))
+            self._selecionados = {idx_mao}
+            self.update()
+            event.accept()
+            return
+
         idx = getattr(self, "_texto_drag_idx", None)
         if idx is not None and event.buttons() & Qt.LeftButton:
             try:
-                if 0 <= int(idx) < len(self.cena.elementos):
+                idx_int = int(idx)
+                if 0 <= idx_int < len(self.cena.elementos):
                     atual = self._tela_para_cena(event.position())
                     inicio = getattr(self, "_texto_drag_inicio_cena", atual)
-                    inicio_pos = getattr(self, "_texto_drag_inicio_pos", _texto_posicao(self.cena.elementos[int(idx)]))
+                    inicio_pos = getattr(self, "_texto_drag_inicio_pos", _texto_posicao(self.cena.elementos[idx_int]))
                     dx = atual.x() - inicio.x()
                     dy = atual.y() - inicio.y()
-                    _set_qpoint(self.cena.elementos[int(idx)], QPointF(inicio_pos.x() + dx, inicio_pos.y() + dy))
+                    _set_qpoint(self.cena.elementos[idx_int], QPointF(inicio_pos.x() + dx, inicio_pos.y() + dy))
                     self._texto_drag_moveu = True
                     self.update()
                     event.accept()
@@ -277,7 +340,19 @@ def aplicar_patch_texto_nativo_canvas() -> None:
                 return
             except Exception:
                 pass
+
+        runtime = getattr(self, "_runtime_tool", None)
+        inicio_caixa = getattr(runtime, "_inicio_caixa", None)
+        fim_caixa = getattr(runtime, "_fim_caixa", None)
         original_release(self, event)
+        if event.button() == Qt.LeftButton and isinstance(inicio_caixa, QPointF) and isinstance(fim_caixa, QPointF):
+            if sqrt((fim_caixa.x() - inicio_caixa.x()) ** 2 + (fim_caixa.y() - inicio_caixa.y()) ** 2) > (4.0 / max(float(getattr(self, "zoom", 1.0) or 1.0), 0.001)):
+                textos = indices_texto_em_retangulo(self, inicio_caixa, fim_caixa)
+                if textos:
+                    self._selecionados |= textos
+                    self.update()
+                    event.accept()
+                    return
 
     def mouseDoubleClickEvent_com_texto(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
@@ -307,9 +382,8 @@ def aplicar_patch_texto_nativo_canvas() -> None:
     VisualizacaoCanvas.mouseDoubleClickEvent = mouseDoubleClickEvent_com_texto
     if original_transladar is not None:
         VisualizacaoCanvas._transladar_elemento = _transladar_elemento_com_texto
-    VisualizacaoCanvas._guimma_texto_nativo_canvas_v4 = True
+    VisualizacaoCanvas._guimma_texto_nativo_canvas_v6 = True
     _PATCH_APLICADO = True
 
 
-# Aplica automaticamente ao importar este módulo.
 aplicar_patch_texto_nativo_canvas()
