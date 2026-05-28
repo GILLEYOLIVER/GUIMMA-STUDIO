@@ -5,7 +5,9 @@ from math import atan2, cos, sin, sqrt
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
+from tools.cota_persistente_utils import aplicar_patch_canvas_cotas, serializar_cota
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo
+from tools.texto_config import aplicar_fonte_texto, cor_texto, configurar_texto_canvas
 from tools.tool_base import FerramentaBase
 
 
@@ -16,19 +18,18 @@ class Ferramenta(FerramentaBase):
     gerencia_coordenadas_operacao = True
 
     COR_REALCE = "#2da8ff"
-    COR_COTA = "#ff00ff"
-    COR_TEXTO = "#ff00ff"
     COR_FUNDO = QColor(0, 0, 0, 0)
 
     def __init__(self):
         super().__init__()
         self._selecionado: dict | None = None
         self._cota_em_maos: dict | None = None
-        self._cotas_finalizadas: list[dict] = []
         self._estado = "aguardando_perimetro"
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        configurar_texto_canvas(canvas)
+        aplicar_patch_canvas_cotas(canvas)
         self._selecionado = None
         self._cota_em_maos = None
         self._estado = "aguardando_perimetro"
@@ -45,6 +46,7 @@ class Ferramenta(FerramentaBase):
         super().on_deactivate(canvas)
 
     def on_mouse_press(self, canvas, event) -> bool:
+        aplicar_patch_canvas_cotas(canvas)
         if event.button() == Qt.RightButton:
             self._cancelar_etapa(canvas)
             event.accept()
@@ -85,7 +87,10 @@ class Ferramenta(FerramentaBase):
 
         if self._estado == "arrastando_cota" and self._cota_em_maos:
             self._cota_em_maos["label_pos"] = QPointF(pos)
-            self._cotas_finalizadas.append(self._copiar_cota(self._cota_em_maos))
+            elemento = serializar_cota(self._cota_em_maos, canvas)
+            canvas.cena.elementos.append(elemento)
+            if hasattr(canvas, "_registrar_historico"):
+                canvas._registrar_historico()
             self._selecionado = None
             self._cota_em_maos = None
             self._estado = "aguardando_perimetro"
@@ -117,8 +122,6 @@ class Ferramenta(FerramentaBase):
                 if len(pontos) >= 2:
                     self._desenhar_realce(canvas, painter, pontos)
 
-            for cota in self._cotas_finalizadas:
-                self._desenhar_cota(canvas, painter, cota)
             if self._cota_em_maos:
                 self._desenhar_cota(canvas, painter, self._cota_em_maos)
         finally:
@@ -135,10 +138,6 @@ class Ferramenta(FerramentaBase):
             self._estado = "aguardando_perimetro"
             canvas.update()
             return True
-        if self._cotas_finalizadas:
-            self._cotas_finalizadas.pop()
-            canvas.update()
-            return True
         return False
 
     def _cancelar_etapa(self, canvas) -> None:
@@ -151,8 +150,7 @@ class Ferramenta(FerramentaBase):
             self._estado = "aguardando_perimetro"
             texto = "Cota Perímetro: seleção limpa. Clique em outro trecho."
         else:
-            self._cotas_finalizadas.clear()
-            texto = "Cota Perímetro: cotas temporárias limpas."
+            texto = "Cota Perímetro: clique no trecho que deseja cotar."
         self.set_status(texto)
         mensagem_status(canvas, texto)
         canvas.update()
@@ -167,14 +165,6 @@ class Ferramenta(FerramentaBase):
             "ancora": QPointF(ancora),
             "label_pos": QPointF(label_pos),
             "valor": float(info.get("perimetro_total", 0.0)),
-        }
-
-    def _copiar_cota(self, cota: dict) -> dict:
-        return {
-            "pontos": [QPointF(p) for p in cota.get("pontos", [])],
-            "ancora": QPointF(cota.get("ancora", QPointF(0.0, 0.0))),
-            "label_pos": QPointF(cota.get("label_pos", QPointF(0.0, 0.0))),
-            "valor": float(cota.get("valor", 0.0)),
         }
 
     def _pontos_para_realce(self, info: dict) -> list[QPointF]:
@@ -208,31 +198,28 @@ class Ferramenta(FerramentaBase):
         label_pos = QPointF(cota.get("label_pos", ancora))
         valor = float(cota.get("valor", 0.0))
         texto = self._formatar_medida(canvas, valor)
-
-        cor = QColor(self.COR_COTA)
-        if not cor.isValid():
-            cor = QColor("#ff00ff")
+        cor = cor_texto(canvas)
 
         p_ancora = canvas._cena_para_tela(ancora)
         p_label = canvas._cena_para_tela(label_pos)
 
-        pen = QPen(cor, 1.4)
+        pen = QPen(cor, 1.7)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        self._desenhar_seta(canvas, painter, p_label, p_ancora, cor)
+        self._desenhar_seta(painter, p_label, p_ancora, cor)
 
+        aplicar_fonte_texto(painter, canvas, negrito=True)
         metrics = painter.fontMetrics()
-        largura = metrics.horizontalAdvance(texto) + 12
-        altura = metrics.height() + 6
+        largura = metrics.horizontalAdvance(texto) + 16
+        altura = metrics.height() + 8
         rect = QRectF(p_label.x() - largura / 2.0, p_label.y() - altura / 2.0, largura, altura)
-
         painter.fillRect(rect, self.COR_FUNDO)
         painter.setPen(QPen(cor, 1.0))
         painter.drawText(rect, Qt.AlignCenter, texto)
 
-    def _desenhar_seta(self, canvas, painter, inicio: QPointF, fim: QPointF, cor: QColor):
+    def _desenhar_seta(self, painter, inicio: QPointF, fim: QPointF, cor: QColor):
         painter.drawLine(inicio, fim)
         dx = inicio.x() - fim.x()
         dy = inicio.y() - fim.y()
@@ -240,7 +227,7 @@ class Ferramenta(FerramentaBase):
         if dist <= 1e-6:
             return
         ang = atan2(dy, dx)
-        tam = 13.0
+        tam = 16.0
         abertura = 0.55
         p1 = QPointF(fim.x() + cos(ang - abertura) * tam, fim.y() + sin(ang - abertura) * tam)
         p2 = QPointF(fim.x() + cos(ang + abertura) * tam, fim.y() + sin(ang + abertura) * tam)
