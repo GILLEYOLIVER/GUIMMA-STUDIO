@@ -53,21 +53,15 @@ class TextoDialog(QDialog):
 
         self.combo_referencia = QComboBox(self)
         self.combo_referencia.addItems([
-            "Topo esquerda",
-            "Topo centro",
-            "Topo direita",
-            "Centro esquerda",
-            "Centro centro",
-            "Centro direita",
-            "Baixo esquerda",
-            "Baixo centro",
-            "Baixo direita",
+            "Topo esquerda", "Topo centro", "Topo direita",
+            "Centro esquerda", "Centro centro", "Centro direita",
+            "Baixo esquerda", "Baixo centro", "Baixo direita",
         ])
-        self.combo_referencia.setCurrentText("Topo esquerda")
+        self.combo_referencia.setCurrentText("Centro centro")
 
         self.combo_justificacao = QComboBox(self)
         self.combo_justificacao.addItems(["Esquerda", "Centro", "Direita"])
-        self.combo_justificacao.setCurrentText("Esquerda")
+        self.combo_justificacao.setCurrentText("Centro")
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         botoes.accepted.connect(self.accept)
@@ -144,11 +138,11 @@ class Ferramenta(FerramentaBase):
                     elemento = self._criar_elemento_texto_nativo(canvas, valores, self._centro_canvas(canvas), cor_texto)
                     if elemento is not None:
                         canvas.cena.elementos.append(elemento)
-                        if hasattr(canvas, "_registrar_historico"):
-                            canvas._registrar_historico()
-                        if hasattr(canvas, "_emitir_elementos_alterados"):
-                            canvas._emitir_elementos_alterados()
-                        texto = "Texto inserido no canvas."
+                        idx = len(canvas.cena.elementos) - 1
+                        canvas._selecionados = {idx}
+                        canvas._texto_em_maos_idx = idx
+                        canvas._texto_em_maos_cancelavel = True
+                        texto = "Texto em mãos: mova o mouse para posicionar, clique esquerdo para soltar ou direito para cancelar."
                     else:
                         texto = "Inserir Texto: nenhum texto informado."
             else:
@@ -299,8 +293,8 @@ class Ferramenta(FerramentaBase):
             "texto_altura_cm": float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM),
             "texto_espaco_linhas_cm": float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM),
             "texto_espessura": espessura,
-            "referencia": str(valores.get("referencia") or "Topo esquerda"),
-            "justificacao": str(valores.get("justificacao") or "Esquerda"),
+            "referencia": str(valores.get("referencia") or "Centro centro"),
+            "justificacao": str(valores.get("justificacao") or "Centro"),
             "cor": cor,
             "cor_texto": cor,
         }
