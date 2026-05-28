@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
 from canvas.visualizacao import VisualizacaoCanvas
 
@@ -18,6 +18,13 @@ def _qpoint(valor) -> QPointF:
         except Exception:
             return QPointF(0.0, 0.0)
     return QPointF(0.0, 0.0)
+
+
+def _set_qpoint(elemento: dict, ponto: QPointF) -> None:
+    p = (float(ponto.x()), float(ponto.y()))
+    elemento["posicao"] = p
+    elemento["ponto"] = p
+    elemento["origem"] = p
 
 
 def _cor(valor, padrao: str = "#ffffff") -> QColor:
@@ -71,59 +78,89 @@ def _flags_justificacao(justificacao: str):
     return Qt.AlignLeft
 
 
+def _fonte_texto(canvas: VisualizacaoCanvas, elemento: dict) -> QFont:
+    zoom = max(float(getattr(canvas, "zoom", 1.0) or 1.0), 0.01)
+    altura_px = max(10, min(900, int(round(_texto_cm(elemento, canvas) * zoom))))
+    fonte = QFont("Arial")
+    fonte.setPixelSize(altura_px)
+    fonte.setBold(False)
+    fonte.setStyleStrategy(QFont.PreferAntialias)
+    return fonte
+
+
+def texto_rect_tela(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
+    texto = str(elemento.get("texto") or elemento.get("conteudo") or "").strip("\n")
+    if not texto:
+        return QRectF()
+    pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
+    fonte = _fonte_texto(canvas, elemento)
+    metricas = QFontMetrics(fonte)
+    linhas = texto.splitlines() or [texto]
+    zoom = max(float(getattr(canvas, "zoom", 1.0) or 1.0), 0.01)
+    entre_linhas_px = max(float(metricas.height()), _espaco_linha_cm(elemento, canvas) * zoom)
+    largura = max(metricas.horizontalAdvance(linha) for linha in linhas) + 12
+    altura_total = entre_linhas_px * len(linhas) + 8
+    x = float(pos_tela.x())
+    y = float(pos_tela.y())
+    referencia = str(elemento.get("referencia") or "Topo esquerda").lower()
+    if "centro" in referencia:
+        x -= largura / 2.0
+    elif "direita" in referencia:
+        x -= largura
+    if "baixo" in referencia or "inferior" in referencia:
+        y -= altura_total
+    elif "meio" in referencia or ("centro" in referencia and "topo" not in referencia and "baixo" not in referencia):
+        y -= altura_total / 2.0
+    return QRectF(x, y, float(largura), float(altura_total))
+
+
+def indice_texto_em_ponto(canvas: VisualizacaoCanvas, pos_tela: QPointF) -> int | None:
+    margem = 6.0
+    elementos = list(getattr(getattr(canvas, "cena", None), "elementos", []) or [])
+    for idx in range(len(elementos) - 1, -1, -1):
+        elemento = elementos[idx]
+        if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
+            continue
+        rect = texto_rect_tela(canvas, elemento).adjusted(-margem, -margem, margem, margem)
+        if rect.isValid() and rect.contains(pos_tela):
+            return idx
+    return None
+
+
 def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
     texto = str(elemento.get("texto") or elemento.get("conteudo") or "").strip("\n")
     if not texto:
         return
 
-    pos_cena = _texto_posicao(elemento)
-    pos_tela = canvas._cena_para_tela(pos_cena)
+    rect_base = texto_rect_tela(canvas, elemento)
+    if not rect_base.isValid():
+        return
+    pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
     cor_texto = _cor(elemento.get("cor_texto") or elemento.get("cor") or getattr(canvas, "_linha_cor", "#ffffff"), "#ffffff")
     cor_halo = _cor_halo(cor_texto)
+    fonte = _fonte_texto(canvas, elemento)
+    metricas = QFontMetrics(fonte)
+    linhas = texto.splitlines() or [texto]
     zoom = max(float(getattr(canvas, "zoom", 1.0) or 1.0), 0.01)
-    altura_px = max(10, min(900, int(round(_texto_cm(elemento, canvas) * zoom))))
-    entre_linhas_px = max(float(altura_px), _espaco_linha_cm(elemento, canvas) * zoom)
+    altura_linha = max(float(metricas.height()), _espaco_linha_cm(elemento, canvas) * zoom)
     espessura = max(1.0, float(elemento.get("texto_espessura", elemento.get("espessura", getattr(canvas, "_linha_espessura", 1.0))) or 1.0))
 
     painter.save()
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        fonte = QFont("Arial")
-        fonte.setPixelSize(altura_px)
-        fonte.setBold(False)
-        fonte.setStyleStrategy(QFont.PreferAntialias)
         painter.setFont(fonte)
-        metricas = painter.fontMetrics()
-        linhas = texto.splitlines() or [texto]
-        largura = max(metricas.horizontalAdvance(l) for l in linhas) + 12
-        altura_linha = max(float(metricas.height()), entre_linhas_px)
-        altura_total = altura_linha * len(linhas) + 8
-
-        x = float(pos_tela.x())
-        y = float(pos_tela.y())
-        referencia = str(elemento.get("referencia") or "Topo esquerda").lower()
-        if "centro" in referencia:
-            x -= largura / 2.0
-        elif "direita" in referencia:
-            x -= largura
-        if "baixo" in referencia or "inferior" in referencia:
-            y -= altura_total
-        elif "meio" in referencia or ("centro" in referencia and "topo" not in referencia and "baixo" not in referencia):
-            y -= altura_total / 2.0
-
-        rect_base = QRectF(x, y, largura, altura_total)
+        rect = QRectF(rect_base)
         angulo = float(elemento.get("angulo", 0.0) or 0.0)
         if abs(angulo) > 1e-6:
             painter.translate(pos_tela)
             painter.rotate(-angulo)
-            rect_base = QRectF(rect_base.x() - pos_tela.x(), rect_base.y() - pos_tela.y(), rect_base.width(), rect_base.height())
+            rect = QRectF(rect.x() - pos_tela.x(), rect.y() - pos_tela.y(), rect.width(), rect.height())
 
         flags = _flags_justificacao(str(elemento.get("justificacao") or "Esquerda")) | Qt.AlignVCenter
         halo_offset = max(1, int(round(espessura)))
         painter.setBrush(Qt.NoBrush)
         for i, linha in enumerate(linhas):
-            rect_linha = QRectF(rect_base.x(), rect_base.y() + i * altura_linha, rect_base.width(), altura_linha)
-            # Halo fino apenas para legibilidade, sem transformar em vetor.
+            rect_linha = QRectF(rect.x(), rect.y() + i * altura_linha, rect.width(), altura_linha)
             painter.setPen(QPen(cor_halo, max(1.0, espessura + 1.0)))
             for dx, dy in ((-halo_offset, 0), (halo_offset, 0), (0, -halo_offset), (0, halo_offset)):
                 painter.drawText(QRectF(rect_linha.x() + dx, rect_linha.y() + dy, rect_linha.width(), rect_linha.height()), flags, linha)
@@ -133,21 +170,50 @@ def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, element
         painter.restore()
 
 
+def desenhar_selecao_texto(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
+    rect = texto_rect_tela(canvas, elemento).adjusted(-5, -5, 5, 5)
+    if not rect.isValid():
+        return
+    painter.save()
+    try:
+        pen = QPen(QColor(getattr(canvas, "_cores_canvas", {}).get("selecao", "#2da8ff")), 1.2, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+    finally:
+        painter.restore()
+
+
+def transladar_texto_elemento(elemento: dict, dx: float, dy: float) -> None:
+    if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
+        return
+    p = _texto_posicao(elemento)
+    _set_qpoint(elemento, QPointF(p.x() + dx, p.y() + dy))
+
+
 def aplicar_patch_texto_nativo_canvas() -> None:
     global _PATCH_APLICADO
-    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas", False):
+    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas_v4", False):
         return
 
     original_paint = VisualizacaoCanvas.paintEvent
+    original_press = VisualizacaoCanvas.mousePressEvent
+    original_move = VisualizacaoCanvas.mouseMoveEvent
+    original_release = VisualizacaoCanvas.mouseReleaseEvent
+    original_double = VisualizacaoCanvas.mouseDoubleClickEvent
+    original_transladar = getattr(VisualizacaoCanvas, "_transladar_elemento", None)
 
     def paintEvent_com_texto(self, event):  # noqa: N802
         original_paint(self, event)
         try:
             painter = QPainter(self)
             try:
-                for elemento in list(getattr(getattr(self, "cena", None), "elementos", []) or []):
+                for idx, elemento in enumerate(list(getattr(getattr(self, "cena", None), "elementos", []) or [])):
                     if isinstance(elemento, dict) and str(elemento.get("tipo") or "").lower() == "texto":
                         desenhar_texto_nativo(self, painter, elemento)
+                        if idx in getattr(self, "_selecionados", set()):
+                            desenhar_selecao_texto(self, painter, elemento)
             finally:
                 painter.end()
         except Exception as exc:
@@ -157,8 +223,91 @@ def aplicar_patch_texto_nativo_canvas() -> None:
             except Exception:
                 pass
 
+    def mousePressEvent_com_texto(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton and str(getattr(self, "ferramenta_ativa", "selecionar") or "selecionar") in {"selecionar", ""}:
+            idx = indice_texto_em_ponto(self, event.position())
+            if idx is not None:
+                if event.modifiers() & Qt.ControlModifier:
+                    if idx in self._selecionados:
+                        self._selecionados.remove(idx)
+                    else:
+                        self._selecionados.add(idx)
+                else:
+                    self._selecionados = {idx}
+                self._texto_drag_idx = idx
+                self._texto_drag_inicio_cena = self._tela_para_cena(event.position())
+                self._texto_drag_inicio_pos = _texto_posicao(self.cena.elementos[idx])
+                self._texto_drag_moveu = False
+                self.update()
+                event.accept()
+                return
+        original_press(self, event)
+
+    def mouseMoveEvent_com_texto(self, event):  # noqa: N802
+        idx = getattr(self, "_texto_drag_idx", None)
+        if idx is not None and event.buttons() & Qt.LeftButton:
+            try:
+                if 0 <= int(idx) < len(self.cena.elementos):
+                    atual = self._tela_para_cena(event.position())
+                    inicio = getattr(self, "_texto_drag_inicio_cena", atual)
+                    inicio_pos = getattr(self, "_texto_drag_inicio_pos", _texto_posicao(self.cena.elementos[int(idx)]))
+                    dx = atual.x() - inicio.x()
+                    dy = atual.y() - inicio.y()
+                    _set_qpoint(self.cena.elementos[int(idx)], QPointF(inicio_pos.x() + dx, inicio_pos.y() + dy))
+                    self._texto_drag_moveu = True
+                    self.update()
+                    event.accept()
+                    return
+            except Exception:
+                pass
+        original_move(self, event)
+
+    def mouseReleaseEvent_com_texto(self, event):  # noqa: N802
+        idx = getattr(self, "_texto_drag_idx", None)
+        if idx is not None and event.button() == Qt.LeftButton:
+            try:
+                if getattr(self, "_texto_drag_moveu", False) and hasattr(self, "_registrar_historico"):
+                    self._registrar_historico()
+                self._texto_drag_idx = None
+                self._texto_drag_inicio_cena = None
+                self._texto_drag_inicio_pos = None
+                self._texto_drag_moveu = False
+                self.update()
+                event.accept()
+                return
+            except Exception:
+                pass
+        original_release(self, event)
+
+    def mouseDoubleClickEvent_com_texto(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            idx = indice_texto_em_ponto(self, event.position())
+            if idx is not None:
+                self._selecionados = {idx}
+                self.update()
+                try:
+                    self._ativar_ferramenta_janela_principal("editar_texto")
+                except Exception:
+                    pass
+                event.accept()
+                return
+        original_double(self, event)
+
+    def _transladar_elemento_com_texto(self, elemento: dict, dx: float, dy: float):
+        if isinstance(elemento, dict) and str(elemento.get("tipo") or "").lower() == "texto":
+            transladar_texto_elemento(elemento, dx, dy)
+            return
+        if original_transladar is not None:
+            return original_transladar(self, elemento, dx, dy)
+
     VisualizacaoCanvas.paintEvent = paintEvent_com_texto
-    VisualizacaoCanvas._guimma_texto_nativo_canvas = True
+    VisualizacaoCanvas.mousePressEvent = mousePressEvent_com_texto
+    VisualizacaoCanvas.mouseMoveEvent = mouseMoveEvent_com_texto
+    VisualizacaoCanvas.mouseReleaseEvent = mouseReleaseEvent_com_texto
+    VisualizacaoCanvas.mouseDoubleClickEvent = mouseDoubleClickEvent_com_texto
+    if original_transladar is not None:
+        VisualizacaoCanvas._transladar_elemento = _transladar_elemento_com_texto
+    VisualizacaoCanvas._guimma_texto_nativo_canvas_v4 = True
     _PATCH_APLICADO = True
 
 
