@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from canvas.visualizacao_texto_nativo_patch import aplicar_patch_texto_nativo_canvas
 from tools.medicao_utils import mensagem_status
 from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
-from tools.texto_persistente_utils import aplicar_patch_canvas_textos
 from tools.tool_base import FerramentaBase
 
 
@@ -39,8 +39,17 @@ FONTES_TEXTO = [
 
 
 class TextoDialog(QDialog):
-    def __init__(self, canvas, parent: QWidget | None = None):
+    def __init__(self, canvas, ferramenta, posicao_previa: QPointF, cor_texto: str, espessura: float, parent: QWidget | None = None):
         super().__init__(parent)
+        self.canvas = canvas
+        self.ferramenta = ferramenta
+        self._posicao_previa = QPointF(posicao_previa)
+        self._cor_texto = str(cor_texto or "#ffffff")
+        self._espessura = max(1.0, float(espessura or 1.0))
+        self._preview_idx: int | None = None
+        self._aceito = False
+        self._atualizando_estilo_caixa = False
+
         self.setWindowTitle("Criar texto")
         self.setModal(True)
         self.resize(560, 390)
@@ -105,6 +114,17 @@ class TextoDialog(QDialog):
         layout.addWidget(botoes, 5, 0, 1, 6)
         layout.setRowStretch(0, 1)
 
+        self.txt_texto.textChanged.connect(self._atualizar_previa_ao_vivo)
+        self.combo_fonte.currentTextChanged.connect(self._fonte_alterada)
+        self.combo_referencia.currentTextChanged.connect(self._atualizar_previa_ao_vivo)
+        self.combo_justificacao.currentTextChanged.connect(self._atualizar_previa_ao_vivo)
+        self.spin_angulo.valueChanged.connect(self._atualizar_previa_ao_vivo)
+        self.spin_altura.valueChanged.connect(self._atualizar_previa_ao_vivo)
+        self.spin_espaco.valueChanged.connect(self._atualizar_previa_ao_vivo)
+
+        self._aplicar_fonte_na_caixa()
+        QTimer.singleShot(0, self._atualizar_previa_ao_vivo)
+
     def valores(self) -> dict:
         return {
             "texto": self.txt_texto.toPlainText(),
@@ -115,6 +135,90 @@ class TextoDialog(QDialog):
             "referencia": self.combo_referencia.currentText(),
             "justificacao": self.combo_justificacao.currentText(),
         }
+
+    def indice_previa(self) -> int | None:
+        if self._preview_idx is None:
+            return None
+        try:
+            idx = int(self._preview_idx)
+            if 0 <= idx < len(self.canvas.cena.elementos):
+                el = self.canvas.cena.elementos[idx]
+                if isinstance(el, dict) and str(el.get("tipo") or "").lower() == "texto":
+                    return idx
+        except Exception:
+            pass
+        return None
+
+    def _fonte_alterada(self):
+        self._aplicar_fonte_na_caixa()
+        self._atualizar_previa_ao_vivo()
+
+    def _aplicar_fonte_na_caixa(self):
+        if self._atualizando_estilo_caixa:
+            return
+        self._atualizando_estilo_caixa = True
+        try:
+            fonte = self.combo_fonte.currentText() or "Arial"
+            self.txt_texto.setStyleSheet(f'QTextEdit {{ font-family: "{fonte}"; font-size: 12pt; }}')
+        finally:
+            self._atualizando_estilo_caixa = False
+
+    def _atualizar_previa_ao_vivo(self):
+        texto = self.txt_texto.toPlainText().strip("\n")
+        if not texto.strip():
+            self._remover_previa()
+            return
+        valores = self.valores()
+        elemento = self.ferramenta._criar_elemento_texto_nativo(self.canvas, valores, self._posicao_previa, self._cor_texto)
+        if elemento is None:
+            self._remover_previa()
+            return
+        elemento["__texto_previa_ao_vivo"] = True
+        elemento["texto_espessura"] = self._espessura
+        elemento["espessura"] = self._espessura
+        idx = self.indice_previa()
+        if idx is None:
+            self.canvas.cena.elementos.append(elemento)
+            idx = len(self.canvas.cena.elementos) - 1
+            self._preview_idx = idx
+        else:
+            pos_atual = self.canvas.cena.elementos[idx].get("posicao")
+            if pos_atual:
+                elemento["posicao"] = pos_atual
+                elemento["ponto"] = pos_atual
+                elemento["origem"] = pos_atual
+            self.canvas.cena.elementos[idx] = elemento
+        self.canvas._selecionados = {idx}
+        self.canvas.update()
+
+    def _remover_previa(self):
+        idx = self.indice_previa()
+        if idx is not None:
+            try:
+                self.canvas.cena.elementos.pop(idx)
+            except Exception:
+                pass
+        self._preview_idx = None
+        try:
+            self.canvas._selecionados.clear()
+        except Exception:
+            pass
+        self.canvas.update()
+
+    def accept(self):
+        self._atualizar_previa_ao_vivo()
+        self._aceito = True
+        super().accept()
+
+    def reject(self):
+        self._aceito = False
+        self._remover_previa()
+        super().reject()
+
+    def closeEvent(self, event):
+        if not self._aceito:
+            self._remover_previa()
+        super().closeEvent(event)
 
 
 class Ferramenta(FerramentaBase):
@@ -130,7 +234,7 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         configurar_texto_canvas(canvas)
-        aplicar_patch_canvas_textos(canvas)
+        aplicar_patch_texto_nativo_canvas()
         self._dialogo_aberto = False
         QTimer.singleShot(0, lambda: self._abrir_dialogo_e_inserir(canvas))
 
@@ -149,27 +253,25 @@ class Ferramenta(FerramentaBase):
         canvas._inserir_texto_dialogo_ativo = True
         canvas._inserir_texto_ultima_abertura = agora
         try:
-            dlg = TextoDialog(canvas, canvas)
+            cor_texto = self._cor_atual_para_texto(canvas)
+            cor_fundo = self._cor_fundo_canvas(canvas)
+            espessura = self._espessura_atual_texto(canvas)
+            dlg = TextoDialog(canvas, self, self._centro_canvas(canvas), cor_texto, espessura, canvas)
             if dlg.exec() == QDialog.Accepted:
-                valores = dlg.valores()
-                configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
-                canvas._texto_fonte = valores["fonte_texto"]
-                cor_texto = self._cor_atual_para_texto(canvas)
-                cor_fundo = self._cor_fundo_canvas(canvas)
+                idx = dlg.indice_previa()
                 if self._cores_iguais_ou_muito_parecidas(cor_texto, cor_fundo):
+                    dlg._remover_previa()
                     self._alertar_cor_invisivel(canvas, cor_texto, cor_fundo)
                     texto = "Texto não inserido: cor igual ou muito parecida com o fundo."
+                elif idx is not None:
+                    canvas.cena.elementos[idx].pop("__texto_previa_ao_vivo", None)
+                    canvas._selecionados = {idx}
+                    canvas._texto_em_maos_idx = idx
+                    canvas._texto_em_maos_cancelavel = True
+                    canvas._texto_fonte = dlg.valores().get("fonte_texto") or "Arial"
+                    texto = "Texto em mãos: mova o mouse para posicionar, clique esquerdo para soltar ou direito para cancelar."
                 else:
-                    elemento = self._criar_elemento_texto_nativo(canvas, valores, self._centro_canvas(canvas), cor_texto)
-                    if elemento is not None:
-                        canvas.cena.elementos.append(elemento)
-                        idx = len(canvas.cena.elementos) - 1
-                        canvas._selecionados = {idx}
-                        canvas._texto_em_maos_idx = idx
-                        canvas._texto_em_maos_cancelavel = True
-                        texto = "Texto em mãos: mova o mouse para posicionar, clique esquerdo para soltar ou direito para cancelar."
-                    else:
-                        texto = "Inserir Texto: nenhum texto informado."
+                    texto = "Inserir Texto: nenhum texto informado."
             else:
                 texto = "Inserir Texto cancelado."
         finally:
