@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
+from tools.inserir_texto_tool import FONTES_TEXTO
 
 
 class EditarTextoDialog(QDialog):
@@ -21,11 +22,16 @@ class EditarTextoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Editar texto")
         self.setModal(True)
-        self.resize(520, 360)
+        self.resize(560, 390)
         self.elemento = elemento
 
         self.txt_texto = QTextEdit(self)
         self.txt_texto.setPlainText(str(elemento.get("texto") or elemento.get("conteudo") or ""))
+
+        self.combo_fonte = QComboBox(self)
+        self.combo_fonte.addItems(FONTES_TEXTO)
+        fonte_atual = str(elemento.get("fonte_texto") or elemento.get("fonte") or "Arial")
+        self.combo_fonte.setCurrentText(fonte_atual if fonte_atual in FONTES_TEXTO else "Arial")
 
         self.spin_angulo = QDoubleSpinBox(self)
         self.spin_angulo.setRange(-360.0, 360.0)
@@ -56,18 +62,12 @@ class EditarTextoDialog(QDialog):
             "Baixo esquerda", "Baixo centro", "Baixo direita",
         ])
         ref = str(elemento.get("referencia") or "Centro centro")
-        if self.combo_referencia.findText(ref) >= 0:
-            self.combo_referencia.setCurrentText(ref)
-        else:
-            self.combo_referencia.setCurrentText("Centro centro")
+        self.combo_referencia.setCurrentText(ref if self.combo_referencia.findText(ref) >= 0 else "Centro centro")
 
         self.combo_justificacao = QComboBox(self)
         self.combo_justificacao.addItems(["Esquerda", "Centro", "Direita"])
         just = str(elemento.get("justificacao") or "Centro")
-        if self.combo_justificacao.findText(just) >= 0:
-            self.combo_justificacao.setCurrentText(just)
-        else:
-            self.combo_justificacao.setCurrentText("Centro")
+        self.combo_justificacao.setCurrentText(just if self.combo_justificacao.findText(just) >= 0 else "Centro")
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         botoes.accepted.connect(self.accept)
@@ -75,25 +75,30 @@ class EditarTextoDialog(QDialog):
 
         layout = QGridLayout(self)
         layout.addWidget(self.txt_texto, 0, 0, 1, 6)
-        layout.addWidget(QLabel("Ângulo"), 1, 0)
-        layout.addWidget(QLabel("Altura"), 1, 2)
-        layout.addWidget(QLabel("Espaço linhas"), 1, 4)
-        layout.addWidget(self.spin_angulo, 2, 0, 1, 2)
-        layout.addWidget(self.spin_altura, 2, 2, 1, 2)
-        layout.addWidget(self.spin_espaco, 2, 4, 1, 2)
-        layout.addWidget(QLabel("Referência"), 3, 0)
-        layout.addWidget(QLabel("Justificação"), 3, 2)
-        layout.addWidget(QLabel("Espessura"), 3, 4)
-        layout.addWidget(self.combo_referencia, 4, 0, 1, 2)
-        layout.addWidget(self.combo_justificacao, 4, 2, 1, 2)
-        layout.addWidget(self.spin_espessura, 4, 4, 1, 2)
-        layout.addWidget(botoes, 5, 0, 1, 6)
+        layout.addWidget(QLabel("Fonte"), 1, 0)
+        layout.addWidget(QLabel("Ângulo"), 1, 2)
+        layout.addWidget(QLabel("Altura"), 1, 4)
+        layout.addWidget(self.combo_fonte, 2, 0, 1, 2)
+        layout.addWidget(self.spin_angulo, 2, 2, 1, 2)
+        layout.addWidget(self.spin_altura, 2, 4, 1, 2)
+        layout.addWidget(QLabel("Espaço linhas"), 3, 0)
+        layout.addWidget(QLabel("Referência"), 3, 2)
+        layout.addWidget(QLabel("Justificação"), 3, 4)
+        layout.addWidget(self.spin_espaco, 4, 0, 1, 2)
+        layout.addWidget(self.combo_referencia, 4, 2, 1, 2)
+        layout.addWidget(self.combo_justificacao, 4, 4, 1, 2)
+        layout.addWidget(QLabel("Espessura"), 5, 0)
+        layout.addWidget(self.spin_espessura, 5, 1, 1, 2)
+        layout.addWidget(botoes, 6, 0, 1, 6)
         layout.setRowStretch(0, 1)
 
     def aplicar(self) -> None:
         texto = self.txt_texto.toPlainText().strip("\n")
+        fonte = self.combo_fonte.currentText()
         self.elemento["texto"] = texto
         self.elemento["conteudo"] = texto
+        self.elemento["fonte_texto"] = fonte
+        self.elemento["fonte"] = fonte
         self.elemento["angulo"] = float(self.spin_angulo.value())
         self.elemento["texto_altura_cm"] = float(self.spin_altura.value())
         self.elemento["texto_espaco_linhas_cm"] = float(self.spin_espaco.value())
@@ -118,6 +123,8 @@ class Ferramenta(FerramentaBase):
     gerencia_coordenadas_operacao = True
 
     def on_activate(self, canvas):
+        if getattr(canvas, "_editar_texto_dialogo_ativo", False):
+            return None
         idx = self._indice_texto_alvo(canvas)
         if idx is None:
             QMessageBox.information(canvas, "Editar Texto", "Selecione um texto no canvas para editar.")
@@ -137,19 +144,25 @@ class Ferramenta(FerramentaBase):
         return None
 
     def _abrir_dialogo(self, canvas, idx: int) -> None:
-        elemento = canvas.cena.elementos[idx]
-        dlg = EditarTextoDialog(elemento, canvas)
-        if dlg.exec() == QDialog.Accepted:
-            dlg.aplicar()
-            cor = _cor_atual_canvas(canvas)
-            if cor:
-                elemento["cor"] = cor
-                elemento["cor_texto"] = cor
-            if hasattr(canvas, "_registrar_historico"):
-                canvas._registrar_historico()
-            if hasattr(canvas, "_emitir_elementos_alterados"):
-                canvas._emitir_elementos_alterados()
-            canvas.update()
+        if getattr(canvas, "_editar_texto_dialogo_ativo", False):
+            return
+        canvas._editar_texto_dialogo_ativo = True
+        try:
+            elemento = canvas.cena.elementos[idx]
+            dlg = EditarTextoDialog(elemento, canvas)
+            if dlg.exec() == QDialog.Accepted:
+                dlg.aplicar()
+                cor = _cor_atual_canvas(canvas)
+                if cor:
+                    elemento["cor"] = cor
+                    elemento["cor_texto"] = cor
+                if hasattr(canvas, "_registrar_historico"):
+                    canvas._registrar_historico()
+                if hasattr(canvas, "_emitir_elementos_alterados"):
+                    canvas._emitir_elementos_alterados()
+                canvas.update()
+        finally:
+            canvas._editar_texto_dialogo_ativo = False
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
