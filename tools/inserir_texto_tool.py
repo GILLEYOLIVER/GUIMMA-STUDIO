@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import monotonic
 
 from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -200,11 +201,47 @@ class Ferramenta(FerramentaBase):
     def _texto_normalizado(self, texto: str) -> str:
         return str(texto or "").translate(_ACENTOS).upper()
 
+    def _cor_atual_para_texto(self, canvas) -> str:
+        candidatos: list[object] = []
+        janela = None
+        try:
+            janela = canvas.window()
+        except Exception:
+            janela = None
+
+        if janela is not None:
+            estilo_janela = getattr(janela, "_estilo_desenho_atual", None)
+            if isinstance(estilo_janela, dict):
+                candidatos.append(estilo_janela.get("cor"))
+            try:
+                for widget in janela.findChildren(QWidget):
+                    if widget.__class__.__name__ == "ColorControlWidget" and hasattr(widget, "valor"):
+                        valor = widget.valor()
+                        if isinstance(valor, dict):
+                            candidatos.append(valor.get("cor"))
+            except Exception:
+                pass
+
+        candidatos.append(getattr(canvas, "_linha_cor", None))
+        cores_canvas = getattr(canvas, "_cores_canvas", None)
+        if isinstance(cores_canvas, dict):
+            candidatos.append(cores_canvas.get("desenho"))
+
+        for valor in candidatos:
+            cor = QColor(str(valor or ""))
+            if cor.isValid():
+                return cor.name()
+        return "#ffffff"
+
     def _criar_elementos_vetor_texto(self, canvas, valores: dict, pos: QPointF) -> list[dict]:
         texto = self._texto_normalizado(str(valores.get("texto") or "").strip("\n"))
         if not texto.strip():
             return []
-        cor = str(getattr(canvas, "_linha_cor", "#ffffff") or "#ffffff")
+        cor = self._cor_atual_para_texto(canvas)
+        try:
+            canvas._linha_cor = cor
+        except Exception:
+            pass
         altura_cm = max(0.2, float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM))
         espaco_cm = max(0.2, float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM))
         cel = altura_cm / 7.0
