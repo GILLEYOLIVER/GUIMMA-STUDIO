@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -99,29 +99,52 @@ class TextoDialog(QDialog):
 class Ferramenta(FerramentaBase):
     id_ferramenta = "inserir_texto"
     nome = "Inserir Texto"
-    descricao_painel = "Clique no canvas para criar um texto técnico."
+    descricao_painel = ""
     gerencia_coordenadas_operacao = True
+
+    def __init__(self):
+        super().__init__()
+        self._config_pendente: dict | None = None
+        self._dialogo_aberto = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         configurar_texto_canvas(canvas)
         aplicar_patch_canvas_textos(canvas)
-        texto = "Inserir Texto: clique no canvas para abrir a caixa de texto."
+        self._config_pendente = None
+        self._dialogo_aberto = False
+        QTimer.singleShot(0, lambda: self._abrir_dialogo_inicial(canvas))
+
+    def _abrir_dialogo_inicial(self, canvas) -> None:
+        if self._dialogo_aberto:
+            return
+        self._dialogo_aberto = True
+        dlg = TextoDialog(canvas, canvas)
+        if dlg.exec() == QDialog.Accepted:
+            valores = dlg.valores()
+            configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
+            self._config_pendente = valores
+            texto = "Inserir Texto: clique no canvas para posicionar o texto."
+        else:
+            self._config_pendente = None
+            texto = "Inserir Texto cancelado."
+        self._dialogo_aberto = False
         self.set_status(texto)
         mensagem_status(canvas, texto)
+        canvas.update()
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
         aplicar_patch_canvas_textos(canvas)
-        pos = canvas._ponto_com_snap(event.position())
-        dlg = TextoDialog(canvas, canvas)
-        if dlg.exec() != QDialog.Accepted:
+
+        if not self._config_pendente:
+            self._abrir_dialogo_inicial(canvas)
             event.accept()
             return True
 
-        valores = dlg.valores()
-        configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
+        pos = canvas._ponto_com_snap(event.position())
+        valores = self._config_pendente
         cor = getattr(canvas, "_linha_cor", "#ffffff")
         elemento = {
             "tipo": "texto",
@@ -139,6 +162,7 @@ class Ferramenta(FerramentaBase):
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
         canvas.update()
-        mensagem_status(canvas, "Texto criado. O tamanho informado será usado nas próximas medidas/textos.")
+        self._config_pendente = None
+        mensagem_status(canvas, "Texto criado. Clique na ferramenta novamente para criar outro texto.")
         event.accept()
         return True
