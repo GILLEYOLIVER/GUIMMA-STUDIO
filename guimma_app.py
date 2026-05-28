@@ -4,12 +4,45 @@ import sys
 from types import MethodType
 from typing import Sequence
 
-from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
+from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTimer, QTranslator
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QMenu, QSizePolicy
+from PySide6.QtWidgets import QApplication, QFrame, QMenu, QScrollArea, QSizePolicy
 
 from config import APP_NOME
 from ui.janela_principal import GuimmaStudioMainWindow
+
+
+class _ScrollLinhaUsuario(QScrollArea):
+    """Área horizontal da barra Usuários: rola com mouse/trackpad sem mostrar barra."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ScrollLinhaUsuario")
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedHeight(34)
+        self.setStyleSheet(
+            "QScrollArea#ScrollLinhaUsuario { background: transparent; border: none; }"
+            "QScrollArea#ScrollLinhaUsuario > QWidget > QWidget { background: transparent; }"
+        )
+
+    def wheelEvent(self, event):  # noqa: N802
+        barra = self.horizontalScrollBar()
+        pixels = event.pixelDelta()
+        angulo = event.angleDelta()
+        deslocamento = 0
+        if not pixels.isNull():
+            deslocamento = pixels.x() if pixels.x() else -pixels.y()
+        elif not angulo.isNull():
+            deslocamento = int(angulo.x() / 2) if angulo.x() else int(-angulo.y() / 2)
+        if deslocamento:
+            barra.setValue(barra.value() + deslocamento)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class GuimmaStudioApp:
@@ -192,17 +225,28 @@ class GuimmaStudioApp:
             return
 
     def _corrigir_faixa_usuarios_topo(self, janela) -> None:
-        """Deixa a linha de ícones encolher e preserva os controles à direita."""
+        """Deixa a linha de ícones rolar horizontalmente sem encavalar."""
         try:
             linha = getattr(janela, "linha_usuario", None)
             if linha is not None:
-                linha.setMinimumWidth(0)
+                self._instalar_scroll_linha_usuario(janela, linha)
                 linha.setMinimumSize(0, 0)
-                linha.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+                linha.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 layout_linha = getattr(janela, "layout_linha_usuario", None)
                 if layout_linha is not None:
                     layout_linha.setContentsMargins(2, 0, 2, 0)
                     layout_linha.setSpacing(2)
+                    largura_conteudo = max(0, layout_linha.sizeHint().width() + 8)
+                else:
+                    largura_conteudo = max(0, linha.sizeHint().width() + 8)
+                scroll = getattr(janela, "scroll_linha_usuario", None)
+                largura_visivel = scroll.viewport().width() if scroll is not None else linha.width()
+                linha.setFixedWidth(max(largura_conteudo, largura_visivel, 1))
+                linha.setFixedHeight(32)
+                if scroll is not None:
+                    scroll.setFixedHeight(34)
+                    scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    scroll.widget().updateGeometry()
 
             painel = getattr(janela, "painel_controles_usuario", None)
             if painel is not None:
@@ -241,6 +285,33 @@ class GuimmaStudioApp:
                 faixa.updateGeometry()
         except Exception:
             return
+
+    def _instalar_scroll_linha_usuario(self, janela, linha) -> None:
+        if getattr(janela, "scroll_linha_usuario", None) is not None:
+            return
+        parent = linha.parentWidget()
+        layout_parent = parent.layout() if parent is not None else None
+        if layout_parent is None:
+            return
+        indice = -1
+        stretch = 1
+        for i in range(layout_parent.count()):
+            item = layout_parent.itemAt(i)
+            if item is not None and item.widget() is linha:
+                indice = i
+                try:
+                    stretch = max(1, layout_parent.stretch(i))
+                except Exception:
+                    stretch = 1
+                break
+        if indice < 0:
+            return
+        layout_parent.removeWidget(linha)
+        scroll = _ScrollLinhaUsuario(parent)
+        scroll.setWidget(linha)
+        janela.scroll_linha_usuario = scroll
+        layout_parent.insertWidget(indice, scroll, stretch)
+        scroll.horizontalScrollBar().setValue(0)
 
     def run(self) -> int:
         self.janela_principal.exibir_inicial()
