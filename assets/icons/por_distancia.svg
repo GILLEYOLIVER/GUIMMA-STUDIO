@@ -1,8 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-    <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#00000022"/>
-      </filter>
-    </defs>
-    <line x1="20" y1="48" x2="76" y2="48" stroke="#4a4a4a" stroke-width="3" stroke-linecap="round" /><polyline points="20,48 29,41 29,55" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><polyline points="76,48 67,41 67,55" stroke="#4a4a4a" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round" /><line x1="20" y1="34" x2="20" y2="62" stroke="#96a0a8" stroke-width="2" stroke-linecap="round" /><line x1="76" y1="34" x2="76" y2="62" stroke="#96a0a8" stroke-width="2" stroke-linecap="round" />
-    </svg>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#00000030"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M18 50H78" stroke="#159B8F" stroke-width="6" stroke-linecap="round"/>
+    <path d="M18 50L31 39V61L18 50Z" fill="#7E3FF2"/>
+    <path d="M78 50L65 39V61L78 50Z" fill="#7E3FF2"/>
+    <path d="M18 30V70" stroke="#2F80ED" stroke-width="5" stroke-linecap="round"/>
+    <path d="M78 30V70" stroke="#2F80ED" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>
