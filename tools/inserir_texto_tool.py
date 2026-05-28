@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QLabel,
+    QMessageBox,
     QTextEdit,
     QWidget,
 )
@@ -170,17 +171,23 @@ class Ferramenta(FerramentaBase):
             if dlg.exec() == QDialog.Accepted:
                 valores = dlg.valores()
                 configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
-                pos = self._centro_canvas(canvas)
-                elementos = self._criar_elementos_vetor_texto(canvas, valores, pos)
-                if elementos:
-                    canvas.cena.elementos.extend(elementos)
-                    if hasattr(canvas, "_registrar_historico"):
-                        canvas._registrar_historico()
-                    if hasattr(canvas, "_emitir_elementos_alterados"):
-                        canvas._emitir_elementos_alterados()
-                    texto = f"Texto inserido no canvas ({len(elementos)} traços)."
+                cor_texto = self._cor_atual_para_texto(canvas)
+                cor_fundo = self._cor_fundo_canvas(canvas)
+                if self._cores_iguais_ou_muito_parecidas(cor_texto, cor_fundo):
+                    self._alertar_cor_invisivel(canvas, cor_texto, cor_fundo)
+                    texto = "Texto não inserido: cor igual ou muito parecida com o fundo."
                 else:
-                    texto = "Inserir Texto: nenhum texto informado."
+                    pos = self._centro_canvas(canvas)
+                    elementos = self._criar_elementos_vetor_texto(canvas, valores, pos, cor_texto)
+                    if elementos:
+                        canvas.cena.elementos.extend(elementos)
+                        if hasattr(canvas, "_registrar_historico"):
+                            canvas._registrar_historico()
+                        if hasattr(canvas, "_emitir_elementos_alterados"):
+                            canvas._emitir_elementos_alterados()
+                        texto = f"Texto inserido no canvas ({len(elementos)} traços)."
+                    else:
+                        texto = "Inserir Texto: nenhum texto informado."
             else:
                 texto = "Inserir Texto cancelado."
         finally:
@@ -200,6 +207,47 @@ class Ferramenta(FerramentaBase):
 
     def _texto_normalizado(self, texto: str) -> str:
         return str(texto or "").translate(_ACENTOS).upper()
+
+    def _cor_valida(self, valor, fallback: str = "#ffffff") -> QColor:
+        cor = QColor(str(valor or ""))
+        return cor if cor.isValid() else QColor(fallback)
+
+    def _cor_fundo_canvas(self, canvas) -> str:
+        candidatos: list[object] = []
+        cores_canvas = getattr(canvas, "_cores_canvas", None)
+        if isinstance(cores_canvas, dict):
+            candidatos.append(cores_canvas.get("fundo"))
+        janela = None
+        try:
+            janela = canvas.window()
+        except Exception:
+            janela = None
+        if janela is not None:
+            cores_global = getattr(janela, "_cores_canvas_global", None)
+            if isinstance(cores_global, dict):
+                candidatos.append(cores_global.get("fundo"))
+        candidatos.append("#000000")
+        for valor in candidatos:
+            cor = QColor(str(valor or ""))
+            if cor.isValid():
+                return cor.name()
+        return "#000000"
+
+    def _cores_iguais_ou_muito_parecidas(self, cor_a: str, cor_b: str) -> bool:
+        a = self._cor_valida(cor_a, "#ffffff")
+        b = self._cor_valida(cor_b, "#000000")
+        distancia = abs(a.red() - b.red()) + abs(a.green() - b.green()) + abs(a.blue() - b.blue())
+        return distancia <= 45
+
+    def _alertar_cor_invisivel(self, canvas, cor_texto: str, cor_fundo: str) -> None:
+        QMessageBox.warning(
+            canvas,
+            "Cor do texto invisível",
+            "A cor escolhida para o texto está igual ou muito parecida com a cor do fundo do canvas.\n\n"
+            f"Cor do texto: {cor_texto}\n"
+            f"Cor do fundo: {cor_fundo}\n\n"
+            "Escolha outra cor em Cor antes de inserir o texto.",
+        )
 
     def _cor_atual_para_texto(self, canvas) -> str:
         candidatos: list[object] = []
@@ -233,11 +281,11 @@ class Ferramenta(FerramentaBase):
                 return cor.name()
         return "#ffffff"
 
-    def _criar_elementos_vetor_texto(self, canvas, valores: dict, pos: QPointF) -> list[dict]:
+    def _criar_elementos_vetor_texto(self, canvas, valores: dict, pos: QPointF, cor: str | None = None) -> list[dict]:
         texto = self._texto_normalizado(str(valores.get("texto") or "").strip("\n"))
         if not texto.strip():
             return []
-        cor = self._cor_atual_para_texto(canvas)
+        cor = cor or self._cor_atual_para_texto(canvas)
         try:
             canvas._linha_cor = cor
         except Exception:
