@@ -5,7 +5,7 @@ from typing import Sequence
 
 from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSizePolicy
 
 from config import APP_NOME
 from ui.janela_principal import GuimmaStudioMainWindow
@@ -26,6 +26,7 @@ class GuimmaStudioApp:
             pass
         QTimer.singleShot(0, self._corrigir_layout_aba_usuario)
         QTimer.singleShot(150, self._corrigir_layout_aba_usuario)
+        QTimer.singleShot(350, self._corrigir_layout_aba_usuario)
 
     def _aplicar_traducao_qt_ptbr(self):
         self._tradutor_qt = QTranslator(self.qt_app)
@@ -54,14 +55,17 @@ class GuimmaStudioApp:
         self.qt_app.setPalette(pal)
 
     def _corrigir_layout_aba_usuario(self, *_args):
-        """Compacta a aba de usuário para não cortar o canto direito do menu."""
+        """Compacta a aba de usuário e impede corte no canto direito do topo."""
         try:
             from ui import ribbon
 
-            rib = self.janela_principal.ribbon
+            janela = self.janela_principal
+            rib = janela.ribbon
             index = rib._tab_index_by_id("usuarios")
             if index is None:
                 return
+
+            self._corrigir_faixa_usuarios_topo(janela)
 
             area_atual = rib.paginas.widget(index)
             pagina_atual = area_atual.widget() if hasattr(area_atual, "widget") else area_atual
@@ -106,6 +110,52 @@ class GuimmaStudioApp:
 
             if hasattr(area_atual, "horizontalScrollBar"):
                 area_atual.horizontalScrollBar().setValue(0)
+        except Exception:
+            return
+
+    def _corrigir_faixa_usuarios_topo(self, janela) -> None:
+        """Deixa a linha de ícones encolher e preserva os controles à direita."""
+        try:
+            linha = getattr(janela, "linha_usuario", None)
+            if linha is not None:
+                linha.setMinimumWidth(0)
+                linha.setMinimumSize(0, 0)
+                linha.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+                layout_linha = getattr(janela, "layout_linha_usuario", None)
+                if layout_linha is not None:
+                    layout_linha.setContentsMargins(2, 0, 2, 0)
+                    layout_linha.setSpacing(2)
+
+            painel = getattr(janela, "painel_controles_usuario", None)
+            if painel is not None:
+                painel.setMinimumWidth(300)
+                painel.setMaximumWidth(390)
+                painel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+            combo = getattr(janela, "combo_perfil_usuario", None)
+            if combo is not None:
+                combo.setMinimumWidth(95)
+                combo.setMaximumWidth(145)
+
+            ajustes_botoes = (
+                ("btn_novo_perfil_usuario", "Novo", 48),
+                ("btn_salvar_perfil_usuario", "Salvar", 58),
+                ("btn_usuario_add_all", "Adicionar", 76),
+                ("btn_usuario_limpar", "Limpar", 58),
+            )
+            for nome_attr, texto, largura in ajustes_botoes:
+                botao = getattr(janela, nome_attr, None)
+                if botao is None:
+                    continue
+                botao.setText(texto)
+                botao.setMinimumWidth(largura)
+                botao.setMaximumWidth(largura + 16)
+                botao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+            faixa = getattr(janela, "faixa_usuarios", None)
+            if faixa is not None:
+                faixa.setMinimumWidth(0)
+                faixa.updateGeometry()
         except Exception:
             return
 
