@@ -77,7 +77,6 @@ class _ScrollLinhaUsuario(QScrollArea):
         )
 
     def reinstalar_filtros(self) -> None:
-        """Faz o scroll funcionar mesmo quando o mouse está em cima dos ícones."""
         objetos = [self, self.viewport()]
         conteudo = self.widget()
         if conteudo is not None:
@@ -118,6 +117,7 @@ class GuimmaStudioApp:
         self._aplicar_traducao_qt_ptbr()
         self._aplicar_tema_claro_global()
         self.janela_principal = GuimmaStudioMainWindow()
+        self._instalar_nome_fixo_aba_usuario()
         self._instalar_menu_contexto_usuario()
         self._corrigir_layout_aba_usuario()
         try:
@@ -153,6 +153,37 @@ class GuimmaStudioApp:
         pal.setColor(QPalette.Highlight, QColor("#2b7cd3"))
         pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         self.qt_app.setPalette(pal)
+
+    def _instalar_nome_fixo_aba_usuario(self):
+        janela = self.janela_principal
+        try:
+            rib = janela.ribbon
+            if getattr(rib, "_guimma_nome_usuario_fixo", False):
+                self._fixar_nome_aba_usuario(janela)
+                return
+            set_user_tools_original = rib.set_user_tools
+
+            def set_user_tools_fixado(tool_ids: list[str], titulo: str):
+                set_user_tools_original(tool_ids, "Usuário")
+                self._fixar_nome_aba_usuario(janela)
+
+            rib.set_user_tools = set_user_tools_fixado
+            rib._guimma_nome_usuario_fixo = True
+            self._fixar_nome_aba_usuario(janela)
+        except Exception:
+            pass
+
+    def _fixar_nome_aba_usuario(self, janela=None) -> None:
+        try:
+            janela = janela or self.janela_principal
+            rib = janela.ribbon
+            index = rib._tab_index_by_id("usuarios")
+            if index is None:
+                return
+            rib._tabs[index].title = "Usuário"
+            rib.tabbar.setTabText(index, "Usuário")
+        except Exception:
+            pass
 
     def _instalar_menu_contexto_usuario(self):
         janela = self.janela_principal
@@ -237,6 +268,7 @@ class GuimmaStudioApp:
 
             janela = self.janela_principal
             rib = janela.ribbon
+            self._fixar_nome_aba_usuario(janela)
             self._corrigir_scroll_ribbon_principal(janela)
             index = rib._tab_index_by_id("usuarios")
             if index is None:
@@ -256,6 +288,7 @@ class GuimmaStudioApp:
                 if tool_id and tool_id not in ids:
                     ids.append(tool_id)
             if not ids:
+                self._fixar_nome_aba_usuario(janela)
                 return
 
             assinatura = tuple(ids)
@@ -288,6 +321,7 @@ class GuimmaStudioApp:
 
             if hasattr(area_atual, "horizontalScrollBar"):
                 area_atual.horizontalScrollBar().setValue(0)
+            self._fixar_nome_aba_usuario(janela)
         except Exception:
             return
 
