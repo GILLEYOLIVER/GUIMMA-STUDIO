@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sys
+from types import MethodType
 from typing import Sequence
 
 from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QSizePolicy
+from PySide6.QtWidgets import QApplication, QMenu, QSizePolicy
 
 from config import APP_NOME
 from ui.janela_principal import GuimmaStudioMainWindow
@@ -19,6 +20,7 @@ class GuimmaStudioApp:
         self._aplicar_traducao_qt_ptbr()
         self._aplicar_tema_claro_global()
         self.janela_principal = GuimmaStudioMainWindow()
+        self._instalar_menu_contexto_usuario()
         self._corrigir_layout_aba_usuario()
         try:
             self.janela_principal.ribbon.tabbar.currentChanged.connect(self._corrigir_layout_aba_usuario)
@@ -53,6 +55,82 @@ class GuimmaStudioApp:
         pal.setColor(QPalette.Highlight, QColor("#2b7cd3"))
         pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         self.qt_app.setPalette(pal)
+
+    def _instalar_menu_contexto_usuario(self):
+        janela = self.janela_principal
+
+        def abrir_menu_contexto_aba_ribbon(janela_ref, pos):
+            try:
+                indice = janela_ref.ribbon.tabbar.tabAt(pos)
+                tab_id = janela_ref.ribbon.tab_id_at(indice) if indice >= 0 else None
+                if not tab_id:
+                    return
+
+                menu = QMenu(janela_ref)
+                submenu_usuarios = menu.addMenu("Usuários")
+                acao_add_aba = submenu_usuarios.addAction("Adicionar ferramentas desta aba")
+                acao_add_todas = submenu_usuarios.addAction("Adicionar todas as ferramentas para usuário")
+                submenu_usuarios.addSeparator()
+                acao_resetar = submenu_usuarios.addAction("Resetar barra de usuário padrão")
+
+                acao = menu.exec(janela_ref.ribbon.tabbar.mapToGlobal(pos))
+                if acao == acao_add_aba:
+                    origem = tab_id
+                    if origem == "usuarios":
+                        origem = getattr(janela_ref, "_ultima_aba_nao_usuario", "construcao") or "construcao"
+                    janela_ref._adicionar_todas_ferramentas_da_aba_id(origem)
+                    self._corrigir_layout_aba_usuario()
+                elif acao == acao_add_todas:
+                    self._adicionar_todas_ferramentas_para_usuario(janela_ref)
+                elif acao == acao_resetar:
+                    self._resetar_barra_usuario_padrao(janela_ref)
+            except Exception as exc:
+                try:
+                    janela_ref.lbl_status.setText(f"Falha no menu Usuários: {type(exc).__name__}: {exc}")
+                except Exception:
+                    pass
+
+        janela._abrir_menu_contexto_aba_ribbon = MethodType(abrir_menu_contexto_aba_ribbon, janela)
+
+    def _ids_todas_ferramentas_disponiveis(self, janela) -> list[str]:
+        ids: list[str] = []
+        rib = janela.ribbon
+        for tab in getattr(rib, "_tabs", []) or []:
+            if getattr(tab, "tab_id", "") == "usuarios":
+                continue
+            for grupo in getattr(tab, "groups", []) or []:
+                for tool_id in getattr(grupo, "tools", []) or []:
+                    if tool_id in getattr(rib, "_tools", {}) and tool_id not in ids:
+                        ids.append(tool_id)
+        for tool_id in getattr(rib, "_tools", {}).keys():
+            if tool_id not in ids:
+                ids.append(tool_id)
+        return ids
+
+    def _adicionar_todas_ferramentas_para_usuario(self, janela) -> None:
+        ids_atuais = list(getattr(janela, "_ferramentas_usuario_ids", []) or [])
+        adicionadas = 0
+        for tool_id in self._ids_todas_ferramentas_disponiveis(janela):
+            if tool_id not in ids_atuais:
+                ids_atuais.append(tool_id)
+                adicionadas += 1
+        janela._ferramentas_usuario_ids = janela._lista_usuario_com_ajuste(ids_atuais)
+        janela.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(janela._ferramentas_usuario_ids)
+        janela._sincronizar_perfil_usuario_atual()
+        janela._atualizar_linha_usuarios()
+        janela._sincronizar_menu_barra_usuarios()
+        self._corrigir_layout_aba_usuario()
+        janela.lbl_status.setText(f"{adicionadas} ferramenta(s) adicionada(s) ao usuário atual.")
+
+    def _resetar_barra_usuario_padrao(self, janela) -> None:
+        janela._ferramentas_usuario_ids = janela._lista_usuario_com_ajuste(list(janela.FERRAMENTAS_USUARIO_PADRAO))
+        janela._garantir_ajuste_automatico_na_barra_usuario()
+        janela.projeto_atual.preferencias_usuario["ferramentas_usuario"] = list(janela._ferramentas_usuario_ids)
+        janela._sincronizar_perfil_usuario_atual()
+        janela._atualizar_linha_usuarios()
+        janela._sincronizar_menu_barra_usuarios()
+        self._corrigir_layout_aba_usuario()
+        janela.lbl_status.setText("Barra de usuário restaurada para o padrão.")
 
     def _corrigir_layout_aba_usuario(self, *_args):
         """Compacta a aba de usuário e impede corte no canto direito do topo."""
