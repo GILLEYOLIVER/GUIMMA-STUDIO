@@ -18,55 +18,8 @@ from PySide6.QtWidgets import (
 
 from tools.medicao_utils import mensagem_status
 from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
+from tools.texto_persistente_utils import aplicar_patch_canvas_textos
 from tools.tool_base import FerramentaBase
-
-
-_BITMAP_5X7 = {
-    "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
-    "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
-    "C": ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
-    "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
-    "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-    "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
-    "G": ["01111", "10000", "10000", "10111", "10001", "10001", "01111"],
-    "H": ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
-    "I": ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
-    "J": ["00111", "00010", "00010", "00010", "10010", "10010", "01100"],
-    "K": ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
-    "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
-    "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
-    "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
-    "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-    "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
-    "Q": ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
-    "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-    "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
-    "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-    "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
-    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
-    "W": ["10001", "10001", "10001", "10101", "10101", "10101", "01010"],
-    "X": ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
-    "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
-    "Z": ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
-    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
-    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
-    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
-    "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
-    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
-    "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
-    "6": ["01111", "10000", "10000", "11110", "10001", "10001", "01110"],
-    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
-    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
-    "9": ["01110", "10001", "10001", "01111", "00001", "00001", "11110"],
-    ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
-    ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
-    "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
-    "/": ["00001", "00001", "00010", "00100", "01000", "10000", "10000"],
-    ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
-    "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
-}
-
-_ACENTOS = str.maketrans("ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇáàâãäéèêëíìîïóòôõöúùûüç", "AAAAAEEEEIIIIOOOOOUUUUCaaaaaeeeeiiiiooooouuuuc")
 
 
 class TextoDialog(QDialog):
@@ -99,7 +52,17 @@ class TextoDialog(QDialog):
         self.spin_espaco.setSuffix(" cm")
 
         self.combo_referencia = QComboBox(self)
-        self.combo_referencia.addItems(["Topo esquerda", "Topo centro", "Topo direita", "Centro esquerda", "Centro centro", "Centro direita", "Baixo esquerda", "Baixo centro", "Baixo direita"])
+        self.combo_referencia.addItems([
+            "Topo esquerda",
+            "Topo centro",
+            "Topo direita",
+            "Centro esquerda",
+            "Centro centro",
+            "Centro direita",
+            "Baixo esquerda",
+            "Baixo centro",
+            "Baixo direita",
+        ])
         self.combo_referencia.setCurrentText("Topo esquerda")
 
         self.combo_justificacao = QComboBox(self)
@@ -149,6 +112,7 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         configurar_texto_canvas(canvas)
+        aplicar_patch_canvas_textos(canvas)
         self._dialogo_aberto = False
         QTimer.singleShot(0, lambda: self._abrir_dialogo_e_inserir(canvas))
 
@@ -177,14 +141,14 @@ class Ferramenta(FerramentaBase):
                     self._alertar_cor_invisivel(canvas, cor_texto, cor_fundo)
                     texto = "Texto não inserido: cor igual ou muito parecida com o fundo."
                 else:
-                    elementos = self._criar_elementos_vetor_texto(canvas, valores, self._centro_canvas(canvas), cor_texto)
-                    if elementos:
-                        canvas.cena.elementos.extend(elementos)
+                    elemento = self._criar_elemento_texto_nativo(canvas, valores, self._centro_canvas(canvas), cor_texto)
+                    if elemento is not None:
+                        canvas.cena.elementos.append(elemento)
                         if hasattr(canvas, "_registrar_historico"):
                             canvas._registrar_historico()
                         if hasattr(canvas, "_emitir_elementos_alterados"):
                             canvas._emitir_elementos_alterados()
-                        texto = f"Texto inserido no canvas ({len(elementos)} traços)."
+                        texto = "Texto inserido no canvas."
                     else:
                         texto = "Inserir Texto: nenhum texto informado."
             else:
@@ -203,9 +167,6 @@ class Ferramenta(FerramentaBase):
             return canvas._tela_para_cena(QPointF(float(canvas.width()) / 2.0, float(canvas.height()) / 2.0))
         except Exception:
             return QPointF(0.0, 0.0)
-
-    def _texto_normalizado(self, texto: str) -> str:
-        return str(texto or "").translate(_ACENTOS).upper()
 
     def _cor_valida(self, valor, fallback: str = "#ffffff") -> QColor:
         cor = QColor(str(valor or ""))
@@ -247,24 +208,18 @@ class Ferramenta(FerramentaBase):
             "Escolha outra cor em Cor antes de inserir o texto.",
         )
 
-    def _cores_dos_controles_cor_visiveis(self, janela) -> list[str]:
-        cores: list[str] = []
+    def _controles_cor(self, janela) -> list[QWidget]:
         try:
             widgets = list(janela.findChildren(QWidget))
         except Exception:
-            widgets = []
-        controles = [w for w in widgets if w.__class__.__name__ == "ColorControlWidget" and hasattr(w, "valor")]
-        controles_visiveis = []
-        controles_ocultos = []
+            return []
+        return [w for w in widgets if w.__class__.__name__ == "ColorControlWidget" and hasattr(w, "valor")]
+
+    def _cores_dos_controles_cor(self, janela) -> list[str]:
+        cores: list[str] = []
+        controles = self._controles_cor(janela)
+        controles.sort(key=lambda w: 0 if (w.isVisible() and not w.isHidden()) else 1)
         for widget in controles:
-            try:
-                if widget.isVisible() and not widget.isHidden():
-                    controles_visiveis.append(widget)
-                else:
-                    controles_ocultos.append(widget)
-            except Exception:
-                controles_ocultos.append(widget)
-        for widget in controles_visiveis + controles_ocultos:
             try:
                 valor = widget.valor()
                 if isinstance(valor, dict):
@@ -275,6 +230,32 @@ class Ferramenta(FerramentaBase):
                 pass
         return cores
 
+    def _espessura_atual_texto(self, canvas) -> float:
+        candidatos: list[object] = []
+        janela = None
+        try:
+            janela = canvas.window()
+        except Exception:
+            janela = None
+        if janela is not None:
+            for widget in self._controles_cor(janela):
+                try:
+                    valor = widget.valor()
+                    if isinstance(valor, dict):
+                        candidatos.append(valor.get("espessura"))
+                except Exception:
+                    pass
+            estilo_janela = getattr(janela, "_estilo_desenho_atual", None)
+            if isinstance(estilo_janela, dict):
+                candidatos.append(estilo_janela.get("espessura"))
+        candidatos.append(getattr(canvas, "_linha_espessura", None))
+        for valor in candidatos:
+            try:
+                return max(1.0, float(valor))
+            except Exception:
+                continue
+        return 1.0
+
     def _cor_atual_para_texto(self, canvas) -> str:
         candidatos: list[object] = []
         janela = None
@@ -282,10 +263,8 @@ class Ferramenta(FerramentaBase):
             janela = canvas.window()
         except Exception:
             janela = None
-
         if janela is not None:
-            candidatos.extend(self._cores_dos_controles_cor_visiveis(janela))
-
+            candidatos.extend(self._cores_dos_controles_cor(janela))
         candidatos.append(getattr(canvas, "_linha_cor", None))
         if janela is not None:
             estilo_janela = getattr(janela, "_estilo_desenho_atual", None)
@@ -294,55 +273,37 @@ class Ferramenta(FerramentaBase):
         cores_canvas = getattr(canvas, "_cores_canvas", None)
         if isinstance(cores_canvas, dict):
             candidatos.append(cores_canvas.get("desenho"))
-
         for valor in candidatos:
             cor = QColor(str(valor or ""))
             if cor.isValid():
                 return cor.name()
         return "#ffffff"
 
-    def _criar_elementos_vetor_texto(self, canvas, valores: dict, pos: QPointF, cor: str | None = None) -> list[dict]:
-        texto = self._texto_normalizado(str(valores.get("texto") or "").strip("\n"))
+    def _criar_elemento_texto_nativo(self, canvas, valores: dict, pos: QPointF, cor: str) -> dict | None:
+        texto = str(valores.get("texto") or "").strip("\n")
         if not texto.strip():
-            return []
-        cor = cor or self._cor_atual_para_texto(canvas)
+            return None
+        espessura = self._espessura_atual_texto(canvas)
         try:
             canvas._linha_cor = cor
+            canvas._linha_espessura = espessura
         except Exception:
             pass
-        altura_cm = max(0.2, float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM))
-        espaco_cm = max(0.2, float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM))
-        cel = altura_cm / 7.0
-        avanco = cel * 6.0
-        espessura = max(0.04, cel * 0.22)
-        x0 = float(pos.x())
-        y0 = float(pos.y())
-        elementos: list[dict] = []
-        for linha_idx, linha in enumerate(texto.splitlines() or [texto]):
-            x = x0
-            y = y0 + (linha_idx * espaco_cm)
-            for ch in linha:
-                if ch == " ":
-                    x += avanco
-                    continue
-                bitmap = _BITMAP_5X7.get(ch, _BITMAP_5X7["?"])
-                for row, bits in enumerate(bitmap):
-                    for col, bit in enumerate(bits):
-                        if bit != "1":
-                            continue
-                        px = x + (col * cel)
-                        py = y + (row * cel)
-                        elementos.append({
-                            "tipo": "polyline",
-                            "pontos": [(px, py), (px + cel * 0.82, py), (px + cel * 0.82, py + cel * 0.82), (px, py + cel * 0.82), (px, py)],
-                            "cor": cor,
-                            "espessura": espessura,
-                            "estilo": "solid",
-                            "amplitude": 1.0,
-                            "texto_vetor": True,
-                        })
-                x += avanco
-        return elementos
+        return {
+            "tipo": "texto",
+            "texto": texto,
+            "posicao": (float(pos.x()), float(pos.y())),
+            "ponto": (float(pos.x()), float(pos.y())),
+            "origem": (float(pos.x()), float(pos.y())),
+            "angulo": float(valores.get("angulo", 0.0) or 0.0),
+            "texto_altura_cm": float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM),
+            "texto_espaco_linhas_cm": float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM),
+            "texto_espessura": espessura,
+            "referencia": str(valores.get("referencia") or "Topo esquerda"),
+            "justificacao": str(valores.get("justificacao") or "Esquerda"),
+            "cor": cor,
+            "cor_texto": cor,
+        }
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
