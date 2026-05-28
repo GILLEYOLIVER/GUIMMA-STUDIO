@@ -4,12 +4,58 @@ import sys
 from types import MethodType
 from typing import Sequence
 
-from PySide6.QtCore import QEvent, QLibraryInfo, QLocale, Qt, QTimer, QTranslator
+from PySide6.QtCore import QEvent, QLibraryInfo, QLocale, QObject, Qt, QTimer, QTranslator
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QScrollArea, QSizePolicy, QWidget
 
 from config import APP_NOME
 from ui.janela_principal import GuimmaStudioMainWindow
+
+
+def _deslocamento_horizontal_roda(event) -> int:
+    pixels = event.pixelDelta()
+    if not pixels.isNull():
+        if pixels.x():
+            return int(pixels.x())
+        if pixels.y():
+            return int(-pixels.y())
+    angulo = event.angleDelta()
+    if not angulo.isNull():
+        if angulo.x():
+            return int(angulo.x() / 2)
+        if angulo.y():
+            return int(-angulo.y() / 2)
+    return 0
+
+
+class _FiltroScrollHorizontal(QObject):
+    """Faz uma QScrollArea horizontal rolar com o mouse sem mostrar barra."""
+
+    def __init__(self, area: QScrollArea):
+        super().__init__(area)
+        self.area = area
+
+    def instalar(self) -> None:
+        objetos = [self.area, self.area.viewport()]
+        conteudo = self.area.widget()
+        if conteudo is not None:
+            objetos.append(conteudo)
+            objetos.extend(conteudo.findChildren(QWidget))
+        for obj in objetos:
+            try:
+                obj.installEventFilter(self)
+            except Exception:
+                pass
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.Wheel:
+            deslocamento = _deslocamento_horizontal_roda(event)
+            if deslocamento:
+                barra = self.area.horizontalScrollBar()
+                barra.setValue(barra.value() + deslocamento)
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
 
 
 class _ScrollLinhaUsuario(QScrollArea):
@@ -43,23 +89,8 @@ class _ScrollLinhaUsuario(QScrollArea):
             except Exception:
                 pass
 
-    def _deslocamento_roda(self, event) -> int:
-        pixels = event.pixelDelta()
-        if not pixels.isNull():
-            if pixels.x():
-                return int(pixels.x())
-            if pixels.y():
-                return int(-pixels.y())
-        angulo = event.angleDelta()
-        if not angulo.isNull():
-            if angulo.x():
-                return int(angulo.x() / 2)
-            if angulo.y():
-                return int(-angulo.y() / 2)
-        return 0
-
     def _rolar_evento(self, event) -> bool:
-        deslocamento = self._deslocamento_roda(event)
+        deslocamento = _deslocamento_horizontal_roda(event)
         if not deslocamento:
             return False
         barra = self.horizontalScrollBar()
@@ -200,12 +231,13 @@ class GuimmaStudioApp:
         janela.lbl_status.setText("Barra de usuário restaurada para o padrão.")
 
     def _corrigir_layout_aba_usuario(self, *_args):
-        """Compacta a aba de usuário e impede corte no canto direito do topo."""
+        """Compacta abas e impede barras de rolagem visíveis no topo."""
         try:
             from ui import ribbon
 
             janela = self.janela_principal
             rib = janela.ribbon
+            self._corrigir_scroll_ribbon_principal(janela)
             index = rib._tab_index_by_id("usuarios")
             if index is None:
                 return
@@ -252,9 +284,46 @@ class GuimmaStudioApp:
                     rib.paginas.setCurrentIndex(index)
                 rib.aplicar_tema(rib._tema_interface)
                 area_atual = nova_area
+                self._corrigir_scroll_ribbon_principal(janela)
 
             if hasattr(area_atual, "horizontalScrollBar"):
                 area_atual.horizontalScrollBar().setValue(0)
+        except Exception:
+            return
+
+    def _corrigir_scroll_ribbon_principal(self, janela) -> None:
+        """Remove a barra visível do ribbon e faz a faixa rolar com a roda do mouse."""
+        try:
+            rib = janela.ribbon
+            filtros = getattr(janela, "_filtros_scroll_ribbon_principal", [])
+            instalados = {id(getattr(filtro, "area", None)) for filtro in filtros}
+            for i in range(rib.paginas.count()):
+                area = rib.paginas.widget(i)
+                if not isinstance(area, QScrollArea):
+                    continue
+                if getattr(area, "objectName", lambda: "")() == "ScrollLinhaUsuario":
+                    continue
+                area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                area.horizontalScrollBar().setFixedHeight(0)
+                area.setFrameShape(QFrame.NoFrame)
+                widget = area.widget()
+                if widget is not None:
+                    widget.resize(widget.sizeHint())
+                    altura = max(1, int(widget.sizeHint().height() + 1))
+                    area.setMinimumHeight(altura)
+                    area.setMaximumHeight(max(area.maximumHeight(), altura))
+                if id(area) not in instalados:
+                    filtro = _FiltroScrollHorizontal(area)
+                    filtro.instalar()
+                    filtros.append(filtro)
+                    instalados.add(id(area))
+                else:
+                    for filtro in filtros:
+                        if getattr(filtro, "area", None) is area:
+                            filtro.instalar()
+                            break
+            janela._filtros_scroll_ribbon_principal = filtros
         except Exception:
             return
 
