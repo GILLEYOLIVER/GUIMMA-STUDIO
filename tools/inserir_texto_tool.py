@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from time import monotonic
 
-from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.medicao_utils import mensagem_status
-from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
+from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, aplicar_fonte_texto, configurar_texto_canvas, cor_texto, espaco_linhas_cm
 from tools.texto_persistente_utils import aplicar_patch_canvas_textos
 from tools.tool_base import FerramentaBase
 
@@ -109,19 +109,26 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._dialogo_aberto = False
+        self._texto_pendente: dict | None = None
+        self._pos_preview: QPointF | None = None
 
     def on_activate(self, canvas):
         # Não chama super(): assim não abre o painel lateral da FerramentaBase.
         configurar_texto_canvas(canvas)
         aplicar_patch_canvas_textos(canvas)
         self._dialogo_aberto = False
-        QTimer.singleShot(0, lambda: self._abrir_dialogo_e_criar_texto(canvas, forcar=False))
+        self._texto_pendente = None
+        self._pos_preview = None
+        QTimer.singleShot(0, lambda: self._abrir_dialogo(canvas))
 
     def on_deactivate(self, canvas):
         self._dialogo_aberto = False
+        self._texto_pendente = None
+        self._pos_preview = None
+        canvas.update()
         return None
 
-    def _abrir_dialogo_e_criar_texto(self, canvas, forcar: bool = False) -> None:
+    def _abrir_dialogo(self, canvas, forcar: bool = False) -> None:
         agora = monotonic()
         if getattr(canvas, "_inserir_texto_dialogo_ativo", False):
             return
@@ -136,10 +143,12 @@ class Ferramenta(FerramentaBase):
             if dlg.exec() == QDialog.Accepted:
                 valores = dlg.valores()
                 configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
-                pos = self._posicao_inicial_texto(canvas)
-                self._criar_texto(canvas, valores, pos)
-                texto = "Texto criado no canvas."
+                self._texto_pendente = valores
+                self._pos_preview = self._centro_canvas(canvas)
+                texto = "Texto pronto. Clique no canvas para posicionar."
             else:
+                self._texto_pendente = None
+                self._pos_preview = None
                 texto = "Inserir Texto cancelado."
         finally:
             self._dialogo_aberto = False
@@ -150,27 +159,23 @@ class Ferramenta(FerramentaBase):
         mensagem_status(canvas, texto)
         canvas.update()
 
-    def _posicao_inicial_texto(self, canvas) -> QPointF:
-        try:
-            pos_local = canvas.mapFromGlobal(QCursor.pos())
-            if canvas.rect().contains(pos_local):
-                return canvas._ponto_com_snap(QPointF(float(pos_local.x()), float(pos_local.y())))
-        except Exception:
-            pass
+    def _centro_canvas(self, canvas) -> QPointF:
         try:
             return canvas._tela_para_cena(QPointF(float(canvas.width()) / 2.0, float(canvas.height()) / 2.0))
         except Exception:
             return QPointF(0.0, 0.0)
 
-    def _criar_texto(self, canvas, valores: dict, pos: QPointF) -> None:
+    def _criar_elemento_texto(self, canvas, valores: dict, pos: QPointF) -> dict | None:
         texto = str(valores.get("texto") or "").strip("\n")
         if not texto.strip():
-            return
+            return None
         cor = getattr(canvas, "_linha_cor", "#ffffff")
-        elemento = {
+        return {
             "tipo": "texto",
             "texto": texto,
             "posicao": (float(pos.x()), float(pos.y())),
+            "ponto": (float(pos.x()), float(pos.y())),
+            "origem": (float(pos.x()), float(pos.y())),
             "angulo": float(valores.get("angulo", 0.0) or 0.0),
             "texto_altura_cm": float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM),
             "texto_espaco_linhas_cm": float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM),
@@ -179,16 +184,77 @@ class Ferramenta(FerramentaBase):
             "cor": str(cor),
             "cor_texto": str(cor),
         }
+
+    def _confirmar_texto(self, canvas, pos: QPointF) -> None:
+        if not self._texto_pendente:
+            return
+        elemento = self._criar_elemento_texto(canvas, self._texto_pendente, pos)
+        if elemento is None:
+            self._texto_pendente = None
+            self._pos_preview = None
+            return
         canvas.cena.elementos.append(elemento)
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
         if hasattr(canvas, "_emitir_elementos_alterados"):
             canvas._emitir_elementos_alterados()
+        self._texto_pendente = None
+        self._pos_preview = None
+        mensagem_status(canvas, "Texto inserido no canvas.")
         canvas.update()
+
+    def on_mouse_move(self, canvas, event) -> bool:
+        if not self._texto_pendente:
+            return False
+        self._pos_preview = canvas._ponto_com_snap(event.position())
+        canvas.update()
+        return True
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        self._abrir_dialogo_e_criar_texto(canvas, forcar=True)
+        aplicar_patch_canvas_textos(canvas)
+        if self._texto_pendente:
+            pos = canvas._ponto_com_snap(event.position())
+            self._confirmar_texto(canvas, pos)
+        else:
+            self._abrir_dialogo(canvas, forcar=True)
         event.accept()
         return True
+
+    def on_paint_overlay(self, canvas, painter):
+        # Preview enquanto o texto está "na mão" para ser posicionado.
+        if not self._texto_pendente:
+            return
+        pos = self._pos_preview or self._centro_canvas(canvas)
+        elemento = self._criar_elemento_texto(canvas, self._texto_pendente, pos)
+        if not elemento:
+            return
+        self._desenhar_texto_preview(canvas, painter, elemento)
+
+    def _desenhar_texto_preview(self, canvas, painter, elemento: dict) -> None:
+        texto = str(elemento.get("texto") or "").strip("\n")
+        if not texto:
+            return
+        try:
+            pos = QPointF(float(elemento["posicao"][0]), float(elemento["posicao"][1]))
+            tela = canvas._cena_para_tela(pos)
+        except Exception:
+            return
+        cor = cor_texto(canvas, elemento)
+        linhas = texto.splitlines() or [texto]
+        painter.save()
+        try:
+            aplicar_fonte_texto(painter, canvas, elemento, negrito=False)
+            metrics = painter.fontMetrics()
+            line_h = max(float(metrics.height()), espaco_linhas_cm(canvas, elemento) * max(float(getattr(canvas, "zoom", 1.0)), 0.01))
+            largura = max(metrics.horizontalAdvance(l) for l in linhas) + 10
+            altura = line_h * len(linhas) + 8
+            rect = QRectF(tela.x(), tela.y(), largura, altura)
+            painter.setPen(QPen(QColor("#2da8ff"), 1.0, Qt.DashLine))
+            painter.drawRect(rect)
+            painter.setPen(QPen(cor, 1.0))
+            for i, linha in enumerate(linhas):
+                painter.drawText(QRectF(rect.x() + 4, rect.y() + 4 + i * line_h, rect.width(), line_h), Qt.AlignLeft | Qt.AlignVCenter, linha)
+        finally:
+            painter.restore()
