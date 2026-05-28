@@ -12,7 +12,7 @@ class Ferramenta(FerramentaBase):
 
     Perímetro é consulta rápida: ao clicar ou passar o mouse sobre uma linha,
     curva ou trecho de molde, o trecho fica azul e a medida aparece ao lado.
-    Ela não cria cota permanente no desenho.
+    Ela não cria cota permanente no desenho e não trava a medição no clique.
     """
 
     id_ferramenta = "perimetro"
@@ -27,12 +27,10 @@ class Ferramenta(FerramentaBase):
     def __init__(self):
         super().__init__()
         self._medicao: dict | None = None
-        self._fixado = False
 
     def on_activate(self, canvas) -> None:
         super().on_activate(canvas)
         self._medicao = None
-        self._fixado = False
         texto = "Perímetro: passe o mouse ou clique em uma linha/curva para medir o trecho."
         self.set_status(texto)
         mensagem_status(canvas, texto)
@@ -40,7 +38,6 @@ class Ferramenta(FerramentaBase):
 
     def on_deactivate(self, canvas) -> None:
         self._medicao = None
-        self._fixado = False
         canvas.update()
         super().on_deactivate(canvas)
 
@@ -54,16 +51,13 @@ class Ferramenta(FerramentaBase):
             return False
 
         pos = canvas._ponto_com_snap(event.position())
-        self._atualizar_medicao(canvas, pos, fixar=True)
+        self._atualizar_medicao(canvas, pos, silencioso=False)
         event.accept()
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
-        if self._fixado:
-            return False
         pos = canvas._ponto_com_snap(event.position())
-        mudou = self._atualizar_medicao(canvas, pos, fixar=False, silencioso=True)
-        return mudou
+        return self._atualizar_medicao(canvas, pos, silencioso=True)
 
     def on_paint_overlay(self, canvas, painter) -> None:
         if not self._medicao:
@@ -86,33 +80,41 @@ class Ferramenta(FerramentaBase):
         finally:
             painter.restore()
 
-    def _atualizar_medicao(self, canvas, pos: QPointF, fixar: bool, silencioso: bool = False) -> bool:
+    def _atualizar_medicao(self, canvas, pos: QPointF, silencioso: bool = False) -> bool:
         info = selecionar_segmento_mais_proximo(canvas, pos, tolerancia_px=14.0)
-        anterior = self._medicao
         if info is None:
             if not silencioso:
                 texto = "Perímetro: nenhum segmento encontrado no clique."
                 self.set_status(texto)
                 mensagem_status(canvas, texto)
-            if anterior is not None and not self._fixado:
+            if self._medicao is not None:
                 self._medicao = None
                 canvas.update()
                 return True
             return False
 
+        mudou = self._medicao is None or self._assinatura_medicao(self._medicao) != self._assinatura_medicao(info)
         self._medicao = info
-        self._fixado = bool(fixar)
         medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
         texto = f"Perímetro: {medida}"
         self.set_status(texto)
         if not silencioso:
             mensagem_status(canvas, texto)
-        canvas.update()
+        if mudou:
+            canvas.update()
         return True
+
+    def _assinatura_medicao(self, info: dict | None):
+        if not isinstance(info, dict):
+            return None
+        return (
+            info.get("elemento_idx"),
+            info.get("segmento_indice"),
+            round(float(info.get("perimetro_total", 0.0)), 6),
+        )
 
     def _limpar(self, canvas) -> None:
         self._medicao = None
-        self._fixado = False
         texto = "Perímetro: medição limpa. Passe o mouse ou clique em outra linha/curva."
         self.set_status(texto)
         mensagem_status(canvas, texto)
