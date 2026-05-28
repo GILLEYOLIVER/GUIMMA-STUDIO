@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import monotonic
+
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
@@ -109,30 +111,41 @@ class Ferramenta(FerramentaBase):
         self._dialogo_aberto = False
 
     def on_activate(self, canvas):
-        # Não chama super(): assim não abre o painel auxiliar lateral.
+        # Não chama super(): assim não abre o painel lateral da FerramentaBase.
         configurar_texto_canvas(canvas)
         aplicar_patch_canvas_textos(canvas)
         self._dialogo_aberto = False
-        QTimer.singleShot(0, lambda: self._abrir_dialogo_e_criar_texto(canvas))
+        QTimer.singleShot(0, lambda: self._abrir_dialogo_e_criar_texto(canvas, forcar=False))
 
     def on_deactivate(self, canvas):
         self._dialogo_aberto = False
         return None
 
-    def _abrir_dialogo_e_criar_texto(self, canvas) -> None:
-        if self._dialogo_aberto:
+    def _abrir_dialogo_e_criar_texto(self, canvas, forcar: bool = False) -> None:
+        agora = monotonic()
+        if getattr(canvas, "_inserir_texto_dialogo_ativo", False):
             return
+        if not forcar and agora - float(getattr(canvas, "_inserir_texto_ultima_abertura", 0.0) or 0.0) < 0.8:
+            return
+
         self._dialogo_aberto = True
-        dlg = TextoDialog(canvas, canvas)
-        if dlg.exec() == QDialog.Accepted:
-            valores = dlg.valores()
-            configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
-            pos = self._posicao_inicial_texto(canvas)
-            self._criar_texto(canvas, valores, pos)
-            texto = "Texto criado no canvas."
-        else:
-            texto = "Inserir Texto cancelado."
-        self._dialogo_aberto = False
+        canvas._inserir_texto_dialogo_ativo = True
+        canvas._inserir_texto_ultima_abertura = agora
+        try:
+            dlg = TextoDialog(canvas, canvas)
+            if dlg.exec() == QDialog.Accepted:
+                valores = dlg.valores()
+                configurar_texto_canvas(canvas, valores["altura_cm"], valores["espaco_linhas_cm"])
+                pos = self._posicao_inicial_texto(canvas)
+                self._criar_texto(canvas, valores, pos)
+                texto = "Texto criado no canvas."
+            else:
+                texto = "Inserir Texto cancelado."
+        finally:
+            self._dialogo_aberto = False
+            canvas._inserir_texto_dialogo_ativo = False
+            canvas._inserir_texto_ultima_abertura = monotonic()
+
         self.set_status(texto)
         mensagem_status(canvas, texto)
         canvas.update()
@@ -150,27 +163,32 @@ class Ferramenta(FerramentaBase):
             return QPointF(0.0, 0.0)
 
     def _criar_texto(self, canvas, valores: dict, pos: QPointF) -> None:
+        texto = str(valores.get("texto") or "").strip("\n")
+        if not texto.strip():
+            return
         cor = getattr(canvas, "_linha_cor", "#ffffff")
         elemento = {
             "tipo": "texto",
-            "texto": valores["texto"],
+            "texto": texto,
             "posicao": (float(pos.x()), float(pos.y())),
-            "angulo": valores["angulo"],
-            "texto_altura_cm": valores["altura_cm"],
-            "texto_espaco_linhas_cm": valores["espaco_linhas_cm"],
-            "referencia": valores["referencia"],
-            "justificacao": valores["justificacao"],
+            "angulo": float(valores.get("angulo", 0.0) or 0.0),
+            "texto_altura_cm": float(valores.get("altura_cm", ALTURA_TEXTO_PADRAO_CM) or ALTURA_TEXTO_PADRAO_CM),
+            "texto_espaco_linhas_cm": float(valores.get("espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM) or ESPACO_LINHAS_PADRAO_CM),
+            "referencia": str(valores.get("referencia") or "Topo esquerda"),
+            "justificacao": str(valores.get("justificacao") or "Esquerda"),
             "cor": str(cor),
             "cor_texto": str(cor),
         }
         canvas.cena.elementos.append(elemento)
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
+        if hasattr(canvas, "_emitir_elementos_alterados"):
+            canvas._emitir_elementos_alterados()
         canvas.update()
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        self._abrir_dialogo_e_criar_texto(canvas)
+        self._abrir_dialogo_e_criar_texto(canvas, forcar=True)
         event.accept()
         return True
