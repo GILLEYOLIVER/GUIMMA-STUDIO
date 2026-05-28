@@ -128,20 +128,25 @@ class GuimmaStudioApp:
 
             painel = getattr(janela, "painel_controles_usuario", None)
             if painel is not None:
-                painel.setMinimumWidth(300)
-                painel.setMaximumWidth(390)
+                painel.setMinimumWidth(360)
+                painel.setMaximumWidth(470)
                 painel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+                painel_layout = painel.layout()
+                if painel_layout is not None:
+                    painel_layout.setContentsMargins(0, 0, 0, 0)
+                    painel_layout.setSpacing(8)
 
             combo = getattr(janela, "combo_perfil_usuario", None)
             if combo is not None:
-                combo.setMinimumWidth(95)
-                combo.setMaximumWidth(145)
+                combo.setMinimumWidth(105)
+                combo.setMaximumWidth(130)
+                combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
             ajustes_botoes = (
-                ("btn_novo_perfil_usuario", "Novo", 48),
-                ("btn_salvar_perfil_usuario", "Salvar", 58),
-                ("btn_usuario_add_all", "Adicionar", 76),
-                ("btn_usuario_limpar", "Limpar", 58),
+                ("btn_novo_perfil_usuario", "Novo", 62),
+                ("btn_salvar_perfil_usuario", "Salvar", 62),
+                ("btn_usuario_add_all", "Adicionar", 82),
+                ("btn_usuario_limpar", "Limpar", 64),
             )
             for nome_attr, texto, largura in ajustes_botoes:
                 botao = getattr(janela, nome_attr, None)
@@ -149,7 +154,7 @@ class GuimmaStudioApp:
                     continue
                 botao.setText(texto)
                 botao.setMinimumWidth(largura)
-                botao.setMaximumWidth(largura + 16)
+                botao.setMaximumWidth(largura)
                 botao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
             faixa = getattr(janela, "faixa_usuarios", None)
