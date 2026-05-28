@@ -3,9 +3,10 @@ from __future__ import annotations
 from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QPen
 
 from tools.medicao_utils import mensagem_status
+from tools.texto_config import aplicar_fonte_texto, cor_texto, configurar_texto_canvas
 from tools.tool_base import FerramentaBase
 
 
@@ -21,6 +22,7 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
+        configurar_texto_canvas(canvas)
         self._p0 = None
         self._p1 = None
         txt = "Distância: clique no ponto inicial."
@@ -42,9 +44,7 @@ class Ferramenta(FerramentaBase):
             return True
         self._p1 = pos
         d = sqrt((self._p1.x() - self._p0.x()) ** 2 + (self._p1.y() - self._p0.y()) ** 2)
-        v = canvas.formatar_valor_unidade(d)
-        unidade = getattr(canvas, "_unidade_sigla", "cm")
-        txt = f"Distância: {v} ({unidade})"
+        txt = f"Distância: {canvas.formatar_distancia(d) if hasattr(canvas, 'formatar_distancia') else canvas.formatar_valor_unidade(d)}"
         self.set_status(txt)
         mensagem_status(canvas, txt)
         canvas.update()
@@ -56,9 +56,7 @@ class Ferramenta(FerramentaBase):
             return False
         self._p1 = canvas._ponto_com_snap(event.position())
         d = sqrt((self._p1.x() - self._p0.x()) ** 2 + (self._p1.y() - self._p0.y()) ** 2)
-        v = canvas.formatar_valor_unidade(d)
-        unidade = getattr(canvas, "_unidade_sigla", "cm")
-        txt = f"Distância (prévia): {v} ({unidade})"
+        txt = f"Distância (prévia): {canvas.formatar_distancia(d) if hasattr(canvas, 'formatar_distancia') else canvas.formatar_valor_unidade(d)}"
         self.set_status(txt)
         mensagem_status(canvas, txt)
         canvas.update()
@@ -68,9 +66,11 @@ class Ferramenta(FerramentaBase):
     def on_paint_overlay(self, canvas, painter):
         if self._p0 is None or self._p1 is None:
             return
-        canvas._desenhar_segmento(painter, self._p0, self._p1, cor="#f2f200", espessura=1.5)
+        cor = cor_texto(canvas)
+        canvas._desenhar_segmento(painter, self._p0, self._p1, cor=cor.name(), espessura=1.8)
         meio = canvas._cena_para_tela(QPointF((self._p0.x() + self._p1.x()) / 2.0, (self._p0.y() + self._p1.y()) / 2.0))
         d = sqrt((self._p1.x() - self._p0.x()) ** 2 + (self._p1.y() - self._p0.y()) ** 2)
-        txt = canvas.formatar_valor_unidade(d)
-        painter.setPen(QPen(QColor("#f2f200"), 1.0))
-        painter.drawText(int(meio.x() + 6), int(meio.y() - 6), txt)
+        txt = canvas.formatar_distancia(d) if hasattr(canvas, "formatar_distancia") else canvas.formatar_valor_unidade(d)
+        aplicar_fonte_texto(painter, canvas, negrito=True)
+        painter.setPen(QPen(cor, 1.0))
+        painter.drawText(int(meio.x() + 8), int(meio.y() - 8), txt)
