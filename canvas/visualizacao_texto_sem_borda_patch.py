@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+# Compatibilidade com versões antigas.
+# Antes este arquivo substituía canvas.visualizacao_texto_nativo_patch.desenhar_selecao_texto
+# por uma função vazia, removendo a seleção visual do texto.
+# Agora a seleção do texto precisa aparecer como caixa azul translúcida com borda tracejada,
+# então este patch não deve mais sobrescrever o desenho oficial.
+
 try:
-    import canvas.visualizacao_texto_nativo_patch as _texto_patch
-
-    def _sem_borda_texto(canvas, painter, elemento) -> None:
-        return None
-
-    _texto_patch.desenhar_selecao_texto = _sem_borda_texto
+    import canvas.visualizacao_texto_nativo_patch  # noqa: F401
 except Exception:
     pass
