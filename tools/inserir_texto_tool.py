@@ -3,7 +3,7 @@ from __future__ import annotations
 from time import monotonic
 
 from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QValidator
+from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -185,14 +185,8 @@ class TextoDialog(QDialog):
         self.spin_altura.valueChanged.connect(self._atualizar_previa_ao_vivo)
         self.spin_espaco.valueChanged.connect(self._atualizar_previa_ao_vivo)
 
-        self._timer_mouse_canvas = QTimer(self)
-        self._timer_mouse_canvas.setInterval(20)
-        self._timer_mouse_canvas.timeout.connect(self._acompanhar_mouse_canvas)
-        self._timer_mouse_canvas.start()
-
         self._aplicar_fonte_na_caixa()
         QTimer.singleShot(0, self._atualizar_previa_ao_vivo)
-        QTimer.singleShot(40, self._acompanhar_mouse_canvas)
 
     def _fonte_em_uso(self) -> str:
         return str(self._fonte_previa_combo or self.combo_fonte.currentText() or "Arial")
@@ -245,38 +239,6 @@ class TextoDialog(QDialog):
         finally:
             self._atualizando_estilo_caixa = False
 
-    def _posicao_mouse_no_canvas(self) -> QPointF | None:
-        try:
-            local = self.canvas.mapFromGlobal(QCursor.pos())
-            x = float(local.x())
-            y = float(local.y())
-            if 0.0 <= x <= float(self.canvas.width()) and 0.0 <= y <= float(self.canvas.height()):
-                return self.canvas._tela_para_cena(QPointF(x, y))
-        except Exception:
-            pass
-        return None
-
-    def _acompanhar_mouse_canvas(self):
-        nova_pos = self._posicao_mouse_no_canvas()
-        if nova_pos is None:
-            return
-        self._posicao_previa = QPointF(nova_pos)
-        idx = self.indice_previa()
-        if idx is not None:
-            p = (float(nova_pos.x()), float(nova_pos.y()))
-            try:
-                self.canvas.cena.elementos[idx]["posicao"] = p
-                self.canvas.cena.elementos[idx]["ponto"] = p
-                self.canvas.cena.elementos[idx]["origem"] = p
-                self.canvas._texto_em_maos_idx = idx
-                self.canvas._texto_em_maos_cancelavel = True
-                self.canvas._selecionados = {idx}
-                self.canvas.update()
-            except Exception:
-                pass
-        else:
-            self._atualizar_previa_ao_vivo()
-
     def _atualizar_previa_ao_vivo(self):
         texto = self.txt_texto.toPlainText().strip("\n")
         if not texto.strip():
@@ -302,8 +264,6 @@ class TextoDialog(QDialog):
                 elemento["ponto"] = pos_atual
                 elemento["origem"] = pos_atual
             self.canvas.cena.elementos[idx] = elemento
-        self.canvas._texto_em_maos_idx = idx
-        self.canvas._texto_em_maos_cancelavel = True
         self.canvas._selecionados = {idx}
         self.canvas.update()
 
@@ -316,8 +276,6 @@ class TextoDialog(QDialog):
                 pass
         self._preview_idx = None
         try:
-            self.canvas._texto_em_maos_idx = None
-            self.canvas._texto_em_maos_cancelavel = False
             self.canvas._selecionados.clear()
         except Exception:
             pass
