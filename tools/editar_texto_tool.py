@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QGridLayout,
     QLabel,
     QMessageBox,
@@ -14,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
-from tools.inserir_texto_tool import FONTES_TEXTO
+from tools.inserir_texto_tool import AnguloSpinBox, FONTES_TEXTO, MedidaCmSpinBox, NumeroLimpoSpinBox
 
 
 class EditarTextoDialog(QDialog):
@@ -33,26 +32,20 @@ class EditarTextoDialog(QDialog):
         fonte_atual = str(elemento.get("fonte_texto") or elemento.get("fonte") or "Arial")
         self.combo_fonte.setCurrentText(fonte_atual if fonte_atual in FONTES_TEXTO else "Arial")
 
-        self.spin_angulo = QDoubleSpinBox(self)
+        self.spin_angulo = AnguloSpinBox(self)
         self.spin_angulo.setRange(-360.0, 360.0)
-        self.spin_angulo.setDecimals(2)
         self.spin_angulo.setValue(float(elemento.get("angulo", 0.0) or 0.0))
 
-        self.spin_altura = QDoubleSpinBox(self)
+        self.spin_altura = MedidaCmSpinBox(self)
         self.spin_altura.setRange(0.2, 200.0)
-        self.spin_altura.setDecimals(2)
         self.spin_altura.setValue(float(elemento.get("texto_altura_cm", elemento.get("altura_cm", 2.0)) or 2.0))
-        self.spin_altura.setSuffix(" cm")
 
-        self.spin_espaco = QDoubleSpinBox(self)
+        self.spin_espaco = MedidaCmSpinBox(self)
         self.spin_espaco.setRange(0.2, 200.0)
-        self.spin_espaco.setDecimals(2)
         self.spin_espaco.setValue(float(elemento.get("texto_espaco_linhas_cm", elemento.get("espaco_linhas_cm", 3.0)) or 3.0))
-        self.spin_espaco.setSuffix(" cm")
 
-        self.spin_espessura = QDoubleSpinBox(self)
+        self.spin_espessura = NumeroLimpoSpinBox(self)
         self.spin_espessura.setRange(1.0, 50.0)
-        self.spin_espessura.setDecimals(2)
         self.spin_espessura.setValue(float(elemento.get("texto_espessura", elemento.get("espessura", 1.0)) or 1.0))
 
         self.combo_referencia = QComboBox(self)
