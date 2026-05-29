@@ -3,7 +3,7 @@ from __future__ import annotations
 from time import monotonic
 
 from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -36,6 +36,49 @@ FONTES_TEXTO = [
     "Consolas",
     "Lucida Sans Unicode",
 ]
+
+
+class MedidaCmSpinBox(QDoubleSpinBox):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setDecimals(2)
+        self.setSingleStep(0.1)
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        valor = round(float(value), 2)
+        texto = f"{valor:.2f}".rstrip("0").rstrip(".")
+        if texto.startswith("0.") and valor > 0:
+            texto = texto[1:]
+        elif texto.startswith("-0."):
+            texto = "-" + texto[2:]
+        if not texto:
+            texto = "0"
+        return f"{texto} cm"
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        texto = str(text or "").lower().replace("cm", "").strip().replace(",", ".")
+        if texto.startswith("."):
+            texto = "0" + texto
+        elif texto.startswith("-."):
+            texto = "-0" + texto[1:]
+        try:
+            return float(texto)
+        except Exception:
+            return float(self.value())
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        texto = str(text or "").lower().replace("cm", "").strip().replace(",", ".")
+        if texto in {"", ".", "-", "-."}:
+            return QValidator.Intermediate, text, pos
+        if texto.startswith("."):
+            texto = "0" + texto
+        elif texto.startswith("-."):
+            texto = "-0" + texto[1:]
+        try:
+            float(texto)
+        except Exception:
+            return QValidator.Invalid, text, pos
+        return QValidator.Acceptable, text, pos
 
 
 class TextoDialog(QDialog):
@@ -71,17 +114,13 @@ class TextoDialog(QDialog):
         self.spin_angulo.setDecimals(2)
         self.spin_angulo.setValue(0.0)
 
-        self.spin_altura = QDoubleSpinBox(self)
+        self.spin_altura = MedidaCmSpinBox(self)
         self.spin_altura.setRange(0.2, 200.0)
-        self.spin_altura.setDecimals(2)
         self.spin_altura.setValue(float(getattr(canvas, "_texto_altura_cm", ALTURA_TEXTO_PADRAO_CM)))
-        self.spin_altura.setSuffix(" cm")
 
-        self.spin_espaco = QDoubleSpinBox(self)
+        self.spin_espaco = MedidaCmSpinBox(self)
         self.spin_espaco.setRange(0.2, 200.0)
-        self.spin_espaco.setDecimals(2)
         self.spin_espaco.setValue(float(getattr(canvas, "_texto_espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM)))
-        self.spin_espaco.setSuffix(" cm")
 
         self.combo_referencia = QComboBox(self)
         self.combo_referencia.addItems([
