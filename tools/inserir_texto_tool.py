@@ -38,25 +38,30 @@ FONTES_TEXTO = [
 ]
 
 
-class MedidaCmSpinBox(QDoubleSpinBox):
-    def __init__(self, parent: QWidget | None = None):
+class NumeroLimpoSpinBox(QDoubleSpinBox):
+    def __init__(self, parent: QWidget | None = None, sufixo: str = ""):
         super().__init__(parent)
+        self._sufixo_limpo = sufixo
         self.setDecimals(2)
         self.setSingleStep(0.1)
 
-    def textFromValue(self, value: float) -> str:  # noqa: N802
+    def _formatar_numero(self, value: float) -> str:
         valor = round(float(value), 2)
         texto = f"{valor:.2f}".rstrip("0").rstrip(".")
         if texto.startswith("0.") and valor > 0:
             texto = texto[1:]
         elif texto.startswith("-0."):
             texto = "-" + texto[2:]
-        if not texto:
+        if not texto or texto == "-":
             texto = "0"
-        return f"{texto} cm"
+        return texto
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        texto = self._formatar_numero(value)
+        return f"{texto}{self._sufixo_limpo}" if self._sufixo_limpo else texto
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
-        texto = str(text or "").lower().replace("cm", "").strip().replace(",", ".")
+        texto = str(text or "").lower().replace("cm", "").replace("°", "").replace("º", "").strip().replace(",", ".")
         if texto.startswith("."):
             texto = "0" + texto
         elif texto.startswith("-."):
@@ -67,7 +72,7 @@ class MedidaCmSpinBox(QDoubleSpinBox):
             return float(self.value())
 
     def validate(self, text: str, pos: int):  # noqa: N802
-        texto = str(text or "").lower().replace("cm", "").strip().replace(",", ".")
+        texto = str(text or "").lower().replace("cm", "").replace("°", "").replace("º", "").strip().replace(",", ".")
         if texto in {"", ".", "-", "-."}:
             return QValidator.Intermediate, text, pos
         if texto.startswith("."):
@@ -79,6 +84,17 @@ class MedidaCmSpinBox(QDoubleSpinBox):
         except Exception:
             return QValidator.Invalid, text, pos
         return QValidator.Acceptable, text, pos
+
+
+class MedidaCmSpinBox(NumeroLimpoSpinBox):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent, " cm")
+
+
+class AnguloSpinBox(NumeroLimpoSpinBox):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent, "°")
+        self.setSingleStep(1.0)
 
 
 class TextoDialog(QDialog):
@@ -109,9 +125,8 @@ class TextoDialog(QDialog):
         self.combo_fonte.setCurrentText(fonte_atual if fonte_atual in FONTES_TEXTO else "Arial")
         self._fonte_previa_combo = self.combo_fonte.currentText() or "Arial"
 
-        self.spin_angulo = QDoubleSpinBox(self)
+        self.spin_angulo = AnguloSpinBox(self)
         self.spin_angulo.setRange(-360.0, 360.0)
-        self.spin_angulo.setDecimals(2)
         self.spin_angulo.setValue(0.0)
 
         self.spin_altura = MedidaCmSpinBox(self)
