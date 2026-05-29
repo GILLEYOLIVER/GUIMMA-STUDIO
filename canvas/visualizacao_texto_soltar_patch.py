@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
+from PySide6.QtWidgets import QApplication, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
+
+
+_FILTRO_GLOBAL = None
 
 
 def _elementos(canvas):
@@ -44,7 +48,31 @@ def _indice_texto_em_maos(canvas) -> int | None:
     return None
 
 
-def _posicao_cena_do_evento(canvas, event) -> QPointF:
+def _canvas_do_widget(widget) -> VisualizacaoCanvas | None:
+    atual = widget
+    while atual is not None:
+        if isinstance(atual, VisualizacaoCanvas):
+            return atual
+        try:
+            atual = atual.parentWidget()
+        except Exception:
+            return None
+    return None
+
+
+def _posicao_cena_do_evento(canvas, event, watched=None) -> QPointF:
+    try:
+        global_pos = event.globalPosition().toPoint()
+        local = canvas.mapFromGlobal(global_pos)
+        return canvas._tela_para_cena(QPointF(float(local.x()), float(local.y())))
+    except Exception:
+        pass
+    try:
+        if watched is not None and isinstance(watched, QWidget) and watched is not canvas:
+            p = watched.mapTo(canvas, QPoint(int(event.position().x()), int(event.position().y())))
+            return canvas._tela_para_cena(QPointF(float(p.x()), float(p.y())))
+    except Exception:
+        pass
     try:
         return canvas._tela_para_cena(event.position())
     except Exception:
@@ -54,8 +82,8 @@ def _posicao_cena_do_evento(canvas, event) -> QPointF:
             return QPointF(0.0, 0.0)
 
 
-def _mover_texto_para_evento(canvas, idx: int, event) -> None:
-    ponto = _posicao_cena_do_evento(canvas, event)
+def _mover_texto_para_evento(canvas, idx: int, event, watched=None) -> None:
+    ponto = _posicao_cena_do_evento(canvas, event, watched)
     p = (float(ponto.x()), float(ponto.y()))
     elemento = canvas.cena.elementos[idx]
     if not isinstance(elemento, dict):
@@ -79,8 +107,8 @@ def _limpar_estado_texto_em_maos(canvas) -> None:
         pass
 
 
-def _confirmar_texto_em_maos(canvas, idx: int, event) -> None:
-    _mover_texto_para_evento(canvas, idx, event)
+def _confirmar_texto_em_maos(canvas, idx: int, event, watched=None) -> None:
+    _mover_texto_para_evento(canvas, idx, event, watched)
     try:
         canvas.cena.elementos[idx].pop("__texto_previa_ao_vivo", None)
     except Exception:
@@ -123,8 +151,43 @@ def _cancelar_texto_em_maos(canvas, idx: int) -> None:
     canvas.update()
 
 
+class _FiltroGlobalSoltarTexto(QObject):
+    def eventFilter(self, watched, event):  # noqa: N802
+        tipo = event.type()
+        if tipo not in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove):
+            return False
+        canvas = _canvas_do_widget(watched)
+        if canvas is None:
+            return False
+        idx = _indice_texto_em_maos(canvas)
+        if idx is None:
+            return False
+        if tipo == QEvent.MouseMove:
+            try:
+                _mover_texto_para_evento(canvas, idx, event, watched)
+                canvas._selecionados = {idx}
+                canvas.update()
+                return False
+            except Exception:
+                return False
+        try:
+            botao = event.button()
+        except Exception:
+            return False
+        if botao == Qt.LeftButton:
+            _confirmar_texto_em_maos(canvas, idx, event, watched)
+            event.accept()
+            return True
+        if botao == Qt.RightButton:
+            _cancelar_texto_em_maos(canvas, idx)
+            event.accept()
+            return True
+        return False
+
+
 def aplicar_patch_soltar_texto_em_maos() -> None:
-    if getattr(VisualizacaoCanvas, "_guimma_soltar_texto_em_maos_v1", False):
+    global _FILTRO_GLOBAL
+    if getattr(VisualizacaoCanvas, "_guimma_soltar_texto_em_maos_v2", False):
         return
 
     original_press = VisualizacaoCanvas.mousePressEvent
@@ -135,7 +198,7 @@ def aplicar_patch_soltar_texto_em_maos() -> None:
         idx = _indice_texto_em_maos(self)
         if idx is not None:
             if event.button() == Qt.LeftButton:
-                _confirmar_texto_em_maos(self, idx, event)
+                _confirmar_texto_em_maos(self, idx, event, self)
                 event.accept()
                 return
             if event.button() == Qt.RightButton:
@@ -148,7 +211,7 @@ def aplicar_patch_soltar_texto_em_maos() -> None:
         idx = _indice_texto_em_maos(self)
         if idx is not None:
             try:
-                _mover_texto_para_evento(self, idx, event)
+                _mover_texto_para_evento(self, idx, event, self)
                 self._selecionados = {idx}
                 self.update()
                 event.accept()
@@ -161,7 +224,7 @@ def aplicar_patch_soltar_texto_em_maos() -> None:
         idx = _indice_texto_em_maos(self)
         if idx is not None:
             if event.button() == Qt.LeftButton:
-                _confirmar_texto_em_maos(self, idx, event)
+                _confirmar_texto_em_maos(self, idx, event, self)
                 event.accept()
                 return
             if event.button() == Qt.RightButton:
@@ -173,7 +236,13 @@ def aplicar_patch_soltar_texto_em_maos() -> None:
     VisualizacaoCanvas.mousePressEvent = mousePressEvent_soltar_texto
     VisualizacaoCanvas.mouseMoveEvent = mouseMoveEvent_soltar_texto
     VisualizacaoCanvas.mouseDoubleClickEvent = mouseDoubleClickEvent_soltar_texto
-    VisualizacaoCanvas._guimma_soltar_texto_em_maos_v1 = True
+
+    app = QApplication.instance()
+    if app is not None:
+        _FILTRO_GLOBAL = _FiltroGlobalSoltarTexto(app)
+        app.installEventFilter(_FILTRO_GLOBAL)
+
+    VisualizacaoCanvas._guimma_soltar_texto_em_maos_v2 = True
 
 
 aplicar_patch_soltar_texto_em_maos()
