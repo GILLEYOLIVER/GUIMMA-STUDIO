@@ -21,10 +21,6 @@ from guimma_app import GuimmaStudioApp
 
 def main() -> int:
     app = GuimmaStudioApp(sys.argv)
-    try:
-        import canvas.visualizacao_texto_soltar_patch  # noqa: F401
-    except Exception:
-        pass
     return app.run()
 
 
