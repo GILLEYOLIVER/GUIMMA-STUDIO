@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 try:
     import canvas.visualizacao_texto_nativo_patch  # noqa: F401
     import canvas.visualizacao_texto_sem_borda_patch  # noqa: F401
+    import tools.dialog_position_patch  # noqa: F401
 except Exception:
     pass
 
