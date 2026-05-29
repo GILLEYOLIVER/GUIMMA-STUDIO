@@ -13,6 +13,7 @@ try:
     import canvas.visualizacao_texto_nativo_patch  # noqa: F401
     import canvas.visualizacao_texto_sem_borda_patch  # noqa: F401
     import tools.dialog_position_patch  # noqa: F401
+    import tools.inserir_texto_focus_patch  # noqa: F401
 except Exception:
     pass
 
