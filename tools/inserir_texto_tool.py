@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from time import monotonic
 
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, Qt, QTimer, QEvent
 from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
@@ -184,6 +184,19 @@ class TextoDialog(QDialog):
 
         self._aplicar_fonte_na_caixa()
 
+        # Instala eventFilter para capturar entrada do mouse e dar foco automaticamente
+        self.installEventFilter(self)
+        self.txt_texto.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        # Quando o mouse entrar no diálogo ou no QTextEdit, dar foco ao texto
+        if event.type() == QEvent.Enter:
+            if watched is self or watched is self.txt_texto:
+                self.txt_texto.setFocus()
+                # Opcional: selecionar todo o texto para facilitar substituição
+                # self.txt_texto.selectAll()
+        return super().eventFilter(watched, event)
+
     def _fonte_em_uso(self) -> str:
         return str(self._fonte_previa_combo or self.combo_fonte.currentText() or "Arial")
 
@@ -226,13 +239,11 @@ class TextoDialog(QDialog):
         self.ferramenta._dialogo_alterado(self.canvas)
 
     def accept(self):
-        """OK: fecha o diálogo, mas mantém a prévia (texto na mão)."""
         self._fechando_por_codigo = True
         self.ferramenta._fechar_dialogo_confirmado(self.canvas)
         super().accept()
 
     def reject(self):
-        """Cancelar: remove prévia e desativa a ferramenta."""
         self._fechando_por_codigo = True
         self.ferramenta._cancelar_dialogo(self.canvas)
         super().reject()
@@ -303,11 +314,12 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = TextoDialog(canvas, self, parent)
             self._dialog_por_canvas[chave] = dialog
-        # Se o diálogo já existia mas foi escondido (após OK), mostramos novamente
         if not dialog.isVisible():
             dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        # Garantir que o texto ganhe foco imediatamente
+        dialog.txt_texto.setFocus()
         return dialog
 
     def _dialogo(self, canvas) -> TextoDialog | None:
@@ -494,14 +506,9 @@ class Ferramenta(FerramentaBase):
 
     def _criar_ou_atualizar_previa(self, canvas) -> None:
         dialog = self._dialogo(canvas)
-        # Se não há diálogo, mas a ferramenta ainda está ativa (aguardando finalização),
-        # usamos os valores salvos no próprio canvas ou os últimos conhecidos.
         if dialog is None:
-            # Modo "texto na mão" sem diálogo: reutiliza o último texto/configurações
-            # que foram salvos no canvas antes do OK.
             ultimo_texto = getattr(canvas, "_ultimo_texto_inserido", None)
             if ultimo_texto is None:
-                # Não há prévia para mostrar
                 self._remover_previa(canvas)
                 return
             valores = ultimo_texto
@@ -531,17 +538,13 @@ class Ferramenta(FerramentaBase):
         else:
             canvas.cena.elementos[idx] = elemento
 
-        # Mantém a prévia selecionada visualmente
         canvas._selecionados = {idx}
         canvas.update()
 
     def _fixar_texto_atual(self, canvas, pos: QPointF) -> bool:
-        """Cria um elemento definitivo na posição indicada.
-        Retorna True se o elemento foi criado, False caso contrário."""
         dialog = self._dialogo(canvas)
         if dialog is not None:
             valores = dialog.valores()
-            # Guarda uma cópia para o modo "sem diálogo" (caso o usuário feche com OK)
             setattr(canvas, "_ultimo_texto_inserido", dict(valores))
         else:
             valores = getattr(canvas, "_ultimo_texto_inserido", None)
@@ -562,7 +565,6 @@ class Ferramenta(FerramentaBase):
         if elemento is None:
             return False
 
-        # Adiciona como elemento permanente (sem flag de prévia)
         canvas.cena.elementos.append(elemento)
         idx = len(canvas.cena.elementos) - 1
         canvas._selecionados = {idx}
@@ -580,8 +582,6 @@ class Ferramenta(FerramentaBase):
         return True
 
     def _posicionar_texto_atual(self, canvas) -> bool:
-        """Chamado pelo clique esquerdo. Se diálogo aberto, fixa e mantém prévia.
-        Se aguardando finalização, fixa e depois desativa a ferramenta."""
         chave = id(canvas)
         pos = self._posicao_cursor_canvas(canvas)
         fixado = self._fixar_texto_atual(canvas, pos)
@@ -589,32 +589,22 @@ class Ferramenta(FerramentaBase):
         if not fixado:
             return True
 
-        # Verifica se estamos em modo "finalização" (diálogo já fechado com OK)
         if self._aguardando_finalizacao_por_canvas.get(chave, False):
-            # Último texto fixado: finaliza a ferramenta
             mensagem_status(canvas, "Texto inserido. Finalizando ferramenta.")
-            # Remove a prévia e desativa
             self._remover_previa(canvas)
-            # Força desativação completa
             self.on_deactivate(canvas)
-            # Notifica a janela principal para voltar à ferramenta padrão
             try:
                 canvas.ferramenta_padrao_solicitada.emit("selecionar")
             except Exception:
                 pass
         else:
-            # Diálogo ainda aberto: mantém a prévia para a próxima cópia
-            # A prévia será recriada na nova posição do mouse assim que o usuário mover
-            # Forçamos uma atualização da prévia na posição atual do cursor
             self._criar_ou_atualizar_previa(canvas)
             mensagem_status(canvas, "Texto inserido. Clique em outro ponto para inserir outra cópia ou edite a caixa.")
 
         return True
 
     def _fechar_dialogo_confirmado(self, canvas) -> None:
-        """OK no diálogo: fecha a caixa, mas mantém a prévia viva."""
         chave = id(canvas)
-        # Remove a referência do diálogo
         dialog = self._dialog_por_canvas.pop(chave, None)
         if dialog is not None:
             try:
@@ -623,15 +613,12 @@ class Ferramenta(FerramentaBase):
                 dialog.deleteLater()
             except Exception:
                 pass
-        # Marca que agora estamos em modo "texto na mão" aguardando clique final
         self._aguardando_finalizacao_por_canvas[chave] = True
-        # Garante que a prévia exista (se não existir, recria)
         self._criar_ou_atualizar_previa(canvas)
         mensagem_status(canvas, "Inserir texto: o texto está na mão. Clique no canvas para fixar e finalizar.")
         canvas.update()
 
     def _cancelar_dialogo(self, canvas) -> None:
-        """Cancelar: remove tudo e desativa a ferramenta."""
         self._remover_previa(canvas)
         chave = id(canvas)
         self._aguardando_finalizacao_por_canvas.pop(chave, None)
@@ -646,7 +633,6 @@ class Ferramenta(FerramentaBase):
         self._cursor_por_canvas.pop(chave, None)
         mensagem_status(canvas, "Inserir texto cancelado.")
         canvas.update()
-        # Força a desativação completa
         self.on_deactivate(canvas)
 
     def _centro_canvas(self, canvas) -> QPointF:
@@ -656,7 +642,6 @@ class Ferramenta(FerramentaBase):
             return QPointF(0.0, 0.0)
 
     def on_mouse_move(self, canvas, event) -> bool:
-        # Se não há diálogo e também não estamos em modo "texto na mão", ignora
         chave = id(canvas)
         if self._dialogo(canvas) is None and not self._aguardando_finalizacao_por_canvas.get(chave, False):
             return False
@@ -673,12 +658,8 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            # Botão direito: remove a prévia, mas mantém o estado
-            # Se estiver com diálogo aberto, apenas limpa a prévia atual (recriará ao mover)
-            # Se estiver em modo finalização, cancela a operação e desativa
             chave = id(canvas)
             if self._aguardando_finalizacao_por_canvas.get(chave, False):
-                # Modo sem diálogo: cancela e finaliza
                 mensagem_status(canvas, "Inserção de texto cancelada.")
                 self.on_deactivate(canvas)
                 try:
@@ -686,7 +667,6 @@ class Ferramenta(FerramentaBase):
                 except Exception:
                     pass
             else:
-                # Apenas remove a prévia visual; ao mover o mouse, recriará
                 self._remover_previa(canvas)
                 mensagem_status(canvas, "Prévia removida. Mova o mouse para recriar.")
             event.accept()
@@ -705,7 +685,6 @@ class Ferramenta(FerramentaBase):
         except Exception:
             self._cursor_por_canvas[id(canvas)] = self._centro_canvas(canvas)
 
-        # Se o diálogo não existe e não estamos em modo finalização, reabre o diálogo (segurança)
         if self._dialogo(canvas) is None and not self._aguardando_finalizacao_por_canvas.get(id(canvas), False):
             self._abrir_dialogo(canvas)
 
