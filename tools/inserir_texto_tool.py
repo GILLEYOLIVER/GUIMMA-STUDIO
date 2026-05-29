@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from time import monotonic
 
-from PySide6.QtCore import QPointF, Qt, QTimer, QEvent
-from PySide6.QtGui import QColor, QValidator
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -184,19 +185,6 @@ class TextoDialog(QDialog):
 
         self._aplicar_fonte_na_caixa()
 
-        # Instala eventFilter para capturar entrada do mouse e dar foco automaticamente
-        self.installEventFilter(self)
-        self.txt_texto.installEventFilter(self)
-
-    def eventFilter(self, watched, event):
-        # Quando o mouse entrar no diálogo ou no QTextEdit, dar foco ao texto
-        if event.type() == QEvent.Enter:
-            if watched is self or watched is self.txt_texto:
-                self.txt_texto.setFocus()
-                # Opcional: selecionar todo o texto para facilitar substituição
-                # self.txt_texto.selectAll()
-        return super().eventFilter(watched, event)
-
     def _fonte_em_uso(self) -> str:
         return str(self._fonte_previa_combo or self.combo_fonte.currentText() or "Arial")
 
@@ -240,17 +228,17 @@ class TextoDialog(QDialog):
 
     def accept(self):
         self._fechando_por_codigo = True
-        self.ferramenta._fechar_dialogo_confirmado(self.canvas)
+        self.ferramenta._ok_dialogo_fecha_mantendo_texto_na_mao(self.canvas)
         super().accept()
 
     def reject(self):
         self._fechando_por_codigo = True
-        self.ferramenta._cancelar_dialogo(self.canvas)
+        self.ferramenta._cancelar_tudo(self.canvas)
         super().reject()
 
     def closeEvent(self, event):
         if not self._fechando_por_codigo:
-            self.ferramenta._cancelar_dialogo(self.canvas)
+            self.ferramenta._cancelar_tudo(self.canvas)
         super().closeEvent(event)
 
 
@@ -264,8 +252,10 @@ class Ferramenta(FerramentaBase):
     _dialog_por_canvas: dict[int, TextoDialog] = {}
     _preview_idx_por_canvas: dict[int, int] = {}
     _cursor_por_canvas: dict[int, QPointF] = {}
+    _timer_por_canvas: dict[int, QTimer] = {}
+    _valores_pos_ok_por_canvas: dict[int, dict] = {}
+    _modo_pos_ok_por_canvas: dict[int, bool] = {}
     _ultima_abertura_por_canvas: dict[int, float] = {}
-    _aguardando_finalizacao_por_canvas: dict[int, bool] = {}
 
     def __init__(self):
         super().__init__()
@@ -275,20 +265,24 @@ class Ferramenta(FerramentaBase):
         configurar_texto_canvas(canvas)
         aplicar_patch_texto_nativo_canvas()
         self._limpar_estado_antigo_texto_em_maos(canvas)
-        chave = id(canvas)
-        self._cursor_por_canvas[chave] = self._centro_canvas(canvas)
-        self._aguardando_finalizacao_por_canvas[chave] = False
+        self._modo_pos_ok_por_canvas[id(canvas)] = False
+        self._cursor_por_canvas[id(canvas)] = self._centro_canvas(canvas)
+        try:
+            canvas.setMouseTracking(True)
+        except Exception:
+            pass
+        self._iniciar_timer_mouse(canvas)
         self._abrir_dialogo(canvas)
         self._criar_ou_atualizar_previa(canvas)
-        msg = "Inserir texto: digite na caixa e clique no canvas para inserir cópias. OK mantém o texto na mão."
+        msg = "Inserir texto: digite na caixa e clique no canvas para soltar uma cópia."
         self.set_status(msg)
         mensagem_status(canvas, msg)
         canvas.update()
 
     def on_deactivate(self, canvas):
+        self._parar_timer_mouse(canvas)
         self._remover_previa(canvas)
-        chave = id(canvas)
-        dialog = self._dialog_por_canvas.pop(chave, None)
+        dialog = self._dialog_por_canvas.pop(id(canvas), None)
         if dialog is not None:
             try:
                 dialog._fechando_por_codigo = True
@@ -296,8 +290,9 @@ class Ferramenta(FerramentaBase):
                 dialog.deleteLater()
             except Exception:
                 pass
-        self._cursor_por_canvas.pop(chave, None)
-        self._aguardando_finalizacao_por_canvas.pop(chave, None)
+        self._cursor_por_canvas.pop(id(canvas), None)
+        self._valores_pos_ok_por_canvas.pop(id(canvas), None)
+        self._modo_pos_ok_por_canvas.pop(id(canvas), None)
         return None
 
     def _limpar_estado_antigo_texto_em_maos(self, canvas) -> None:
@@ -307,6 +302,39 @@ class Ferramenta(FerramentaBase):
             except Exception:
                 pass
 
+    def _iniciar_timer_mouse(self, canvas) -> None:
+        chave = id(canvas)
+        timer = self._timer_por_canvas.get(chave)
+        if timer is not None and timer.isActive():
+            return
+        timer = QTimer(canvas)
+        timer.setInterval(25)
+        timer.timeout.connect(lambda canvas_ref=canvas: self._atualizar_previa_pelo_mouse_global(canvas_ref))
+        timer.start()
+        self._timer_por_canvas[chave] = timer
+
+    def _parar_timer_mouse(self, canvas) -> None:
+        timer = self._timer_por_canvas.pop(id(canvas), None)
+        if timer is not None:
+            try:
+                timer.stop()
+                timer.deleteLater()
+            except Exception:
+                pass
+
+    def _atualizar_previa_pelo_mouse_global(self, canvas) -> None:
+        if self._dialogo(canvas) is None and not self._modo_pos_ok_por_canvas.get(id(canvas), False):
+            return
+        try:
+            local = canvas.mapFromGlobal(QCursor.pos())
+            x = float(local.x())
+            y = float(local.y())
+            if 0.0 <= x <= float(canvas.width()) and 0.0 <= y <= float(canvas.height()):
+                self._cursor_por_canvas[id(canvas)] = canvas._tela_para_cena(QPointF(x, y))
+                self._criar_ou_atualizar_previa(canvas)
+        except Exception:
+            pass
+
     def _abrir_dialogo(self, canvas) -> TextoDialog:
         chave = id(canvas)
         dialog = self._dialog_por_canvas.get(chave)
@@ -314,16 +342,20 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = TextoDialog(canvas, self, parent)
             self._dialog_por_canvas[chave] = dialog
-        if not dialog.isVisible():
-            dialog.show()
+            self._ultima_abertura_por_canvas[chave] = monotonic()
+        dialog.show()
         dialog.raise_()
         dialog.activateWindow()
-        # Garantir que o texto ganhe foco imediatamente
-        dialog.txt_texto.setFocus()
         return dialog
 
     def _dialogo(self, canvas) -> TextoDialog | None:
         return self._dialog_por_canvas.get(id(canvas))
+
+    def _valores_atuais(self, canvas) -> dict:
+        dialog = self._dialogo(canvas)
+        if dialog is not None:
+            return dialog.valores()
+        return dict(self._valores_pos_ok_por_canvas.get(id(canvas), {}))
 
     def _dialogo_alterado(self, canvas) -> None:
         if self._dialogo(canvas) is None:
@@ -505,21 +537,10 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _criar_ou_atualizar_previa(self, canvas) -> None:
-        dialog = self._dialogo(canvas)
-        if dialog is None:
-            ultimo_texto = getattr(canvas, "_ultimo_texto_inserido", None)
-            if ultimo_texto is None:
-                self._remover_previa(canvas)
-                return
-            valores = ultimo_texto
-        else:
-            valores = dialog.valores()
-
+        valores = self._valores_atuais(canvas)
         texto = str(valores.get("texto") or "").strip("\n")
         if not texto.strip():
             self._remover_previa(canvas)
-            if dialog is not None:
-                mensagem_status(canvas, "Inserir texto: digite o texto na caixa.")
             return
 
         cor_texto = self._cor_atual_para_texto(canvas)
@@ -541,32 +562,28 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = {idx}
         canvas.update()
 
-    def _fixar_texto_atual(self, canvas, pos: QPointF) -> bool:
-        dialog = self._dialogo(canvas)
-        if dialog is not None:
-            valores = dialog.valores()
-            setattr(canvas, "_ultimo_texto_inserido", dict(valores))
-        else:
-            valores = getattr(canvas, "_ultimo_texto_inserido", None)
-            if valores is None:
-                return False
-
-        texto = str(valores.get("texto") or "").strip("\n")
-        if not texto.strip():
-            return False
+    def _fixar_previa_como_copia_e_manter_caixa(self, canvas) -> bool:
+        self._criar_ou_atualizar_previa(canvas)
+        idx = self._preview_idx(canvas)
+        if idx is None:
+            mensagem_status(canvas, "Inserir texto: digite o texto antes de posicionar.")
+            return True
 
         cor_texto = self._cor_atual_para_texto(canvas)
         cor_fundo = self._cor_fundo_canvas(canvas)
         if self._cores_iguais_ou_muito_parecidas(cor_texto, cor_fundo):
+            self._remover_previa(canvas)
             self._alertar_cor_invisivel(canvas, cor_texto, cor_fundo)
-            return False
+            return True
 
-        elemento = self._criar_elemento_texto_nativo(canvas, valores, pos, cor_texto)
-        if elemento is None:
-            return False
+        try:
+            fixo = deepcopy(canvas.cena.elementos[idx])
+            fixo.pop("__texto_previa_ao_vivo", None)
+            canvas.cena.elementos[idx] = fixo
+        except Exception:
+            return True
 
-        canvas.cena.elementos.append(elemento)
-        idx = len(canvas.cena.elementos) - 1
+        self._preview_idx_por_canvas.pop(id(canvas), None)
         canvas._selecionados = {idx}
         try:
             if hasattr(canvas, "_registrar_historico"):
@@ -578,62 +595,78 @@ class Ferramenta(FerramentaBase):
                 canvas._emitir_elementos_alterados()
         except Exception:
             pass
+
+        self._criar_ou_atualizar_previa(canvas)
+        mensagem_status(canvas, "Texto inserido. Continue escrevendo ou clique em outro ponto para inserir nova cópia.")
         canvas.update()
         return True
 
-    def _posicionar_texto_atual(self, canvas) -> bool:
-        chave = id(canvas)
-        pos = self._posicao_cursor_canvas(canvas)
-        fixado = self._fixar_texto_atual(canvas, pos)
+    def _ok_dialogo_fecha_mantendo_texto_na_mao(self, canvas) -> None:
+        dialog = self._dialogo(canvas)
+        if dialog is not None:
+            self._valores_pos_ok_por_canvas[id(canvas)] = dialog.valores()
+        self._criar_ou_atualizar_previa(canvas)
+        self._dialog_por_canvas.pop(id(canvas), None)
+        self._modo_pos_ok_por_canvas[id(canvas)] = True
+        self._iniciar_timer_mouse(canvas)
+        mensagem_status(canvas, "Texto na mão: clique esquerdo para posicionar e finalizar.")
+        canvas.update()
 
-        if not fixado:
+    def _finalizar_previa_pos_ok(self, canvas) -> bool:
+        self._criar_ou_atualizar_previa(canvas)
+        idx = self._preview_idx(canvas)
+        if idx is None:
+            self._modo_pos_ok_por_canvas.pop(id(canvas), None)
+            self._parar_timer_mouse(canvas)
+            self._voltar_para_selecionar(canvas)
             return True
 
-        if self._aguardando_finalizacao_por_canvas.get(chave, False):
-            mensagem_status(canvas, "Texto inserido. Finalizando ferramenta.")
-            self._remover_previa(canvas)
-            self.on_deactivate(canvas)
-            try:
-                canvas.ferramenta_padrao_solicitada.emit("selecionar")
-            except Exception:
-                pass
-        else:
-            self._criar_ou_atualizar_previa(canvas)
-            mensagem_status(canvas, "Texto inserido. Clique em outro ponto para inserir outra cópia ou edite a caixa.")
-
+        try:
+            canvas.cena.elementos[idx].pop("__texto_previa_ao_vivo", None)
+        except Exception:
+            pass
+        self._preview_idx_por_canvas.pop(id(canvas), None)
+        self._modo_pos_ok_por_canvas.pop(id(canvas), None)
+        self._valores_pos_ok_por_canvas.pop(id(canvas), None)
+        canvas._selecionados = {idx}
+        try:
+            if hasattr(canvas, "_registrar_historico"):
+                canvas._registrar_historico()
+        except Exception:
+            pass
+        try:
+            if hasattr(canvas, "_emitir_elementos_alterados"):
+                canvas._emitir_elementos_alterados()
+        except Exception:
+            pass
+        self._parar_timer_mouse(canvas)
+        mensagem_status(canvas, "Texto inserido. Ferramenta finalizada.")
+        canvas.update()
+        self._voltar_para_selecionar(canvas)
         return True
 
-    def _fechar_dialogo_confirmado(self, canvas) -> None:
-        chave = id(canvas)
-        dialog = self._dialog_por_canvas.pop(chave, None)
-        if dialog is not None:
-            try:
-                dialog._fechando_por_codigo = True
-                dialog.hide()
-                dialog.deleteLater()
-            except Exception:
-                pass
-        self._aguardando_finalizacao_por_canvas[chave] = True
-        self._criar_ou_atualizar_previa(canvas)
-        mensagem_status(canvas, "Inserir texto: o texto está na mão. Clique no canvas para fixar e finalizar.")
-        canvas.update()
+    def _voltar_para_selecionar(self, canvas) -> None:
+        try:
+            canvas._ativar_ferramenta_janela_principal("selecionar")
+            return
+        except Exception:
+            pass
+        try:
+            janela = canvas.window()
+            if hasattr(janela, "ativar_ferramenta"):
+                janela.ativar_ferramenta("selecionar")
+        except Exception:
+            pass
 
-    def _cancelar_dialogo(self, canvas) -> None:
+    def _cancelar_tudo(self, canvas) -> None:
         self._remover_previa(canvas)
-        chave = id(canvas)
-        self._aguardando_finalizacao_por_canvas.pop(chave, None)
-        dialog = self._dialog_por_canvas.pop(chave, None)
-        if dialog is not None:
-            try:
-                dialog._fechando_por_codigo = True
-                dialog.hide()
-                dialog.deleteLater()
-            except Exception:
-                pass
-        self._cursor_por_canvas.pop(chave, None)
+        self._dialog_por_canvas.pop(id(canvas), None)
+        self._cursor_por_canvas.pop(id(canvas), None)
+        self._valores_pos_ok_por_canvas.pop(id(canvas), None)
+        self._modo_pos_ok_por_canvas.pop(id(canvas), None)
+        self._parar_timer_mouse(canvas)
         mensagem_status(canvas, "Inserir texto cancelado.")
         canvas.update()
-        self.on_deactivate(canvas)
 
     def _centro_canvas(self, canvas) -> QPointF:
         try:
@@ -642,52 +675,50 @@ class Ferramenta(FerramentaBase):
             return QPointF(0.0, 0.0)
 
     def on_mouse_move(self, canvas, event) -> bool:
-        chave = id(canvas)
-        if self._dialogo(canvas) is None and not self._aguardando_finalizacao_por_canvas.get(chave, False):
+        if self._dialogo(canvas) is None and not self._modo_pos_ok_por_canvas.get(id(canvas), False):
             return False
         try:
-            self._cursor_por_canvas[chave] = canvas._ponto_com_snap(event.position())
+            self._cursor_por_canvas[id(canvas)] = canvas._ponto_com_snap(event.position())
         except Exception:
             try:
-                self._cursor_por_canvas[chave] = canvas._tela_para_cena(event.position())
+                self._cursor_por_canvas[id(canvas)] = canvas._tela_para_cena(event.position())
             except Exception:
-                self._cursor_por_canvas[chave] = self._centro_canvas(canvas)
+                self._cursor_por_canvas[id(canvas)] = self._centro_canvas(canvas)
         self._criar_ou_atualizar_previa(canvas)
         event.accept()
         return True
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            chave = id(canvas)
-            if self._aguardando_finalizacao_por_canvas.get(chave, False):
+            self._remover_previa(canvas)
+            if self._modo_pos_ok_por_canvas.get(id(canvas), False):
+                self._modo_pos_ok_por_canvas.pop(id(canvas), None)
+                self._valores_pos_ok_por_canvas.pop(id(canvas), None)
+                self._parar_timer_mouse(canvas)
+                self._voltar_para_selecionar(canvas)
                 mensagem_status(canvas, "Inserção de texto cancelada.")
-                self.on_deactivate(canvas)
-                try:
-                    canvas.ferramenta_padrao_solicitada.emit("selecionar")
-                except Exception:
-                    pass
             else:
-                self._remover_previa(canvas)
-                mensagem_status(canvas, "Prévia removida. Mova o mouse para recriar.")
+                mensagem_status(canvas, "Prévia de texto cancelada. A caixa continua aberta.")
             event.accept()
             return True
 
         if event.button() != Qt.LeftButton:
             return False
 
-        agora = monotonic()
-        if agora - float(self._ultima_abertura_por_canvas.get(id(canvas), 0.0) or 0.0) < 0.15:
-            event.accept()
-            return True
-
         try:
             self._cursor_por_canvas[id(canvas)] = canvas._ponto_com_snap(event.position())
         except Exception:
             self._cursor_por_canvas[id(canvas)] = self._centro_canvas(canvas)
 
-        if self._dialogo(canvas) is None and not self._aguardando_finalizacao_por_canvas.get(id(canvas), False):
-            self._abrir_dialogo(canvas)
+        if self._modo_pos_ok_por_canvas.get(id(canvas), False):
+            event.accept()
+            return self._finalizar_previa_pos_ok(canvas)
 
-        self._posicionar_texto_atual(canvas)
+        if self._dialogo(canvas) is None:
+            self._abrir_dialogo(canvas)
+            self._criar_ou_atualizar_previa(canvas)
+            event.accept()
+            return True
+
         event.accept()
-        return True
+        return self._fixar_previa_como_copia_e_manter_caixa(canvas)
