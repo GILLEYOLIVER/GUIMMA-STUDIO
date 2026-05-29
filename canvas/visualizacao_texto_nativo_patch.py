@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from math import sqrt
+from math import cos, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
 
 from canvas.visualizacao import VisualizacaoCanvas
 
@@ -90,7 +90,7 @@ def _fonte_texto(canvas: VisualizacaoCanvas, elemento: dict) -> QFont:
     return fonte
 
 
-def texto_rect_tela(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
+def _texto_rect_base_tela(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
     texto = str(elemento.get("texto") or elemento.get("conteudo") or "").strip("\n")
     if not texto:
         return QRectF()
@@ -116,15 +116,61 @@ def texto_rect_tela(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
     return QRectF(x, y, float(largura), float(altura_total))
 
 
+def _texto_rect_local(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
+    rect = _texto_rect_base_tela(canvas, elemento)
+    if not rect.isValid():
+        return QRectF()
+    pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
+    return QRectF(rect.x() - pos_tela.x(), rect.y() - pos_tela.y(), rect.width(), rect.height())
+
+
+def _rotacionar_ponto_local(pos_tela: QPointF, p: QPointF, angulo: float) -> QPointF:
+    a = radians(float(angulo or 0.0))
+    c = cos(a)
+    s = sin(a)
+    # Mesmo sentido usado no painter.rotate(-angulo)
+    x = p.x() * c + p.y() * s
+    y = -p.x() * s + p.y() * c
+    return QPointF(pos_tela.x() + x, pos_tela.y() + y)
+
+
+def texto_poligono_tela(canvas: VisualizacaoCanvas, elemento: dict, margem: float = 0.0) -> QPolygonF:
+    rect = _texto_rect_local(canvas, elemento).adjusted(-margem, -margem, margem, margem)
+    if not rect.isValid():
+        return QPolygonF()
+    pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
+    angulo = float(elemento.get("angulo", 0.0) or 0.0)
+    pontos = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+    return QPolygonF([_rotacionar_ponto_local(pos_tela, p, angulo) for p in pontos])
+
+
+def texto_rect_tela(canvas: VisualizacaoCanvas, elemento: dict) -> QRectF:
+    poligono = texto_poligono_tela(canvas, elemento, 0.0)
+    return poligono.boundingRect() if not poligono.isEmpty() else QRectF()
+
+
+def _ponto_em_texto(canvas: VisualizacaoCanvas, elemento: dict, pos_tela: QPointF, margem: float = 6.0) -> bool:
+    rect = _texto_rect_local(canvas, elemento).adjusted(-margem, -margem, margem, margem)
+    if not rect.isValid():
+        return False
+    pos_anchor = canvas._cena_para_tela(_texto_posicao(elemento))
+    dx = float(pos_tela.x() - pos_anchor.x())
+    dy = float(pos_tela.y() - pos_anchor.y())
+    # Inverte a rotação usada para desenhar o texto.
+    a = radians(float(elemento.get("angulo", 0.0) or 0.0))
+    c = cos(a)
+    s = sin(a)
+    local = QPointF(dx * c - dy * s, dx * s + dy * c)
+    return rect.contains(local)
+
+
 def indice_texto_em_ponto(canvas: VisualizacaoCanvas, pos_tela: QPointF) -> int | None:
-    margem = 6.0
     elementos = list(getattr(getattr(canvas, "cena", None), "elementos", []) or [])
     for idx in range(len(elementos) - 1, -1, -1):
         elemento = elementos[idx]
         if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
             continue
-        rect = texto_rect_tela(canvas, elemento).adjusted(-margem, -margem, margem, margem)
-        if rect.isValid() and rect.contains(pos_tela):
+        if _ponto_em_texto(canvas, elemento, pos_tela, 6.0):
             return idx
     return None
 
@@ -139,10 +185,33 @@ def indices_texto_em_retangulo(canvas: VisualizacaoCanvas, inicio_cena: QPointF,
     for idx, elemento in enumerate(list(getattr(getattr(canvas, "cena", None), "elementos", []) or [])):
         if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
             continue
-        rect_texto = texto_rect_tela(canvas, elemento).adjusted(-5, -5, 5, 5)
+        rect_texto = texto_poligono_tela(canvas, elemento, 5.0).boundingRect()
         if rect_texto.isValid() and rect.intersects(rect_texto):
             selecionados.add(idx)
     return selecionados
+
+
+def desenhar_selecao_texto(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
+    rect = _texto_rect_local(canvas, elemento).adjusted(-5, -5, 5, 5)
+    if not rect.isValid():
+        return
+    pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
+    angulo = float(elemento.get("angulo", 0.0) or 0.0)
+    painter.save()
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.translate(pos_tela)
+        painter.rotate(-angulo)
+        cor_borda = QColor(getattr(canvas, "_cores_canvas", {}).get("selecao", "#2da8ff"))
+        cor_fundo = QColor(cor_borda)
+        cor_fundo.setAlpha(42)
+        painter.setBrush(cor_fundo)
+        pen = QPen(cor_borda, 1.2, Qt.DashLine)
+        pen.setDashPattern([3.5, 2.5])
+        painter.setPen(pen)
+        painter.drawRect(rect)
+    finally:
+        painter.restore()
 
 
 def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
@@ -150,7 +219,7 @@ def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, element
     if not texto:
         return
 
-    rect_base = texto_rect_tela(canvas, elemento)
+    rect_base = _texto_rect_base_tela(canvas, elemento)
     if not rect_base.isValid():
         return
     pos_tela = canvas._cena_para_tela(_texto_posicao(elemento))
@@ -188,21 +257,6 @@ def desenhar_texto_nativo(canvas: VisualizacaoCanvas, painter: QPainter, element
         painter.restore()
 
 
-def desenhar_selecao_texto(canvas: VisualizacaoCanvas, painter: QPainter, elemento: dict) -> None:
-    rect = texto_rect_tela(canvas, elemento).adjusted(-5, -5, 5, 5)
-    if not rect.isValid():
-        return
-    painter.save()
-    try:
-        pen = QPen(QColor(getattr(canvas, "_cores_canvas", {}).get("selecao", "#2da8ff")), 1.2, Qt.DashLine)
-        pen.setDashPattern([3.5, 2.5])
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(rect)
-    finally:
-        painter.restore()
-
-
 def transladar_texto_elemento(elemento: dict, dx: float, dy: float) -> None:
     if not isinstance(elemento, dict) or str(elemento.get("tipo") or "").lower() != "texto":
         return
@@ -225,7 +279,7 @@ def _texto_mao_idx(canvas) -> int | None:
 
 def aplicar_patch_texto_nativo_canvas() -> None:
     global _PATCH_APLICADO
-    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas_v6", False):
+    if _PATCH_APLICADO or getattr(VisualizacaoCanvas, "_guimma_texto_nativo_canvas_v7", False):
         return
 
     original_paint = VisualizacaoCanvas.paintEvent
@@ -242,9 +296,9 @@ def aplicar_patch_texto_nativo_canvas() -> None:
             try:
                 for idx, elemento in enumerate(list(getattr(getattr(self, "cena", None), "elementos", []) or [])):
                     if isinstance(elemento, dict) and str(elemento.get("tipo") or "").lower() == "texto":
-                        desenhar_texto_nativo(self, painter, elemento)
                         if idx in getattr(self, "_selecionados", set()):
                             desenhar_selecao_texto(self, painter, elemento)
+                        desenhar_texto_nativo(self, painter, elemento)
             finally:
                 painter.end()
         except Exception as exc:
@@ -278,7 +332,7 @@ def aplicar_patch_texto_nativo_canvas() -> None:
                 event.accept()
                 return
 
-        if event.button() == Qt.LeftButton and str(getattr(self, "ferramenta_ativa", "selecionar") or "selecionar") in {"selecionar", ""}:
+        if event.button() == Qt.LeftButton:
             idx = indice_texto_em_ponto(self, event.position())
             if idx is not None:
                 if event.modifiers() & Qt.ControlModifier or event.modifiers() & Qt.ShiftModifier:
@@ -382,7 +436,7 @@ def aplicar_patch_texto_nativo_canvas() -> None:
     VisualizacaoCanvas.mouseDoubleClickEvent = mouseDoubleClickEvent_com_texto
     if original_transladar is not None:
         VisualizacaoCanvas._transladar_elemento = _transladar_elemento_com_texto
-    VisualizacaoCanvas._guimma_texto_nativo_canvas_v6 = True
+    VisualizacaoCanvas._guimma_texto_nativo_canvas_v7 = True
     _PATCH_APLICADO = True
 
 
