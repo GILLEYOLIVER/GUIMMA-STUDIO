@@ -49,6 +49,7 @@ class TextoDialog(QDialog):
         self._preview_idx: int | None = None
         self._aceito = False
         self._atualizando_estilo_caixa = False
+        self._fonte_previa_combo = "Arial"
 
         self.setWindowTitle("Criar texto")
         self.setModal(True)
@@ -63,6 +64,7 @@ class TextoDialog(QDialog):
         self.combo_fonte.addItems(FONTES_TEXTO)
         fonte_atual = str(getattr(canvas, "_texto_fonte", "Arial") or "Arial")
         self.combo_fonte.setCurrentText(fonte_atual if fonte_atual in FONTES_TEXTO else "Arial")
+        self._fonte_previa_combo = self.combo_fonte.currentText() or "Arial"
 
         self.spin_angulo = QDoubleSpinBox(self)
         self.spin_angulo.setRange(-360.0, 360.0)
@@ -116,6 +118,13 @@ class TextoDialog(QDialog):
 
         self.txt_texto.textChanged.connect(self._atualizar_previa_ao_vivo)
         self.combo_fonte.currentTextChanged.connect(self._fonte_alterada)
+        try:
+            self.combo_fonte.textHighlighted.connect(self._fonte_destacada)
+        except Exception:
+            try:
+                self.combo_fonte.highlighted.connect(self._fonte_destacada_indice)
+            except Exception:
+                pass
         self.combo_referencia.currentTextChanged.connect(self._atualizar_previa_ao_vivo)
         self.combo_justificacao.currentTextChanged.connect(self._atualizar_previa_ao_vivo)
         self.spin_angulo.valueChanged.connect(self._atualizar_previa_ao_vivo)
@@ -125,10 +134,13 @@ class TextoDialog(QDialog):
         self._aplicar_fonte_na_caixa()
         QTimer.singleShot(0, self._atualizar_previa_ao_vivo)
 
+    def _fonte_em_uso(self) -> str:
+        return str(self._fonte_previa_combo or self.combo_fonte.currentText() or "Arial")
+
     def valores(self) -> dict:
         return {
             "texto": self.txt_texto.toPlainText(),
-            "fonte_texto": self.combo_fonte.currentText(),
+            "fonte_texto": self._fonte_em_uso(),
             "angulo": float(self.spin_angulo.value()),
             "altura_cm": float(self.spin_altura.value()),
             "espaco_linhas_cm": float(self.spin_espaco.value()),
@@ -149,17 +161,27 @@ class TextoDialog(QDialog):
             pass
         return None
 
-    def _fonte_alterada(self):
-        self._aplicar_fonte_na_caixa()
+    def _fonte_alterada(self, fonte: str | None = None):
+        self._fonte_previa_combo = str(fonte or self.combo_fonte.currentText() or "Arial")
+        self._aplicar_fonte_na_caixa(self._fonte_previa_combo)
         self._atualizar_previa_ao_vivo()
 
-    def _aplicar_fonte_na_caixa(self):
+    def _fonte_destacada(self, fonte: str):
+        self._fonte_previa_combo = str(fonte or self.combo_fonte.currentText() or "Arial")
+        self._aplicar_fonte_na_caixa(self._fonte_previa_combo)
+        self._atualizar_previa_ao_vivo()
+
+    def _fonte_destacada_indice(self, indice: int):
+        if 0 <= int(indice) < self.combo_fonte.count():
+            self._fonte_destacada(self.combo_fonte.itemText(int(indice)))
+
+    def _aplicar_fonte_na_caixa(self, fonte: str | None = None):
         if self._atualizando_estilo_caixa:
             return
         self._atualizando_estilo_caixa = True
         try:
-            fonte = self.combo_fonte.currentText() or "Arial"
-            self.txt_texto.setStyleSheet(f'QTextEdit {{ font-family: "{fonte}"; font-size: 12pt; }}')
+            fonte_final = str(fonte or self._fonte_em_uso() or "Arial")
+            self.txt_texto.setStyleSheet(f'QTextEdit {{ font-family: "{fonte_final}"; font-size: 12pt; }}')
         finally:
             self._atualizando_estilo_caixa = False
 
@@ -206,6 +228,7 @@ class TextoDialog(QDialog):
         self.canvas.update()
 
     def accept(self):
+        self._fonte_previa_combo = self.combo_fonte.currentText() or self._fonte_previa_combo or "Arial"
         self._atualizar_previa_ao_vivo()
         self._aceito = True
         super().accept()
