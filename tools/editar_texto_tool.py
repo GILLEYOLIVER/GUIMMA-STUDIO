@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -23,6 +25,10 @@ class EditarTextoDialog(QDialog):
         self.setModal(True)
         self.resize(560, 390)
         self.elemento = elemento
+        self.canvas = parent
+        self._original = deepcopy(elemento)
+        self._aceito = False
+        self._atualizando = False
 
         self.txt_texto = QTextEdit(self)
         self.txt_texto.setPlainText(str(elemento.get("texto") or elemento.get("conteudo") or ""))
@@ -85,6 +91,62 @@ class EditarTextoDialog(QDialog):
         layout.addWidget(botoes, 6, 0, 1, 6)
         layout.setRowStretch(0, 1)
 
+        self._conectar_atualizacao_ao_vivo()
+        self._aplicar_fonte_caixa()
+
+    def _conectar_atualizacao_ao_vivo(self) -> None:
+        self.txt_texto.textChanged.connect(self._atualizar_ao_vivo)
+        self.combo_fonte.currentTextChanged.connect(self._atualizar_ao_vivo)
+        try:
+            self.combo_fonte.textHighlighted.connect(self._fonte_destacada)
+        except Exception:
+            try:
+                self.combo_fonte.highlighted.connect(self._fonte_destacada_indice)
+            except Exception:
+                pass
+        self.spin_angulo.valueChanged.connect(self._atualizar_ao_vivo)
+        self.spin_altura.valueChanged.connect(self._atualizar_ao_vivo)
+        self.spin_espaco.valueChanged.connect(self._atualizar_ao_vivo)
+        self.spin_espessura.valueChanged.connect(self._atualizar_ao_vivo)
+        self.combo_referencia.currentTextChanged.connect(self._atualizar_ao_vivo)
+        self.combo_justificacao.currentTextChanged.connect(self._atualizar_ao_vivo)
+
+    def _fonte_destacada(self, fonte: str) -> None:
+        if fonte and self.combo_fonte.currentText() != fonte:
+            self.combo_fonte.setCurrentText(fonte)
+        self._atualizar_ao_vivo()
+
+    def _fonte_destacada_indice(self, indice: int) -> None:
+        if 0 <= int(indice) < self.combo_fonte.count():
+            self._fonte_destacada(self.combo_fonte.itemText(int(indice)))
+
+    def _aplicar_fonte_caixa(self) -> None:
+        fonte = self.combo_fonte.currentText() or "Arial"
+        self.txt_texto.setStyleSheet(f'QTextEdit {{ font-family: "{fonte}"; font-size: 12pt; }}')
+
+    def _atualizar_canvas(self) -> None:
+        try:
+            if self.canvas is not None:
+                self.canvas.update()
+        except Exception:
+            pass
+
+    def _atualizar_ao_vivo(self, *args) -> None:
+        if self._atualizando:
+            return
+        self._atualizando = True
+        try:
+            self.aplicar()
+            self._aplicar_fonte_caixa()
+            self._atualizar_canvas()
+        finally:
+            self._atualizando = False
+
+    def _restaurar_original(self) -> None:
+        self.elemento.clear()
+        self.elemento.update(deepcopy(self._original))
+        self._atualizar_canvas()
+
     def aplicar(self) -> None:
         texto = self.txt_texto.toPlainText().strip("\n")
         fonte = self.combo_fonte.currentText()
@@ -94,11 +156,29 @@ class EditarTextoDialog(QDialog):
         self.elemento["fonte"] = fonte
         self.elemento["angulo"] = float(self.spin_angulo.value())
         self.elemento["texto_altura_cm"] = float(self.spin_altura.value())
+        self.elemento["altura_cm"] = float(self.spin_altura.value())
         self.elemento["texto_espaco_linhas_cm"] = float(self.spin_espaco.value())
+        self.elemento["espaco_linhas_cm"] = float(self.spin_espaco.value())
         self.elemento["texto_espessura"] = float(self.spin_espessura.value())
         self.elemento["espessura"] = float(self.spin_espessura.value())
         self.elemento["referencia"] = self.combo_referencia.currentText()
         self.elemento["justificacao"] = self.combo_justificacao.currentText()
+
+    def accept(self) -> None:
+        self._aceito = True
+        self.aplicar()
+        self._atualizar_canvas()
+        super().accept()
+
+    def reject(self) -> None:
+        self._aceito = False
+        self._restaurar_original()
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if not self._aceito:
+            self._restaurar_original()
+        super().closeEvent(event)
 
 
 def _cor_atual_canvas(canvas) -> str | None:
