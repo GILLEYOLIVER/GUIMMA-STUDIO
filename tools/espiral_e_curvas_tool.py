@@ -181,7 +181,14 @@ def _dist(a: QPointF, b: QPointF) -> float:
     return sqrt((dx * dx) + (dy * dy))
 
 
-def _interp_segmento_centripeto(p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF, amostras: int = 32, alpha: float = 0.5) -> list[QPointF]:
+def _interp_segmento_centripeto(
+    p0: QPointF,
+    p1: QPointF,
+    p2: QPointF,
+    p3: QPointF,
+    amostras: int = 32,
+    alpha: float = 0.5,
+) -> list[QPointF]:
     def tj(ti: float, pa: QPointF, pb: QPointF) -> float:
         d = max(_dist(pa, pb), 1e-6)
         return ti + (d ** alpha)
@@ -190,6 +197,7 @@ def _interp_segmento_centripeto(p0: QPointF, p1: QPointF, p2: QPointF, p3: QPoin
     t1 = tj(t0, p0, p1)
     t2 = tj(t1, p1, p2)
     t3 = tj(t2, p2, p3)
+
     pts: list[QPointF] = []
     for i in range(amostras):
         t = t1 + ((t2 - t1) * (i / amostras))
@@ -231,23 +239,23 @@ def _interp(perfil: list[tuple[float, float]], sx: float = 6.0, sy: float = 4.0,
 def _gerar_curva_base(nome: str) -> list[QPointF]:
     perfis = {
         "Curva Francesa 1": [
-            # Ajustada para ficar mais próxima da amostra branca:
-            # arco mais suave no corpo da curva, topo menos inchado
-            # e descida final controlada, sem fechar cedo demais.
+            # Ajuste fino final pela amostra branca: corpo central levemente mais baixo,
+            # topo menos aberto e descida final mais vertical/fechada.
             (0.020, 0.735),
-            (0.075, 0.697),
-            (0.145, 0.650),
-            (0.235, 0.603),
-            (0.345, 0.565),
-            (0.465, 0.537),
-            (0.585, 0.522),
-            (0.680, 0.519),
-            (0.755, 0.528),
-            (0.820, 0.553),
-            (0.872, 0.605),
-            (0.910, 0.690),
-            (0.938, 0.802),
-            (0.952, 0.900),
+            (0.076, 0.698),
+            (0.150, 0.651),
+            (0.245, 0.605),
+            (0.360, 0.570),
+            (0.485, 0.545),
+            (0.600, 0.531),
+            (0.685, 0.529),
+            (0.745, 0.534),
+            (0.795, 0.553),
+            (0.840, 0.593),
+            (0.875, 0.662),
+            (0.905, 0.758),
+            (0.930, 0.875),
+            (0.943, 0.900),
         ],
         "Curva Francesa 2": [(0.06, 0.84), (0.12, 0.74), (0.20, 0.62), (0.31, 0.50), (0.45, 0.38), (0.60, 0.28), (0.75, 0.19), (0.89, 0.13)],
         "Curva Francesa 3": [(0.08, 0.82), (0.16, 0.73), (0.27, 0.62), (0.39, 0.50), (0.52, 0.39), (0.65, 0.30), (0.78, 0.22), (0.90, 0.17)],
