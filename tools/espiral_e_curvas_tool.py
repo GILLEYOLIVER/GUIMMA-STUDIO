@@ -197,7 +197,6 @@ def _interp_segmento_centripeto(
     t1 = tj(t0, p0, p1)
     t2 = tj(t1, p1, p2)
     t3 = tj(t2, p2, p3)
-
     pts: list[QPointF] = []
     for i in range(amostras):
         t = t1 + ((t2 - t1) * (i / amostras))
@@ -239,23 +238,22 @@ def _interp(perfil: list[tuple[float, float]], sx: float = 6.0, sy: float = 4.0,
 def _gerar_curva_base(nome: str) -> list[QPointF]:
     perfis = {
         "Curva Francesa 1": [
-            # Ajuste fino final pela amostra branca: corpo central levemente mais baixo,
-            # topo menos aberto e descida final mais vertical/fechada.
+            # Ajuste pela amostra branca: corpo central mais alto e descida final suavizada.
             (0.020, 0.735),
-            (0.076, 0.698),
-            (0.150, 0.651),
-            (0.245, 0.605),
-            (0.360, 0.570),
-            (0.485, 0.545),
-            (0.600, 0.531),
-            (0.685, 0.529),
-            (0.745, 0.534),
-            (0.795, 0.553),
-            (0.840, 0.593),
-            (0.875, 0.662),
-            (0.905, 0.758),
-            (0.930, 0.875),
-            (0.943, 0.900),
+            (0.075, 0.694),
+            (0.150, 0.647),
+            (0.248, 0.601),
+            (0.365, 0.565),
+            (0.488, 0.539),
+            (0.604, 0.524),
+            (0.690, 0.522),
+            (0.754, 0.529),
+            (0.806, 0.550),
+            (0.850, 0.591),
+            (0.886, 0.660),
+            (0.914, 0.756),
+            (0.936, 0.865),
+            (0.948, 0.900),
         ],
         "Curva Francesa 2": [(0.06, 0.84), (0.12, 0.74), (0.20, 0.62), (0.31, 0.50), (0.45, 0.38), (0.60, 0.28), (0.75, 0.19), (0.89, 0.13)],
         "Curva Francesa 3": [(0.08, 0.82), (0.16, 0.73), (0.27, 0.62), (0.39, 0.50), (0.52, 0.39), (0.65, 0.30), (0.78, 0.22), (0.90, 0.17)],
