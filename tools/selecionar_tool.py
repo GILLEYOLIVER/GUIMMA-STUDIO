@@ -48,6 +48,13 @@ class Ferramenta(FerramentaBase):
                 self.set_status("Elemento alternado com botão direito.")
                 event.accept()
                 return True
+            indices_curva = self._indices_elementos_em_ponto(canvas, pos)
+            if indices_curva:
+                canvas._selecionados = {indices_curva[0]}
+                self.set_status("Elemento alternado com botão direito.")
+                canvas.update()
+                event.accept()
+                return True
             if canvas._snap_resultado and canvas._snap_resultado.elemento_idx is not None:
                 idx_snap = int(canvas._snap_resultado.elemento_idx)
                 if 0 <= idx_snap < len(canvas.cena.elementos):
@@ -60,7 +67,7 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
 
-        indices = canvas._indices_elementos_em_ponto(pos)
+        indices = self._indices_elementos_em_ponto(canvas, pos)
         if not indices and canvas._snap_resultado and canvas._snap_resultado.elemento_idx is not None:
             idx_snap = int(canvas._snap_resultado.elemento_idx)
             if 0 <= idx_snap < len(canvas.cena.elementos):
@@ -78,8 +85,6 @@ class Ferramenta(FerramentaBase):
             else:
                 if selecionado not in canvas._selecionados:
                     canvas._selecionados = {selecionado}
-                # Inicia arraste já no primeiro clique pressionado sobre o elemento
-                # para evitar exigir um segundo clique para mover.
                 self._arrastando_selecao = True
                 self._ultimo_ponto_arrasto = pos
                 self._movido = False
@@ -117,7 +122,7 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
         pos = canvas._ponto_com_snap(event.position())
-        self._hover_idx = (canvas._indices_elementos_em_ponto(pos) or [None])[0]
+        self._hover_idx = (self._indices_elementos_em_ponto(canvas, pos) or [None])[0]
         if self._inicio_caixa is None:
             if canvas.lbl_status:
                 snap_info = f" | {canvas.descricao_snap_atual()}" if hasattr(canvas, "descricao_snap_atual") and canvas.descricao_snap_atual() else ""
@@ -139,6 +144,154 @@ class Ferramenta(FerramentaBase):
                 elementos_sombra=self._originais_arraste,
             )
         return canvas._ponto_com_snap(event.position())
+
+    def _indices_elementos_em_ponto(self, canvas, pos: QPointF) -> list[int]:
+        indices: list[int] = []
+        try:
+            indices = list(canvas._indices_elementos_em_ponto(pos) or [])
+        except Exception:
+            indices = []
+
+        existentes = set(indices)
+        tolerancia = max(8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 0.08)
+
+        # A seleção nativa pega bem polylines retas. Para curvas suaves, como as
+        # criadas por Curvas e Espirais, o desenho real é interpolado entre os
+        # pontos de controle. Por isso o clique precisa testar a curva amostrada,
+        # não só a corda reta entre os controles.
+        extras: list[tuple[int, float]] = []
+        for idx in range(len(canvas.cena.elementos) - 1, -1, -1):
+            if idx in existentes:
+                continue
+            el = canvas.cena.elementos[idx]
+            pontos = self._pontos_elemento_para_selecao(canvas, el)
+            if len(pontos) < 2:
+                continue
+            melhor = self._distancia_ponto_polyline(pos, pontos)
+            if melhor <= tolerancia:
+                extras.append((idx, melhor))
+
+        extras.sort(key=lambda item: item[1])
+        for idx, _distancia in extras:
+            if idx not in existentes:
+                indices.append(idx)
+                existentes.add(idx)
+        return indices
+
+    def _pontos_elemento_para_selecao(self, canvas, el: dict) -> list[QPointF]:
+        if not isinstance(el, dict):
+            return []
+        if el.get("tipo") == "polyline":
+            pontos_base = self._pontos_polyline(el)
+            if self._elemento_curva_suave(canvas, el) and len(pontos_base) >= 3:
+                return self._amostrar_curva_suave(pontos_base, amostras=18)
+            return pontos_base
+        if el.get("tipo") == "bezier_quadratica":
+            try:
+                p0 = QPointF(*el["p0"])
+                p1 = QPointF(*el["p1"])
+                p2 = QPointF(*el["p2"])
+                if hasattr(canvas, "_amostrar_bezier_quadratica"):
+                    return canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=48)
+                return [p0, p1, p2]
+            except Exception:
+                return []
+        return []
+
+    @staticmethod
+    def _elemento_curva_suave(canvas, el: dict) -> bool:
+        if hasattr(canvas, "_elemento_curva_suave"):
+            try:
+                return bool(canvas._elemento_curva_suave(el))
+            except Exception:
+                pass
+        return bool(
+            el.get("curva_suave")
+            or el.get("suavizar")
+            or str(el.get("tipo_curva") or "").lower().startswith("spline")
+            or str(el.get("renderizacao") or "").lower() == "curva_suave"
+        )
+
+    @staticmethod
+    def _qpoint_item(item) -> QPointF | None:
+        try:
+            if isinstance(item, dict):
+                return QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0)))
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                return QPointF(float(item[0]), float(item[1]))
+        except Exception:
+            return None
+        return None
+
+    def _pontos_polyline(self, el: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for item in el.get("pontos", []) or []:
+            pt = self._qpoint_item(item)
+            if pt is not None:
+                pontos.append(pt)
+        return pontos
+
+    @staticmethod
+    def _amostrar_curva_suave(controles: list[QPointF], amostras: int = 18) -> list[QPointF]:
+        if len(controles) < 3:
+            return [QPointF(p) for p in controles]
+        fechado = len(controles) > 3 and Ferramenta._dist_qp(controles[0], controles[-1]) <= 1e-7
+        pts = [QPointF(p) for p in (controles[:-1] if fechado else controles)]
+        total = len(pts)
+        if total < 3:
+            return [QPointF(p) for p in controles]
+        saida: list[QPointF] = []
+        limite = total if fechado else total - 1
+        for i in range(limite):
+            p0 = pts[(i - 1) % total] if fechado or i > 0 else pts[i]
+            p1 = pts[i]
+            p2 = pts[(i + 1) % total]
+            p3 = pts[(i + 2) % total] if fechado or i + 2 < total else p2
+            for j in range(amostras):
+                t = j / float(amostras)
+                t2 = t * t
+                t3 = t2 * t
+                x = 0.5 * (
+                    (2.0 * p1.x())
+                    + (-p0.x() + p2.x()) * t
+                    + (2.0 * p0.x() - 5.0 * p1.x() + 4.0 * p2.x() - p3.x()) * t2
+                    + (-p0.x() + 3.0 * p1.x() - 3.0 * p2.x() + p3.x()) * t3
+                )
+                y = 0.5 * (
+                    (2.0 * p1.y())
+                    + (-p0.y() + p2.y()) * t
+                    + (2.0 * p0.y() - 5.0 * p1.y() + 4.0 * p2.y() - p3.y()) * t2
+                    + (-p0.y() + 3.0 * p1.y() - 3.0 * p2.y() + p3.y()) * t3
+                )
+                saida.append(QPointF(x, y))
+        if fechado and saida:
+            saida.append(QPointF(saida[0]))
+        elif not fechado:
+            saida.append(QPointF(pts[-1]))
+        return saida
+
+    @staticmethod
+    def _dist_qp(a: QPointF, b: QPointF) -> float:
+        return sqrt(((a.x() - b.x()) ** 2) + ((a.y() - b.y()) ** 2))
+
+    def _distancia_ponto_polyline(self, pos: QPointF, pontos: list[QPointF]) -> float:
+        melhor = float("inf")
+        for a, b in zip(pontos, pontos[1:]):
+            melhor = min(melhor, self._distancia_ponto_segmento(pos, a, b))
+        return melhor
+
+    @staticmethod
+    def _distancia_ponto_segmento(p: QPointF, a: QPointF, b: QPointF) -> float:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        apx = p.x() - a.x()
+        apy = p.y() - a.y()
+        den = (abx * abx) + (aby * aby)
+        if den <= 1e-12:
+            return sqrt((p.x() - a.x()) ** 2 + (p.y() - a.y()) ** 2)
+        t = max(0.0, min(1.0, ((apx * abx) + (apy * aby)) / den))
+        proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+        return sqrt((p.x() - proj.x()) ** 2 + (p.y() - proj.y()) ** 2)
 
     def on_mouse_release(self, canvas, event) -> bool:
         if event.button() == Qt.LeftButton and self._arrastando_selecao:
@@ -162,15 +315,7 @@ class Ferramenta(FerramentaBase):
         if sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) > (4.0 / max(canvas.zoom, 0.001)):
             selecionados_area: set[int] = set()
             for idx, el in enumerate(canvas.cena.elementos):
-                if el.get("tipo") == "polyline":
-                    pontos = [QPointF(float(px), float(py)) for px, py in el.get("pontos", [])]
-                elif el.get("tipo") == "bezier_quadratica":
-                    p0 = QPointF(*el["p0"])
-                    p1 = QPointF(*el["p1"])
-                    p2 = QPointF(*el["p2"])
-                    pontos = canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=24)
-                else:
-                    pontos = []
+                pontos = self._pontos_elemento_para_selecao(canvas, el)
                 if pontos and all(x1 <= p.x() <= x2 and y1 <= p.y() <= y2 for p in pontos):
                     selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
@@ -246,13 +391,9 @@ class Ferramenta(FerramentaBase):
             if idx is None or idx < 0 or idx >= len(canvas.cena.elementos):
                 continue
             el = canvas.cena.elementos[idx]
-            pontos: list[QPointF] = []
-            if el.get("tipo") == "polyline":
-                pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
-                if hasattr(canvas, "_pontos_costuras_vinculadas"):
-                    pontos.extend(canvas._pontos_costuras_vinculadas(el))
-            elif el.get("tipo") == "bezier_quadratica":
-                pontos = [QPointF(*el["p0"]), QPointF(*el["p1"]), QPointF(*el["p2"])]
+            pontos = self._pontos_elemento_para_selecao(canvas, el)
+            if el.get("tipo") == "polyline" and hasattr(canvas, "_pontos_costuras_vinculadas"):
+                pontos.extend(canvas._pontos_costuras_vinculadas(el))
             if not pontos:
                 continue
             margem = self.DISTANCIA_VISUAL_SELECAO_CM
