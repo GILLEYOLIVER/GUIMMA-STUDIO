@@ -118,6 +118,7 @@ class Ferramenta(FerramentaBase):
         if event.button() == Qt.RightButton:
             if self._fase in {"selecionar", "posicionar"} and (self._alvo_idx is not None or self._preview or self._realce_segmentos):
                 self._limpar_estado()
+                self._limpar_selecao_canvas(canvas)
                 self._operacao_finalizada = True
                 self._direito_confirma_fechamento = True
                 self._status(canvas, "Operacao finalizada. Clique direito novamente fecha a ferramenta.")
@@ -135,6 +136,7 @@ class Ferramenta(FerramentaBase):
         self._ultima_posicao_mouse = QPointF(pos)
         if self._fase == "finalizado":
             self._limpar_estado()
+            self._limpar_selecao_canvas(canvas)
         if self._fase == "selecionar" and self._alvo_idx is None:
             if not self._iniciar_selecao(canvas, pos):
                 self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho.")
@@ -195,6 +197,7 @@ class Ferramenta(FerramentaBase):
             if paralelo:
                 self._criar_elemento(canvas, paralelo, {"elemento_idx": idx})
                 criou += 1
+        self._limpar_selecao_canvas(canvas)
         if criou:
             self._status(canvas, f"Criado(s) {criou} elemento(s) paralelo(s).")
         else:
@@ -219,6 +222,13 @@ class Ferramenta(FerramentaBase):
         self._selecao_contorno_completo = False
         self._realce_segmentos = []
         self._ultima_posicao_mouse = None
+
+    def _limpar_selecao_canvas(self, canvas) -> None:
+        if hasattr(canvas, "_selecionados"):
+            try:
+                canvas._selecionados.clear()
+            except Exception:
+                canvas._selecionados = set()
 
     def _iniciar_selecao(self, canvas, pos: QPointF) -> bool:
         info = self._segmento_mais_proximo(canvas, pos)
@@ -294,14 +304,14 @@ class Ferramenta(FerramentaBase):
             self._criar_elemento(canvas, self._preview, self._hover_info, registrar=False)
             self._criar_elemento(canvas, self._preview_2, self._hover_info, registrar=False)
             canvas._registrar_historico()
-            canvas.update()
         else:
             self._criar_elemento(canvas, self._preview, self._hover_info)
         self._fase = "finalizado"
         self._preview = []
         self._preview_2 = []
         self._realce_segmentos = []
-        self._status(canvas, "Elemento paralelo criado. Clique esquerdo inicia outro; direito finaliza.")
+        self._limpar_selecao_canvas(canvas)
+        self._status(canvas, "Elemento paralelo criado. Nada ficou selecionado. Clique esquerdo inicia outro; direito finaliza.")
         canvas.update()
         return True
 
@@ -323,15 +333,17 @@ class Ferramenta(FerramentaBase):
             "metadados": {"tipo_ferramenta": self.id_ferramenta, "origem_idx": info.get("elemento_idx") if info else None},
         }
         canvas.cena.elementos.append(novo)
-        canvas._selecionados = {len(canvas.cena.elementos) - 1}
+        self._limpar_selecao_canvas(canvas)
         if registrar:
             canvas._registrar_historico()
+            self._limpar_selecao_canvas(canvas)
             canvas.update()
         self._operacao_finalizada = True
         self._direito_confirma_fechamento = False
         self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; direito fecha.")
 
     def _fechar(self, canvas) -> None:
+        self._limpar_selecao_canvas(canvas)
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Elemento Paralelo finalizada. Voltando para Selecionar.")
 
