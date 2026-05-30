@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from math import sqrt
+from math import acos, sqrt
 from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QMouseEvent, QPen
 from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QDialog, QDoubleSpinBox, QFormLayout, QLabel, QVBoxLayout
 
 from tools.tool_base import FerramentaBase
@@ -83,18 +83,16 @@ class Ferramenta(FerramentaBase):
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
         self._ultima_posicao_mouse: QPointF | None = None
         self._operacao_finalizada = False
-        self._direito_confirma_fechamento = False
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._limpar_estado()
         self._operacao_finalizada = False
-        self._direito_confirma_fechamento = False
         dialog = self._obter_dialog(canvas)
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Elemento paralelo: clique no perimetro para iniciar a selecao.")
+        self._status(canvas, "Elemento paralelo: clique no perímetro para iniciar a seleção. Duplo clique esquerdo sai da ferramenta.")
 
     def on_deactivate(self, canvas):
         self._limpar_estado()
@@ -102,6 +100,7 @@ class Ferramenta(FerramentaBase):
         if dialog is not None:
             dialog.hide()
         if canvas is not None:
+            self._limpar_selecao_canvas(canvas)
             canvas.update()
 
     def on_mouse_move(self, canvas, event) -> bool:
@@ -116,33 +115,31 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            if self._fase in {"selecionar", "posicionar"} and (self._alvo_idx is not None or self._preview or self._realce_segmentos):
-                self._limpar_estado()
-                self._limpar_selecao_canvas(canvas)
-                self._operacao_finalizada = True
-                self._direito_confirma_fechamento = True
-                self._status(canvas, "Operacao finalizada. Clique direito novamente fecha a ferramenta.")
-                canvas.update()
-            elif self._operacao_finalizada and not self._direito_confirma_fechamento:
-                self._direito_confirma_fechamento = True
-                self._status(canvas, "Operacao finalizada. Clique direito novamente fecha a ferramenta.")
-            else:
-                self._fechar(canvas)
+            self._limpar_estado()
+            self._limpar_selecao_canvas(canvas)
+            self._operacao_finalizada = True
+            self._status(canvas, "Operação cancelada/finalizada. A ferramenta continua ativa. Duplo clique esquerdo sai.")
+            canvas.update()
             event.accept()
             return True
+
         if event.button() != Qt.LeftButton:
             return False
+
         pos = canvas._ponto_com_snap(event.position())
         self._ultima_posicao_mouse = QPointF(pos)
+
         if self._fase == "finalizado":
             self._limpar_estado()
             self._limpar_selecao_canvas(canvas)
+
         if self._fase == "selecionar" and self._alvo_idx is None:
             if not self._iniciar_selecao(canvas, pos):
-                self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho.")
+                self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho. Duplo clique esquerdo sai.")
                 return False
             event.accept()
             return True
+
         if self._fase == "selecionar":
             self._fase = "posicionar"
             self._atualizar_preview(canvas, pos)
@@ -150,13 +147,32 @@ class Ferramenta(FerramentaBase):
             canvas.update()
             event.accept()
             return True
+
         if self._fase == "posicionar":
             self._atualizar_preview(canvas, pos)
             if not self._confirmar_paralela(canvas):
-                self._status(canvas, "Nao foi possivel criar a paralela desse trecho.")
+                self._status(canvas, "Não foi possível criar a paralela desse trecho.")
                 return False
+            event.accept()
+            return True
+
         event.accept()
         return True
+
+    def on_mouse_double_click(self, canvas, event) -> bool:
+        if event.button() == Qt.LeftButton:
+            self._fechar(canvas)
+            event.accept()
+            return True
+        if event.button() == Qt.RightButton:
+            # Impede que o canvas solte a ferramenta por duplo clique direito.
+            self._limpar_estado()
+            self._limpar_selecao_canvas(canvas)
+            self._status(canvas, "A ferramenta continua ativa. Para sair, dê dois cliques seguidos com o botão esquerdo.")
+            canvas.update()
+            event.accept()
+            return True
+        return False
 
     def _obter_dialog(self, canvas) -> ElementoParaleloDialog:
         chave = id(canvas)
@@ -199,9 +215,10 @@ class Ferramenta(FerramentaBase):
                 criou += 1
         self._limpar_selecao_canvas(canvas)
         if criou:
-            self._status(canvas, f"Criado(s) {criou} elemento(s) paralelo(s).")
+            self._status(canvas, f"Criado(s) {criou} elemento(s) paralelo(s). Duplo clique esquerdo sai.")
         else:
             self._status(canvas, "Não foi possível criar paralelo da seleção.")
+        canvas.update()
 
     def _redesenhar(self, canvas) -> None:
         if self._fase == "posicionar" and self._ultima_posicao_mouse is not None:
@@ -243,7 +260,7 @@ class Ferramenta(FerramentaBase):
         self._selecao_contorno_completo = False
         canvas._selecionados = {self._alvo_idx}
         self._atualizar_realce(canvas)
-        self._status(canvas, "Trecho iniciado. Mova pelo perimetro para acrescentar partes; clique esquerdo mostra a paralela.")
+        self._status(canvas, "Trecho iniciado. Mova pelo perímetro para acrescentar partes; clique esquerdo mostra a paralela.")
         canvas.update()
         return True
 
@@ -311,7 +328,7 @@ class Ferramenta(FerramentaBase):
         self._preview_2 = []
         self._realce_segmentos = []
         self._limpar_selecao_canvas(canvas)
-        self._status(canvas, "Elemento paralelo criado. Nada ficou selecionado. Clique esquerdo inicia outro; direito finaliza.")
+        self._status(canvas, "Elemento paralelo criado. Nada ficou selecionado. Clique esquerdo continua; duplo clique esquerdo sai.")
         canvas.update()
         return True
 
@@ -339,13 +356,14 @@ class Ferramenta(FerramentaBase):
             self._limpar_selecao_canvas(canvas)
             canvas.update()
         self._operacao_finalizada = True
-        self._direito_confirma_fechamento = False
-        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; direito fecha.")
+        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; duplo clique esquerdo sai.")
 
     def _fechar(self, canvas) -> None:
+        self._limpar_estado()
         self._limpar_selecao_canvas(canvas)
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Elemento Paralelo finalizada. Voltando para Selecionar.")
+        canvas.update()
 
     def on_paint_overlay(self, canvas, painter):
         if len(self._preview) < 2 and len(self._preview_2) < 2 and not self._realce_segmentos:
@@ -538,29 +556,17 @@ class Ferramenta(FerramentaBase):
             out.append(inter if inter is not None else linhas[i][0])
         return out
 
-    def _pontos_juncao_offset(
-        self,
-        vertice_original: QPointF,
-        linha_anterior: tuple[QPointF, QPointF],
-        linha_atual: tuple[QPointF, QPointF],
-        distancia: float,
-    ) -> list[QPointF]:
+    def _pontos_juncao_offset(self, vertice_original: QPointF, linha_anterior: tuple[QPointF, QPointF], linha_atual: tuple[QPointF, QPointF], distancia: float) -> list[QPointF]:
         angulo = self._angulo_entre_segmentos(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
         if angulo < 0.35:
             return [self._media_pontos(linha_anterior[1], linha_atual[0])]
 
         inter = self._intersecao_linhas(linha_anterior[0], linha_anterior[1], linha_atual[0], linha_atual[1])
         if inter is not None:
-            tamanho_ref = max(
-                distancia * 4.0,
-                min(self._dist(linha_anterior[0], linha_anterior[1]), self._dist(linha_atual[0], linha_atual[1])) * 1.6,
-            )
+            tamanho_ref = max(distancia * 4.0, min(self._dist(linha_anterior[0], linha_anterior[1]), self._dist(linha_atual[0], linha_atual[1])) * 1.6)
             if self._dist(inter, linha_anterior[1]) > tamanho_ref or self._dist(inter, linha_atual[0]) > tamanho_ref:
                 return [self._media_pontos(linha_anterior[1], linha_atual[0])]
             return [inter]
-
-        # Linhas paralelas nao possuem ponto unico de encontro; nesse caso, a
-        # ponte reta fecha o trecho sem inverter a ordem da paralela.
         return self._ponte_canto_reta(linha_anterior[1], linha_atual[0], distancia)
 
     def _ponte_canto_reta(self, inicio: QPointF, fim: QPointF, distancia: float) -> list[QPointF]:
@@ -578,9 +584,18 @@ class Ferramenta(FerramentaBase):
         return out
 
     def _pontos_poly(self, el: dict) -> list[QPointF]:
-        if el.get("tipo") != "polyline":
+        if not isinstance(el, dict) or el.get("tipo") != "polyline":
             return []
-        return [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
+        pontos = []
+        for item in el.get("pontos", []) or []:
+            try:
+                if isinstance(item, dict):
+                    pontos.append(QPointF(float(item.get("x", 0.0)), float(item.get("y", 0.0))))
+                else:
+                    pontos.append(QPointF(float(item[0]), float(item[1])))
+            except Exception:
+                continue
+        return pontos
 
     def _offset_polyline(self, pts: list[QPointF], distancia: float, fechar: bool) -> list[QPointF]:
         if len(pts) < 2:
@@ -645,8 +660,6 @@ class Ferramenta(FerramentaBase):
 
     @staticmethod
     def _angulo_entre_segmentos(a1: QPointF, a2: QPointF, b1: QPointF, b2: QPointF) -> float:
-        from math import acos
-
         ax, ay = a2.x() - a1.x(), a2.y() - a1.y()
         bx, by = b2.x() - b1.x(), b2.y() - b1.y()
         da = sqrt(ax * ax + ay * ay)
