@@ -3,9 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from time import monotonic
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QValidator
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -110,6 +111,7 @@ class TextoDialog(QDialog):
         self.setWindowTitle("Criar texto")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
+        self.setFocusPolicy(Qt.StrongFocus)  # Mantém o foco no diálogo
         self.resize(560, 390)
         configurar_texto_canvas(canvas)
 
@@ -242,6 +244,16 @@ class TextoDialog(QDialog):
         super().closeEvent(event)
 
 
+class _EventFilter(QObject):
+    """Filtro de eventos auxiliar para manter o foco no diálogo."""
+    def __init__(self, ferramenta):
+        super().__init__()
+        self.ferramenta = ferramenta
+
+    def eventFilter(self, obj, event):
+        return self.ferramenta._event_filter(obj, event)
+
+
 class Ferramenta(FerramentaBase):
     id_ferramenta = "inserir_texto"
     nome = "Inserir Texto"
@@ -256,10 +268,35 @@ class Ferramenta(FerramentaBase):
     _valores_pos_ok_por_canvas: dict[int, dict] = {}
     _modo_pos_ok_por_canvas: dict[int, bool] = {}
     _ultima_abertura_por_canvas: dict[int, float] = {}
+    _event_filter_instalado = False
+    _event_filter_obj = None
 
     def __init__(self):
         super().__init__()
         self._dialogo_aberto = False
+
+    def _forcar_foco_dialogo(self):
+        """Força o foco para o diálogo de texto ativo."""
+        for dialog in self._dialog_por_canvas.values():
+            if dialog and not dialog.isHidden():
+                dialog.raise_()
+                dialog.activateWindow()
+                dialog.txt_texto.setFocus(Qt.OtherFocusReason)
+                return
+
+    def _event_filter(self, obj, event):
+        """Filtro global para manter o foco no diálogo."""
+        if not any(dlg and not dlg.isHidden() for dlg in self._dialog_por_canvas.values()):
+            return False
+        if event.type() == QEvent.FocusIn:
+            dialog_atual = None
+            for dlg in self._dialog_por_canvas.values():
+                if dlg and (obj is dlg or obj.parent() == dlg or obj in dlg.findChildren(QWidget)):
+                    dialog_atual = dlg
+                    break
+            if dialog_atual is None:
+                QTimer.singleShot(5, self._forcar_foco_dialogo)
+        return False
 
     def on_activate(self, canvas):
         configurar_texto_canvas(canvas)
@@ -279,6 +316,17 @@ class Ferramenta(FerramentaBase):
         mensagem_status(canvas, msg)
         canvas.update()
 
+        # Impede o canvas de receber foco
+        canvas.setFocusPolicy(Qt.NoFocus)
+
+        # Instala o filtro de eventos global
+        if not self._event_filter_instalado:
+            app = QApplication.instance()
+            if app:
+                self._event_filter_obj = _EventFilter(self)
+                app.installEventFilter(self._event_filter_obj)
+                self._event_filter_instalado = True
+
     def on_deactivate(self, canvas):
         self._parar_timer_mouse(canvas)
         self._remover_previa(canvas)
@@ -293,6 +341,17 @@ class Ferramenta(FerramentaBase):
         self._cursor_por_canvas.pop(id(canvas), None)
         self._valores_pos_ok_por_canvas.pop(id(canvas), None)
         self._modo_pos_ok_por_canvas.pop(id(canvas), None)
+
+        # Restaura a política de foco do canvas
+        canvas.setFocusPolicy(Qt.ClickFocus)
+
+        # Remove o filtro se não houver mais diálogos
+        if not self._dialog_por_canvas and self._event_filter_instalado:
+            app = QApplication.instance()
+            if app and self._event_filter_obj:
+                app.removeEventFilter(self._event_filter_obj)
+                self._event_filter_obj = None
+                self._event_filter_instalado = False
         return None
 
     def _limpar_estado_antigo_texto_em_maos(self, canvas) -> None:
@@ -721,4 +780,7 @@ class Ferramenta(FerramentaBase):
             return True
 
         event.accept()
-        return self._fixar_previa_como_copia_e_manter_caixa(canvas)
+        resultado = self._fixar_previa_como_copia_e_manter_caixa(canvas)
+        # Força o foco de volta para o diálogo após o clique
+        self._forcar_foco_dialogo()
+        return resultado

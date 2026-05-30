@@ -88,9 +88,9 @@ class VisualizacaoCanvas(QWidget):
         self._linha_espessura = 1.0
         self._linha_amplitude = 1.0
         self._unidade_sigla = "cm"
-        self._unidade_fator = 1.0  # 1 unidade de cena = 1 cm
+        self._unidade_fator = 1.0
         self._unidade_quadrado_sigla = "m"
-        self._unidade_quadrado_fator = 100.0  # 1 m = 100 cm de cena
+        self._unidade_quadrado_fator = 100.0
         self._precisao_medida = "0.01"
         self._casas_precisao = 2
         self._snap_angular_passo = 45.0
@@ -116,10 +116,10 @@ class VisualizacaoCanvas(QWidget):
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
-        self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None  # Para ferramenta reta
+        self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None
         self._ultimo_clique_direito_ts = 0.0
         self._sequencia_clique_direito = 0
-        self.lbl_status = None  # Será definido pela janela principal
+        self.lbl_status = None
         self._imagem_cache: dict[str, QPixmap] = {}
         self._mostrar_curva_original_emf = False
         self._piscando_ponto_restauracao_indices: set[int] = set()
@@ -129,7 +129,8 @@ class VisualizacaoCanvas(QWidget):
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Política de foco padrão: pode receber foco por clique
+        self.setFocusPolicy(Qt.ClickFocus)
 
         self.painel_coordenadas = PainelCoordenadas(self)
         self.painel_coordenadas.desfazer_ponto.connect(self._desfazer_ponto)
@@ -140,12 +141,25 @@ class VisualizacaoCanvas(QWidget):
         self.painel_coordenadas.set_unidade_medida(self._unidade_sigla, self._unidade_fator)
         self.painel_coordenadas.show()
 
+    # ========== MODIFICAÇÃO PRINCIPAL ==========
+    def mousePressEvent(self, event: QMouseEvent):
+        # Se a ferramenta ativa for "inserir_texto", não rouba o foco
+        if self.ferramenta_ativa == "inserir_texto":
+            event.accept()
+            if self._runtime_tool and hasattr(self._runtime_tool, "on_mouse_press"):
+                self._runtime_tool.on_mouse_press(self, event)
+            return
+        super().mousePressEvent(event)
+    # ========== FIM DA MODIFICAÇÃO ==========
+
     def set_zoom(self, zoom: float):
         self.zoom = max(0.025, min(zoom, 10000.0))
         self.zoom_changed.emit(self.zoom)
         self.update()
 
     def set_ferramenta_ativa(self, tool_id: str):
+        """Ativa a ferramenta e ajusta a política de foco do canvas."""
+        # Desativa a ferramenta anterior
         if self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
             self._runtime_tool.on_deactivate(self)
         self.cancelar_operacao_coordenadas(limpar_preview=True)
@@ -153,6 +167,14 @@ class VisualizacaoCanvas(QWidget):
         self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
             self._runtime_tool.on_activate(self)
+
+        # ========== MODIFICAÇÃO PARA INSERIR TEXTO ==========
+        if tool_id == "inserir_texto":
+            self.setFocusPolicy(Qt.NoFocus)  # Canvas não ganha foco por clique
+        else:
+            self.setFocusPolicy(Qt.ClickFocus)  # Comportamento normal
+        # ===================================================
+
         self._aguardando_retorno_selecao = False
         self._cliques_direito_reta = 0
         self._sequencia_clique_direito = 0
