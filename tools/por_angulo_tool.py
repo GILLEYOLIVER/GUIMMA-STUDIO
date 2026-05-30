@@ -21,6 +21,24 @@ from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
+def _formatar_numero(valor: float, casas: int = 2) -> str:
+    try:
+        numero = float(valor)
+    except Exception:
+        return str(valor)
+    if abs(numero) < 1e-10:
+        numero = 0.0
+    texto = f"{numero:.{max(0, int(casas))}f}"
+    if "." in texto:
+        texto = texto.rstrip("0").rstrip(".")
+    return texto or "0"
+
+
+class _SpinBoxSemZeros(QDoubleSpinBox):
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        return _formatar_numero(value, self.decimals())
+
+
 class _PainelPorAngulo(QFrame):
     def __init__(self, ferramenta: "Ferramenta", parent: QWidget | None = None):
         super().__init__(parent)
@@ -103,7 +121,7 @@ class _PainelPorAngulo(QFrame):
 
         lbl_ang = QLabel("Ângulo")
         lbl_ang.setObjectName("rotuloCampo")
-        self.spn_angulo = QDoubleSpinBox()
+        self.spn_angulo = _SpinBoxSemZeros()
         self.spn_angulo.setRange(-3600.0, 3600.0)
         self.spn_angulo.setDecimals(2)
         self.spn_angulo.setSingleStep(1.0)
@@ -112,9 +130,9 @@ class _PainelPorAngulo(QFrame):
 
         lbl_comp = QLabel("Comprimento")
         lbl_comp.setObjectName("rotuloCampo")
-        self.spn_comprimento = QDoubleSpinBox()
-        self.spn_comprimento.setRange(0.001, 100000.0)
-        self.spn_comprimento.setDecimals(3)
+        self.spn_comprimento = _SpinBoxSemZeros()
+        self.spn_comprimento.setRange(0.01, 100000.0)
+        self.spn_comprimento.setDecimals(2)
         self.spn_comprimento.setSingleStep(1.0)
         self.spn_comprimento.setKeyboardTracking(False)
 
@@ -144,9 +162,9 @@ class _PainelPorAngulo(QFrame):
         self.chk_comprimento_fixo.blockSignals(True)
         try:
             self.spn_angulo.setValue(float(angulo))
-            self.spn_comprimento.setValue(max(0.001, float(comprimento)))
+            self.spn_comprimento.setValue(max(0.01, float(comprimento)))
             self.chk_comprimento_fixo.setChecked(bool(fixo))
-            self.spn_comprimento.setSuffix(f" {unidade or 'cm'}")
+            self.spn_comprimento.setSuffix(str(unidade or "cm"))
         finally:
             self.spn_angulo.blockSignals(False)
             self.spn_comprimento.blockSignals(False)
@@ -180,7 +198,7 @@ class _PainelPorAngulo(QFrame):
                 salvar_posicao(self, self._chave_posicao)
             return
         if not restaurar_posicao(self, self._chave_posicao, fallback=self._ajustar_para_canvas(QPoint(10_000, 0))):
-            salvar_posicao(self, self._chave_posicao)
+            salvar_posicao(self._chave_posicao)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton and event.position().y() <= 56:
@@ -235,7 +253,7 @@ class Ferramenta(FerramentaBase):
             {"angulo": 0.0, "comprimento": 10.0, "comprimento_fixo": False},
         )
         self._angulo = float(cfg.get("angulo", 0.0) or 0.0)
-        self._comprimento = max(0.001, float(cfg.get("comprimento", 10.0) or 10.0))
+        self._comprimento = max(0.01, float(cfg.get("comprimento", 10.0) or 10.0))
         self._comprimento_fixo = bool(cfg.get("comprimento_fixo", False))
         self._origem = None
         self._preview = None
@@ -323,12 +341,13 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and self._origem is not None and self._preview is not None:
-            if self._adicionar_reta(canvas, self._origem, self._preview):
+            destino = QPointF(self._preview)
+            if self._adicionar_reta(canvas, self._origem, destino):
                 self._status(canvas, "Reta por ângulo criada. Nada ficou selecionado.")
             self._origem = None
             self._preview = None
             if hasattr(canvas, "finalizar_operacao_coordenadas"):
-                canvas.finalizar_operacao_coordenadas(self._preview)
+                canvas.finalizar_operacao_coordenadas(destino)
             canvas.update()
             event.accept()
             return True
@@ -389,7 +408,7 @@ class Ferramenta(FerramentaBase):
         if painel is None:
             return
         self._angulo = float(painel.spn_angulo.value())
-        self._comprimento = max(0.001, float(painel.spn_comprimento.value()))
+        self._comprimento = max(0.01, float(painel.spn_comprimento.value()))
         self._comprimento_fixo = bool(painel.chk_comprimento_fixo.isChecked())
         canvas = self._canvas
         if canvas is not None:
@@ -476,7 +495,7 @@ class Ferramenta(FerramentaBase):
         comprimento = self._distancia(origem, destino)
         comp_u = self._comprimento_de_cena(canvas, comprimento)
         unidade = str(getattr(canvas, "_unidade_sigla", "cm") or "cm")
-        texto = f"{self._angulo:.2f}°  |  {comp_u:.2f} {unidade}"
+        texto = f"{_formatar_numero(self._angulo, 2)}°  |  {_formatar_numero(comp_u, 2)}{unidade}"
         fonte = painter.font()
         fonte.setBold(True)
         fonte.setPointSize(max(8, fonte.pointSize()))
