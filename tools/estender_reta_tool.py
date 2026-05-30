@@ -5,6 +5,7 @@ from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtWidgets import QApplication, QDialog
 
 from tools.tool_base import FerramentaBase
 
@@ -39,6 +40,7 @@ class Ferramenta(FerramentaBase):
         self._preview: QPointF | None = None
 
     def on_activate(self, canvas) -> None:
+        self._ocultar_janela_auxiliar_antiga(canvas)
         super().on_activate(canvas)
         self._hover = None
         self._alvo = None
@@ -171,6 +173,46 @@ class Ferramenta(FerramentaBase):
             self._desenhar_rotulo(canvas, painter, p_preview, "nova ponta")
 
         painter.restore()
+
+    def _ocultar_janela_auxiliar_antiga(self, canvas) -> None:
+        """Remove a janela separada antiga para ficar apenas o painel interno do canvas."""
+        janela_principal = None
+        try:
+            janela_principal = canvas.window() if canvas is not None and hasattr(canvas, "window") else None
+        except Exception:
+            janela_principal = None
+
+        app = QApplication.instance()
+        filtro_removido = False
+        if app is not None and janela_principal is not None:
+            try:
+                app.removeEventFilter(janela_principal)
+                filtro_removido = True
+            except Exception:
+                filtro_removido = False
+
+        try:
+            dialogos: list[QDialog] = []
+            caixas = getattr(janela_principal, "_janelas_aux_instrucao", None) if janela_principal is not None else None
+            if isinstance(caixas, dict):
+                dialogo = caixas.get(self.id_ferramenta)
+                if isinstance(dialogo, QDialog):
+                    dialogos.append(dialogo)
+            if app is not None:
+                for widget in app.topLevelWidgets():
+                    if isinstance(widget, QDialog) and widget.windowTitle() == f"{self.nome} - Auxiliar":
+                        dialogos.append(widget)
+            for dialogo in dict.fromkeys(dialogos):
+                try:
+                    dialogo.hide()
+                except Exception:
+                    pass
+        finally:
+            if app is not None and janela_principal is not None and filtro_removido:
+                try:
+                    app.installEventFilter(janela_principal)
+                except Exception:
+                    pass
 
     def _limpar_estado(self, canvas) -> None:
         self._hover = None
