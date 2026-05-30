@@ -14,7 +14,6 @@ from tools.tool_base import FerramentaBase
 @dataclass
 class _OrigemExtensao:
     elemento_idx: int
-    segmento_idx: int
     ponto_movel_idx: int
     ponto_ancora_idx: int
     ponto_original: QPointF
@@ -39,7 +38,7 @@ class Ferramenta(FerramentaBase):
     descricao_painel = (
         "1) Clique na reta de origem para escolher a ponta mais próxima. "
         "2) Clique no elemento alvo. A reta será prolongada até a interseção. "
-        "Shift permite aceitar alvo antes da ponta original. Botão direito cancela."
+        "Botão direito cancela."
     )
     gerencia_coordenadas_operacao = True
 
@@ -57,10 +56,7 @@ class Ferramenta(FerramentaBase):
         self._origem = None
         self._hover_alvo = None
         self._preview = None
-        self._status(
-            canvas,
-            "Estender até elemento: clique na reta de origem; depois clique no elemento alvo.",
-        )
+        self._status(canvas, "Estender até elemento: clique na reta de origem; depois clique no elemento alvo.")
         if hasattr(canvas, "cancelar_operacao_coordenadas"):
             canvas.cancelar_operacao_coordenadas(limpar_preview=True)
         canvas.update()
@@ -143,7 +139,7 @@ class Ferramenta(FerramentaBase):
 
         aplicado = self._aplicar_extensao(canvas, self._origem, alvo.ponto_intersecao)
         if aplicado:
-            self._status(canvas, "Reta estendida até o elemento alvo. Clique em outra reta para continuar.")
+            self._status(canvas, "Reta estendida até o elemento alvo. Nada ficou selecionado.")
         else:
             self._status(canvas, "Estender até elemento: nenhuma alteração aplicada.")
         if hasattr(canvas, "finalizar_operacao_coordenadas"):
@@ -152,6 +148,8 @@ class Ferramenta(FerramentaBase):
         self._hover_origem = None
         self._hover_alvo = None
         self._preview = None
+        if hasattr(canvas, "_selecionados"):
+            canvas._selecionados.clear()
         canvas.update()
         event.accept()
         return True
@@ -237,7 +235,7 @@ class Ferramenta(FerramentaBase):
             if len(pontos) < 2:
                 continue
             for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
-                proj, dist = self._projetar_no_segmento(a, b, pos)
+                _proj, dist = self._projetar_no_segmento(a, b, pos)
                 if dist > tolerancia:
                     continue
                 origem = self._origem_para_segmento(idx, seg_idx, pontos, a, b, pos, dist)
@@ -276,7 +274,6 @@ class Ferramenta(FerramentaBase):
             return None
         return _OrigemExtensao(
             elemento_idx=elemento_idx,
-            segmento_idx=segmento_idx,
             ponto_movel_idx=movel_idx,
             ponto_ancora_idx=ancora_idx,
             ponto_original=QPointF(movel),
@@ -339,7 +336,6 @@ class Ferramenta(FerramentaBase):
         minimo_t = 0.001 if permitir_encurtar else comprimento
 
         if abs(den) <= 1e-9:
-            # Paralelo. Se for colinear, usa o ponto do segmento alvo mais próximo no sentido da extensão.
             if abs(self._cross(wx, wy, ux, uy)) > 1e-7:
                 return None
             t1 = ((a.x() - ax) * ux) + ((a.y() - ay) * uy)
@@ -374,9 +370,10 @@ class Ferramenta(FerramentaBase):
         pontos[origem.ponto_movel_idx] = QPointF(novo_ponto)
         elemento["pontos"] = [(float(p.x()), float(p.y())) for p in pontos]
         elemento.setdefault("metadados", {})["ultima_ferramenta"] = self.id_ferramenta
-        canvas._selecionados = {origem.elemento_idx}
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
+        if hasattr(canvas, "_selecionados"):
+            canvas._selecionados.clear()
         return True
 
     def _segmentos_elemento_alvo(self, elemento: dict) -> list[tuple[QPointF, QPointF]]:
