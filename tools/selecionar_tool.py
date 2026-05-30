@@ -41,14 +41,20 @@ class Ferramenta(FerramentaBase):
         self.set_status("Clique para selecionar. Arraste para seleção por área. RMB cicla sobrepostos.")
 
     def on_mouse_press(self, canvas, event) -> bool:
+        # Para selecionar curvas suaves, o teste precisa usar primeiro o ponto real
+        # do mouse sem snap. Se usar só o ponto com snap, o cursor pode ser puxado
+        # para um nó/controle e ficar longe do traçado visual da curva.
         pos_sem_snap = canvas._tela_para_cena(event.position())
-        pos = canvas._ponto_com_snap(event.position())
+        pos_snap = canvas._ponto_com_snap(event.position())
+
         if event.button() == Qt.RightButton:
-            if canvas._selecionar_proximo_em_ponto(pos):
+            if canvas._selecionar_proximo_em_ponto(pos_sem_snap) or canvas._selecionar_proximo_em_ponto(pos_snap):
                 self.set_status("Elemento alternado com botão direito.")
                 event.accept()
                 return True
-            indices_curva = self._indices_elementos_em_ponto(canvas, pos)
+            indices_curva = self._indices_elementos_em_ponto(canvas, pos_sem_snap)
+            if not indices_curva:
+                indices_curva = self._indices_elementos_em_ponto(canvas, pos_snap)
             if indices_curva:
                 canvas._selecionados = {indices_curva[0]}
                 self.set_status("Elemento alternado com botão direito.")
@@ -67,7 +73,9 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
 
-        indices = self._indices_elementos_em_ponto(canvas, pos)
+        indices = self._indices_elementos_em_ponto(canvas, pos_sem_snap)
+        if not indices:
+            indices = self._indices_elementos_em_ponto(canvas, pos_snap)
         if not indices and canvas._snap_resultado and canvas._snap_resultado.elemento_idx is not None:
             idx_snap = int(canvas._snap_resultado.elemento_idx)
             if 0 <= idx_snap < len(canvas.cena.elementos):
@@ -86,7 +94,7 @@ class Ferramenta(FerramentaBase):
                 if selecionado not in canvas._selecionados:
                     canvas._selecionados = {selecionado}
                 self._arrastando_selecao = True
-                self._ultimo_ponto_arrasto = pos
+                self._ultimo_ponto_arrasto = pos_snap
                 self._movido = False
                 self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
             self._inicio_caixa = None
@@ -121,13 +129,14 @@ class Ferramenta(FerramentaBase):
             canvas.update()
             event.accept()
             return True
-        pos = canvas._ponto_com_snap(event.position())
-        self._hover_idx = (self._indices_elementos_em_ponto(canvas, pos) or [None])[0]
+
+        pos_snap = canvas._ponto_com_snap(event.position())
+        self._hover_idx = (self._indices_elementos_em_ponto(canvas, pos_sem_snap) or self._indices_elementos_em_ponto(canvas, pos_snap) or [None])[0]
         if self._inicio_caixa is None:
             if canvas.lbl_status:
                 snap_info = f" | {canvas.descricao_snap_atual()}" if hasattr(canvas, "descricao_snap_atual") and canvas.descricao_snap_atual() else ""
-                canvas.lbl_status.setText(f"Selecionar | X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
-                self.set_status(f"Cursor X {pos.x():.2f} Y {pos.y():.2f}{snap_info}")
+                canvas.lbl_status.setText(f"Selecionar | X {pos_sem_snap.x():.2f} Y {pos_sem_snap.y():.2f}{snap_info}")
+                self.set_status(f"Cursor X {pos_sem_snap.x():.2f} Y {pos_sem_snap.y():.2f}{snap_info}")
             canvas.update()
             return True
         self._fim_caixa = pos_sem_snap
@@ -153,7 +162,7 @@ class Ferramenta(FerramentaBase):
             indices = []
 
         existentes = set(indices)
-        tolerancia = max(8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 0.08)
+        tolerancia = max(18.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 0.18)
 
         # A seleção nativa pega bem polylines retas. Para curvas suaves, como as
         # criadas por Curvas e Espirais, o desenho real é interpolado entre os
@@ -184,7 +193,7 @@ class Ferramenta(FerramentaBase):
         if el.get("tipo") == "polyline":
             pontos_base = self._pontos_polyline(el)
             if self._elemento_curva_suave(canvas, el) and len(pontos_base) >= 3:
-                return self._amostrar_curva_suave(pontos_base, amostras=18)
+                return self._amostrar_curva_suave(pontos_base, amostras=28)
             return pontos_base
         if el.get("tipo") == "bezier_quadratica":
             try:
@@ -192,7 +201,7 @@ class Ferramenta(FerramentaBase):
                 p1 = QPointF(*el["p1"])
                 p2 = QPointF(*el["p2"])
                 if hasattr(canvas, "_amostrar_bezier_quadratica"):
-                    return canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=48)
+                    return canvas._amostrar_bezier_quadratica(p0, p1, p2, segmentos=64)
                 return [p0, p1, p2]
             except Exception:
                 return []
@@ -210,6 +219,8 @@ class Ferramenta(FerramentaBase):
             or el.get("suavizar")
             or str(el.get("tipo_curva") or "").lower().startswith("spline")
             or str(el.get("renderizacao") or "").lower() == "curva_suave"
+            or str(el.get("subtipo_audaces") or "").lower() == "curva_predefinida"
+            or str(el.get("nome_curva_predefinida") or "").strip()
         )
 
     @staticmethod
@@ -225,14 +236,21 @@ class Ferramenta(FerramentaBase):
 
     def _pontos_polyline(self, el: dict) -> list[QPointF]:
         pontos: list[QPointF] = []
-        for item in el.get("pontos", []) or []:
+        origem = (
+            el.get("pontos")
+            or el.get("pontos_controle_curva")
+            or el.get("pontos_principais")
+            or el.get("pontos_controle")
+            or []
+        )
+        for item in origem:
             pt = self._qpoint_item(item)
             if pt is not None:
                 pontos.append(pt)
         return pontos
 
     @staticmethod
-    def _amostrar_curva_suave(controles: list[QPointF], amostras: int = 18) -> list[QPointF]:
+    def _amostrar_curva_suave(controles: list[QPointF], amostras: int = 28) -> list[QPointF]:
         if len(controles) < 3:
             return [QPointF(p) for p in controles]
         fechado = len(controles) > 3 and Ferramenta._dist_qp(controles[0], controles[-1]) <= 1e-7
