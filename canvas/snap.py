@@ -87,6 +87,8 @@ class SnapManager:
             if not self._participa_snap(elemento):
                 continue
             if tipo == "polyline":
+                if not self._elemento_proximo_cursor(elemento, cursor, tolerancia_cena * 2.5):
+                    continue
                 self._candidatos_polyline(idx, elemento, cursor, tolerancia_cena, candidatos)
                 segmentos.extend(self._segmentos_polyline(idx, elemento))
             elif tipo in {"circle", "esfera"}:
@@ -97,6 +99,61 @@ class SnapManager:
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade_elemento(cena, c.elemento_idx), self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
+
+    def _elemento_proximo_cursor(self, elemento: dict, cursor: QPointF, margem: float) -> bool:
+        assinatura = []
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "pontos_controle_principais",
+            "controle_auxiliares",
+            "pontos_auxiliares",
+            "pontos_principais",
+            "pontos_controle_curva",
+            "pontos_controle",
+            "controle_pontos",
+        ):
+            valor = elemento.get(chave)
+            if isinstance(valor, (list, tuple)):
+                primeiro = repr(valor[0]) if valor else ""
+                ultimo = repr(valor[-1]) if valor else ""
+                assinatura.append((chave, id(valor), len(valor), primeiro, ultimo))
+        assinatura = tuple(assinatura)
+        if elemento.get("_runtime_snap_bbox_assinatura") == assinatura:
+            bbox = elemento.get("_runtime_snap_bbox")
+        else:
+            pontos: list[QPointF] = []
+            pontos.extend(self._pontos_polyline(elemento))
+            for chave in (
+                "controle_cantos",
+                "pontos_controle_principais",
+                "controle_auxiliares",
+                "pontos_auxiliares",
+                "pontos_principais",
+                "pontos_controle_curva",
+                "pontos_controle",
+                "controle_pontos",
+            ):
+                pontos.extend(self._pontos_controle_serializados(elemento.get(chave, [])))
+            if pontos:
+                bbox = (
+                    min(p.x() for p in pontos),
+                    min(p.y() for p in pontos),
+                    max(p.x() for p in pontos),
+                    max(p.y() for p in pontos),
+                )
+            else:
+                bbox = None
+            elemento["_runtime_snap_bbox_assinatura"] = assinatura
+            elemento["_runtime_snap_bbox"] = bbox
+        if bbox is None:
+            return True
+        min_x, min_y, max_x, max_y = bbox
+        min_x -= margem
+        max_x += margem
+        min_y -= margem
+        max_y += margem
+        return min_x <= cursor.x() <= max_x and min_y <= cursor.y() <= max_y
 
     def _elemento_curva_suave(self, elemento: dict) -> bool:
         tipo_curva = str(elemento.get("tipo_curva") or "").strip().lower()

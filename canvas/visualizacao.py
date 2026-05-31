@@ -125,6 +125,10 @@ class VisualizacaoCanvas(QWidget):
         self._piscando_ponto_restauracao_indices: set[int] = set()
         self._piscando_ponto_restauracao_visivel = False
         self._piscando_ponto_restauracao_geracao = 0
+        self._zoom_interativo = False
+        self._timer_fim_zoom = QTimer(self)
+        self._timer_fim_zoom.setSingleShot(True)
+        self._timer_fim_zoom.timeout.connect(self._finalizar_zoom_interativo)
 
         self.setMinimumSize(100, 100)
         self.setAutoFillBackground(False)
@@ -1057,6 +1061,110 @@ class VisualizacaoCanvas(QWidget):
         return QPointF((ponto.x() - self.origem_cena.x()) * self.zoom,
                        (ponto.y() - self.origem_cena.y()) * self.zoom)
 
+    @staticmethod
+    def _coordenadas_bbox_elemento(elemento: dict):
+        if not isinstance(elemento, dict):
+            return
+
+        def adicionar(item):
+            try:
+                if isinstance(item, dict):
+                    yield float(item["x"]), float(item["y"])
+                elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                    yield float(item[0]), float(item[1])
+            except Exception:
+                return
+
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "pontos_controle_principais",
+            "controle_auxiliares",
+            "pontos_auxiliares",
+            "pontos_principais",
+            "pontos_controle_curva",
+            "pontos_controle",
+            "controle_pontos",
+            "marcacoes_no_perimetro",
+        ):
+            for item in elemento.get(chave, []) or []:
+                yield from adicionar(item)
+        for chave in ("p0", "p1", "p2", "centro", "fio_origem", "fio_fim", "pos"):
+            item = elemento.get(chave)
+            if item is not None:
+                yield from adicionar(item)
+
+    @staticmethod
+    def _assinatura_bbox_elemento(elemento: dict) -> tuple:
+        assinatura = []
+        for chave in (
+            "pontos",
+            "controle_cantos",
+            "pontos_controle_principais",
+            "controle_auxiliares",
+            "pontos_auxiliares",
+            "pontos_principais",
+            "pontos_controle_curva",
+            "pontos_controle",
+            "controle_pontos",
+            "marcacoes_no_perimetro",
+        ):
+            valor = elemento.get(chave)
+            if isinstance(valor, (list, tuple)):
+                primeiro = repr(valor[0]) if valor else ""
+                ultimo = repr(valor[-1]) if valor else ""
+                assinatura.append((chave, id(valor), len(valor), primeiro, ultimo))
+        for chave in ("p0", "p1", "p2", "centro", "fio_origem", "fio_fim", "pos"):
+            valor = elemento.get(chave)
+            if valor is not None:
+                assinatura.append((chave, repr(valor)))
+        return tuple(assinatura)
+
+    def _bbox_cena_elemento(self, elemento: dict) -> tuple[float, float, float, float] | None:
+        assinatura = self._assinatura_bbox_elemento(elemento)
+        if elemento.get("_runtime_bbox_assinatura") == assinatura:
+            return elemento.get("_runtime_bbox_cena")
+        pontos = list(self._coordenadas_bbox_elemento(elemento))
+        if not pontos:
+            elemento["_runtime_bbox_assinatura"] = assinatura
+            elemento["_runtime_bbox_cena"] = None
+            return None
+        xs = [p[0] for p in pontos]
+        ys = [p[1] for p in pontos]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+        elemento["_runtime_bbox_assinatura"] = assinatura
+        elemento["_runtime_bbox_cena"] = bbox
+        return bbox
+
+    def _elemento_proximo_ponto_cena(self, elemento: dict, ponto: QPointF, margem_cena: float) -> bool:
+        bbox = self._bbox_cena_elemento(elemento)
+        if bbox is None:
+            return True
+        min_x, min_y, max_x, max_y = bbox
+        return (
+            min_x - margem_cena <= ponto.x() <= max_x + margem_cena
+            and min_y - margem_cena <= ponto.y() <= max_y + margem_cena
+        )
+
+    def _elemento_visivel_no_viewport(self, elemento: dict, margem_px: float = 32.0) -> bool:
+        if elemento.get("tipo") == "imagem":
+            return True
+        bbox = self._bbox_cena_elemento(elemento)
+        if bbox is None:
+            return True
+        margem_cena = float(margem_px) / max(float(self.zoom), 0.001)
+        viewport_min_x = self.origem_cena.x() - margem_cena
+        viewport_min_y = self.origem_cena.y() - margem_cena
+        viewport_max_x = self.origem_cena.x() + (self.width() / max(float(self.zoom), 0.001)) + margem_cena
+        viewport_max_y = self.origem_cena.y() + (self.height() / max(float(self.zoom), 0.001)) + margem_cena
+        min_x, min_y, max_x, max_y = bbox
+        return not (
+            max_x < viewport_min_x
+            or min_x > viewport_max_x
+            or max_y < viewport_min_y
+            or min_y > viewport_max_y
+        )
+
     def _adicionar_candidato_snap(
             self,
             candidatos: list[SnapResult],
@@ -1164,6 +1272,8 @@ class VisualizacaoCanvas(QWidget):
         )
 
         for idx, el in enumerate(self.cena.elementos):
+            if not self._elemento_proximo_ponto_cena(el, pos_cena, tol_cena * 2.5):
+                continue
             if el.get("tipo") == "bezier_quadratica":
                 p0 = QPointF(*el["p0"])
                 p1 = QPointF(*el["p1"])
@@ -1637,6 +1747,8 @@ class VisualizacaoCanvas(QWidget):
             self._runtime_tool.on_canvas_resize(self)
 
     def wheelEvent(self, event: QWheelEvent):
+        self._zoom_interativo = True
+        self._timer_fim_zoom.start(140)
         cursor_tela = event.position()
         cursor_cena_antes = self._tela_para_cena(cursor_tela)
         delta = event.angleDelta().y()
@@ -1647,6 +1759,12 @@ class VisualizacaoCanvas(QWidget):
             cursor_cena_antes.y() - (cursor_tela.y() / self.zoom),
         )
         event.accept()
+
+    def _finalizar_zoom_interativo(self):
+        if not self._zoom_interativo:
+            return
+        self._zoom_interativo = False
+        self.update()
 
     def keyPressEvent(self, event):
         if (
@@ -1820,7 +1938,7 @@ class VisualizacaoCanvas(QWidget):
         painter = QPainter(self)
         fundo = getattr(self, "_cores_canvas", {}).get("fundo", "#000000")
         painter.fillRect(self.rect(), QColor(fundo))
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing, not self._zoom_interativo)
 
         if bool(getattr(self, "_grid_visivel", True)):
             self._desenhar_grade_canvas(painter)
@@ -1835,7 +1953,11 @@ class VisualizacaoCanvas(QWidget):
             p2_tela = self._cena_para_tela(self._destacar_reta_temporaria[1])
             painter.drawLine(p1_tela, p2_tela)
 
+        elementos_visiveis: set[int] = set()
         for idx, elemento in enumerate(self.cena.elementos):
+            if not self._elemento_visivel_no_viewport(elemento):
+                continue
+            elementos_visiveis.add(idx)
             if elemento.get("tipo") == "imagem":
                 self._desenhar_imagem_referencia(painter, elemento)
                 continue
@@ -1892,9 +2014,10 @@ class VisualizacaoCanvas(QWidget):
         for marca in getattr(self, "_marcacoes_temporarias", []) or []:
             self._desenhar_marca_x(painter, QPointF(marca), cor="#ff40ff", tamanho_px=6)
 
-        self._desenhar_overlays_moldes(painter)
+        if not self._zoom_interativo:
+            self._desenhar_overlays_moldes(painter, elementos_visiveis)
 
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
+        if not self._zoom_interativo and self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
         self._desenhar_overlay_snap_ativo(painter)
 
@@ -1972,6 +2095,8 @@ class VisualizacaoCanvas(QWidget):
         painter.setOpacity(0.34)
         for elemento in elementos:
             if not isinstance(elemento, dict):
+                continue
+            if not self._elemento_visivel_no_viewport(elemento):
                 continue
             cor = str(elemento.get("_cor_visualizacao_instantanea") or elemento.get("cor") or "#ffffff")
             esp = max(1.0, float(elemento.get("espessura", 1.0) or 1.0))
@@ -2144,9 +2269,11 @@ class VisualizacaoCanvas(QWidget):
         """
         return False
 
-    def _desenhar_overlays_moldes(self, painter: QPainter):
+    def _desenhar_overlays_moldes(self, painter: QPainter, elementos_visiveis: set[int] | None = None):
         for idx, el in enumerate(self.cena.elementos):
             if not el.get("molde"):
+                continue
+            if elementos_visiveis is not None and idx not in elementos_visiveis:
                 continue
             pontos = [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]
             if len(pontos) < 3:

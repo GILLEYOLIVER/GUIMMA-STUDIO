@@ -1,11 +1,57 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "contour_engine.h"
 #include "guimma_engine.h"
 #include "snap_engine.h"
 #include "spatial_index.h"
 
 namespace py = pybind11;
+
+namespace {
+
+using PointTuple = std::pair<double, double>;
+
+std::vector<guimma::Point> to_points(const std::vector<PointTuple>& points) {
+    std::vector<guimma::Point> out;
+    out.reserve(points.size());
+    for (const auto& [x, y] : points) {
+        out.push_back({x, y});
+    }
+    return out;
+}
+
+std::vector<std::vector<guimma::Point>> to_polylines(const std::vector<std::vector<PointTuple>>& polylines) {
+    std::vector<std::vector<guimma::Point>> out;
+    out.reserve(polylines.size());
+    for (const auto& polyline : polylines) {
+        out.push_back(to_points(polyline));
+    }
+    return out;
+}
+
+std::vector<PointTuple> to_tuples(const std::vector<guimma::Point>& points) {
+    std::vector<PointTuple> out;
+    out.reserve(points.size());
+    for (const auto& point : points) {
+        out.push_back({point.x, point.y});
+    }
+    return out;
+}
+
+py::object contour_result_to_python(const std::optional<guimma::ContourResult>& result) {
+    if (!result.has_value()) {
+        return py::none();
+    }
+    py::dict out;
+    out["valid"] = result->valid;
+    out["points"] = to_tuples(result->points);
+    out["area"] = result->area;
+    out["perimeter"] = result->perimeter;
+    return std::move(out);
+}
+
+}
 
 PYBIND11_MODULE(guimma_geometry_cpp, m) {
     m.doc() = "Motor geometrico C++ do GUIMMA STUDIO";
@@ -73,4 +119,32 @@ PYBIND11_MODULE(guimma_geometry_cpp, m) {
     });
 
     m.def("snap_kind_to_string", &guimma::snap_kind_to_string);
+
+    m.def("polygon_area", [](const std::vector<PointTuple>& polygon) {
+        return guimma::polygon_area(to_points(polygon));
+    });
+
+    m.def("polyline_length", [](const std::vector<PointTuple>& polyline) {
+        return guimma::polyline_length(to_points(polyline));
+    });
+
+    m.def("normalize_closed_polyline", [](const std::vector<PointTuple>& polyline, bool clockwise, double tolerance) {
+        return to_tuples(guimma::normalize_closed_polyline(to_points(polyline), clockwise, tolerance));
+    }, py::arg("polyline"), py::arg("clockwise") = true, py::arg("tolerance") = 1e-9);
+
+    m.def("point_in_polygon", [](double x, double y, const std::vector<PointTuple>& polygon) {
+        return guimma::point_in_polygon({x, y}, to_points(polygon));
+    });
+
+    m.def("point_in_polygon_or_boundary", [](double x, double y, const std::vector<PointTuple>& polygon, double tolerance) {
+        return guimma::point_in_polygon_or_boundary({x, y}, to_points(polygon), tolerance);
+    }, py::arg("x"), py::arg("y"), py::arg("polygon"), py::arg("tolerance") = 1e-7);
+
+    m.def("extract_smallest_enclosing_contour", [](const std::vector<std::vector<PointTuple>>& polylines, double x, double y, double tolerance) {
+        return contour_result_to_python(guimma::smallest_enclosing_contour(to_polylines(polylines), {x, y}, tolerance));
+    }, py::arg("polylines"), py::arg("x"), py::arg("y"), py::arg("tolerance") = 1e-6);
+
+    m.def("extract_local_enclosing_contour", [](const std::vector<std::vector<PointTuple>>& polylines, double x, double y, double search_radius, double tolerance) {
+        return contour_result_to_python(guimma::local_enclosing_contour(to_polylines(polylines), {x, y}, search_radius, tolerance));
+    }, py::arg("polylines"), py::arg("x"), py::arg("y"), py::arg("search_radius") = 20.0, py::arg("tolerance") = 0.01);
 }

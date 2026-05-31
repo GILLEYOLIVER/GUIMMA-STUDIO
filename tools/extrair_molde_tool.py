@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from shiboken6 import isValid
 
 from core.geometry.engine import internal_angle, point_segment_distance, polyline_perimeter
-from core.geometry_bridge import (
+from core.geometry_bridge_accelerated import (
     compose_closed_contour,
     create_mold_payload,
     extract_local_enclosing_contour,

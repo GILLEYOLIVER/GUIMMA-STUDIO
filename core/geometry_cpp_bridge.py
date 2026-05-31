@@ -1,11 +1,32 @@
 from __future__ import annotations
 
-from typing import Iterable
+import importlib.util
+from pathlib import Path
+import sys
+
+
+def _carregar_modulo_build_local():
+    build_dir = Path(__file__).resolve().parent / "geometry_cpp" / "build"
+    if not build_dir.is_dir():
+        return None
+    for pattern in ("guimma_geometry_cpp*.so", "guimma_geometry_cpp*.pyd", "guimma_geometry_cpp*.dylib"):
+        for artifact in sorted(build_dir.rglob(pattern)):
+            try:
+                spec = importlib.util.spec_from_file_location("guimma_geometry_cpp", artifact)
+                if spec is None or spec.loader is None:
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                sys.modules.setdefault("guimma_geometry_cpp", module)
+                spec.loader.exec_module(module)
+                return module
+            except Exception:
+                sys.modules.pop("guimma_geometry_cpp", None)
+    return None
 
 try:
     import guimma_geometry_cpp as _cpp
 except Exception:  # pragma: no cover - fallback quando o modulo C++ nao foi compilado
-    _cpp = None
+    _cpp = _carregar_modulo_build_local()
 
 
 def cpp_disponivel() -> bool:

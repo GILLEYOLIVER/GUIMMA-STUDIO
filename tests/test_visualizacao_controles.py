@@ -115,6 +115,35 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(cor.name(), QColor("#ffffff").name())
 
+    def test_elemento_fora_do_viewport_nao_precisa_ser_desenhado(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(800, 600)
+        canvas.zoom = 10.0
+        canvas.origem_cena = QPointF(0.0, 0.0)
+
+        self.assertTrue(canvas._elemento_visivel_no_viewport({"tipo": "polyline", "pontos": [(1.0, 1.0), (2.0, 2.0)]}))
+        self.assertFalse(canvas._elemento_visivel_no_viewport({"tipo": "polyline", "pontos": [(500.0, 500.0), (510.0, 510.0)]}))
+
+    def test_cache_bbox_invalida_quando_pontos_sao_substituidos(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(800, 600)
+        canvas.zoom = 10.0
+        canvas.origem_cena = QPointF(0.0, 0.0)
+        elemento = {"tipo": "polyline", "pontos": [(1.0, 1.0), (2.0, 2.0)]}
+
+        self.assertTrue(canvas._elemento_visivel_no_viewport(elemento))
+        elemento["pontos"] = [(500.0, 500.0), (510.0, 510.0)]
+
+        self.assertFalse(canvas._elemento_visivel_no_viewport(elemento))
+
+    def test_finalizar_zoom_interativo_restaura_renderizacao_completa(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas._zoom_interativo = True
+
+        canvas._finalizar_zoom_interativo()
+
+        self.assertFalse(canvas._zoom_interativo)
+
 
 if __name__ == "__main__":
     unittest.main()

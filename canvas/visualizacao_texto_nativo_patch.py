@@ -291,11 +291,15 @@ def aplicar_patch_texto_nativo_canvas() -> None:
 
     def paintEvent_com_texto(self, event):  # noqa: N802
         original_paint(self, event)
+        if getattr(self, "_zoom_interativo", False):
+            return
         try:
             painter = QPainter(self)
             try:
                 for idx, elemento in enumerate(list(getattr(getattr(self, "cena", None), "elementos", []) or [])):
                     if isinstance(elemento, dict) and str(elemento.get("tipo") or "").lower() == "texto":
+                        if hasattr(self, "_elemento_visivel_no_viewport") and not self._elemento_visivel_no_viewport(elemento, margem_px=96.0):
+                            continue
                         if idx in getattr(self, "_selecionados", set()):
                             desenhar_selecao_texto(self, painter, elemento)
                         desenhar_texto_nativo(self, painter, elemento)

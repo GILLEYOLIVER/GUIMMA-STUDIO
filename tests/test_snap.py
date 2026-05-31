@@ -9,7 +9,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
 
 from canvas.cena import CenaDocumento
-from canvas.snap import rotulo_tipo_snap, tipo_snap_movimento_fluido
+from canvas.snap import SnapManager, rotulo_tipo_snap, tipo_snap_movimento_fluido
 from canvas.visualizacao import VisualizacaoCanvas
 
 
@@ -57,6 +57,26 @@ class SnapRotuloTestCase(unittest.TestCase):
         self.assertEqual(ponto, QPointF(5.0, 0.0))
         self.assertIsNotNone(canvas._snap_resultado)
         self.assertIsNone(canvas._snap_resultado.elemento_idx)
+
+    def test_snap_nao_acumula_segmentos_de_elemento_distante(self):
+        class _SnapManagerContador(SnapManager):
+            def __init__(self):
+                super().__init__()
+                self.indices_segmentos = []
+
+            def _segmentos_polyline(self, idx, elemento):
+                self.indices_segmentos.append(idx)
+                return super()._segmentos_polyline(idx, elemento)
+
+        manager = _SnapManagerContador()
+        cena = CenaDocumento(elementos=[
+            {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]},
+            {"tipo": "polyline", "pontos": [(1000.0, 1000.0), (1010.0, 1000.0)]},
+        ])
+
+        manager.calcular_candidatos(cena, QPointF(5.0, 0.0), zoom=10.0)
+
+        self.assertEqual(manager.indices_segmentos, [0])
 
 
 if __name__ == "__main__":

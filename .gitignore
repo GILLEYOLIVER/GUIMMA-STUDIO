@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+core/geometry_cpp/build/
 
 # IDE files
 .idea/

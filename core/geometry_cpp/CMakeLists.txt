@@ -21,6 +21,17 @@ pybind11_add_module(guimma_geometry_cpp
 
 target_include_directories(guimma_geometry_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+if(APPLE)
+    execute_process(
+        COMMAND xcrun --sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE GUIMMA_MACOS_SDK
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(EXISTS "${GUIMMA_MACOS_SDK}/usr/include/c++/v1")
+        target_include_directories(guimma_geometry_cpp SYSTEM PRIVATE "${GUIMMA_MACOS_SDK}/usr/include/c++/v1")
+    endif()
+endif()
+
 target_compile_definitions(guimma_geometry_cpp PRIVATE VERSION_INFO="0.1.0")
 
 if(MSVC)
