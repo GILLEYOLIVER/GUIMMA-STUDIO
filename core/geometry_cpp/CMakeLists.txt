@@ -14,6 +14,7 @@ pybind11_add_module(guimma_geometry_cpp
     guimma_engine.cpp
     spatial_index.cpp
     snap_engine.cpp
+    curve_engine.cpp
 )
 
 target_include_directories(guimma_geometry_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
