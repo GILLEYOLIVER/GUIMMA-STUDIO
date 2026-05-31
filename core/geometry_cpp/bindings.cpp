@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 
 #include "contour_engine.h"
+#include "curve_engine.h"
 #include "guimma_engine.h"
 #include "snap_engine.h"
 #include "spatial_index.h"
@@ -119,6 +120,18 @@ PYBIND11_MODULE(guimma_geometry_cpp, m) {
     });
 
     m.def("snap_kind_to_string", &guimma::snap_kind_to_string);
+
+    m.def("sample_quadratic_bezier", [](PointTuple p0, PointTuple control, PointTuple p2, int segments) {
+        return to_tuples(guimma::sample_quadratic_bezier({p0.first, p0.second}, {control.first, control.second}, {p2.first, p2.second}, segments));
+    }, py::arg("p0"), py::arg("control"), py::arg("p2"), py::arg("segments") = 48);
+
+    m.def("sample_parabola_3p", [](PointTuple p0, PointTuple middle, PointTuple p2, int segments) {
+        return to_tuples(guimma::sample_parabola_3p({p0.first, p0.second}, {middle.first, middle.second}, {p2.first, p2.second}, segments));
+    }, py::arg("p0"), py::arg("middle"), py::arg("p2"), py::arg("segments") = 48);
+
+    m.def("sample_catmull_rom", [](const std::vector<PointTuple>& controls, int samples_per_span, bool closed) {
+        return to_tuples(guimma::sample_catmull_rom(to_points(controls), samples_per_span, closed));
+    }, py::arg("controls"), py::arg("samples_per_span") = 18, py::arg("closed") = false);
 
     m.def("polygon_area", [](const std::vector<PointTuple>& polygon) {
         return guimma::polygon_area(to_points(polygon));
