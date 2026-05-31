@@ -8,6 +8,11 @@ from PySide6.QtCore import QPointF
 
 from canvas.cena import CenaDocumento
 
+try:
+    import guimma_geometry_cpp as _guimma_cpp
+except Exception:  # pragma: no cover - o fallback Python deve continuar funcionando
+    _guimma_cpp = None
+
 
 @dataclass(slots=True)
 class SnapResult:
@@ -63,6 +68,9 @@ class SnapManager:
         self.tolerancia_px = tolerancia_px
         self.snap_grade = snap_grade
         self.passo_grade = max(0.001, passo_grade)
+        self._cpp_engine = None
+        self._cpp_assinatura = None
+        self._cpp_erro = False
 
     def calcular(self, cena: CenaDocumento, cursor: QPointF, zoom: float, tolerancia_px: float | None = None) -> SnapResult | None:
         candidatos_validos = self.calcular_candidatos(cena, cursor, zoom, tolerancia_px=tolerancia_px)
@@ -71,6 +79,18 @@ class SnapManager:
         return candidatos_validos[0]
 
     def calcular_candidatos(
+        self,
+        cena: CenaDocumento,
+        cursor: QPointF,
+        zoom: float,
+        tolerancia_px: float | None = None,
+    ) -> list[SnapResult]:
+        candidatos_cpp = self._calcular_candidatos_cpp(cena, cursor, zoom, tolerancia_px=tolerancia_px)
+        if candidatos_cpp is not None:
+            return candidatos_cpp
+        return self._calcular_candidatos_python(cena, cursor, zoom, tolerancia_px=tolerancia_px)
+
+    def _calcular_candidatos_python(
         self,
         cena: CenaDocumento,
         cursor: QPointF,
@@ -99,6 +119,118 @@ class SnapManager:
         candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
         candidatos_validos.sort(key=lambda c: (self._prioridade_elemento(cena, c.elemento_idx), self._prioridade(c.tipo), c.distancia))
         return candidatos_validos
+
+    def _calcular_candidatos_cpp(
+        self,
+        cena: CenaDocumento,
+        cursor: QPointF,
+        zoom: float,
+        tolerancia_px: float | None = None,
+    ) -> list[SnapResult] | None:
+        """Usa o motor C++ quando disponível; retorna None para cair no Python."""
+        if _guimma_cpp is None or self._cpp_erro:
+            return None
+        try:
+            engine = self._obter_engine_cpp(cena)
+            if engine is None:
+                return None
+            tolerancia_efetiva = self.tolerancia_px if tolerancia_px is None else tolerancia_px
+            tolerancia_cena = tolerancia_efetiva / max(zoom, 0.001)
+            pontos_cpp = engine.candidates(_guimma_cpp.Point(float(cursor.x()), float(cursor.y())), float(zoom), float(tolerancia_efetiva))
+            candidatos: list[SnapResult] = []
+            for item in pontos_cpp:
+                tipo = str(getattr(item, "kind_text", "") or "")
+                tipo = {
+                    "no": "nó",
+                    "ponto medio": "ponto médio",
+                    "intersecao": "interseção",
+                    "controle principal": "controle principal",
+                    "controle auxiliar": "controle auxiliar",
+                    "borda": "borda",
+                    "grade": "grade",
+                    "centro": "centro",
+                }.get(tipo, tipo or "snap")
+                ponto = QPointF(float(item.point.x), float(item.point.y))
+                candidatos.append(SnapResult(
+                    ponto=ponto,
+                    tipo=tipo,
+                    distancia=float(item.distance),
+                    elemento_idx=int(item.element_index) if int(item.element_index) >= 0 else None,
+                ))
+
+            # O motor C++ atual acelera polylines/controles/bordas/grade.
+            # Centro de círculo continua em Python para preservar comportamento.
+            for idx, elemento in enumerate(cena.elementos):
+                if not self._participa_snap(elemento):
+                    continue
+                if elemento.get("tipo") in {"circle", "esfera"}:
+                    self._candidatos_circulo(idx, elemento, cursor, candidatos)
+
+            candidatos_validos = [c for c in candidatos if c.distancia <= tolerancia_cena]
+            candidatos_validos.sort(key=lambda c: (self._prioridade_elemento(cena, c.elemento_idx), self._prioridade(c.tipo), c.distancia))
+            return candidatos_validos
+        except Exception:
+            self._cpp_erro = True
+            return None
+
+    def _assinatura_cpp(self, cena: CenaDocumento):
+        assinatura = []
+        for idx, elemento in enumerate(cena.elementos):
+            if not self._participa_snap(elemento):
+                continue
+            tipo = elemento.get("tipo")
+            partes = [idx, tipo, elemento.get("subtipo_audaces"), elemento.get("molde")]
+            for chave in (
+                "pontos",
+                "controle_cantos",
+                "pontos_controle_principais",
+                "controle_auxiliares",
+                "pontos_auxiliares",
+                "pontos_principais",
+                "pontos_controle_curva",
+                "pontos_controle",
+                "controle_pontos",
+                "pontos_tracado_real",
+                "tipo_curva",
+                "curva_suave",
+                "curva_editavel",
+            ):
+                valor = elemento.get(chave)
+                if isinstance(valor, (list, tuple)):
+                    partes.append((chave, id(valor), len(valor), repr(valor[0]) if valor else "", repr(valor[-1]) if valor else ""))
+                else:
+                    partes.append((chave, valor))
+            assinatura.append(tuple(partes))
+        return tuple(assinatura), self.snap_grade, self.passo_grade, self.tolerancia_px
+
+    def _obter_engine_cpp(self, cena: CenaDocumento):
+        assinatura = self._assinatura_cpp(cena)
+        if self._cpp_engine is not None and self._cpp_assinatura == assinatura:
+            return self._cpp_engine
+        engine = _guimma_cpp.SnapEngine()
+        engine.set_tolerance_px(float(self.tolerancia_px))
+        engine.set_grid(bool(self.snap_grade), float(self.passo_grade))
+        for idx, elemento in enumerate(cena.elementos):
+            if not self._participa_snap(elemento):
+                continue
+            if elemento.get("tipo") != "polyline":
+                continue
+            poly = _guimma_cpp.PolylineElement()
+            poly.element_index = int(idx)
+            poly.points = self._qpoints_para_cpp(self._pontos_borda_elemento(elemento))
+            poly.main_controls = self._qpoints_para_cpp(self._pontos_controle_serializados(elemento.get("controle_cantos", []) or elemento.get("pontos_controle_principais", [])))
+            poly.helper_controls = self._qpoints_para_cpp(self._pontos_controle_serializados(elemento.get("controle_auxiliares", []) or elemento.get("pontos_auxiliares", [])))
+            poly.official_controls = self._qpoints_para_cpp(self._controles_oficiais_elemento(elemento))
+            poly.participates = True
+            poly.element_priority = self._prioridade_elemento(cena, idx)
+            if len(poly.points) >= 2 or poly.official_controls or poly.main_controls or poly.helper_controls:
+                engine.add_polyline(poly)
+        self._cpp_engine = engine
+        self._cpp_assinatura = assinatura
+        return engine
+
+    def _qpoints_para_cpp(self, pontos: list[QPointF]):
+        return [_guimma_cpp.Point(float(p.x()), float(p.y())) for p in pontos]
 
     def _elemento_proximo_cursor(self, elemento: dict, cursor: QPointF, margem: float) -> bool:
         assinatura = []
