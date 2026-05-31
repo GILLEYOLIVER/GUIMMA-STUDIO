@@ -4,11 +4,21 @@ from math import cos, pi, sin, sqrt
 
 from PySide6.QtCore import QPointF
 
+try:
+    from tools import medicao_cpp_bridge as _medicao_cpp
+except Exception:  # pragma: no cover - fallback quando a ponte C++ nao existir
+    _medicao_cpp = None
+
 
 _EPS = 1e-9
 
 
 def _dist(a: QPointF, b: QPointF) -> float:
+    if _medicao_cpp is not None:
+        try:
+            return float(_medicao_cpp.dist(a, b))
+        except Exception:
+            pass
     return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)
 
 
@@ -37,6 +47,11 @@ def _pontos_lista(origem) -> list[QPointF]:
 
 
 def _dist_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> float:
+    if _medicao_cpp is not None:
+        try:
+            return float(_medicao_cpp.dist_ponto_segmento(a, b, p))
+        except Exception:
+            pass
     abx = b.x() - a.x()
     aby = b.y() - a.y()
     apx = p.x() - a.x()
@@ -50,6 +65,11 @@ def _dist_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> float:
 
 
 def _projetar_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> QPointF:
+    if _medicao_cpp is not None:
+        try:
+            return QPointF(_medicao_cpp.projetar_ponto_segmento(a, b, p))
+        except Exception:
+            pass
     abx = b.x() - a.x()
     aby = b.y() - a.y()
     apx = p.x() - a.x()
@@ -62,6 +82,11 @@ def _projetar_ponto_segmento(a: QPointF, b: QPointF, p: QPointF) -> QPointF:
 
 
 def _amostrar_bezier_quadratica(p0: QPointF, p1: QPointF, p2: QPointF, segmentos: int = 64) -> list[QPointF]:
+    if _medicao_cpp is not None:
+        try:
+            return _medicao_cpp.amostrar_bezier_quadratica(p0, p1, p2, segmentos=segmentos)
+        except Exception:
+            pass
     pontos: list[QPointF] = []
     n = max(4, int(segmentos))
     for i in range(n + 1):
@@ -97,6 +122,12 @@ def _amostrar_curva_suave(pontos_base: list[QPointF], segmentos_por_trecho: int 
         return [QPointF(p) for p in pontos_base]
 
     fechado = len(pontos_base) > 3 and _dist(pontos_base[0], pontos_base[-1]) <= 1e-6
+    if _medicao_cpp is not None and hasattr(_medicao_cpp, "amostrar_catmull_rom"):
+        try:
+            return _medicao_cpp.amostrar_catmull_rom(pontos_base, segmentos_por_trecho=segmentos_por_trecho, fechado=fechado)
+        except Exception:
+            pass
+
     pts = [QPointF(p) for p in (pontos_base[:-1] if fechado else pontos_base)]
     if len(pts) < 3:
         return [QPointF(p) for p in pontos_base]
@@ -164,6 +195,11 @@ def pontos_de_elemento(elemento: dict, canvas=None) -> list[QPointF]:
         controles = _controles_parabola_3p(elemento)
         if len(controles) == 3:
             p0, p_meio, p2 = controles
+            if _medicao_cpp is not None and hasattr(_medicao_cpp, "amostrar_parabola_3p"):
+                try:
+                    return _medicao_cpp.amostrar_parabola_3p(p0, p_meio, p2, segmentos=96)
+                except Exception:
+                    pass
             p1 = _controle_bezier_por_3_pontos(p0, p_meio, p2)
             return _amostrar_bezier_quadratica(p0, p1, p2, segmentos=96)
 
