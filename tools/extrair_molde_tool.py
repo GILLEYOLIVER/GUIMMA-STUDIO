@@ -977,6 +977,7 @@ class Ferramenta(FerramentaBase):
                 indices_cantos.append(idx_ref)
         indices_cantos = sorted({int(i) % len(base) for i in indices_cantos if 0 <= int(i) < len(base)})
         cantos = [base[i] for i in indices_cantos]
+        cantos = self._ordenar_controles_principais_extraidos(cantos)
         molde["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
 
         usar_auxiliares = bool(self._cfg.get("usar_auxiliares", True))
@@ -988,6 +989,11 @@ class Ferramenta(FerramentaBase):
         molde["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
         molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
         molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
+
+    def _ordenar_controles_principais_extraidos(self, cantos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(cantos) != 2:
+            return cantos
+        return sorted(cantos, key=lambda pt: (float(pt[0]), float(pt[1])))
 
     def _coletar_pontos_controle_existentes(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if not contorno:

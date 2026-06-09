@@ -19,6 +19,8 @@ else:
 
     from tools.excluir_ponto_tool import Ferramenta as FerramentaExcluirPonto
 
+_BaseWidget = QWidget if QWidget is not None else object
+
 
 class _FakeEvent:
     def __init__(self, pos):
@@ -35,7 +37,7 @@ class _FakeEvent:
         self.accepted = True
 
 
-class _FakeCanvas(QWidget):
+class _FakeCanvas(_BaseWidget):
     def __init__(self):
         super().__init__()
         self.zoom = 20.0
@@ -70,6 +72,9 @@ class _FakeCanvas(QWidget):
         )
 
     def _ponto_com_snap(self, pos):
+        return QPointF(pos)
+
+    def _tela_para_cena(self, pos):
         return QPointF(pos)
 
     def _dist(self, a, b):
@@ -124,6 +129,35 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         alvo = ferramenta._controle_molde_em_ponto(canvas, QPointF(5.8, 0.0))
 
         self.assertEqual(alvo, (0, "aux", 0))
+
+    def test_busca_ponto_usa_cursor_real_mesmo_com_snap_deslocado(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        canvas._ponto_com_snap = lambda _pos: QPointF(99.0, 99.0)
+        ferramenta = FerramentaExcluirPonto()
+        ferramenta._molde_confirmado_idx = 0
+
+        ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        self.assertEqual(ferramenta._hover_alvo, ("molde", 0, "aux", 0))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+
+        self.assertEqual(canvas.cena.elementos[0]["controle_auxiliares"], [(5.0, 2.5)])
+
+    def test_excluir_auxiliar_tambem_encontra_pontos_auxiliares_espelhados(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        molde = canvas.cena.elementos[0]
+        molde["controle_auxiliares"] = []
+        molde["pontos_auxiliares"] = [{"x": 5.0, "y": 0.0}, {"x": 5.0, "y": 2.5}]
+        ferramenta = FerramentaExcluirPonto()
+        ferramenta._molde_confirmado_idx = 0
+
+        ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        self.assertEqual(ferramenta._hover_alvo, ("molde", 0, "aux", 0))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+
+        self.assertEqual(molde["controle_auxiliares"], [(5.0, 2.5)])
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": 5.0, "y": 2.5}])
 
     def test_excluir_controle_trava_hover_no_proximo_controle(self):
         canvas = _FakeCanvas()
@@ -316,10 +350,30 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         ferramenta = FerramentaExcluirPonto()
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
 
         curva = canvas.cena.elementos[0]
         self.assertEqual(curva["pontos_principais"], [(0.0, 0.0), (10.0, 0.0)])
         self.assertEqual(curva["pontos"], [(0.0, 0.0), (10.0, 0.0)])
+
+    def test_elemento_livre_primeiro_clique_seleciona_segundo_exclui_vertice(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "pontos": [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)],
+        }
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertEqual(canvas.historico, 0)
+
+        ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+
+        self.assertEqual(canvas.cena.elementos[0]["pontos"], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(canvas.historico, 1)
 
 
 if __name__ == "__main__":

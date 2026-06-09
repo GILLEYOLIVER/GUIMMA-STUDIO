@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import QMessageBox
 
 from tools.tool_base import FerramentaBase
@@ -29,13 +29,26 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        pos = canvas._ponto_com_snap(event.position())
-        pos_sem_snap = canvas._tela_para_cena(event.position()) if hasattr(canvas, "_tela_para_cena") else pos
+        pos = self._posicao_evento_cena(canvas, event)
+        pos_snap = canvas._ponto_com_snap(event.position())
+        pos_sem_snap = pos
 
         if self._molde_confirmado_idx is None:
-            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos)
+            elemento_alvo = self._elemento_em_ponto(canvas, pos)
+            selecionados = self._indices_elementos_selecionados(canvas)
+            if elemento_alvo is not None and elemento_alvo not in selecionados:
+                el = canvas.cena.elementos[elemento_alvo]
+                if not el.get("molde"):
+                    canvas._selecionados = {elemento_alvo}
+                    self._atualizar_hover_selecao(canvas, pos)
+                    canvas.update()
+                    self.set_status("Elemento selecionado. Passe sobre o ponto desejado e clique novamente para excluir.")
+                    event.accept()
+                    return True
+
+            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos_snap)
             if idx_confirmar is not None:
-                self._confirmar_molde(canvas, idx_confirmar, pos)
+                self._confirmar_molde(canvas, idx_confirmar, pos_snap)
                 event.accept()
                 return True
 
@@ -43,7 +56,7 @@ class Ferramenta(FerramentaBase):
         if alvo_controle is not None:
             idx, tipo, controle_idx = alvo_controle
             if self._molde_confirmado_idx is not None and idx != self._molde_confirmado_idx:
-                self._confirmar_molde(canvas, idx, pos)
+                self._confirmar_molde(canvas, idx, pos_snap)
                 event.accept()
                 return True
             ponto_removido = self._ponto_controle_molde(canvas, idx, tipo, controle_idx) or QPointF(pos)
@@ -62,28 +75,30 @@ class Ferramenta(FerramentaBase):
             return True
 
         if self._molde_confirmado_idx is not None:
-            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos)
+            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos_snap)
             if idx_confirmar is not None and idx_confirmar != self._molde_confirmado_idx:
-                self._confirmar_molde(canvas, idx_confirmar, pos)
+                self._confirmar_molde(canvas, idx_confirmar, pos_snap)
                 event.accept()
                 return True
             self.set_status("Indique um ponto principal ou auxiliar do molde para apagar.")
             event.accept()
             return True
 
-        alvo_curva = self._controle_curva_em_ponto(canvas, pos)
+        selecionados = self._indices_elementos_selecionados(canvas)
+        alvo_curva = self._controle_curva_em_ponto(canvas, pos, selecionados or None)
         if alvo_curva is not None:
             idx, controle_idx = alvo_curva
             if not self._excluir_controle_curva(canvas, idx, controle_idx):
                 return False
             canvas._selecionados = {idx}
+            self._hover_alvo = None
             canvas._registrar_historico()
             canvas.update()
             self.set_status("Ponto de controle da curva excluído.")
             event.accept()
             return True
 
-        alvo = self._vertice_em_ponto(canvas, pos)
+        alvo = self._vertice_em_ponto(canvas, pos, selecionados or None)
         if alvo is None:
             self.set_status("Nenhum ponto encontrado para exclusão.")
             return False
@@ -121,6 +136,7 @@ class Ferramenta(FerramentaBase):
         el["pontos"] = pontos
         self._sincronizar_curva_livre(el, ponto_removido)
         canvas._selecionados = {idx}
+        self._hover_alvo = None
         canvas._registrar_historico()
         canvas.update()
         self.set_status("Ponto excluído com sucesso.")
@@ -128,9 +144,13 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
-        pos = canvas._ponto_com_snap(event.position())
+        pos = self._posicao_evento_cena(canvas, event)
         if self._molde_confirmado_idx is not None:
             alvo_controle = self._controle_molde_em_ponto_indices(canvas, pos, [self._molde_confirmado_idx], 22.0)
+        elif self._indices_elementos_selecionados(canvas) and self._atualizar_hover_selecao(canvas, pos):
+            canvas.update()
+            event.accept()
+            return True
         else:
             alvo_controle = self._controle_molde_em_ponto(canvas, pos)
         if alvo_controle is not None:
@@ -151,6 +171,43 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         event.accept()
         return True
+
+    def _posicao_evento_cena(self, canvas, event) -> QPointF:
+        if hasattr(canvas, "_tela_para_cena"):
+            try:
+                return canvas._tela_para_cena(event.position())
+            except Exception:
+                pass
+        return canvas._ponto_com_snap(event.position())
+
+    def _atualizar_hover_selecao(self, canvas, pos: QPointF) -> bool:
+        selecionados = self._indices_elementos_selecionados(canvas)
+        moldes = [
+            idx
+            for idx in selecionados
+            if canvas.cena.elementos[idx].get("tipo") == "polyline" and canvas.cena.elementos[idx].get("molde")
+        ]
+        if moldes:
+            alvo_controle = self._controle_molde_em_ponto_indices(canvas, pos, moldes, 18.0)
+            if alvo_controle is not None:
+                idx, tipo, controle_idx = alvo_controle
+                self._hover_alvo = ("molde", idx, tipo, controle_idx)
+                return True
+
+        alvo_curva = self._controle_curva_em_ponto(canvas, pos, selecionados)
+        if alvo_curva is not None:
+            idx, controle_idx = alvo_curva
+            self._hover_alvo = ("curva", idx, controle_idx)
+            return True
+
+        alvo_vertice = self._vertice_em_ponto(canvas, pos, selecionados)
+        if alvo_vertice is not None:
+            idx, ponto_idx = alvo_vertice
+            self._hover_alvo = ("vertice", idx, ponto_idx)
+            return True
+
+        self._hover_alvo = None
+        return False
 
     def on_paint_overlay(self, canvas, painter):
         self._desenhar_controles_molde_selecionado(canvas, painter)
@@ -176,10 +233,9 @@ class Ferramenta(FerramentaBase):
             _, idx, tipo, controle_idx = self._hover_alvo
             if not (0 <= idx < len(canvas.cena.elementos)):
                 return None
-            chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
-            controles = canvas.cena.elementos[idx].get(chave, []) or []
+            controles = self._controles_molde_tipo(canvas.cena.elementos[idx], tipo)
             if 0 <= controle_idx < len(controles):
-                return self._ponto_qt(controles[controle_idx])
+                return QPointF(controles[controle_idx][2])
         if kind == "curva":
             _, idx, controle_idx = self._hover_alvo
             if not (0 <= idx < len(canvas.cena.elementos)):
@@ -279,12 +335,21 @@ class Ferramenta(FerramentaBase):
             j = i
         return dentro
 
-    def _controle_molde_em_ponto(self, canvas, pos: QPointF) -> tuple[int, str, int] | None:
+    def _controle_molde_em_ponto(
+        self,
+        canvas,
+        pos: QPointF,
+        somente_selecionados: bool = False,
+    ) -> tuple[int, str, int] | None:
         selecionados = self._indices_moldes_selecionados(canvas)
         if selecionados:
             alvo = self._controle_molde_em_ponto_indices(canvas, pos, selecionados, 22.0)
             if alvo is not None:
                 return alvo
+            if somente_selecionados:
+                return None
+        elif somente_selecionados:
+            return None
         todos = [
             idx
             for idx, el in enumerate(canvas.cena.elementos)
@@ -308,11 +373,8 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline" or not el.get("molde"):
                 continue
-            for tipo, chave in (("canto", "controle_cantos"), ("aux", "controle_auxiliares")):
-                for c_idx, item in enumerate(el.get(chave, []) or []):
-                    pt = self._ponto_qt(item)
-                    if pt is None:
-                        continue
+            for tipo in ("canto", "aux"):
+                for c_idx, (_chave, _idx_original, pt) in enumerate(self._controles_molde_tipo(el, tipo)):
                     d = canvas._dist(pt, pos)
                     if d <= melhor_d:
                         melhor_d = d
@@ -320,6 +382,13 @@ class Ferramenta(FerramentaBase):
         return melhor
 
     def _indices_moldes_selecionados(self, canvas) -> list[int]:
+        return [
+            idx
+            for idx in self._indices_elementos_selecionados(canvas)
+            if canvas.cena.elementos[idx].get("tipo") == "polyline" and canvas.cena.elementos[idx].get("molde")
+        ]
+
+    def _indices_elementos_selecionados(self, canvas) -> list[int]:
         selecionados = getattr(canvas, "_selecionados", set()) or set()
         saida: list[int] = []
         for idx in selecionados:
@@ -330,9 +399,21 @@ class Ferramenta(FerramentaBase):
             if not (0 <= idx_int < len(canvas.cena.elementos)):
                 continue
             el = canvas.cena.elementos[idx_int]
-            if el.get("tipo") == "polyline" and el.get("molde"):
+            if el.get("tipo") == "polyline":
                 saida.append(idx_int)
         return saida
+
+    def _elemento_em_ponto(self, canvas, pos: QPointF) -> int | None:
+        todos = [
+            idx
+            for idx, el in enumerate(canvas.cena.elementos)
+            if el.get("tipo") == "polyline" and not el.get("molde")
+        ]
+        alvo_curva = self._controle_curva_em_ponto(canvas, pos, todos)
+        if alvo_curva is not None:
+            return alvo_curva[0]
+        alvo_vertice = self._vertice_em_ponto(canvas, pos, todos)
+        return alvo_vertice[0] if alvo_vertice is not None else None
 
     def _desenhar_controles_molde_selecionado(self, canvas, painter) -> None:
         indices = self._indices_moldes_selecionados(canvas)
@@ -342,31 +423,96 @@ class Ferramenta(FerramentaBase):
         painter.setRenderHint(QPainter.Antialiasing, True)
         for idx in indices:
             el = canvas.cena.elementos[idx]
-            for tipo, chave in (("canto", "controle_cantos"), ("aux", "controle_auxiliares")):
-                cor = QColor("#2da8ff") if tipo == "canto" else QColor("#7fd8ff")
-                painter.setPen(QPen(QColor("#ffffff"), 1.0))
-                painter.setBrush(cor)
-                raio = 4 if tipo == "canto" else 3
-                for item in el.get(chave, []) or []:
-                    pt = self._ponto_qt(item)
-                    if pt is None:
-                        continue
-                    tela = canvas._cena_para_tela(pt)
-                    painter.drawEllipse(int(tela.x() - raio), int(tela.y() - raio), raio * 2, raio * 2)
+            for tipo in ("canto", "aux"):
+                chave_cfg = "ponto_controle" if tipo == "canto" else "ponto_nao_graduado"
+                cor = self._cor_ponto_config(canvas, chave_cfg, "#ff4a3d" if tipo == "canto" else "#ff9a3d")
+                forma = self._forma_ponto_config(canvas, chave_cfg, "Circulo preenchido" if tipo == "canto" else "Losango")
+                tamanho = 9 if tipo == "canto" else 7
+                for _chave, _idx_original, pt in self._controles_molde_tipo(el, tipo):
+                    self._desenhar_marcador_configurado(canvas, painter, pt, cor, forma, tamanho)
         painter.restore()
 
     def _ponto_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> QPointF | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return None
-        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
-        controles = canvas.cena.elementos[idx].get(chave, []) or []
+        controles = self._controles_molde_tipo(canvas.cena.elementos[idx], tipo)
         if not (0 <= controle_idx < len(controles)):
             return None
-        return self._ponto_qt(controles[controle_idx])
+        return QPointF(controles[controle_idx][2])
 
     def _fixar_hover_proximo_controle(self, canvas, idx: int, pos: QPointF) -> None:
         alvo = self._controle_molde_em_ponto_indices(canvas, pos, [idx], 80.0)
         self._hover_alvo = ("molde", *alvo) if alvo is not None else None
+
+    def _cor_ponto_config(self, canvas, chave: str, padrao: str) -> str:
+        if hasattr(canvas, "_config_cor_molde"):
+            try:
+                return canvas._config_cor_molde(chave, padrao)
+            except Exception:
+                return padrao
+        return padrao
+
+    def _forma_ponto_config(self, canvas, chave: str, padrao: str) -> str:
+        if hasattr(canvas, "_config_forma_molde"):
+            try:
+                return canvas._config_forma_molde(chave, padrao)
+            except Exception:
+                return padrao
+        return padrao
+
+    def _desenhar_marcador_configurado(self, canvas, painter, ponto: QPointF, cor: str, forma: str, tamanho: int) -> None:
+        tela = canvas._cena_para_tela(ponto)
+        meio = max(3, int(round(tamanho / 2)))
+        forma_norm = self._normalizar_forma(forma)
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(QColor(cor))
+        if forma_norm == "quadrado":
+            painter.drawRect(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+        elif forma_norm == "losango":
+            painter.drawPolygon(
+                QPolygon(
+                    [
+                        QPoint(int(tela.x()), int(tela.y() - meio)),
+                        QPoint(int(tela.x() + meio), int(tela.y())),
+                        QPoint(int(tela.x()), int(tela.y() + meio)),
+                        QPoint(int(tela.x() - meio), int(tela.y())),
+                    ]
+                )
+            )
+        else:
+            painter.drawEllipse(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
+
+    @staticmethod
+    def _normalizar_forma(forma: str) -> str:
+        texto = str(forma or "").lower()
+        if "quadr" in texto:
+            return "quadrado"
+        if "los" in texto:
+            return "losango"
+        return "circulo"
+
+    def _controles_molde_tipo(self, el: dict, tipo: str) -> list[tuple[str, int, QPointF]]:
+        chaves = (
+            ("controle_cantos", "pontos_controle_principais")
+            if tipo == "canto"
+            else ("controle_auxiliares", "pontos_auxiliares")
+        )
+        saida: list[tuple[str, int, QPointF]] = []
+        vistos: set[tuple[float, float]] = set()
+        for chave in chaves:
+            valores = el.get(chave, []) or []
+            if not isinstance(valores, list):
+                continue
+            for idx_original, item in enumerate(valores):
+                pt = self._ponto_qt(item)
+                if pt is None:
+                    continue
+                assinatura = (round(float(pt.x()), 7), round(float(pt.y()), 7))
+                if assinatura in vistos:
+                    continue
+                vistos.add(assinatura)
+                saida.append((chave, idx_original, QPointF(pt)))
+        return saida
 
     def _excluir_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> bool:
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -375,9 +521,8 @@ class Ferramenta(FerramentaBase):
         if not el.get("molde"):
             return False
 
-        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
-        controles = list(el.get(chave, []) or [])
-        if not (0 <= controle_idx < len(controles)):
+        controles_tipo = self._controles_molde_tipo(el, tipo)
+        if not (0 <= controle_idx < len(controles_tipo)):
             self.set_status("Controle inválido para exclusão.")
             return False
 
@@ -388,11 +533,15 @@ class Ferramenta(FerramentaBase):
         recompor_segmentos = self._segmentos_para_recompor_apos_exclusao(canvas, el, tipo, controle_idx)
         if tipo == "canto":
             self._reorganizar_auxiliares_apos_excluir_canto(canvas, el, controle_idx)
-            controles = list(el.get(chave, []) or [])
             recompor_segmentos = set()
         else:
-            controles.pop(controle_idx)
-            el[chave] = [self._tupla_xy(item) for item in controles if self._tupla_xy(item) is not None]
+            restantes = [
+                QPointF(pt)
+                for pos, (_chave, _idx_original, pt) in enumerate(controles_tipo)
+                if pos != controle_idx
+            ]
+            el["controle_auxiliares"] = [(float(pt.x()), float(pt.y())) for pt in restantes]
+            el["pontos_auxiliares"] = [{"x": float(pt.x()), "y": float(pt.y())} for pt in restantes]
         if tipo != "canto":
             self._helper._garantir_auxiliares_minimos_curva_molde(
                 canvas,
@@ -404,6 +553,7 @@ class Ferramenta(FerramentaBase):
         if not self._regenerar_molde_por_controles(canvas, el):
             self.set_status("Exclusão cancelada: não foi possível regenerar o contorno.")
             return False
+        self._sincronizar_espelhos_controles_molde(el)
         return True
 
     def _deve_bloquear_exclusao_canto_molde(self, canvas, el: dict) -> bool:
@@ -501,6 +651,16 @@ class Ferramenta(FerramentaBase):
     @staticmethod
     def _ponto_medio(a: QPointF, b: QPointF) -> QPointF:
         return QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+
+    def _sincronizar_espelhos_controles_molde(self, el: dict) -> None:
+        cantos = [self._tupla_xy(item) for item in el.get("controle_cantos", []) or []]
+        auxiliares = [self._tupla_xy(item) for item in el.get("controle_auxiliares", []) or []]
+        cantos = [item for item in cantos if item is not None]
+        auxiliares = [item for item in auxiliares if item is not None]
+        el["controle_cantos"] = cantos
+        el["controle_auxiliares"] = auxiliares
+        el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
+        el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
 
     def _segmentos_para_recompor_apos_exclusao(self, canvas, el: dict, tipo: str, controle_idx: int) -> set[int]:
         cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
@@ -685,11 +845,15 @@ class Ferramenta(FerramentaBase):
     # ------------------------------------------------------------------
     # Elementos livres: comportamento antigo mantido.
     # ------------------------------------------------------------------
-    def _vertice_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
+    def _vertice_em_ponto(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
         melhor: tuple[int, int] | None = None
         melhor_d = tolerancia
-        for idx, el in enumerate(canvas.cena.elementos):
+        candidatos = indices if indices is not None else list(range(len(canvas.cena.elementos)))
+        for idx in candidatos:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline" or el.get("molde"):
                 continue
             if self._curva_editavel(el):
@@ -704,11 +868,15 @@ class Ferramenta(FerramentaBase):
                     melhor = (idx, p_idx)
         return melhor
 
-    def _controle_curva_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
+    def _controle_curva_em_ponto(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
         melhor: tuple[int, int] | None = None
         melhor_d = tolerancia
-        for idx, el in enumerate(canvas.cena.elementos):
+        candidatos = indices if indices is not None else list(range(len(canvas.cena.elementos)))
+        for idx in candidatos:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline" or el.get("molde") or not self._curva_editavel(el):
                 continue
             for controle_idx, pt in enumerate(self._controles_curva(el)):

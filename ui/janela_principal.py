@@ -346,9 +346,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         "tamanhos_menores": {"ativo": False, "cor": "#efefef"},
         "tamanho_base": {"ativo": False, "cor": "#efefef"},
         "tamanhos_maiores": {"ativo": False, "cor": "#efefef"},
-        "ponto_controle": {"ativo": False, "cor": "#efefef"},
-        "ponto_pique": {"ativo": False, "cor": "#efefef"},
-        "ponto_nao_graduado": {"ativo": False, "cor": "#efefef"},
+        "ponto_controle": {"ativo": False, "cor": "#efefef", "forma": "Circulo preenchido"},
+        "ponto_pique": {"ativo": False, "cor": "#efefef", "forma": "Quadrado preenchido"},
+        "ponto_nao_graduado": {"ativo": False, "cor": "#efefef", "forma": "Losango"},
     }
     ESTILO_LINHA_COSTURA_PADRAO = "dash"
     ZOOM_INICIAL_CANVAS = 8.760
@@ -862,6 +862,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                     continue
                 base[chave]["ativo"] = bool(valor.get("ativo", base[chave]["ativo"]))
                 base[chave]["cor"] = self._cor_hex_valida(valor.get("cor"), str(base[chave]["cor"]))
+                if "forma" in base[chave]:
+                    forma = str(valor.get("forma", base[chave]["forma"]) or base[chave]["forma"])
+                    if forma not in {"Circulo preenchido", "Quadrado preenchido", "Losango"}:
+                        forma = str(base[chave]["forma"])
+                    base[chave]["forma"] = forma
         return base
 
     def _carregar_opcoes_app(self) -> dict:
@@ -2625,8 +2630,8 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_dialogo_cores(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Cores")
-        dialog.resize(640, 760)
-        dialog.setMinimumSize(560, 520)
+        dialog.resize(780, 860)
+        dialog.setMinimumSize(720, 820)
         self._aplicar_estilo_claro_dialogo(dialog)
         raiz = QVBoxLayout(dialog)
         raiz.setContentsMargins(10, 10, 10, 10)
@@ -2723,6 +2728,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             ("tamanhos_maiores", "Tamanhos maiores"),
         ]
         widgets_moldes: dict[str, tuple[QCheckBox, QPushButton]] = {}
+        combos_pontos: dict[str, QComboBox] = {}
 
         def adicionar_item_molde(chave: str, texto: str, linha: int, coluna: int):
             cfg = self._cores_moldes_global.get(chave, self.CORES_MOLDES_PADRAO[chave])
@@ -2739,17 +2745,27 @@ class GuimmaStudioMainWindow(QMainWindow):
         for i, (chave, texto) in enumerate(campos_moldes_dir):
             adicionar_item_molde(chave, texto, i, 3)
 
-        base_row = max(len(campos_moldes_esq), len(campos_moldes_dir)) + 1
+        base_row = max(len(campos_moldes_esq), len(campos_moldes_dir))
+        separador_pontos = QFrame()
+        separador_pontos.setFrameShape(QFrame.HLine)
+        separador_pontos.setFrameShadow(QFrame.Sunken)
+        moldes.addWidget(separador_pontos, base_row, 0, 1, 6)
+        lbl_pontos = QLabel("Pontos")
+        lbl_pontos.setStyleSheet("font-weight:600; color:#202020;")
+        moldes.addWidget(lbl_pontos, base_row + 1, 0, 1, 6)
         for idx, (chave, texto, padrao) in enumerate((
             ("ponto_controle", "Ponto de controle", "Circulo preenchido"),
             ("ponto_pique", "Ponto de pique", "Quadrado preenchido"),
             ("ponto_nao_graduado", "Ponto nao graduado", "Losango"),
         )):
-            adicionar_item_molde(chave, texto, base_row + idx, 0)
+            linha = base_row + 2 + idx
+            adicionar_item_molde(chave, texto, linha, 0)
             cmb = QComboBox()
             cmb.addItems(["Circulo preenchido", "Quadrado preenchido", "Losango"])
-            cmb.setCurrentText(padrao)
-            moldes.addWidget(cmb, base_row + idx, 3, 1, 3)
+            cfg_ponto = self._cores_moldes_global.get(chave, self.CORES_MOLDES_PADRAO[chave])
+            cmb.setCurrentText(str(cfg_ponto.get("forma", padrao)))
+            combos_pontos[chave] = cmb
+            moldes.addWidget(cmb, linha, 3, 1, 3)
         layout.addWidget(gb_moldes)
 
         layout.addWidget(QCheckBox("Mostrar conforme definicao das ferramentas"))
@@ -2805,7 +2821,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                     for chave, botao in botoes_canvas.items()
                 },
                 "cores_moldes_global": {
-                    chave: {"ativo": chk.isChecked(), "cor": str(btn.property("cor") or "#efefef")}
+                    chave: {
+                        "ativo": chk.isChecked(),
+                        "cor": str(btn.property("cor") or "#efefef"),
+                        **({"forma": combos_pontos[chave].currentText()} if chave in combos_pontos else {}),
+                    }
                     for chave, (chk, btn) in widgets_moldes.items()
                 },
                 "estilo_linha_costura_global": str(cmb_estilo.currentData() or self.ESTILO_LINHA_COSTURA_PADRAO),
@@ -2823,6 +2843,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 item = cores_moldes.get(chave, self.CORES_MOLDES_PADRAO[chave])
                 chk.setChecked(bool(item.get("ativo", False)))
                 atualizar_botao_cor(btn, str(item.get("cor", "#efefef")))
+                if chave in combos_pontos:
+                    combos_pontos[chave].setCurrentText(str(item.get("forma", self.CORES_MOLDES_PADRAO[chave].get("forma", "Circulo preenchido"))))
             cmb_estilo.setCurrentIndex(max(0, cmb_estilo.findData(str(cfg.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)))))
             chk_cor_tecidos.setChecked(bool(cfg.get("mostrar_cor_tecidos_global", True)))
             chk_cor_tecidos_menu.setChecked(bool(cfg.get("mostrar_cor_tecidos_menu_global", False)))

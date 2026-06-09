@@ -171,6 +171,28 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertGreaterEqual(len(molde["controle_auxiliares"]), 8)
         self.assertLessEqual(len(molde["controle_auxiliares"]), 24)
 
+    def test_contorno_curvo_com_duas_pontas_numera_esquerda_antes_da_direita(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (10.0, 0.0),
+            (7.0, 2.4),
+            (2.0, 3.5),
+            (-4.0, 3.1),
+            (-10.0, 0.0),
+            (-4.0, -3.1),
+            (2.0, -3.5),
+            (7.0, -2.4),
+        ]
+        molde = {"tipo": "molde", "pontos": [*pontos, pontos[0]]}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertEqual(molde["controle_cantos"], [(-10.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(
+            molde["pontos_controle_principais"],
+            [{"x": -10.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+        )
+
     def test_trecho_curvo_longo_recebe_mais_auxiliares_para_definicao(self):
         ferramenta = FerramentaExtrairMolde()
         trecho = [(float(x), (float(x) - 5.0) ** 2 * 0.18) for x in range(11)]

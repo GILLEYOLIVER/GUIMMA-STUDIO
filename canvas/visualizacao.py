@@ -3458,16 +3458,20 @@ class VisualizacaoCanvas(QWidget):
                             espessura: float = 1.0, estilo: str = "solid", amplitude: float = 1.0,
                             fase_inicial: float = 0.0):
         if len(pontos) >= 2 and not is_geometric_line_style(estilo):
-            path = QPainterPath(self._cena_para_tela(pontos[0]))
-            for p in pontos[1:]:
-                path.lineTo(self._cena_para_tela(p))
-            pen = QPen(QColor(cor), espessura)
-            self._aplicar_estilo_caneta(pen, estilo)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPath(path)
+            painter.save()
+            try:
+                path = QPainterPath(self._cena_para_tela(pontos[0]))
+                for p in pontos[1:]:
+                    path.lineTo(self._cena_para_tela(p))
+                pen = QPen(QColor(cor), espessura)
+                self._aplicar_estilo_caneta(pen, estilo)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPath(path)
+            finally:
+                painter.restore()
             return
         fase = fase_inicial
         for inicio, fim in zip(pontos, pontos[1:]):

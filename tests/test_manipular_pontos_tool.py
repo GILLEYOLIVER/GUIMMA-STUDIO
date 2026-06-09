@@ -24,12 +24,14 @@ else:
     except ModuleNotFoundError:
         FerramentaMoverPonto = None
 
+_BaseWidget = QWidget if QWidget is not None else object
+
 
 class _FakeEvent:
-    def __init__(self, button=Qt.LeftButton, pos=None, modifiers=Qt.NoModifier):
-        self._button = button
+    def __init__(self, button=None, pos=None, modifiers=None):
+        self._button = button if button is not None else Qt.LeftButton
         self._pos = pos or QPointF(0.0, 0.0)
-        self._modifiers = modifiers
+        self._modifiers = modifiers if modifiers is not None else Qt.NoModifier
         self.accepted = False
 
     def button(self):
@@ -56,7 +58,7 @@ class _FakeCheck:
         return self._checked
 
 
-class _FakeCanvas(QWidget):
+class _FakeCanvas(_BaseWidget):
     def __init__(self):
         super().__init__()
         self.cena = SimpleNamespace(
@@ -163,7 +165,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         dist = ((px - proj_x) ** 2 + (py - proj_y) ** 2) ** 0.5
         self.assertLessEqual(dist, 10 ** -casas, f"{ponto} nao esta sobre a reta {inicio}->{fim}")
 
-    def test_um_auxiliar_fora_do_eixo_deforma_trecho_sem_mover_principais(self):
+    def test_um_auxiliar_entre_principais_mantem_trecho_reto(self):
         ferramenta = FerramentaManipularPontos()
 
         pontos = ferramenta._amostrar_trecho_molde(
@@ -171,10 +173,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
             segmentos=24,
         )
 
-        self.assertEqual((pontos[0].x(), pontos[0].y()), (0.0, 0.0))
-        self.assertEqual((pontos[-1].x(), pontos[-1].y()), (10.0, 0.0))
-        self.assertGreaterEqual(len(pontos), 17)
-        self.assertTrue(any(abs(p.x() - 5.0) <= 1e-7 and abs(p.y() - 4.0) <= 1e-7 for p in pontos))
+        self.assertEqual([(p.x(), p.y()) for p in pontos], [(0.0, 0.0), (10.0, 0.0)])
 
     def test_dois_auxiliares_entre_principais_transformam_trecho_em_curva(self):
         ferramenta = FerramentaManipularPontos()
@@ -591,7 +590,7 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_controle_principais"][1], {"x": 10.0, "y": 2.0})
         self.assertEqual(canvas.historico, 1)
 
-    def test_arrasta_auxiliar_ja_fora_da_reta_preserva_cantos_e_deforma_curva(self):
+    def test_arrasta_auxiliar_unico_preserva_cantos_sem_converter_reta_em_curva(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
             {
@@ -616,7 +615,8 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (10.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][0], (5.0, 3.0))
-        self.assertContemPonto(molde["pontos"], (5.0, 3.0))
+        self.assertEqual(molde["pontos"][:2], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertNotIn((5.0, 3.0), molde["pontos"])
 
     def test_auxiliar_pode_ultrapassar_outro_auxiliar_do_mesmo_trecho(self):
         canvas = _FakeCanvas()

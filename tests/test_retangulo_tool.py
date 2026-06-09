@@ -19,10 +19,12 @@ else:
 
     from tools.retangulo_tool import Ferramenta as FerramentaRetangulo
 
+_BaseWidget = QWidget if QWidget is not None else object
+
 
 class _FakeEvent:
-    def __init__(self, button=Qt.LeftButton, pos=None):
-        self._button = button
+    def __init__(self, button=None, pos=None):
+        self._button = button if button is not None else Qt.LeftButton
         self._pos = pos or QPointF(0.0, 0.0)
         self.accepted = False
 
@@ -36,7 +38,7 @@ class _FakeEvent:
         self.accepted = True
 
 
-class _FakeCanvas(QWidget):
+class _FakeCanvas(_BaseWidget):
     def __init__(self):
         super().__init__()
         self.cena = SimpleNamespace(elementos=[])
@@ -98,7 +100,7 @@ class RetanguloToolTestCase(unittest.TestCase):
         molde = canvas.cena.elementos[0]
         self.assertEqual(
             molde["controle_cantos"],
-            [(0.0, 4.0), (10.0, 4.0), (10.0, 0.0), (0.0, 0.0)],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)],
         )
         auxiliares = molde["controle_auxiliares"]
         self.assertEqual(len(auxiliares), 4)
@@ -122,6 +124,33 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.brushes_preview, [Qt.NoBrush])
         self.assertEqual(painter.salvou, 1)
         self.assertEqual(painter.restaurou, 1)
+
+    def test_retangulo_molde_numera_cantos_em_ordem_horaria_visual(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRetangulo()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(
+            molde["controle_cantos"],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)],
+        )
+        self.assertEqual(
+            molde["pontos_controle_principais"],
+            [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 4.0},
+                {"x": 0.0, "y": 4.0},
+            ],
+        )
+        self.assertEqual(
+            molde["pontos"],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0), (0.0, 0.0)],
+        )
 
 
 if __name__ == "__main__":
