@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -4544,6 +4545,8 @@ class ConfigurarCoresTecidosDialog(QDialog):
 
 
 def _log_propriedades_debug(mensagem: str):
+    if os.environ.get("GUIMMA_PROPRIEDADES_DEBUG") != "1":
+        return
     try:
         caminho = Path.home() / "guimma_propriedades_debug.log"
         linha = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [propriedades_tool] {mensagem}"

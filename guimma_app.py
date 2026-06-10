@@ -121,7 +121,7 @@ class GuimmaStudioApp:
         self._instalar_menu_contexto_usuario()
         self._corrigir_layout_aba_usuario()
         try:
-            self.janela_principal.ribbon.tabbar.currentChanged.connect(self._corrigir_layout_aba_usuario)
+            self.janela_principal.ribbon.tabbar.currentChanged.connect(self._on_ribbon_tab_changed)
         except Exception:
             pass
         QTimer.singleShot(0, self._corrigir_layout_aba_usuario)
@@ -153,6 +153,12 @@ class GuimmaStudioApp:
         pal.setColor(QPalette.Highlight, QColor("#2b7cd3"))
         pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         self.qt_app.setPalette(pal)
+
+    def _on_ribbon_tab_changed(self, *_args):
+        try:
+            self._fixar_nome_aba_usuario(self.janela_principal)
+        except Exception:
+            pass
 
     def _instalar_nome_fixo_aba_usuario(self):
         janela = self.janela_principal
@@ -269,7 +275,10 @@ class GuimmaStudioApp:
             janela = self.janela_principal
             rib = janela.ribbon
             self._fixar_nome_aba_usuario(janela)
-            self._corrigir_scroll_ribbon_principal(janela)
+            assinatura_scroll = rib.paginas.count()
+            if getattr(rib, "_scroll_ribbon_corrigido_assinatura", None) != assinatura_scroll:
+                self._corrigir_scroll_ribbon_principal(janela)
+                rib._scroll_ribbon_corrigido_assinatura = assinatura_scroll
             index = rib._tab_index_by_id("usuarios")
             if index is None:
                 return
@@ -312,12 +321,14 @@ class GuimmaStudioApp:
                 nova_area = rib._criar_viewport_pagina(pagina)
                 nova_area.setMinimumWidth(0)
                 rib.paginas.insertWidget(index, nova_area)
+                rib._cache_botoes_ribbon_valido = False
                 rib._usuario_layout_compacto_assinatura = assinatura
                 if pagina_visivel == index:
                     rib.paginas.setCurrentIndex(index)
                 rib.aplicar_tema(rib._tema_interface)
                 area_atual = nova_area
                 self._corrigir_scroll_ribbon_principal(janela)
+                rib._scroll_ribbon_corrigido_assinatura = rib.paginas.count()
 
             if hasattr(area_atual, "horizontalScrollBar"):
                 area_atual.horizontalScrollBar().setValue(0)

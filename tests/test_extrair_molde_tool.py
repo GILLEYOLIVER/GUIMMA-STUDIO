@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from importlib.util import find_spec
-from math import cos, pi, sin
+from math import atan2, cos, pi, sin
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -193,6 +193,39 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
             [{"x": -10.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
         )
 
+    def test_arraste_molde_com_snap_ativo_imanta_angulos_proximos(self):
+        ferramenta = FerramentaExtrairMolde()
+        canvas = SimpleNamespace(snap_ativo=True)
+        ferramenta._origem_arrasto_molde = QPointF(0.0, 0.0)
+        ferramenta._ultimo_pos_arrasto = QPointF(0.0, 0.0)
+
+        pos = ferramenta._posicao_arrasto_com_restricao(canvas, QPointF(8.0, 0.4))
+
+        self.assertAlmostEqual(pos.x(), 8.009993757800315)
+        self.assertAlmostEqual(pos.y(), 0.0)
+        self.assertEqual(ferramenta._angulo_arrasto_molde, 0.0)
+        self.assertIsNotNone(ferramenta._guia_arrasto_angular)
+
+        livre = ferramenta._posicao_arrasto_com_restricao(canvas, QPointF(8.0, 3.0))
+        self.assertEqual(livre, QPointF(8.0, 3.0))
+        self.assertIsNone(ferramenta._angulo_arrasto_molde)
+        self.assertIsNone(ferramenta._guia_arrasto_angular)
+
+        pos_45 = ferramenta._posicao_arrasto_com_restricao(canvas, QPointF(7.0, 8.0))
+        angulo = (atan2(pos_45.y(), pos_45.x()) * 180.0 / pi) % 360.0
+        self.assertAlmostEqual(angulo, 45.0)
+        self.assertEqual(ferramenta._angulo_arrasto_molde, 45.0)
+
+    def test_arraste_molde_sem_snap_permanece_livre(self):
+        ferramenta = FerramentaExtrairMolde()
+        canvas = SimpleNamespace(snap_ativo=False)
+        ferramenta._origem_arrasto_molde = QPointF(0.0, 0.0)
+        ferramenta._ultimo_pos_arrasto = QPointF(0.0, 0.0)
+
+        self.assertEqual(ferramenta._posicao_arrasto_com_restricao(canvas, QPointF(5.0, 2.0)), QPointF(5.0, 2.0))
+        self.assertIsNone(ferramenta._angulo_arrasto_molde)
+        self.assertIsNone(ferramenta._guia_arrasto_angular)
+
     def test_trecho_curvo_longo_recebe_mais_auxiliares_para_definicao(self):
         ferramenta = FerramentaExtrairMolde()
         trecho = [(float(x), (float(x) - 5.0) ** 2 * 0.18) for x in range(11)]
@@ -309,6 +342,82 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
 
         self.assertEqual(molde["controle_cantos"], [(8.0, 0.0)])
         self.assertIn((4.0, -2.0), molde["controle_auxiliares"])
+
+    def test_emenda_do_fechamento_vira_ponto_principal_ao_extrair(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [
+            (1.0, 3.0),
+            (4.0, 5.0),
+            (8.0, 4.0),
+            (11.0, 0.0),
+            (8.0, -4.0),
+            (4.0, -5.0),
+            (1.0, -3.0),
+            (1.0, 3.0),
+        ]
+        molde = {"tipo": "molde", "pontos": contorno, "ponto_emenda_referencia": (1.0, 3.0)}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertIn((1.0, 3.0), molde["controle_cantos"])
+
+    def test_extracao_usa_emenda_do_desenho_original_mesmo_com_contorno_rotacionado(self):
+        ferramenta = FerramentaExtrairMolde()
+        base = [
+            (cos(pi + ((2.0 * pi * i) / 48.0)) * 5.0, sin(pi + ((2.0 * pi * i) / 48.0)) * 3.0)
+            for i in range(48)
+        ]
+        desenho_original = [*base, base[0]]
+        contorno_extraido = [*base[18:], *base[:18], base[18]]
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [{"tipo": "polyline", "pontos": desenho_original, "fechado": True}]
+
+        self.assertTrue(ferramenta._criar_molde_de_contorno_extraido(canvas, contorno_extraido))
+
+        molde = canvas.cena.elementos[-1]
+        emenda = base[0]
+        self.assertEqual(len(molde["controle_cantos"]), 1)
+        self.assertTrue(
+            any(
+                ((x - emenda[0]) ** 2 + (y - emenda[1]) ** 2) ** 0.5 <= 1e-4
+                for x, y in molde["controle_cantos"]
+            )
+        )
+        self.assertFalse(
+            any(
+                ((x - 5.0) ** 2 + (y - 0.0) ** 2) ** 0.5 <= 1e-4
+                for x, y in molde["controle_cantos"]
+            )
+        )
+
+    def test_nome_e_fio_nascem_dentro_de_molde_concavo(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [
+            (0.0, 0.0),
+            (12.0, 0.0),
+            (12.0, 3.0),
+            (4.0, 3.0),
+            (4.0, 7.0),
+            (12.0, 7.0),
+            (12.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]
+        molde = {"tipo": "molde", "pontos": contorno, "nome_molde": "K123456789"}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        ponto_texto = tuple(molde["ponto_texto"])
+        self.assertTrue(ferramenta._ponto_dentro_poligono_coords(ponto_texto, contorno))
+        self.assertEqual(molde["referencia_texto_nome"], "Livre")
+        self.assertLess(molde["texto_nome_altura_cm"], 3.0)
+
+        x1, y1 = molde["fio_origem"]
+        x2, y2 = molde["fio_fim"]
+        for passo in range(7):
+            t = passo / 6.0
+            ponto = (x1 + ((x2 - x1) * t), y1 + ((y2 - y1) * t))
+            self.assertTrue(ferramenta._ponto_dentro_poligono_coords(ponto, contorno))
 
     def test_arraste_do_molde_extraido_nao_usa_snap_para_evitar_tremor(self):
         canvas = _FakeCanvasExtracao()

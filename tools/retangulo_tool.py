@@ -224,6 +224,8 @@ class Ferramenta(FerramentaBase):
             )
             canvas._selecionados = set()
         else:
+            p2 = QPointF(p3.x(), p1.y())
+            p4 = QPointF(p1.x(), p3.y())
             pontos = [p1, p2, p3, p4, p1]
             fase = 0.0
             for inicio, fim in zip(pontos, pontos[1:]):

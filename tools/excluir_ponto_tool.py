@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QMessageBox
 
 from tools.tool_base import FerramentaBase
@@ -29,34 +29,21 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        pos = self._posicao_evento_cena(canvas, event)
-        pos_snap = canvas._ponto_com_snap(event.position())
-        pos_sem_snap = pos
+        pos = canvas._ponto_com_snap(event.position())
+        pos_sem_snap = canvas._tela_para_cena(event.position()) if hasattr(canvas, "_tela_para_cena") else pos
 
         if self._molde_confirmado_idx is None:
-            elemento_alvo = self._elemento_em_ponto(canvas, pos)
-            selecionados = self._indices_elementos_selecionados(canvas)
-            if elemento_alvo is not None and elemento_alvo not in selecionados:
-                el = canvas.cena.elementos[elemento_alvo]
-                if not el.get("molde"):
-                    canvas._selecionados = {elemento_alvo}
-                    self._atualizar_hover_selecao(canvas, pos)
-                    canvas.update()
-                    self.set_status("Elemento selecionado. Passe sobre o ponto desejado e clique novamente para excluir.")
-                    event.accept()
-                    return True
-
-            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos_snap)
+            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos)
             if idx_confirmar is not None:
-                self._confirmar_molde(canvas, idx_confirmar, pos_snap)
+                self._confirmar_molde(canvas, idx_confirmar, pos)
                 event.accept()
                 return True
 
-        alvo_controle = self._controle_molde_em_ponto(canvas, pos)
+        alvo_controle = self._controle_molde_em_ponto(canvas, pos_sem_snap) or self._controle_molde_em_ponto(canvas, pos)
         if alvo_controle is not None:
             idx, tipo, controle_idx = alvo_controle
             if self._molde_confirmado_idx is not None and idx != self._molde_confirmado_idx:
-                self._confirmar_molde(canvas, idx, pos_snap)
+                self._confirmar_molde(canvas, idx, pos)
                 event.accept()
                 return True
             ponto_removido = self._ponto_controle_molde(canvas, idx, tipo, controle_idx) or QPointF(pos)
@@ -70,35 +57,39 @@ class Ferramenta(FerramentaBase):
             self._fixar_hover_proximo_controle(canvas, idx, ponto_removido)
             canvas._registrar_historico()
             canvas.update()
-            self.set_status("Controle do molde excluído e contorno regenerado.")
+            self.set_status("Ponto do molde excluído e curva recalculada.")
             event.accept()
             return True
 
         if self._molde_confirmado_idx is not None:
-            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos_snap)
+            idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos)
             if idx_confirmar is not None and idx_confirmar != self._molde_confirmado_idx:
-                self._confirmar_molde(canvas, idx_confirmar, pos_snap)
+                self._confirmar_molde(canvas, idx_confirmar, pos)
                 event.accept()
                 return True
             self.set_status("Indique um ponto principal ou auxiliar do molde para apagar.")
             event.accept()
             return True
 
-        selecionados = self._indices_elementos_selecionados(canvas)
-        alvo_curva = self._controle_curva_em_ponto(canvas, pos, selecionados or None)
+        alvo_curva = self._controle_curva_em_ponto(canvas, pos)
         if alvo_curva is not None:
             idx, controle_idx = alvo_curva
+            if idx not in (getattr(canvas, "_selecionados", set()) or set()):
+                canvas._selecionados = {idx}
+                canvas.update()
+                self.set_status("Elemento selecionado. Clique novamente no ponto para excluir.")
+                event.accept()
+                return True
             if not self._excluir_controle_curva(canvas, idx, controle_idx):
                 return False
             canvas._selecionados = {idx}
-            self._hover_alvo = None
             canvas._registrar_historico()
             canvas.update()
             self.set_status("Ponto de controle da curva excluído.")
             event.accept()
             return True
 
-        alvo = self._vertice_em_ponto(canvas, pos, selecionados or None)
+        alvo = self._vertice_em_ponto(canvas, pos)
         if alvo is None:
             self.set_status("Nenhum ponto encontrado para exclusão.")
             return False
@@ -107,6 +98,13 @@ class Ferramenta(FerramentaBase):
         if el.get("molde"):
             self.set_status("Em moldes, exclua apenas cantos/auxiliares oficiais, não pontos da amostra.")
             return False
+
+        if idx not in (getattr(canvas, "_selecionados", set()) or set()):
+            canvas._selecionados = {idx}
+            canvas.update()
+            self.set_status("Elemento selecionado. Clique novamente no ponto para excluir.")
+            event.accept()
+            return True
 
         pontos = list(el.get("pontos", []))
         if len(pontos) <= 2:
@@ -136,7 +134,6 @@ class Ferramenta(FerramentaBase):
         el["pontos"] = pontos
         self._sincronizar_curva_livre(el, ponto_removido)
         canvas._selecionados = {idx}
-        self._hover_alvo = None
         canvas._registrar_historico()
         canvas.update()
         self.set_status("Ponto excluído com sucesso.")
@@ -144,15 +141,15 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
-        pos = self._posicao_evento_cena(canvas, event)
+        pos = canvas._ponto_com_snap(event.position())
+        pos_sem_snap = canvas._tela_para_cena(event.position()) if hasattr(canvas, "_tela_para_cena") else pos
         if self._molde_confirmado_idx is not None:
-            alvo_controle = self._controle_molde_em_ponto_indices(canvas, pos, [self._molde_confirmado_idx], 22.0)
-        elif self._indices_elementos_selecionados(canvas) and self._atualizar_hover_selecao(canvas, pos):
-            canvas.update()
-            event.accept()
-            return True
+            alvo_controle = (
+                self._controle_molde_em_ponto_indices(canvas, pos_sem_snap, [self._molde_confirmado_idx], 22.0)
+                or self._controle_molde_em_ponto_indices(canvas, pos, [self._molde_confirmado_idx], 22.0)
+            )
         else:
-            alvo_controle = self._controle_molde_em_ponto(canvas, pos)
+            alvo_controle = self._controle_molde_em_ponto(canvas, pos_sem_snap) or self._controle_molde_em_ponto(canvas, pos)
         if alvo_controle is not None:
             idx, tipo, controle_idx = alvo_controle
             self._hover_alvo = ("molde", idx, tipo, controle_idx)
@@ -171,43 +168,6 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         event.accept()
         return True
-
-    def _posicao_evento_cena(self, canvas, event) -> QPointF:
-        if hasattr(canvas, "_tela_para_cena"):
-            try:
-                return canvas._tela_para_cena(event.position())
-            except Exception:
-                pass
-        return canvas._ponto_com_snap(event.position())
-
-    def _atualizar_hover_selecao(self, canvas, pos: QPointF) -> bool:
-        selecionados = self._indices_elementos_selecionados(canvas)
-        moldes = [
-            idx
-            for idx in selecionados
-            if canvas.cena.elementos[idx].get("tipo") == "polyline" and canvas.cena.elementos[idx].get("molde")
-        ]
-        if moldes:
-            alvo_controle = self._controle_molde_em_ponto_indices(canvas, pos, moldes, 18.0)
-            if alvo_controle is not None:
-                idx, tipo, controle_idx = alvo_controle
-                self._hover_alvo = ("molde", idx, tipo, controle_idx)
-                return True
-
-        alvo_curva = self._controle_curva_em_ponto(canvas, pos, selecionados)
-        if alvo_curva is not None:
-            idx, controle_idx = alvo_curva
-            self._hover_alvo = ("curva", idx, controle_idx)
-            return True
-
-        alvo_vertice = self._vertice_em_ponto(canvas, pos, selecionados)
-        if alvo_vertice is not None:
-            idx, ponto_idx = alvo_vertice
-            self._hover_alvo = ("vertice", idx, ponto_idx)
-            return True
-
-        self._hover_alvo = None
-        return False
 
     def on_paint_overlay(self, canvas, painter):
         self._desenhar_controles_molde_selecionado(canvas, painter)
@@ -233,9 +193,10 @@ class Ferramenta(FerramentaBase):
             _, idx, tipo, controle_idx = self._hover_alvo
             if not (0 <= idx < len(canvas.cena.elementos)):
                 return None
-            controles = self._controles_molde_tipo(canvas.cena.elementos[idx], tipo)
+            chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+            controles = canvas.cena.elementos[idx].get(chave, []) or []
             if 0 <= controle_idx < len(controles):
-                return QPointF(controles[controle_idx][2])
+                return self._ponto_qt(controles[controle_idx])
         if kind == "curva":
             _, idx, controle_idx = self._hover_alvo
             if not (0 <= idx < len(canvas.cena.elementos)):
@@ -335,21 +296,12 @@ class Ferramenta(FerramentaBase):
             j = i
         return dentro
 
-    def _controle_molde_em_ponto(
-        self,
-        canvas,
-        pos: QPointF,
-        somente_selecionados: bool = False,
-    ) -> tuple[int, str, int] | None:
+    def _controle_molde_em_ponto(self, canvas, pos: QPointF) -> tuple[int, str, int] | None:
         selecionados = self._indices_moldes_selecionados(canvas)
         if selecionados:
             alvo = self._controle_molde_em_ponto_indices(canvas, pos, selecionados, 22.0)
             if alvo is not None:
                 return alvo
-            if somente_selecionados:
-                return None
-        elif somente_selecionados:
-            return None
         todos = [
             idx
             for idx, el in enumerate(canvas.cena.elementos)
@@ -373,8 +325,14 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline" or not el.get("molde"):
                 continue
-            for tipo in ("canto", "aux"):
-                for c_idx, (_chave, _idx_original, pt) in enumerate(self._controles_molde_tipo(el, tipo)):
+            for tipo, chave in (("canto", "controle_cantos"), ("aux", "controle_auxiliares")):
+                controles = el.get(chave, []) or []
+                if tipo == "aux" and not controles:
+                    controles = el.get("pontos_auxiliares", []) or []
+                for c_idx, item in enumerate(controles):
+                    pt = self._ponto_qt(item)
+                    if pt is None:
+                        continue
                     d = canvas._dist(pt, pos)
                     if d <= melhor_d:
                         melhor_d = d
@@ -382,13 +340,6 @@ class Ferramenta(FerramentaBase):
         return melhor
 
     def _indices_moldes_selecionados(self, canvas) -> list[int]:
-        return [
-            idx
-            for idx in self._indices_elementos_selecionados(canvas)
-            if canvas.cena.elementos[idx].get("tipo") == "polyline" and canvas.cena.elementos[idx].get("molde")
-        ]
-
-    def _indices_elementos_selecionados(self, canvas) -> list[int]:
         selecionados = getattr(canvas, "_selecionados", set()) or set()
         saida: list[int] = []
         for idx in selecionados:
@@ -399,21 +350,9 @@ class Ferramenta(FerramentaBase):
             if not (0 <= idx_int < len(canvas.cena.elementos)):
                 continue
             el = canvas.cena.elementos[idx_int]
-            if el.get("tipo") == "polyline":
+            if el.get("tipo") == "polyline" and el.get("molde"):
                 saida.append(idx_int)
         return saida
-
-    def _elemento_em_ponto(self, canvas, pos: QPointF) -> int | None:
-        todos = [
-            idx
-            for idx, el in enumerate(canvas.cena.elementos)
-            if el.get("tipo") == "polyline" and not el.get("molde")
-        ]
-        alvo_curva = self._controle_curva_em_ponto(canvas, pos, todos)
-        if alvo_curva is not None:
-            return alvo_curva[0]
-        alvo_vertice = self._vertice_em_ponto(canvas, pos, todos)
-        return alvo_vertice[0] if alvo_vertice is not None else None
 
     def _desenhar_controles_molde_selecionado(self, canvas, painter) -> None:
         indices = self._indices_moldes_selecionados(canvas)
@@ -423,96 +362,33 @@ class Ferramenta(FerramentaBase):
         painter.setRenderHint(QPainter.Antialiasing, True)
         for idx in indices:
             el = canvas.cena.elementos[idx]
-            for tipo in ("canto", "aux"):
-                chave_cfg = "ponto_controle" if tipo == "canto" else "ponto_nao_graduado"
-                cor = self._cor_ponto_config(canvas, chave_cfg, "#ff4a3d" if tipo == "canto" else "#ff9a3d")
-                forma = self._forma_ponto_config(canvas, chave_cfg, "Circulo preenchido" if tipo == "canto" else "Losango")
-                tamanho = 9 if tipo == "canto" else 7
-                for _chave, _idx_original, pt in self._controles_molde_tipo(el, tipo):
-                    self._desenhar_marcador_configurado(canvas, painter, pt, cor, forma, tamanho)
+            for tipo, chave in (("canto", "controle_cantos"), ("aux", "controle_auxiliares")):
+                cor = QColor("#2da8ff") if tipo == "canto" else QColor("#7fd8ff")
+                painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                painter.setBrush(cor)
+                raio = 4 if tipo == "canto" else 3
+                for item in el.get(chave, []) or []:
+                    pt = self._ponto_qt(item)
+                    if pt is None:
+                        continue
+                    tela = canvas._cena_para_tela(pt)
+                    painter.drawEllipse(int(tela.x() - raio), int(tela.y() - raio), raio * 2, raio * 2)
         painter.restore()
 
     def _ponto_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> QPointF | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return None
-        controles = self._controles_molde_tipo(canvas.cena.elementos[idx], tipo)
+        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+        controles = canvas.cena.elementos[idx].get(chave, []) or []
+        if tipo == "aux" and not controles:
+            controles = canvas.cena.elementos[idx].get("pontos_auxiliares", []) or []
         if not (0 <= controle_idx < len(controles)):
             return None
-        return QPointF(controles[controle_idx][2])
+        return self._ponto_qt(controles[controle_idx])
 
     def _fixar_hover_proximo_controle(self, canvas, idx: int, pos: QPointF) -> None:
         alvo = self._controle_molde_em_ponto_indices(canvas, pos, [idx], 80.0)
         self._hover_alvo = ("molde", *alvo) if alvo is not None else None
-
-    def _cor_ponto_config(self, canvas, chave: str, padrao: str) -> str:
-        if hasattr(canvas, "_config_cor_molde"):
-            try:
-                return canvas._config_cor_molde(chave, padrao)
-            except Exception:
-                return padrao
-        return padrao
-
-    def _forma_ponto_config(self, canvas, chave: str, padrao: str) -> str:
-        if hasattr(canvas, "_config_forma_molde"):
-            try:
-                return canvas._config_forma_molde(chave, padrao)
-            except Exception:
-                return padrao
-        return padrao
-
-    def _desenhar_marcador_configurado(self, canvas, painter, ponto: QPointF, cor: str, forma: str, tamanho: int) -> None:
-        tela = canvas._cena_para_tela(ponto)
-        meio = max(3, int(round(tamanho / 2)))
-        forma_norm = self._normalizar_forma(forma)
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor(cor))
-        if forma_norm == "quadrado":
-            painter.drawRect(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
-        elif forma_norm == "losango":
-            painter.drawPolygon(
-                QPolygon(
-                    [
-                        QPoint(int(tela.x()), int(tela.y() - meio)),
-                        QPoint(int(tela.x() + meio), int(tela.y())),
-                        QPoint(int(tela.x()), int(tela.y() + meio)),
-                        QPoint(int(tela.x() - meio), int(tela.y())),
-                    ]
-                )
-            )
-        else:
-            painter.drawEllipse(int(tela.x() - meio), int(tela.y() - meio), meio * 2, meio * 2)
-
-    @staticmethod
-    def _normalizar_forma(forma: str) -> str:
-        texto = str(forma or "").lower()
-        if "quadr" in texto:
-            return "quadrado"
-        if "los" in texto:
-            return "losango"
-        return "circulo"
-
-    def _controles_molde_tipo(self, el: dict, tipo: str) -> list[tuple[str, int, QPointF]]:
-        chaves = (
-            ("controle_cantos", "pontos_controle_principais")
-            if tipo == "canto"
-            else ("controle_auxiliares", "pontos_auxiliares")
-        )
-        saida: list[tuple[str, int, QPointF]] = []
-        vistos: set[tuple[float, float]] = set()
-        for chave in chaves:
-            valores = el.get(chave, []) or []
-            if not isinstance(valores, list):
-                continue
-            for idx_original, item in enumerate(valores):
-                pt = self._ponto_qt(item)
-                if pt is None:
-                    continue
-                assinatura = (round(float(pt.x()), 7), round(float(pt.y()), 7))
-                if assinatura in vistos:
-                    continue
-                vistos.add(assinatura)
-                saida.append((chave, idx_original, QPointF(pt)))
-        return saida
 
     def _excluir_controle_molde(self, canvas, idx: int, tipo: str, controle_idx: int) -> bool:
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -521,8 +397,17 @@ class Ferramenta(FerramentaBase):
         if not el.get("molde"):
             return False
 
-        controles_tipo = self._controles_molde_tipo(el, tipo)
-        if not (0 <= controle_idx < len(controles_tipo)):
+        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+        controles = list(el.get(chave, []) or [])
+        if tipo == "aux" and not controles:
+            controles = list(el.get("pontos_auxiliares", []) or [])
+            el["controle_auxiliares"] = [
+                (float(pt.x()), float(pt.y()))
+                for pt in (self._ponto_qt(item) for item in controles)
+                if pt is not None
+            ]
+            controles = list(el.get("controle_auxiliares", []) or [])
+        if not (0 <= controle_idx < len(controles)):
             self.set_status("Controle inválido para exclusão.")
             return False
 
@@ -530,164 +415,580 @@ class Ferramenta(FerramentaBase):
             self.set_status("O molde precisa manter pelo menos 3 pontos principais.")
             return False
 
-        recompor_segmentos = self._segmentos_para_recompor_apos_exclusao(canvas, el, tipo, controle_idx)
-        if tipo == "canto":
-            self._reorganizar_auxiliares_apos_excluir_canto(canvas, el, controle_idx)
-            recompor_segmentos = set()
-        else:
-            restantes = [
-                QPointF(pt)
-                for pos, (_chave, _idx_original, pt) in enumerate(controles_tipo)
-                if pos != controle_idx
-            ]
-            el["controle_auxiliares"] = [(float(pt.x()), float(pt.y())) for pt in restantes]
-            el["pontos_auxiliares"] = [{"x": float(pt.x()), "y": float(pt.y())} for pt in restantes]
-        if tipo != "canto":
-            self._helper._garantir_auxiliares_minimos_curva_molde(
-                canvas,
-                el,
-                recompor_segmentos=recompor_segmentos,
-                normalizar_retas=False,
-            )
-        el["_controles_topologia_alterada"] = True
-        if not self._regenerar_molde_por_controles(canvas, el):
-            self.set_status("Exclusão cancelada: não foi possível regenerar o contorno.")
-            return False
-        self._sincronizar_espelhos_controles_molde(el)
-        return True
+        if self._excluir_controle_molde_por_controles_restantes(canvas, el, tipo, controle_idx):
+            return True
+
+        self.set_status("Exclusão cancelada: controles restantes insuficientes para regenerar a curva.")
+        return False
 
     def _deve_bloquear_exclusao_canto_molde(self, canvas, el: dict) -> bool:
         cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
-        if len(cantos) <= 3:
-            pontos = list(el.get("pontos", []) or [])
-            fechado = self._helper._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
-            return bool(fechado or len(cantos) >= 3)
-        return False
-
-    def _reorganizar_auxiliares_apos_excluir_canto(self, canvas, el: dict, controle_idx: int) -> None:
-        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
-        if not (0 <= controle_idx < len(cantos)):
-            return
         auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
         pontos = list(el.get("pontos", []) or [])
         fechado = self._helper._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
-        segmentos_antigos = self._helper._segmentos_cantos(cantos, fechado)
-        por_segmento = self._helper._auxiliares_por_segmento_indexados(cantos, segmentos_antigos, auxiliares, preferir_ordem=False)
-        segmentos_afetados = {
-            seg_idx
-            for seg_idx, (a_idx, b_idx) in enumerate(segmentos_antigos)
-            if a_idx == controle_idx or b_idx == controle_idx
-        }
-        pontos_qt = [p for p in (self._ponto_qt(item) for item in pontos) if p is not None]
-        trecho_curvo_afetado = False
-        for seg_idx in segmentos_afetados:
-            if not (0 <= seg_idx < len(segmentos_antigos)):
-                continue
-            a_idx, b_idx = segmentos_antigos[seg_idx]
-            existentes = [QPointF(pt) for _aux_idx, _t, pt in por_segmento.get(seg_idx, [])]
-            trecho = self._helper._trecho_contorno_molde(canvas, pontos_qt, cantos, a_idx, b_idx, fechado)
-            if self._helper._segmento_molde_eh_curvo(cantos[a_idx], cantos[b_idx], trecho, existentes):
-                trecho_curvo_afetado = True
-                break
+        return bool(fechado and (len(cantos) + len(auxiliares)) <= 3)
 
-        auxiliares_preservados: list[QPointF] = []
-        for seg_idx, itens in por_segmento.items():
-            if seg_idx in segmentos_afetados:
-                continue
-            auxiliares_preservados.extend(QPointF(pt) for _aux_idx, _t, pt in itens)
-
-        novos_cantos = [QPointF(pt) for idx, pt in enumerate(cantos) if idx != controle_idx]
-        if len(novos_cantos) >= 2:
-            anterior = cantos[(controle_idx - 1) % len(cantos)]
-            proximo = cantos[(controle_idx + 1) % len(cantos)]
-            if trecho_curvo_afetado:
-                trecho_unido = self._helper._trecho_contorno_molde(
-                    canvas,
-                    pontos_qt,
-                    cantos,
-                    (controle_idx - 1) % len(cantos),
-                    (controle_idx + 1) % len(cantos),
-                    fechado,
-                )
-                for aux in self._helper._amostrar_auxiliares_minimos_trecho(
-                    trecho_unido,
-                    anterior,
-                    proximo,
-                    quantidade=6,
-                ):
-                    if self._dist_local(aux, anterior) <= 1e-6 or self._dist_local(aux, proximo) <= 1e-6:
-                        continue
-                    auxiliares_preservados.append(aux)
-            else:
-                auxiliares_preservados.append(self._ponto_medio(anterior, proximo))
-
-        auxiliares_final = self._garantir_um_auxiliar_em_cada_reta(canvas, el, novos_cantos, auxiliares_preservados)
-        el["controle_cantos"] = [(float(p.x()), float(p.y())) for p in novos_cantos]
-        el["controle_auxiliares"] = [(float(p.x()), float(p.y())) for p in auxiliares_final]
-        el["pontos_controle_principais"] = [{"x": float(p.x()), "y": float(p.y())} for p in novos_cantos]
-        el["pontos_auxiliares"] = [{"x": float(p.x()), "y": float(p.y())} for p in auxiliares_final]
-
-    def _garantir_um_auxiliar_em_cada_reta(
+    def _excluir_controle_molde_por_controles_restantes(
         self,
         canvas,
         el: dict,
+        tipo: str,
+        controle_idx: int,
+    ) -> bool:
+        chave = "controle_cantos" if tipo == "canto" else "controle_auxiliares"
+        controles = list(el.get(chave, []) or [])
+        if not (0 <= controle_idx < len(controles)):
+            return False
+        alvo = self._ponto_qt(controles[controle_idx])
+        if alvo is None:
+            return False
+
+        pontos_anteriores = [self._tupla_xy(item) for item in el.get("pontos", []) or []]
+        pontos_anteriores = [pt for pt in pontos_anteriores if pt is not None]
+        cantos_anteriores = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+        fechado = self._contorno_fechado_por_tuplas(pontos_anteriores) or bool(el.get("fechado"))
+        segmento_repor_auxiliares = None
+        if tipo == "aux":
+            segmento_repor_auxiliares = self._segmento_principal_do_ponto(
+                pontos_anteriores,
+                cantos_anteriores,
+                alvo,
+                fechado,
+            )
+        segmento_recalcular_canto = None
+        if tipo == "canto":
+            segmento_recalcular_canto = self._segmento_mesclado_ao_remover_canto(
+                pontos_anteriores,
+                cantos_anteriores,
+                alvo,
+                fechado,
+            )
+
+        controles.pop(controle_idx)
+        novos_controles = [self._tupla_xy(item) for item in controles if self._tupla_xy(item) is not None]
+        outra_chave = "controle_auxiliares" if tipo == "canto" else "controle_cantos"
+        outros_controles = self._remover_ponto_duplicado_de_controles(el.get(outra_chave, []) or [], alvo)
+
+        if tipo == "canto":
+            novos_cantos = novos_controles
+            novos_auxiliares = outros_controles
+        else:
+            novos_cantos = outros_controles
+            novos_auxiliares = novos_controles
+        if tipo == "canto":
+            realocados = self._realocar_canto_removido(
+                pontos_anteriores,
+                novos_cantos,
+                novos_auxiliares,
+                alvo,
+                fechado,
+            )
+            if realocados is None:
+                return False
+            novos_cantos, novos_auxiliares = realocados
+        novos_cantos = self._ordenar_controles_no_contorno(novos_cantos, pontos_anteriores, fechado)
+        cantos = [p for p in (self._ponto_qt(item) for item in novos_cantos) if p is not None]
+        auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
+        if segmento_repor_auxiliares is not None:
+            novos_auxiliares = self._garantir_minimo_auxiliares_no_segmento(
+                pontos_anteriores,
+                cantos,
+                auxiliares,
+                segmento_repor_auxiliares,
+                fechado,
+                evitar=[alvo],
+            )
+            auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
+        minimo = 3 if fechado else 2
+        segmento_local = segmento_repor_auxiliares or segmento_recalcular_canto
+        if segmento_local is not None:
+            if segmento_recalcular_canto is not None:
+                novos_auxiliares = self._garantir_minimo_auxiliares_no_segmento(
+                    pontos_anteriores,
+                    cantos,
+                    auxiliares,
+                    segmento_recalcular_canto,
+                    fechado,
+                    evitar=[alvo],
+                )
+                auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
+            novos_pontos = self._regenerar_apenas_segmento_auxiliar(
+                pontos_anteriores,
+                cantos,
+                auxiliares,
+                segmento_local,
+                fechado,
+            )
+        else:
+            controles_ordenados = self._controles_molde_restantes_ordenados(canvas, pontos_anteriores, cantos, auxiliares, fechado)
+            if len(controles_ordenados) < minimo:
+                return False
+            novos_pontos = self._helper._gerar_tracado_curva_real(
+                controles_ordenados,
+                fechado=fechado,
+                tipo_curva="spline_catmull_rom",
+            )
+        if len(novos_pontos) < minimo:
+            return False
+        if fechado and novos_pontos and not self._contorno_fechado_por_tuplas(novos_pontos):
+            novos_pontos.append(novos_pontos[0])
+
+        el["controle_cantos"] = [(float(x), float(y)) for x, y in novos_cantos]
+        el["controle_auxiliares"] = [(float(x), float(y)) for x, y in novos_auxiliares]
+        el["pontos"] = [(float(x), float(y)) for x, y in novos_pontos]
+        el["fechado"] = bool(fechado)
+        self._sincronizar_controles_molde(el)
+        for temp_key in (
+            "_controles_topologia_alterada",
+            "_segmentos_auxiliares_arraste",
+            "_auxiliares_retos_arraste",
+            "_auxiliar_arrastado_idx",
+        ):
+            el.pop(temp_key, None)
+        return True
+
+    def _garantir_minimo_auxiliares_no_segmento(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
         cantos: list[QPointF],
         auxiliares: list[QPointF],
-    ) -> list[QPointF]:
-        if len(cantos) < 2:
-            return [QPointF(p) for p in auxiliares]
-        fechado = self._helper._molde_fechado_por_pontos_ou_controles(canvas, el, el.get("pontos", []) or [], cantos)
-        segmentos = self._helper._segmentos_cantos(cantos, fechado)
-        if not segmentos:
-            return [QPointF(p) for p in auxiliares]
-        saida = [QPointF(p) for p in auxiliares]
-        por_segmento = self._helper._auxiliares_por_segmento_indexados(cantos, segmentos, saida, preferir_ordem=False)
-        for seg_idx, (a_idx, b_idx) in enumerate(segmentos):
-            if por_segmento.get(seg_idx):
+        segmento: tuple[QPointF, QPointF],
+        fechado: bool,
+        evitar: list[QPointF] | None = None,
+    ) -> list[tuple[float, float]]:
+        auxiliares_saida = [QPointF(p) for p in auxiliares]
+        evitar = [QPointF(p) for p in (evitar or [])]
+        auxiliares_no_segmento = [
+            p
+            for p in auxiliares_saida
+            if self._mesmo_segmento_principal(
+                self._segmento_principal_do_ponto(pontos_anteriores, cantos, p, fechado),
+                segmento,
+            )
+        ]
+        trecho = self._trecho_contorno_entre_pontos(pontos_anteriores, segmento[0], segmento[1], fechado)
+        if not self._helper._segmento_molde_eh_curvo(segmento[0], segmento[1], trecho, auxiliares_no_segmento):
+            return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
+        if len(auxiliares_no_segmento) >= 3:
+            return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
+
+        candidatos = self._pontos_auxiliares_em_trecho(trecho, segmento[0], segmento[1], total=5)
+        for candidato in candidatos:
+            if len(auxiliares_no_segmento) >= 3:
+                break
+            if self._ponto_duplicado_em(candidato, evitar, 1e-5):
                 continue
-            saida.append(self._ponto_medio(cantos[a_idx], cantos[b_idx]))
+            if self._ponto_duplicado_em(candidato, cantos, 1e-5):
+                continue
+            if self._ponto_duplicado_em(candidato, auxiliares_saida, 1e-5):
+                continue
+            auxiliares_saida.append(QPointF(candidato))
+            auxiliares_no_segmento.append(QPointF(candidato))
+
+        return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
+
+    def _realocar_canto_removido(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[tuple[float, float]],
+        auxiliares: list[tuple[float, float]],
+        removido: QPointF,
+        fechado: bool,
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
+        cantos_qt = [p for p in (self._ponto_qt(item) for item in cantos) if p is not None]
+        auxiliares_qt = [p for p in (self._ponto_qt(item) for item in auxiliares) if p is not None]
+        candidatos_aux = [
+            (self._dist_local(pt, removido), idx, pt)
+            for idx, pt in enumerate(auxiliares_qt)
+            if not self._ponto_duplicado_em(pt, cantos_qt, 1e-5)
+        ]
+        if candidatos_aux:
+            _dist, idx_promovido, promovido = min(candidatos_aux, key=lambda item: item[0])
+            novos_aux = [pt for idx, pt in enumerate(auxiliares_qt) if idx != idx_promovido]
+            novos_cantos = [*cantos_qt, QPointF(promovido)]
+            return (
+                self._ordenar_controles_qt_no_contorno(novos_cantos, pontos_anteriores, fechado),
+                [(float(p.x()), float(p.y())) for p in novos_aux],
+            )
+
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        candidatos_contorno = [
+            (self._dist_local(pt, removido), pt)
+            for pt in caminho
+            if self._dist_local(pt, removido) > 1e-5 and not self._ponto_duplicado_em(pt, cantos_qt, 1e-5)
+        ]
+        if not candidatos_contorno:
+            return None
+        _dist, promovido = min(candidatos_contorno, key=lambda item: item[0])
+        novos_cantos = [*cantos_qt, QPointF(promovido)]
+        return (
+            self._ordenar_controles_qt_no_contorno(novos_cantos, pontos_anteriores, fechado),
+            [(float(p.x()), float(p.y())) for p in auxiliares_qt],
+        )
+
+    def _segmento_principal_do_ponto(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[QPointF],
+        ponto: QPointF,
+        fechado: bool,
+    ) -> tuple[QPointF, QPointF] | None:
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        cantos_ordenados = self._cantos_ordenados_no_caminho(caminho, cantos, fechado)
+        if len(cantos_ordenados) < 2 or len(caminho) < 2:
+            return None
+
+        posicoes = [
+            (self._posicao_ponto_no_contorno(caminho, canto, fechado), QPointF(canto))
+            for canto in cantos_ordenados
+        ]
+        posicoes.sort(key=lambda item: item[0])
+        pos_ponto = self._posicao_ponto_no_contorno(caminho, ponto, fechado)
+        tolerancia = 1e-6
+
+        limite = len(posicoes) if fechado else len(posicoes) - 1
+        for idx in range(limite):
+            pos_a, a = posicoes[idx]
+            pos_b, b = posicoes[(idx + 1) % len(posicoes)]
+            if idx == len(posicoes) - 1 and fechado:
+                if pos_ponto >= pos_a - tolerancia or pos_ponto <= pos_b + tolerancia:
+                    return (a, b)
+            elif pos_a - tolerancia <= pos_ponto <= pos_b + tolerancia:
+                return (a, b)
+
+        if fechado:
+            return min(
+                ((posicoes[i][1], posicoes[(i + 1) % len(posicoes)][1]) for i in range(len(posicoes))),
+                key=lambda seg: self._distancia_ponto_segmento_qt(ponto, seg[0], seg[1]),
+            )
+        return None
+
+    def _segmento_mesclado_ao_remover_canto(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[QPointF],
+        canto_removido: QPointF,
+        fechado: bool,
+    ) -> tuple[QPointF, QPointF] | None:
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        cantos_ordenados = self._cantos_ordenados_no_caminho(caminho, cantos, fechado)
+        if len(cantos_ordenados) < 3 or len(caminho) < 2:
+            return None
+        idx = min(range(len(cantos_ordenados)), key=lambda i: self._dist_local(cantos_ordenados[i], canto_removido))
+        if self._dist_local(cantos_ordenados[idx], canto_removido) > 1e-5:
+            return None
+        if fechado:
+            return (QPointF(cantos_ordenados[idx - 1]), QPointF(cantos_ordenados[(idx + 1) % len(cantos_ordenados)]))
+        if idx <= 0 or idx >= len(cantos_ordenados) - 1:
+            return None
+        return (QPointF(cantos_ordenados[idx - 1]), QPointF(cantos_ordenados[idx + 1]))
+
+    def _caminho_contorno_qt(self, pontos: list[tuple[float, float]], fechado: bool) -> list[QPointF]:
+        caminho = [QPointF(float(x), float(y)) for x, y in pontos]
+        if fechado and len(caminho) >= 2 and self._dist_local(caminho[0], caminho[-1]) <= 1e-7:
+            caminho = caminho[:-1]
+        return caminho
+
+    def _cantos_ordenados_no_caminho(self, caminho: list[QPointF], cantos: list[QPointF], fechado: bool) -> list[QPointF]:
+        unicos = self._pontos_unicos([QPointF(p) for p in cantos])
+        if len(unicos) <= 2 or len(caminho) < 2:
+            return unicos
+        return sorted(unicos, key=lambda pt: self._posicao_ponto_no_contorno(caminho, pt, fechado))
+
+    def _ordenar_controles_no_contorno(
+        self,
+        controles: list[tuple[float, float]],
+        pontos_anteriores: list[tuple[float, float]],
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        pontos = [p for p in (self._ponto_qt(item) for item in controles) if p is not None]
+        return self._ordenar_controles_qt_no_contorno(pontos, pontos_anteriores, fechado)
+
+    def _ordenar_controles_qt_no_contorno(
+        self,
+        controles: list[QPointF],
+        pontos_anteriores: list[tuple[float, float]],
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        ordenados = self._cantos_ordenados_no_caminho(caminho, controles, fechado)
+        return [(float(p.x()), float(p.y())) for p in ordenados]
+
+    def _mesmo_segmento_principal(
+        self,
+        segmento_a: tuple[QPointF, QPointF] | None,
+        segmento_b: tuple[QPointF, QPointF] | None,
+    ) -> bool:
+        if segmento_a is None or segmento_b is None:
+            return False
+        a0, a1 = segmento_a
+        b0, b1 = segmento_b
+        direto = self._dist_local(a0, b0) <= 1e-5 and self._dist_local(a1, b1) <= 1e-5
+        inverso = self._dist_local(a0, b1) <= 1e-5 and self._dist_local(a1, b0) <= 1e-5
+        return direto or inverso
+
+    def _trecho_contorno_entre_pontos(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        inicio: QPointF,
+        fim: QPointF,
+        fechado: bool,
+    ) -> list[QPointF]:
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        if len(caminho) < 2:
+            return [QPointF(inicio), QPointF(fim)]
+        idx_inicio = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], inicio))
+        idx_fim = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], fim))
+        if fechado:
+            trecho = [QPointF(caminho[idx_inicio])]
+            idx = idx_inicio
+            while idx != idx_fim:
+                idx = (idx + 1) % len(caminho)
+                trecho.append(QPointF(caminho[idx]))
+                if len(trecho) > len(caminho) + 1:
+                    break
+        else:
+            if idx_inicio > idx_fim:
+                idx_inicio, idx_fim = idx_fim, idx_inicio
+                inicio, fim = fim, inicio
+            trecho = [QPointF(p) for p in caminho[idx_inicio : idx_fim + 1]]
+        if trecho:
+            trecho[0] = QPointF(inicio)
+            trecho[-1] = QPointF(fim)
+        return trecho if len(trecho) >= 2 else [QPointF(inicio), QPointF(fim)]
+
+    def _pontos_auxiliares_em_trecho(
+        self,
+        trecho: list[QPointF],
+        inicio: QPointF,
+        fim: QPointF,
+        total: int,
+    ) -> list[QPointF]:
+        total = max(0, int(total))
+        if total <= 0:
+            return []
+        if len(trecho) < 2:
+            return [self._interpolar(inicio, fim, (idx + 1) / (total + 1)) for idx in range(total)]
+        comprimentos = [self._dist_local(a, b) for a, b in zip(trecho, trecho[1:])]
+        perimetro = sum(comprimentos)
+        if perimetro <= 1e-9:
+            return [self._interpolar(inicio, fim, (idx + 1) / (total + 1)) for idx in range(total)]
+
+        saida: list[QPointF] = []
+        for idx in range(total):
+            alvo = perimetro * ((idx + 1) / (total + 1))
+            acumulado = 0.0
+            for seg_idx, comprimento in enumerate(comprimentos):
+                prox = acumulado + comprimento
+                if alvo <= prox or seg_idx == len(comprimentos) - 1:
+                    t = 0.0 if comprimento <= 1e-9 else (alvo - acumulado) / comprimento
+                    saida.append(self._interpolar(trecho[seg_idx], trecho[seg_idx + 1], t))
+                    break
+                acumulado = prox
         return saida
 
     @staticmethod
-    def _ponto_medio(a: QPointF, b: QPointF) -> QPointF:
-        return QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+    def _interpolar(a: QPointF, b: QPointF, t: float) -> QPointF:
+        return QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
 
-    def _sincronizar_espelhos_controles_molde(self, el: dict) -> None:
-        cantos = [self._tupla_xy(item) for item in el.get("controle_cantos", []) or []]
-        auxiliares = [self._tupla_xy(item) for item in el.get("controle_auxiliares", []) or []]
-        cantos = [item for item in cantos if item is not None]
-        auxiliares = [item for item in auxiliares if item is not None]
-        el["controle_cantos"] = cantos
-        el["controle_auxiliares"] = auxiliares
+    def _ponto_duplicado_em(self, ponto: QPointF, pontos: list[QPointF], tolerancia: float) -> bool:
+        return any(self._dist_local(ponto, existente) <= tolerancia for existente in pontos)
+
+    def _distancia_ponto_segmento_qt(self, ponto: QPointF, a: QPointF, b: QPointF) -> float:
+        return self._parametro_e_distancia_segmento(ponto, a, b)[1]
+
+    def _regenerar_apenas_segmento_auxiliar(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        segmento: tuple[QPointF, QPointF],
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        if len(caminho) < 2:
+            return []
+        a, b = QPointF(segmento[0]), QPointF(segmento[1])
+        idx_a = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], a))
+        idx_b = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], b))
+        trecho_original = self._trecho_contorno_entre_pontos(pontos_anteriores, a, b, fechado)
+        controles_internos = [
+            QPointF(p)
+            for p in [*cantos, *auxiliares]
+            if self._dist_local(p, a) > 1e-5
+            and self._dist_local(p, b) > 1e-5
+            and self._ponto_esta_no_intervalo_contorno(caminho, p, a, b, fechado)
+        ]
+        controles_internos = self._pontos_unicos(controles_internos)
+        controles_internos.sort(key=lambda p: self._posicao_ponto_no_trecho(trecho_original, p))
+        controles_segmento = [a, *controles_internos, b]
+        trecho_novo = [
+            QPointF(float(x), float(y))
+            for x, y in self._helper._gerar_tracado_curva_real(
+                controles_segmento,
+                fechado=False,
+                tipo_curva="spline_catmull_rom",
+            )
+        ]
+        if len(trecho_novo) < 2:
+            trecho_novo = [a, b]
+        trecho_novo[0] = a
+        trecho_novo[-1] = b
+
+        if fechado:
+            if idx_a <= idx_b:
+                novo_caminho = [*caminho[:idx_a], *trecho_novo, *caminho[idx_b + 1 :]]
+            else:
+                novo_caminho = [*trecho_novo, *caminho[idx_b + 1 : idx_a]]
+        else:
+            if idx_a <= idx_b:
+                novo_caminho = [*caminho[:idx_a], *trecho_novo, *caminho[idx_b + 1 :]]
+            else:
+                trecho_invertido = list(reversed(trecho_novo))
+                novo_caminho = [*caminho[:idx_b], *trecho_invertido, *caminho[idx_a + 1 :]]
+
+        novo_caminho = self._remover_duplicados_consecutivos(novo_caminho)
+        if fechado and novo_caminho:
+            if self._dist_local(novo_caminho[0], novo_caminho[-1]) > 1e-7:
+                novo_caminho.append(QPointF(novo_caminho[0]))
+            else:
+                novo_caminho[-1] = QPointF(novo_caminho[0])
+        return [(float(p.x()), float(p.y())) for p in novo_caminho]
+
+    def _posicao_ponto_no_trecho(self, trecho: list[QPointF], ponto: QPointF) -> float:
+        if len(trecho) < 2:
+            return 0.0
+        acumulado = 0.0
+        melhor = 0.0
+        melhor_dist = float("inf")
+        for a, b in zip(trecho, trecho[1:]):
+            comprimento = self._dist_local(a, b)
+            t, dist = self._parametro_e_distancia_segmento(ponto, a, b)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor = acumulado + (comprimento * t)
+            acumulado += comprimento
+        return melhor
+
+    def _ponto_esta_no_intervalo_contorno(
+        self,
+        caminho: list[QPointF],
+        ponto: QPointF,
+        inicio: QPointF,
+        fim: QPointF,
+        fechado: bool,
+    ) -> bool:
+        if len(caminho) < 2:
+            return False
+        pos_inicio = self._posicao_ponto_no_contorno(caminho, inicio, fechado)
+        pos_fim = self._posicao_ponto_no_contorno(caminho, fim, fechado)
+        pos_ponto = self._posicao_ponto_no_contorno(caminho, ponto, fechado)
+        tolerancia = 1e-6
+        if fechado and pos_inicio > pos_fim:
+            return pos_ponto >= pos_inicio - tolerancia or pos_ponto <= pos_fim + tolerancia
+        return pos_inicio - tolerancia <= pos_ponto <= pos_fim + tolerancia
+
+    def _remover_duplicados_consecutivos(self, pontos: list[QPointF]) -> list[QPointF]:
+        saida: list[QPointF] = []
+        for ponto in pontos:
+            if saida and self._dist_local(saida[-1], ponto) <= 1e-7:
+                continue
+            saida.append(QPointF(ponto))
+        return saida
+
+    def _controles_molde_restantes_ordenados(
+        self,
+        canvas,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        fechado: bool,
+    ) -> list[QPointF]:
+        controles = [QPointF(p) for p in cantos] + [QPointF(p) for p in auxiliares]
+        controles = self._pontos_unicos(controles)
+        if len(controles) <= 2:
+            return controles
+
+        caminho = [QPointF(float(x), float(y)) for x, y in pontos_anteriores]
+        if fechado and len(caminho) >= 2 and self._dist_local(caminho[0], caminho[-1]) <= 1e-7:
+            caminho = caminho[:-1]
+        if len(caminho) < 2:
+            return controles
+
+        ordenados = sorted(
+            controles,
+            key=lambda pt: self._posicao_ponto_no_contorno(caminho, pt, fechado),
+        )
+        return self._rotacionar_controles_para_primeiro_canto(ordenados, cantos) if fechado else ordenados
+
+    def _rotacionar_controles_para_primeiro_canto(self, controles: list[QPointF], cantos: list[QPointF]) -> list[QPointF]:
+        if not controles or not cantos:
+            return controles
+        primeiro = cantos[0]
+        melhor = min(range(len(controles)), key=lambda idx: self._dist_local(controles[idx], primeiro))
+        return [*controles[melhor:], *controles[:melhor]]
+
+    def _posicao_ponto_no_contorno(self, caminho: list[QPointF], ponto: QPointF, fechado: bool) -> float:
+        if len(caminho) < 2:
+            return 0.0
+        limite = len(caminho) if fechado else len(caminho) - 1
+        acumulado = 0.0
+        melhor_pos = 0.0
+        melhor_dist = float("inf")
+        for idx in range(limite):
+            a = caminho[idx]
+            b = caminho[(idx + 1) % len(caminho)]
+            dist_ab = self._dist_local(a, b)
+            t, dist = self._parametro_e_distancia_segmento(ponto, a, b)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_pos = acumulado + (dist_ab * t)
+            acumulado += dist_ab
+        return melhor_pos
+
+    @staticmethod
+    def _parametro_e_distancia_segmento(p: QPointF, a: QPointF, b: QPointF) -> tuple[float, float]:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        den = (abx * abx) + (aby * aby)
+        if den <= 1e-12:
+            return 0.0, Ferramenta._dist_local(p, a)
+        t = max(0.0, min(1.0, (((p.x() - a.x()) * abx) + ((p.y() - a.y()) * aby)) / den))
+        proj = QPointF(a.x() + (abx * t), a.y() + (aby * t))
+        return t, Ferramenta._dist_local(p, proj)
+
+    def _pontos_unicos(self, pontos: list[QPointF]) -> list[QPointF]:
+        saida: list[QPointF] = []
+        for ponto in pontos:
+            if any(self._dist_local(ponto, existente) <= 1e-7 for existente in saida):
+                continue
+            saida.append(QPointF(ponto))
+        return saida
+
+    def _sincronizar_controles_molde(self, el: dict) -> None:
+        cantos = [pt for item in el.get("controle_cantos", []) or [] if (pt := self._tupla_xy(item)) is not None]
+        auxiliares = [pt for item in el.get("controle_auxiliares", []) or [] if (pt := self._tupla_xy(item)) is not None]
+        el["controle_cantos"] = [(float(x), float(y)) for x, y in cantos]
+        el["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
         el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
         el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
 
-    def _segmentos_para_recompor_apos_exclusao(self, canvas, el: dict, tipo: str, controle_idx: int) -> set[int]:
-        cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
-        if not cantos:
-            return set()
-        pontos = list(el.get("pontos", []) or [])
-        fechado = self._helper._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
-        segmentos = self._helper._segmentos_cantos(cantos, fechado)
-        if not segmentos:
-            return set()
-        if tipo == "canto":
-            if len(cantos) <= 2:
-                return {0}
-            return {
-                seg_idx
-                for seg_idx, (a_idx, b_idx) in enumerate(segmentos)
-                if a_idx == controle_idx or b_idx == controle_idx
-            }
-        auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
-        por_segmento = self._helper._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=False)
-        for seg_idx, itens in por_segmento.items():
-            if any(aux_idx == controle_idx for aux_idx, _t, _pt in itens):
-                return {seg_idx}
-        return set()
+    def _remover_ponto_duplicado_de_controles(self, controles: list, alvo: QPointF) -> list[tuple[float, float]]:
+        saida: list[tuple[float, float]] = []
+        for item in controles:
+            pt = self._tupla_xy(item)
+            if pt is None:
+                continue
+            if self._dist_local(QPointF(float(pt[0]), float(pt[1])), alvo) <= 1e-6:
+                continue
+            saida.append((float(pt[0]), float(pt[1])))
+        return saida
 
-    def _regenerar_molde_por_controles(self, canvas, el: dict) -> bool:
-        return self._helper._regenerar_molde_por_controles(canvas, el)
+    @staticmethod
+    def _contorno_fechado_por_tuplas(pontos: list[tuple[float, float]]) -> bool:
+        if len(pontos) < 3:
+            return False
+        return abs(float(pontos[0][0]) - float(pontos[-1][0])) <= 1e-7 and abs(float(pontos[0][1]) - float(pontos[-1][1])) <= 1e-7
 
     def _regenerar_molde_por_controles_legado(self, canvas, el: dict) -> bool:
         cantos = [pt for item in el.get("controle_cantos", []) or [] if (pt := self._ponto_qt(item)) is not None]
@@ -845,15 +1146,11 @@ class Ferramenta(FerramentaBase):
     # ------------------------------------------------------------------
     # Elementos livres: comportamento antigo mantido.
     # ------------------------------------------------------------------
-    def _vertice_em_ponto(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int] | None:
+    def _vertice_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
         melhor: tuple[int, int] | None = None
         melhor_d = tolerancia
-        candidatos = indices if indices is not None else list(range(len(canvas.cena.elementos)))
-        for idx in candidatos:
-            if not (0 <= idx < len(canvas.cena.elementos)):
-                continue
-            el = canvas.cena.elementos[idx]
+        for idx, el in enumerate(canvas.cena.elementos):
             if el.get("tipo") != "polyline" or el.get("molde"):
                 continue
             if self._curva_editavel(el):
@@ -868,15 +1165,11 @@ class Ferramenta(FerramentaBase):
                     melhor = (idx, p_idx)
         return melhor
 
-    def _controle_curva_em_ponto(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int] | None:
+    def _controle_curva_em_ponto(self, canvas, pos: QPointF) -> tuple[int, int] | None:
         tolerancia = 8.0 / max(canvas.zoom, 0.001)
         melhor: tuple[int, int] | None = None
         melhor_d = tolerancia
-        candidatos = indices if indices is not None else list(range(len(canvas.cena.elementos)))
-        for idx in candidatos:
-            if not (0 <= idx < len(canvas.cena.elementos)):
-                continue
-            el = canvas.cena.elementos[idx]
+        for idx, el in enumerate(canvas.cena.elementos):
             if el.get("tipo") != "polyline" or el.get("molde") or not self._curva_editavel(el):
                 continue
             for controle_idx, pt in enumerate(self._controles_curva(el)):

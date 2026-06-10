@@ -1453,7 +1453,15 @@ class Ferramenta(FerramentaBase):
         )
         if mapa_por_ordem:
             return mapa_por_ordem
-        por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=False)
+        por_segmento = self._auxiliares_por_segmento_molde(
+            canvas,
+            pontos,
+            cantos,
+            segmentos,
+            auxiliares,
+            fechado,
+            preferir_ordem=False,
+        )
         mapa = [-1 for _ in auxiliares]
         for seg_ordem, itens in por_segmento.items():
             for aux_idx, _t, _pt in itens:
@@ -1916,7 +1924,15 @@ class Ferramenta(FerramentaBase):
         if not segmentos:
             return
         auxiliares = [p for p in (self._ponto_qt(item) for item in el.get("controle_auxiliares", []) or []) if p is not None]
-        por_segmento = self._auxiliares_por_segmento_indexados(cantos, segmentos, auxiliares, preferir_ordem=False)
+        por_segmento = self._auxiliares_por_segmento_molde(
+            canvas,
+            pontos,
+            cantos,
+            segmentos,
+            auxiliares,
+            fechado,
+            preferir_ordem=False,
+        )
         recompor_segmentos = set(recompor_segmentos or set())
         novos_aux: list[QPointF] = []
         alterou = False
@@ -1925,10 +1941,10 @@ class Ferramenta(FerramentaBase):
             existentes = [QPointF(pt) for _idx, _t, pt in por_segmento.get(seg_ordem, [])]
             trecho = self._trecho_contorno_molde(canvas, pontos, cantos, a_idx, b_idx, fechado)
             curva = self._segmento_molde_eh_curvo(cantos[a_idx], cantos[b_idx], trecho, existentes)
-            precisa_recompor = curva and (seg_ordem in recompor_segmentos or len(existentes) < 2)
+            precisa_recompor = curva and (seg_ordem in recompor_segmentos or len(existentes) < 3)
             if precisa_recompor:
                 amostrados = self._amostrar_auxiliares_minimos_trecho(trecho, cantos[a_idx], cantos[b_idx], quantidade=3)
-                if len(amostrados) >= 2:
+                if len(amostrados) >= 3:
                     novos_aux.extend(amostrados)
                     alterou = True
                     continue
@@ -2352,6 +2368,68 @@ class Ferramenta(FerramentaBase):
         for seg_ordem, itens in list(saida.items()):
             saida[seg_ordem] = sorted(itens, key=lambda item: item[1])
         return saida
+
+    def _auxiliares_por_segmento_molde(
+        self,
+        canvas,
+        pontos: list,
+        cantos: list[QPointF],
+        segmentos: list[tuple[int, int]],
+        auxiliares: list[QPointF],
+        fechado: bool,
+        preferir_ordem: bool = False,
+    ) -> dict[int, list[tuple[int, float, QPointF]]]:
+        mapa = self._mapa_segmentos_auxiliares_por_ordem_pontos(
+            canvas,
+            pontos,
+            cantos,
+            auxiliares,
+            segmentos,
+            fechado,
+        )
+        if not self._mapa_auxiliares_valido(mapa, auxiliares, segmentos):
+            return self._auxiliares_por_segmento_indexados(
+                cantos,
+                segmentos,
+                auxiliares,
+                preferir_ordem=preferir_ordem,
+            )
+
+        saida: dict[int, list[tuple[int, float, QPointF]]] = {i: [] for i in range(len(segmentos))}
+        trechos = {
+            seg_ordem: self._trecho_contorno_molde(canvas, pontos, cantos, a_idx, b_idx, fechado)
+            for seg_ordem, (a_idx, b_idx) in enumerate(segmentos)
+        }
+        for aux_idx, aux in enumerate(auxiliares):
+            seg_ordem = int(mapa[aux_idx])
+            t = self._parametro_ponto_no_trecho_contorno(trechos.get(seg_ordem, []), aux)
+            saida[seg_ordem].append((aux_idx, t, QPointF(aux)))
+        for seg_ordem, itens in list(saida.items()):
+            saida[seg_ordem] = sorted(itens, key=lambda item: item[1])
+        return saida
+
+    def _parametro_ponto_no_trecho_contorno(self, trecho: list[QPointF], ponto: QPointF) -> float:
+        caminho = [QPointF(p) for p in trecho if p is not None]
+        if len(caminho) < 2:
+            return 0.0
+        comprimentos = [self._dist_pontos_local(a, b) for a, b in zip(caminho, caminho[1:])]
+        total = sum(comprimentos)
+        if total <= 1e-9:
+            return 0.0
+
+        acumulado = 0.0
+        melhor_pos = 0.0
+        melhor_dist = float("inf")
+        for idx, (a, b) in enumerate(zip(caminho, caminho[1:])):
+            comprimento = comprimentos[idx]
+            t = self._parametro_no_segmento(ponto, a, b)
+            proj = QPointF(a.x() + ((b.x() - a.x()) * t), a.y() + ((b.y() - a.y()) * t))
+            dist = self._dist_pontos_local(ponto, proj)
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor_pos = acumulado + (comprimento * t)
+            acumulado += comprimento
+        return max(0.0, min(1.0, melhor_pos / total))
 
     def _ordem_auxiliares_compativel(
         self,

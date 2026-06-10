@@ -116,6 +116,7 @@ class VisualizacaoCanvas(QWidget):
         self._hover_ponto_poly: tuple[int, int] | None = None
         self._guia_ponto_poly: tuple[QPointF, QPointF | None, QPointF | None] | None = None
         self._runtime_tool = None
+        self._runtime_tool_cache: dict[str, object] = {}
         self._destacar_reta_temporaria: tuple[QPointF, QPointF] | None = None
         self._ultimo_clique_direito_ts = 0.0
         self._sequencia_clique_direito = 0
@@ -163,10 +164,11 @@ class VisualizacaoCanvas(QWidget):
 
     def set_ferramenta_ativa(self, tool_id: str):
         """Ativa a ferramenta e ajusta a política de foco do canvas."""
-        # Desativa a ferramenta anterior
-        if self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
+        mesma_ferramenta = tool_id == self.ferramenta_ativa and self._runtime_tool is not None
+        if not mesma_ferramenta and self._runtime_tool and hasattr(self._runtime_tool, "on_deactivate"):
             self._runtime_tool.on_deactivate(self)
-        self.cancelar_operacao_coordenadas(limpar_preview=True)
+        if not mesma_ferramenta:
+            self.cancelar_operacao_coordenadas(limpar_preview=True)
         self.ferramenta_ativa = tool_id
         self._runtime_tool = self._carregar_runtime_ferramenta(tool_id)
         if self._runtime_tool and hasattr(self._runtime_tool, "on_activate"):
@@ -216,10 +218,14 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def _carregar_runtime_ferramenta(self, tool_id: str):
+        if tool_id in self._runtime_tool_cache:
+            return self._runtime_tool_cache[tool_id]
         try:
             module = import_module(f"tools.{tool_id}_tool")
             tool_cls = getattr(module, "Ferramenta")
-            return tool_cls()
+            tool = tool_cls()
+            self._runtime_tool_cache[tool_id] = tool
+            return tool
         except Exception:
             return None
 
@@ -1982,6 +1988,7 @@ class VisualizacaoCanvas(QWidget):
                                              estilo=estilo,
                                              amplitude=float(elemento.get("amplitude", 1.0)),
                                              fase_inicial=float(elemento.get("fase_inicio", 0.0)))
+                    self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
                     continue
                 if self._desenhar_parabola_3p_elemento(
                     painter,
@@ -1991,9 +1998,11 @@ class VisualizacaoCanvas(QWidget):
                     estilo=estilo,
                     amplitude=float(elemento.get("amplitude", 1.0)),
                 ):
+                    self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
                     continue
                 if self._elemento_curva_suave(elemento) and not elemento.get("pontos_tracado_real"):
                     self._desenhar_curva_suave_elemento(painter, elemento, cor=cor, espessura=esp, estilo=estilo)
+                    self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
                     continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
                                          estilo=estilo,
@@ -2008,8 +2017,7 @@ class VisualizacaoCanvas(QWidget):
             if selecionado and not is_molde:
                 self._desenhar_bbox_selecao_elemento(painter, elemento)
 
-            for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
-                self._desenhar_marca_x(painter, QPointF(float(mx), float(my)), cor="#ff2f2f", tamanho_px=5)
+            self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
 
         for marca in getattr(self, "_marcacoes_temporarias", []) or []:
             self._desenhar_marca_x(painter, QPointF(marca), cor="#ff40ff", tamanho_px=6)
@@ -3641,6 +3649,78 @@ class VisualizacaoCanvas(QWidget):
         painter.setPen(pen)
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() - tamanho), int(pt.x() + tamanho), int(pt.y() + tamanho))
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
+
+    def _desenhar_marcacoes_piques_elemento(self, painter: QPainter, elemento: dict, cor_molde: str) -> None:
+        pontos_piques_detalhados = self._desenhar_piques_configurados(painter, elemento, cor_molde)
+        for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
+            ponto_marcacao = QPointF(float(mx), float(my))
+            if any(self._dist(ponto_marcacao, ponto_cfg) <= 1e-6 for ponto_cfg in pontos_piques_detalhados):
+                continue
+            self._desenhar_marca_x(painter, ponto_marcacao, cor=self._cor_piques_elemento(elemento, cor_molde), tamanho_px=7)
+
+    def _desenhar_piques_configurados(self, painter: QPainter, elemento: dict, cor_molde: str) -> list[QPointF]:
+        pontos_desenhados: list[QPointF] = []
+        for cfg in elemento.get("piques_config", []) or []:
+            if not isinstance(cfg, dict):
+                continue
+            cor = self._cor_piques_elemento(elemento, cor_molde, interno=not bool(cfg.get("sobre_contorno", True)))
+            ponto = self._ponto_cfg_pique(cfg)
+            if ponto is not None:
+                pontos_desenhados.append(ponto)
+            segmentos = cfg.get("segmentos") or []
+            desenhou = False
+            for segmento in segmentos:
+                pts = self._segmento_cfg_pique(segmento)
+                if pts is None:
+                    continue
+                a, b = pts
+                self._desenhar_segmento(painter, a, b, cor=cor, espessura=2.0)
+                desenhou = True
+            if not desenhou and ponto is not None:
+                self._desenhar_marca_x(painter, ponto, cor=cor, tamanho_px=7)
+        return pontos_desenhados
+
+    def _cor_piques_elemento(self, elemento: dict, cor_molde: str, interno: bool = False) -> str:
+        cor_base = str(elemento.get("cor") or cor_molde or "#ffffff")
+        if elemento.get("molde") and bool(getattr(self, "_mostrar_cor_tecidos", False)):
+            tecido = str(elemento.get("tecido") or "").strip()
+            if tecido and tecido in getattr(self, "_cores_tecidos", {}):
+                cor_base = str(self._cores_tecidos[tecido])
+        return self._config_cor_molde("piques_internos" if interno else "piques", cor_base)
+
+    @staticmethod
+    def _ponto_cfg_pique(cfg: dict) -> QPointF | None:
+        try:
+            ponto = cfg.get("ponto")
+            if isinstance(ponto, dict):
+                return QPointF(float(ponto["x"]), float(ponto["y"]))
+            if isinstance(ponto, (list, tuple)) and len(ponto) >= 2:
+                return QPointF(float(ponto[0]), float(ponto[1]))
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _segmento_cfg_pique(segmento) -> tuple[QPointF, QPointF] | None:
+        try:
+            if isinstance(segmento, dict):
+                a = segmento.get("a") or segmento.get("inicio")
+                b = segmento.get("b") or segmento.get("fim")
+            elif isinstance(segmento, (list, tuple)) and len(segmento) >= 2:
+                a, b = segmento[0], segmento[1]
+            else:
+                return None
+            if isinstance(a, dict):
+                pa = QPointF(float(a["x"]), float(a["y"]))
+            else:
+                pa = QPointF(float(a[0]), float(a[1]))
+            if isinstance(b, dict):
+                pb = QPointF(float(b["x"]), float(b["y"]))
+            else:
+                pb = QPointF(float(b[0]), float(b[1]))
+            return pa, pb
+        except Exception:
+            return None
 
     def _distancia_ponto_segmento(self, a: QPointF, b: QPointF, p: QPointF) -> float:
         abx = b.x() - a.x()

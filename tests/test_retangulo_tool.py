@@ -111,6 +111,23 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
         self.assertEqual(canvas._selecionados, set())
 
+    def test_retangulo_desenho_quando_criar_molde_desmarcado(self):
+        canvas = _FakeCanvas()
+        canvas._retangulo_criar_molde = False
+        ferramenta = FerramentaRetangulo()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+
+        self.assertEqual(len(canvas.cena.elementos), 4)
+        self.assertTrue(all(not el.get("molde") for el in canvas.cena.elementos))
+        self.assertEqual(canvas.cena.elementos[0]["pontos"], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(canvas.cena.elementos[1]["pontos"], [(10.0, 0.0), (10.0, 4.0)])
+        self.assertEqual(canvas.cena.elementos[2]["pontos"], [(10.0, 4.0), (0.0, 4.0)])
+        self.assertEqual(canvas.cena.elementos[3]["pontos"], [(0.0, 4.0), (0.0, 0.0)])
+        self.assertEqual(canvas.historico, 1)
+
     def test_preview_retangulo_nao_usa_preenchimento_herdado_do_painter(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRetangulo()

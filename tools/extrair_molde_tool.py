@@ -107,6 +107,9 @@ class Ferramenta(FerramentaBase):
         self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto: QPointF | None = None
+        self._origem_arrasto_molde: QPointF | None = None
+        self._angulo_arrasto_molde: float | None = None
+        self._guia_arrasto_angular: tuple[QPointF, QPointF, float] | None = None
         self._snapshot_cancelamento: dict[int, dict] = {}
         self._indices_molde_em_arraste: set[int] = set()
         self._cfg = dict(type(self)._cfg_global)
@@ -135,6 +138,9 @@ class Ferramenta(FerramentaBase):
         self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
+        self._origem_arrasto_molde = None
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
         self._ultimo_clique_falho = None
@@ -162,6 +168,9 @@ class Ferramenta(FerramentaBase):
         self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
+        self._origem_arrasto_molde = None
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
         self._contorno_hover_preview = []
@@ -442,8 +451,9 @@ class Ferramenta(FerramentaBase):
                 canvas.update()
             event.accept()
             return True
-        pos = canvas._tela_para_cena(self._posicao_tela_exata_no_canvas(canvas, event.position()))
-        self._ultima_pos_cena = QPointF(pos)
+        pos_real = canvas._tela_para_cena(self._posicao_tela_exata_no_canvas(canvas, event.position()))
+        self._ultima_pos_cena = QPointF(pos_real)
+        pos = self._posicao_arrasto_com_restricao(canvas, QPointF(pos_real))
         if self._ultimo_pos_arrasto is None:
             self._ultimo_pos_arrasto = pos
             return True
@@ -553,12 +563,29 @@ class Ferramenta(FerramentaBase):
                 cor="#ff7a00",
                 espessura=1.5,
             )
+        if self._arrastando_molde and self._guia_arrasto_angular is not None:
+            self._desenhar_guia_arrasto_angular(canvas, painter)
 
     def _desenhar_contorno(self, canvas, painter, pontos: list[QPointF], cor: QColor, esp: float):
         if len(pontos) < 2:
             return
         for a, b in zip(pontos, pontos[1:]):
             canvas._desenhar_segmento(painter, a, b, cor=cor.name(), espessura=esp)
+
+    def _desenhar_guia_arrasto_angular(self, canvas, painter: QPainter) -> None:
+        if self._guia_arrasto_angular is None:
+            return
+        origem, destino, angulo = self._guia_arrasto_angular
+        canvas._desenhar_segmento(painter, origem, destino, cor="#d000d0", espessura=1.0)
+        try:
+            destino_tela = canvas._cena_para_tela(destino)
+        except Exception:
+            return
+        painter.save()
+        painter.setPen(QPen(QColor("#d000d0"), 1))
+        painter.setFont(QFont("Arial", 8))
+        painter.drawText(destino_tela + QPointF(4.0, -4.0), f"{angulo:g}°")
+        painter.restore()
 
     def _preview_de_contorno(self, contorno: list[tuple[float, float]]) -> list[QPointF]:
         return [QPointF(float(x), float(y)) for x, y in contorno]
@@ -759,6 +786,7 @@ class Ferramenta(FerramentaBase):
             try:
                 pontos_base = self._contornos_preparados.get(idx, el.get("pontos", []))
                 pontos_base = self._normalizar_pontos_contorno(pontos_base)
+                ponto_emenda = self._referencia_emenda_contorno(pontos_base)
                 payload = create_mold_payload({"tipo": "polyline", "pontos": pontos_base})
             except ValueError as exc:
                 self.set_status(f"Contorno inválido no elemento {idx + 1}: {exc}")
@@ -776,6 +804,7 @@ class Ferramenta(FerramentaBase):
                 "pontos_controle_principais": [],
                 "pontos_auxiliares": pontos_auxiliares,
                 "origem_contorno": idx,
+                "ponto_emenda_referencia": ponto_emenda,
             }
             self._enriquecer_metadados_molde(novo)
             canvas.cena.elementos.append(novo)
@@ -805,6 +834,7 @@ class Ferramenta(FerramentaBase):
             pontos = self._normalizar_pontos_contorno(pontos)
             novo = {"tipo": "polyline", "pontos": pontos}
             payload = create_mold_payload(novo)
+            emendas_origem = self._coletar_emendas_fechamento_no_contorno(canvas, payload["pontos"])
         except ValueError as exc:
             self.set_status(f"Falha ao compor contorno: {exc}")
             return False
@@ -821,6 +851,7 @@ class Ferramenta(FerramentaBase):
                 "pontos_controle_principais": [],
                 "pontos_auxiliares": [],
                 "origens_contorno": idxs,
+                "pontos_emenda_referencia": emendas_origem,
             }
         )
         self._enriquecer_metadados_molde(novo)
@@ -835,6 +866,7 @@ class Ferramenta(FerramentaBase):
         try:
             pontos = self._normalizar_pontos_contorno(pontos)
             payload = create_mold_payload({"tipo": "polyline", "pontos": pontos})
+            emendas_origem = self._coletar_emendas_fechamento_no_contorno(canvas, payload["pontos"])
         except ValueError as exc:
             self.set_status(f"Contorno detectado inválido: {exc}")
             return False
@@ -850,6 +882,7 @@ class Ferramenta(FerramentaBase):
             "pontos_controle_principais": [],
             "pontos_auxiliares": [],
             "origem_extracao": "face_auto" if self._cfg.get("modo") == "Automático" else "contorno",
+            "pontos_emenda_referencia": emendas_origem,
             "pontos_controle_referencia": self._coletar_pontos_controle_existentes(canvas, payload["pontos"]),
             "pontos_interseccao_referencia": self._coletar_interseccoes_no_contorno(canvas, payload["pontos"]),
         }
@@ -928,23 +961,11 @@ class Ferramenta(FerramentaBase):
             return
 
         base = pontos[:-1]
-        xs = [x for x, _ in base]
-        ys = [y for _, y in base]
-        cx = sum(xs) / len(xs)
-        cy = sum(ys) / len(ys)
+        layout_visual = self._layout_visual_interno(base, str(molde.get("nome_molde") or ""))
 
         molde["pontos"] = pontos
         molde.setdefault("molde_id", str(uuid4()))
-        molde.setdefault("fio_angulo", 0.0)
-
-        largura = max(xs) - min(xs)
-        altura = max(ys) - min(ys)
-        margem = largura * 0.20
-        y_fio = min(max(ys) - max(0.15, altura * 0.06), cy + max(0.25, altura * 0.08))
-        molde.setdefault("fio_origem", (min(xs) + margem, y_fio))
-        molde.setdefault("fio_fim", (max(xs) - margem, y_fio))
-        molde.setdefault("ponto_texto", (cx, cy))
-        molde.setdefault("texto_nome_altura_cm", 3.0)
+        self._aplicar_layout_visual_interno_molde(molde, base, layout_visual)
         molde.setdefault("numero_altura_cm", 0.7)
         molde.setdefault("mostrar_nome", True)
         molde.setdefault("mostrar_fio", True)
@@ -953,6 +974,7 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("molde_pronto", True)
         molde.setdefault("permitir_alteracoes_encaixe", True)
 
+        refs_emenda = self._referencias_emenda_molde(molde, pontos)
         refs_controle = list(molde.get("pontos_controle_referencia", []) or [])
         refs_interseccao = list(molde.get("pontos_interseccao_referencia", []) or [])
         refs_explicitas = bool(refs_controle or refs_interseccao)
@@ -962,7 +984,17 @@ class Ferramenta(FerramentaBase):
         elif refs_explicitas:
             indices_cantos = []
         else:
-            indices_cantos = self._indices_controles_principais(base)
+            indices_por_angulo = self._indices_por_angulo(base)
+            if refs_emenda and not indices_por_angulo and self._eh_forma_fechada_suave(base):
+                indices_cantos = []
+            else:
+                indices_cantos = indices_por_angulo or self._indices_controles_principais(base)
+        for ref in refs_emenda:
+            if not isinstance(ref, (list, tuple)) or len(ref) != 2:
+                continue
+            idx_ref = self._indice_mais_proximo_no_contorno((float(ref[0]), float(ref[1])), base)
+            if idx_ref is not None:
+                indices_cantos.append(idx_ref)
         for ref in refs_controle:
             if not isinstance(ref, (list, tuple)) or len(ref) != 2:
                 continue
@@ -994,6 +1026,329 @@ class Ferramenta(FerramentaBase):
         if len(cantos) != 2:
             return cantos
         return sorted(cantos, key=lambda pt: (float(pt[0]), float(pt[1])))
+
+    def _referencia_emenda_contorno(self, pontos: list[tuple[float, float]] | list) -> tuple[float, float] | None:
+        contorno = self._normalizar_pontos_contorno(pontos)
+        if not contorno:
+            return None
+        x, y = contorno[0]
+        return (float(x), float(y))
+
+    def _coletar_emendas_fechamento_no_contorno(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if not contorno or not hasattr(canvas, "cena"):
+            return []
+        contorno_ref = self._normalizar_pontos_contorno(contorno)
+        if len(contorno_ref) < 4:
+            return []
+        emendas: list[tuple[float, float]] = []
+        for el in getattr(canvas.cena, "elementos", []) or []:
+            if not isinstance(el, dict) or el.get("molde") or el.get("tipo") != "polyline":
+                continue
+            pontos_raw = self._pontos_elemento_como_tuplas(el.get("pontos", []) or [])
+            if len(pontos_raw) < 3:
+                continue
+            fechado = self._dist_tuple(pontos_raw[0], pontos_raw[-1]) <= max(0.15, self.TOLERANCIA_FECHAMENTO_CM)
+            if not fechado and not bool(el.get("fechado")):
+                continue
+            pontos_el = self._normalizar_pontos_contorno(pontos_raw)
+            if not self._contorno_origem_corresponde_ao_extraido(pontos_el, contorno_ref):
+                continue
+            emenda = (float(pontos_raw[0][0]), float(pontos_raw[0][1]))
+            if self._ponto_no_contorno(emenda, contorno_ref, tol=0.18):
+                emendas.append(emenda)
+        return self._deduplicar_pontos(emendas, tol=1e-4)
+
+    def _contorno_origem_corresponde_ao_extraido(
+        self,
+        origem: list[tuple[float, float]],
+        extraido: list[tuple[float, float]],
+    ) -> bool:
+        origem = self._normalizar_pontos_contorno(origem)
+        extraido = self._normalizar_pontos_contorno(extraido)
+        if len(origem) < 4 or len(extraido) < 4:
+            return False
+        per_origem = max(1e-9, self._perimetro_contorno(origem))
+        per_extraido = max(1e-9, self._perimetro_contorno(extraido))
+        if abs(per_origem - per_extraido) / max(per_origem, per_extraido) > 0.08:
+            return False
+        area_origem = max(1e-9, abs(self._area_contorno(origem)))
+        area_extraido = max(1e-9, abs(self._area_contorno(extraido)))
+        if abs(area_origem - area_extraido) / max(area_origem, area_extraido) > 0.08:
+            return False
+        tolerancia = max(0.12, per_extraido * 0.002)
+        pontos = origem[:-1]
+        if not pontos:
+            return False
+        acertos = sum(1 for pt in pontos if self._ponto_no_contorno(pt, extraido, tol=tolerancia))
+        return acertos >= max(3, int(round(len(pontos) * 0.65)))
+
+    @staticmethod
+    def _pontos_elemento_como_tuplas(pontos: list) -> list[tuple[float, float]]:
+        saida: list[tuple[float, float]] = []
+        for item in pontos:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                try:
+                    saida.append((float(item[0]), float(item[1])))
+                except Exception:
+                    continue
+        return saida
+
+    def _referencias_emenda_molde(self, molde: dict, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        refs: list[tuple[float, float]] = []
+
+        def adicionar(valor) -> None:
+            if isinstance(valor, (list, tuple)) and len(valor) == 2:
+                try:
+                    refs.append((float(valor[0]), float(valor[1])))
+                except Exception:
+                    pass
+
+        adicionar(molde.get("ponto_emenda_referencia"))
+        for valor in molde.get("pontos_emenda_referencia", []) or []:
+            adicionar(valor)
+        return self._deduplicar_pontos(refs, tol=1e-4)
+
+    def _layout_visual_interno(self, base: list[tuple[float, float]], nome: str) -> dict:
+        bbox = self._bbox_tuple(base)
+        faixas = self._faixas_horizontais_internas(base)
+        ponto_texto, altura_texto = self._layout_nome_interno(base, faixas, nome, bbox)
+        fio_origem, fio_fim = self._layout_fio_interno(base, faixas, ponto_texto, altura_texto, bbox)
+        comprimento_fio = self._dist_tuple(fio_origem, fio_fim)
+        return {
+            "ponto_texto": ponto_texto,
+            "texto_nome_altura_cm": altura_texto,
+            "fio_origem": fio_origem,
+            "fio_fim": fio_fim,
+            "tam_fio": max(0.15, min(0.8, comprimento_fio * 0.12)),
+        }
+
+    def _aplicar_layout_visual_interno_molde(self, molde: dict, base: list[tuple[float, float]], layout: dict) -> None:
+        ponto_texto = layout["ponto_texto"]
+        altura_nome = float(layout["texto_nome_altura_cm"])
+        fio_origem = layout["fio_origem"]
+        fio_fim = layout["fio_fim"]
+
+        molde["ponto_texto"] = (float(ponto_texto[0]), float(ponto_texto[1]))
+        molde["ponto_texto_nome"] = molde["ponto_texto"]
+        molde["nome_posicao"] = molde["ponto_texto"]
+        molde["nome_centro"] = molde["ponto_texto"]
+        molde["texto_nome_altura_cm"] = altura_nome
+        molde["referencia_texto_nome"] = "Livre"
+        molde["alinhamento_texto_nome"] = "Centro"
+        molde.setdefault("texto_nome_angulo", 0.0)
+
+        if not self._segmento_interno_poligono(fio_origem, fio_fim, base):
+            fio_origem, fio_fim = self._layout_fio_interno(
+                base,
+                self._faixas_horizontais_internas(base),
+                ponto_texto,
+                altura_nome,
+                self._bbox_tuple(base),
+            )
+        molde["fio_origem"] = (float(fio_origem[0]), float(fio_origem[1]))
+        molde["fio_fim"] = (float(fio_fim[0]), float(fio_fim[1]))
+        molde["fio_angulo"] = 0.0
+        molde["tam_fio"] = layout["tam_fio"]
+        molde["tamanho_fio"] = layout["tam_fio"]
+        molde["fonte_fio"] = layout["tam_fio"]
+
+    def _layout_nome_interno(
+        self,
+        base: list[tuple[float, float]],
+        faixas: list[dict],
+        nome: str,
+        bbox: tuple[float, float, float, float],
+    ) -> tuple[tuple[float, float], float]:
+        texto = str(nome or "K").strip() or "K"
+        min_x, min_y, max_x, max_y = bbox
+        cy = (min_y + max_y) / 2.0
+        altura_bbox = max(0.1, max_y - min_y)
+        melhor: tuple[tuple[float, float], float, float] | None = None
+        for faixa in sorted(faixas, key=lambda f: (abs(float(f["y"]) - cy), -float(f["largura"]))):
+            largura_util = max(0.0, float(faixa["largura"]) - (2.0 * self._margem_faixa(float(faixa["largura"]))))
+            altura = min(3.0, altura_bbox * 0.32, self._altura_texto_maxima_por_largura(texto, largura_util))
+            altura = max(0.18, altura)
+            centro = ((float(faixa["x1"]) + float(faixa["x2"])) / 2.0, float(faixa["y"]))
+            for passo in range(18):
+                fator = 1.0 - (passo * 0.055)
+                altura_teste = max(0.16, altura * fator)
+                if self._texto_nome_cabe_no_poligono(base, centro, texto, altura_teste):
+                    score = (altura_teste * 100.0) + float(faixa["largura"]) - (abs(float(faixa["y"]) - cy) * 0.5)
+                    if melhor is None or score > melhor[2]:
+                        melhor = (centro, altura_teste, score)
+                    break
+        if melhor is not None:
+            return melhor[0], melhor[1]
+        centro = self._ponto_interno_fallback(base, bbox)
+        return centro, max(0.16, min(0.45, altura_bbox * 0.08))
+
+    def _layout_fio_interno(
+        self,
+        base: list[tuple[float, float]],
+        faixas: list[dict],
+        ponto_texto: tuple[float, float],
+        altura_texto: float,
+        bbox: tuple[float, float, float, float],
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        min_x, min_y, max_x, max_y = bbox
+        altura_bbox = max(0.1, max_y - min_y)
+        desejado = float(ponto_texto[1]) + max(altura_texto * 1.45, altura_bbox * 0.08)
+        candidatos = sorted(
+            faixas,
+            key=lambda f: (-(float(f["largura"])), abs(float(f["y"]) - desejado)),
+        )
+        for faixa in candidatos:
+            largura = float(faixa["largura"])
+            if largura <= 0.12:
+                continue
+            margem = self._margem_faixa(largura)
+            reserva_rotulo = max(0.25, min(1.2, largura * 0.18))
+            x1 = float(faixa["x1"]) + margem
+            x2 = float(faixa["x2"]) - margem - reserva_rotulo
+            if x2 - x1 < max(0.18, largura * 0.28):
+                x2 = float(faixa["x2"]) - margem
+            if x2 <= x1:
+                continue
+            p1 = (x1, float(faixa["y"]))
+            p2 = (x2, float(faixa["y"]))
+            if self._segmento_interno_poligono(p1, p2, base):
+                return p1, p2
+        centro = self._ponto_interno_fallback(base, bbox)
+        comprimento = max(0.1, min(1.0, (max_x - min_x) * 0.12))
+        p1 = (centro[0] - comprimento / 2.0, centro[1])
+        p2 = (centro[0] + comprimento / 2.0, centro[1])
+        return (p1, p2) if self._segmento_interno_poligono(p1, p2, base) else (centro, centro)
+
+    def _faixas_horizontais_internas(self, base: list[tuple[float, float]], amostras: int = 45) -> list[dict]:
+        if len(base) < 3:
+            return []
+        min_x, min_y, max_x, max_y = self._bbox_tuple(base)
+        altura = max_y - min_y
+        if altura <= 1e-9:
+            return []
+        margem_y = max(0.01, altura * 0.025)
+        y0 = min_y + margem_y
+        y1 = max_y - margem_y
+        if y1 <= y0:
+            y0, y1 = min_y, max_y
+        valores_y = []
+        total = max(5, int(amostras))
+        for idx in range(total):
+            t = idx / max(1, total - 1)
+            valores_y.append(y0 + ((y1 - y0) * t))
+        valores_y.append((min_y + max_y) / 2.0)
+
+        faixas: list[dict] = []
+        vistos: set[tuple[int, int, int]] = set()
+        for y in valores_y:
+            for x_inicio, x_fim in self._intervalos_horizontais_poligono(base, y):
+                largura = x_fim - x_inicio
+                if largura <= 0.05:
+                    continue
+                centro = ((x_inicio + x_fim) / 2.0, y)
+                if not self._ponto_dentro_poligono_coords(centro, base):
+                    continue
+                chave = (round(y * 1000), round(x_inicio * 1000), round(x_fim * 1000))
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                faixas.append({"y": float(y), "x1": float(x_inicio), "x2": float(x_fim), "largura": float(largura)})
+        return faixas
+
+    def _intervalos_horizontais_poligono(self, base: list[tuple[float, float]], y: float) -> list[tuple[float, float]]:
+        poly = list(base)
+        if self._dist_tuple(poly[0], poly[-1]) > 1e-6:
+            poly.append(poly[0])
+        xs: list[float] = []
+        for (x1, y1), (x2, y2) in zip(poly, poly[1:]):
+            if abs(y2 - y1) <= 1e-12:
+                continue
+            if (y1 <= y < y2) or (y2 <= y < y1):
+                t = (y - y1) / (y2 - y1)
+                xs.append(x1 + ((x2 - x1) * t))
+        xs.sort()
+        limpos: list[float] = []
+        for x in xs:
+            if not limpos or abs(x - limpos[-1]) > 1e-7:
+                limpos.append(float(x))
+        return [(limpos[i], limpos[i + 1]) for i in range(0, len(limpos) - 1, 2)]
+
+    def _texto_nome_cabe_no_poligono(
+        self,
+        base: list[tuple[float, float]],
+        centro: tuple[float, float],
+        texto: str,
+        altura_cm: float,
+    ) -> bool:
+        largura, altura = self._dimensoes_texto_aproximadas(texto, altura_cm)
+        cx, cy = centro
+        margem = max(0.02, altura_cm * 0.08)
+        meia_larg = (largura / 2.0) + margem
+        meia_alt = (altura / 2.0) + margem
+        pontos = [
+            (cx - meia_larg, cy - meia_alt),
+            (cx + meia_larg, cy - meia_alt),
+            (cx + meia_larg, cy + meia_alt),
+            (cx - meia_larg, cy + meia_alt),
+            (cx, cy),
+            (cx - meia_larg, cy),
+            (cx + meia_larg, cy),
+            (cx, cy - meia_alt),
+            (cx, cy + meia_alt),
+        ]
+        return all(self._ponto_dentro_poligono_coords(p, base) for p in pontos)
+
+    @staticmethod
+    def _dimensoes_texto_aproximadas(texto: str, altura_cm: float) -> tuple[float, float]:
+        linhas = str(texto or "K").splitlines() or ["K"]
+        caracteres = max(1, max(len(linha) for linha in linhas))
+        altura = max(0.01, float(altura_cm)) * max(1, len(linhas)) * 1.15
+        largura = max(float(altura_cm), caracteres * float(altura_cm) * 0.72)
+        return largura, altura
+
+    def _altura_texto_maxima_por_largura(self, texto: str, largura_util: float) -> float:
+        linhas = str(texto or "K").splitlines() or ["K"]
+        caracteres = max(1, max(len(linha) for linha in linhas))
+        return max(0.16, float(largura_util) / max(1.0, caracteres * 0.72))
+
+    def _segmento_interno_poligono(
+        self,
+        inicio: tuple[float, float],
+        fim: tuple[float, float],
+        base: list[tuple[float, float]],
+    ) -> bool:
+        for passo in range(11):
+            t = passo / 10.0
+            ponto = (
+                float(inicio[0]) + ((float(fim[0]) - float(inicio[0])) * t),
+                float(inicio[1]) + ((float(fim[1]) - float(inicio[1])) * t),
+            )
+            if not self._ponto_dentro_poligono_coords(ponto, base):
+                return False
+        return True
+
+    def _ponto_interno_fallback(
+        self,
+        base: list[tuple[float, float]],
+        bbox: tuple[float, float, float, float],
+    ) -> tuple[float, float]:
+        min_x, min_y, max_x, max_y = bbox
+        centro = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
+        if self._ponto_dentro_poligono_coords(centro, base):
+            return centro
+        for faixa in sorted(self._faixas_horizontais_internas(base), key=lambda f: -float(f["largura"])):
+            return ((float(faixa["x1"]) + float(faixa["x2"])) / 2.0, float(faixa["y"]))
+        return (float(base[0][0]), float(base[0][1])) if base else (0.0, 0.0)
+
+    @staticmethod
+    def _bbox_tuple(base: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+        xs = [float(x) for x, _ in base]
+        ys = [float(y) for _, y in base]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    @staticmethod
+    def _margem_faixa(largura: float) -> float:
+        return max(0.08, min(0.75, float(largura) * 0.10))
 
     def _coletar_pontos_controle_existentes(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if not contorno:
@@ -1160,6 +1515,9 @@ class Ferramenta(FerramentaBase):
     def _finalizar_posicionamento(self, canvas, msg: str):
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
+        self._origem_arrasto_molde = None
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
         self._contorno_hover_preview = []
@@ -1190,6 +1548,43 @@ class Ferramenta(FerramentaBase):
         self._indices_molde_em_arraste = set(self._selecoes_manuais)
         self._arrastando_molde = True
         self._ultimo_pos_arrasto = QPointF(pos)
+        self._origem_arrasto_molde = QPointF(pos)
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
+
+    def _posicao_arrasto_com_restricao(self, canvas, pos: QPointF) -> QPointF:
+        if not bool(getattr(canvas, "snap_ativo", False)):
+            self._angulo_arrasto_molde = None
+            self._guia_arrasto_angular = None
+            return QPointF(pos)
+        origem = self._origem_arrasto_molde or self._ultimo_pos_arrasto
+        if origem is None:
+            self._angulo_arrasto_molde = None
+            self._guia_arrasto_angular = None
+            return QPointF(pos)
+        dx_total = pos.x() - origem.x()
+        dy_total = pos.y() - origem.y()
+        raio = sqrt((dx_total * dx_total) + (dy_total * dy_total))
+        if raio <= 1e-9:
+            self._angulo_arrasto_molde = None
+            self._guia_arrasto_angular = None
+            return QPointF(origem)
+
+        angulo = (atan2(dy_total, dx_total) * 180.0 / pi) % 360.0
+        angulos_ima = tuple(float(a) for a in range(0, 360, 15))
+        alvo = min(angulos_ima, key=lambda a: min(abs(angulo - a), 360.0 - abs(angulo - a)))
+        diferenca = min(abs(angulo - alvo), 360.0 - abs(angulo - alvo))
+        tolerancia = 4.0
+        if diferenca > tolerancia:
+            self._angulo_arrasto_molde = None
+            self._guia_arrasto_angular = None
+            return QPointF(pos)
+
+        rad = alvo * pi / 180.0
+        destino = QPointF(origem.x() + (cos(rad) * raio), origem.y() + (sin(rad) * raio))
+        self._angulo_arrasto_molde = alvo
+        self._guia_arrasto_angular = (QPointF(origem), QPointF(destino), alvo)
+        return destino
 
     def _cancelar_arraste_molde(self, canvas):
         for idx in sorted(self._indices_molde_em_arraste, reverse=True):
@@ -1204,6 +1599,9 @@ class Ferramenta(FerramentaBase):
             self._dialog.hide()
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
+        self._origem_arrasto_molde = None
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
         self._snapshot_cancelamento = {}
         self._molde_criado = False
         self._molde_posicionado = False
@@ -1232,6 +1630,9 @@ class Ferramenta(FerramentaBase):
         self._molde_posicionado = False
         self._arrastando_molde = False
         self._ultimo_pos_arrasto = None
+        self._origem_arrasto_molde = None
+        self._angulo_arrasto_molde = None
+        self._guia_arrasto_angular = None
         self._snapshot_cancelamento = {}
         self._indices_molde_em_arraste = set()
         self._contorno_hover_preview = []

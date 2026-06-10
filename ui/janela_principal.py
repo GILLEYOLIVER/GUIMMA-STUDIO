@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -30,6 +31,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -178,6 +181,8 @@ class _LinhaUsuarioDropArea(QWidget):
 class GuimmaStudioMainWindow(QMainWindow):
     ARQUIVO_PREFS_APP = Path.home() / ".guimma_studio_prefs.json"
     ARQUIVO_RECUPERACAO = Path.home() / ".guimma_studio_recovery.json"
+    MAX_SNAPSHOTS_RECUPERACAO = 5
+    INTERVALO_RECUPERACAO_MS = 10_000
     PERFIL_USUARIO_PADRAO = "1"
     TEMA_INTERFACE_PADRAO = "classico_padrao"
     TEMAS_INTERFACE = {
@@ -475,6 +480,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._pendente_centralizar_indicado = False
         self._inicializar_perfis_usuarios()
         self._opcoes_app = self._carregar_opcoes_app()
+        self._timer_salvar_preferencias_app = QTimer(self)
+        self._timer_salvar_preferencias_app.setSingleShot(True)
+        self._timer_salvar_preferencias_app.timeout.connect(self._salvar_preferencias_app)
         self._timer_salvar_estado = QTimer(self)
         self._timer_salvar_estado.setSingleShot(True)
         self._timer_salvar_estado.timeout.connect(self._salvar_estado_projeto_silenciosamente)
@@ -561,6 +569,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             )
         except Exception:
             pass
+
+    def _agendar_salvar_preferencias_app(self, intervalo_ms: int = 350):
+        timer = getattr(self, "_timer_salvar_preferencias_app", None)
+        if timer is None:
+            self._salvar_preferencias_app()
+            return
+        timer.start(max(0, int(intervalo_ms)))
 
     def _normalizar_tema_interface(self, tema_id: object) -> str:
         tema = str(tema_id or "").strip()
@@ -905,8 +920,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._salvar_preferencias_app()
 
     def _aplicar_intervalo_recovery(self):
-        minutos = max(1, int(self._opcoes_app.get("auto_recuperacao_min", 1)))
-        self._timer_recovery.start(minutos * 60 * 1000)
+        self._timer_recovery.start(self.INTERVALO_RECUPERACAO_MS)
 
     def _capturar_configuracoes_perfil(self) -> dict:
         return {
@@ -1224,6 +1238,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.botoes["Abrir"].clicked.connect(self._abrir_projeto)
         self.backstage.botoes["Salvar"].clicked.connect(self._acao_salvar_pelo_backstage)
         self.backstage.botoes["Salvar como"].clicked.connect(self._salvar_projeto_como)
+        if "Recuperar perdidos" in self.backstage.botoes:
+            self.backstage.botoes["Recuperar perdidos"].clicked.connect(self._abrir_recuperar_perdidos)
         if "Modelo ▸" in self.backstage.botoes:
             self.backstage.botoes["Modelo ▸"].clicked.connect(self._abrir_menu_modelo)
         self.backstage.botoes["Importar ▸"].clicked.connect(self._abrir_menu_importar)
@@ -1414,6 +1430,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._adicionar_todas_ferramentas_da_aba_id(tab_id)
 
     def _log_debug_propriedades(self, mensagem: str):
+        if not (
+            bool(getattr(self, "_debug_propriedades", False))
+            or os.environ.get("GUIMMA_PROPRIEDADES_DEBUG") == "1"
+        ):
+            return
         try:
             caminho = Path.home() / "guimma_propriedades_debug.log"
             linha = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [janela_principal] {mensagem}"
@@ -1433,7 +1454,21 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _abrir_pagina_ferramenta(self, tool_id: str):
         self._log_debug_propriedades(f"_abrir_pagina_ferramenta iniciado com tool_id={tool_id!r}")
-        if self._executar_acao_edicao_ribbon(tool_id):
+        acoes_globais = {
+            "imprimir",
+            "impressao",
+            "print",
+            "plotar",
+            "plotagem",
+            "plot",
+            "desfazer",
+            "refazer",
+            "salvar",
+            "salvar_como",
+            "cores",
+            "unidade_medidas",
+        }
+        if tool_id in acoes_globais and self._executar_acao_edicao_ribbon(tool_id):
             self._log_debug_propriedades(f"tool_id={tool_id!r} tratado como ação de edição ribbon.")
             return
         tool_def = self.ribbon.tool_def(tool_id)
@@ -1442,9 +1477,37 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText(f"Ferramenta não encontrada: {tool_id}")
             self._log_debug_propriedades(f"Ferramenta não encontrada para tool_id={tool_id!r}")
             return
+        if not self._garantir_canvas_para_ferramenta(tool_id):
+            return
+        if self._executar_acao_edicao_ribbon(tool_id):
+            self._log_debug_propriedades(f"tool_id={tool_id!r} tratado como acao de edicao ribbon.")
+            return
         if self._abrir_janela_auxiliar_ferramenta(tool_id, tool_def.title):
             self._log_debug_propriedades(f"tool_id={tool_id!r} abriu janela auxiliar e retornou.")
             return
+
+        area = self._area_documento_atual()
+        if area is not None:
+            try:
+                self._ativar_ferramenta_global(tool_id)
+                if tool_id != "selecionar":
+                    self.lbl_status.setText(f"{tool_def.title} ativo.")
+                return
+            except Exception as exc:
+                self.lbl_status.setText(f"Falha ao abrir {tool_def.title}: {exc}")
+                self._log_debug_propriedades(f"Falha ao ativar {tool_def.title!r}: {type(exc).__name__}: {exc}")
+                try:
+                    caixa = QMessageBox(self)
+                    self._estilizar_message_box(caixa)
+                    caixa.setWindowTitle("Erro ao abrir ferramenta")
+                    caixa.setIcon(QMessageBox.Critical)
+                    caixa.setText(f"{type(exc).__name__}: {exc}")
+                    caixa.setStandardButtons(QMessageBox.Ok)
+                    self._traduzir_botoes_padrao_message_box(caixa)
+                    caixa.exec()
+                except Exception as exc2:
+                    self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
+                return
 
         module_name = tool_def.module.replace("/", ".").replace(".py", "")
         self._log_debug_propriedades(
@@ -1505,6 +1568,21 @@ class GuimmaStudioMainWindow(QMainWindow):
                 caixa.exec()
             except Exception as exc2:
                 self._log_debug_propriedades(f"Falha ao mostrar QMessageBox: {type(exc2).__name__}: {exc2}")
+
+    def _garantir_canvas_para_ferramenta(self, tool_id: str) -> bool:
+        if not hasattr(self, "abas_documentos"):
+            return False
+        if self._area_documento_atual() is not None:
+            return True
+        self._adicionar_aba_documento()
+        area = self._area_documento_atual()
+        if area is None:
+            self.lbl_status.setText("Nao foi possivel criar um canvas novo.")
+            self._log_debug_propriedades(f"Falha ao criar canvas automatico para tool_id={tool_id!r}.")
+            return False
+        self.lbl_status.setText("Canvas novo criado.")
+        self._log_debug_propriedades(f"Canvas automatico criado para tool_id={tool_id!r}.")
+        return True
 
     def _executar_acao_edicao_ribbon(self, tool_id: str) -> bool:
         if tool_id in {"imprimir", "impressao", "print"}:
@@ -5227,6 +5305,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             area = self.abas_documentos.widget(i)
             if not isinstance(area, AreaDocumentoWidget):
                 continue
+            if not self._tem_alteracoes_area(area) and not self._tem_alteracoes_estado_area(area):
+                continue
             payload = self._capturar_estado_documento_canvas(area)
             payload["nome"] = self.abas_documentos.tabText(i) or "(Sem nome)"
             documentos.append(payload)
@@ -5238,7 +5318,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             "documentos": documentos,
         }
         try:
-            self.ARQUIVO_RECUPERACAO.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+            snapshots = self._carregar_snapshots_recuperacao()
+            snapshots.insert(0, snapshot)
+            snapshots = snapshots[: self.MAX_SNAPSHOTS_RECUPERACAO]
+            payload = {"versao": 2, "snapshots": snapshots}
+            self.ARQUIVO_RECUPERACAO.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
 
@@ -5250,14 +5334,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             pass
 
     def _oferecer_recuperacao_pos_falha(self):
-        if not self.ARQUIVO_RECUPERACAO.exists():
-            return
-        try:
-            bruto = json.loads(self.ARQUIVO_RECUPERACAO.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        docs = bruto.get("documentos", [])
-        if not isinstance(docs, list) or not docs:
+        snapshots = self._carregar_snapshots_recuperacao()
+        if not snapshots:
             return
         caixa = QMessageBox(self)
         self._estilizar_message_box(caixa)
@@ -5270,8 +5348,36 @@ class GuimmaStudioMainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
         caixa.exec()
         if caixa.clickedButton() is not botao_sim:
-            self._limpar_arquivo_recuperacao()
             return
+        self._restaurar_snapshot_recuperacao(snapshots[0])
+
+    def _carregar_snapshots_recuperacao(self) -> list[dict]:
+        if not self.ARQUIVO_RECUPERACAO.exists():
+            return []
+        try:
+            bruto = json.loads(self.ARQUIVO_RECUPERACAO.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if isinstance(bruto, dict) and isinstance(bruto.get("snapshots"), list):
+            candidatos = bruto.get("snapshots", [])
+        elif isinstance(bruto, dict) and isinstance(bruto.get("documentos"), list):
+            candidatos = [bruto]
+        else:
+            candidatos = []
+        snapshots: list[dict] = []
+        for item in candidatos:
+            if not isinstance(item, dict):
+                continue
+            docs = item.get("documentos", [])
+            if isinstance(docs, list) and docs:
+                snapshots.append(item)
+        snapshots.sort(key=lambda item: int(item.get("ts", 0) or 0), reverse=True)
+        return snapshots[: self.MAX_SNAPSHOTS_RECUPERACAO]
+
+    def _restaurar_snapshot_recuperacao(self, snapshot: dict) -> bool:
+        docs = snapshot.get("documentos", []) if isinstance(snapshot, dict) else []
+        if not isinstance(docs, list) or not docs:
+            return False
         self._limpar_abas_documentos()
         for doc in docs:
             nome = str(doc.get("nome") or "(Recuperado)")
@@ -5288,6 +5394,62 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._ativar_ferramenta_global("selecionar")
         self.lbl_status.setText("Recuperação concluída.")
         self._agendar_reencaixe_janela_canvas()
+
+        return True
+
+    def _abrir_recuperar_perdidos(self):
+        snapshots = self._carregar_snapshots_recuperacao()
+        if not snapshots:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("Recuperar perdidos")
+            caixa.setIcon(QMessageBox.Information)
+            caixa.setText("Nenhum arquivo perdido encontrado.")
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Recuperar perdidos")
+        dialog.resize(520, 320)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel("Arquivos interrompidos encontrados"))
+        lista = QListWidget()
+        for idx, snapshot in enumerate(snapshots):
+            ts = int(snapshot.get("ts", 0) or 0)
+            quando = datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M:%S") if ts else "Data desconhecida"
+            docs = snapshot.get("documentos", []) or []
+            nomes = ", ".join(str(doc.get("nome") or "(Sem nome)") for doc in docs[:3])
+            if len(docs) > 3:
+                nomes += f" (+{len(docs) - 3})"
+            item = QListWidgetItem(f"{quando} - {nomes}")
+            item.setData(Qt.UserRole, idx)
+            lista.addItem(item)
+        lista.setCurrentRow(0)
+        layout.addWidget(lista)
+        botoes = QDialogButtonBox(QDialogButtonBox.Open | QDialogButtonBox.Cancel)
+        botao_abrir = botoes.button(QDialogButtonBox.Open)
+        botao_cancelar = botoes.button(QDialogButtonBox.Cancel)
+        if botao_abrir is not None:
+            botao_abrir.setText("Recuperar")
+        if botao_cancelar is not None:
+            botao_cancelar.setText("Cancelar")
+        layout.addWidget(botoes)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        item = lista.currentItem()
+        if item is None:
+            return
+        idx = int(item.data(Qt.UserRole))
+        if 0 <= idx < len(snapshots):
+            self._restaurar_snapshot_recuperacao(snapshots[idx])
+            self.backstage.hide()
 
     def _abrir_projeto(self):
         self.backstage.hide()
@@ -6686,9 +6848,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         return True
 
     def _ativar_ferramenta_global(self, tool_id: str):
+        preferencia_anterior = self.projeto_atual.preferencias_usuario.get("ferramenta_ativa_id")
         self._ferramenta_ativa_id = tool_id
-        self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = tool_id
-        self._salvar_preferencias_app()
+        if preferencia_anterior != tool_id:
+            self.projeto_atual.preferencias_usuario["ferramenta_ativa_id"] = tool_id
+            self._agendar_salvar_preferencias_app()
         self.ribbon.set_active_tool(tool_id)
         self._atualizar_barra_lateral_ferramentas()
         self._ocultar_janelas_auxiliares(exceto=tool_id)

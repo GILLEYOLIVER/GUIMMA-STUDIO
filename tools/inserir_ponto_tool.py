@@ -31,7 +31,16 @@ class Ferramenta(FerramentaBase):
         pos = canvas._ponto_com_snap(event.position())
         molde_alvo = self._molde_em_ponto(canvas, pos)
         moldes_selecionados = self._indices_moldes_selecionados(canvas)
-        if molde_alvo is not None and molde_alvo not in moldes_selecionados:
+        controle_alvo = None
+        amostra_alvo = False
+        if molde_alvo is not None:
+            controle_alvo = self._controle_molde_em_ponto(canvas, molde_alvo, pos, 10.0)
+            amostra_alvo = self._amostra_molde_em_ponto(canvas, molde_alvo, pos, 10.0)
+        if (
+            molde_alvo is not None
+            and molde_alvo not in moldes_selecionados
+            and (not self._shift_pressionado(event) or bool(controle_alvo) or not amostra_alvo)
+        ):
             canvas._selecionados = {molde_alvo}
             self._hover_principal = self._shift_pressionado(event)
             self._hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=[molde_alvo])
@@ -40,7 +49,7 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        indices = moldes_selecionados or None
+        indices = moldes_selecionados or ([molde_alvo] if molde_alvo is not None else None)
         alvo = self._segmento_mais_proximo(canvas, pos, indices=indices)
         if alvo is None:
             self.set_status("Nenhum segmento encontrado sob o cursor.")
@@ -148,6 +157,28 @@ class Ferramenta(FerramentaBase):
         if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("molde"):
             return idx
         return None
+
+    def _controle_molde_em_ponto(self, canvas, idx: int, pos: QPointF, tolerancia_px: float) -> bool:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+        tolerancia = float(tolerancia_px) / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        el = canvas.cena.elementos[idx]
+        for chave in ("controle_cantos", "controle_auxiliares"):
+            for item in el.get(chave, []) or []:
+                pt = self._ponto_qt(item)
+                if pt is not None and canvas._dist(pt, pos) <= tolerancia:
+                    return True
+        return False
+
+    def _amostra_molde_em_ponto(self, canvas, idx: int, pos: QPointF, tolerancia_px: float) -> bool:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+        tolerancia = float(tolerancia_px) / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        for item in canvas.cena.elementos[idx].get("pontos", []) or []:
+            pt = self._ponto_qt(item)
+            if pt is not None and canvas._dist(pt, pos) <= tolerancia:
+                return True
+        return False
 
     def _desenhar_ponto_preview(self, canvas, painter, ponto: QPointF) -> None:
         chave = "ponto_controle" if self._hover_principal else "ponto_nao_graduado"
@@ -283,6 +314,7 @@ class Ferramenta(FerramentaBase):
             )
         el["controle_auxiliares"] = auxiliares
         self._inserir_ponto_no_contorno_sem_deformar(canvas, el, ponto, seg_idx)
+        self._helper._garantir_auxiliares_minimos_curva_molde(canvas, el, normalizar_retas=False)
         self._sincronizar_controles_molde(el)
         return True
 

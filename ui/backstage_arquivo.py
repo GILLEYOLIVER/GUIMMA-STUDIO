@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -62,6 +62,7 @@ class BackstageArquivoPanel(QFrame):
             "Abrir",
             "Salvar",
             "Salvar como",
+            "Recuperar perdidos",
             "Modelo ▸",
             "Importar ▸",
             "Exportar ▸",
@@ -75,6 +76,7 @@ class BackstageArquivoPanel(QFrame):
             "Abrir": "abrir.svg",
             "Salvar": "salvar.svg",
             "Salvar como": "salvar_como.svg",
+            "Recuperar perdidos": "abrir.svg",
             "Modelo ▸": "molde-pronto.svg",
             "Importar ▸": "abrir.svg",
             "Exportar ▸": "exportar.svg",

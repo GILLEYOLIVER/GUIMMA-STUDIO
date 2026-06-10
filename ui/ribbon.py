@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
     QWidget,
 )
+from shiboken6 import isValid as _qt_objeto_valido
 
 from config import ICONS_DIR
 from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
@@ -766,6 +767,9 @@ class RibbonWidget(QWidget):
             "hover_menu": "#e9f3ff",
             "selecionado": "#c5e4f6",
         }
+        self._active_tool_id: str | None = None
+        self._botoes_por_tool_id: dict[str, list[RibbonButton]] = {}
+        self._cache_botoes_ribbon_valido = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -845,6 +849,7 @@ class RibbonWidget(QWidget):
         self.paginas.insertWidget(index, self._criar_viewport_pagina(pagina))
         if pagina_atual == index:
             self.paginas.setCurrentIndex(index)
+        self._cache_botoes_ribbon_valido = False
         self.aplicar_tema(self._tema_interface)
 
     def _on_tool_selected(self, tool_id: str):
@@ -852,20 +857,44 @@ class RibbonWidget(QWidget):
         self.tool_selected.emit(tool_id)
 
     def set_active_tool(self, tool_id: str):
+        if not self._cache_botoes_ribbon_valido:
+            self._reconstruir_cache_botoes()
+
+        ids_alvo = {tool_id}
+        if self._active_tool_id:
+            ids_alvo.add(self._active_tool_id)
+
+        for tid in ids_alvo:
+            botoes_validos: list[RibbonButton] = []
+            for botao in self._botoes_por_tool_id.get(tid, []):
+                if not _qt_objeto_valido(botao):
+                    self._cache_botoes_ribbon_valido = False
+                    continue
+                botoes_validos.append(botao)
+                try:
+                    botao.blockSignals(True)
+                    botao.setChecked(tid == tool_id)
+                finally:
+                    if _qt_objeto_valido(botao):
+                        botao.blockSignals(False)
+            if len(botoes_validos) != len(self._botoes_por_tool_id.get(tid, [])):
+                self._botoes_por_tool_id[tid] = botoes_validos
+        self._active_tool_id = tool_id
+
+    def _reconstruir_cache_botoes(self):
+        botoes_por_tool_id: dict[str, list[RibbonButton]] = {}
         for botao in self.findChildren(RibbonButton):
-            botao.blockSignals(True)
-            botao.setChecked(bool(botao.property("tool_id") == tool_id))
-            botao.blockSignals(False)
+            if not _qt_objeto_valido(botao):
+                continue
+            tool_id = str(botao.property("tool_id") or "")
+            if tool_id:
+                botoes_por_tool_id.setdefault(tool_id, []).append(botao)
+        self._botoes_por_tool_id = botoes_por_tool_id
+        self._cache_botoes_ribbon_valido = True
 
     def _atualizar_destaque_aba(self, index: int):
-        tema = getattr(self, "_tema_interface", {})
         if 0 <= index < len(self._tabs):
             self.tab_changed.emit(self._tabs[index].tab_id)
-        for i in range(self.paginas.count()):
-            pagina = self._pagina_em(i)
-            pagina.setStyleSheet(
-                f"background: {tema.get('painel', '#ffffff')}; border-top: none;"
-            )
 
     def _criar_viewport_pagina(self, pagina: RibbonPage) -> _RibbonPageScrollArea:
         return _RibbonPageScrollArea(pagina)

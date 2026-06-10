@@ -198,6 +198,55 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] < 5.0]), 3)
         self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] > 5.0]), 3)
 
+    def test_inserir_principal_em_curva_garante_tres_auxiliares_por_trecho(self):
+        canvas = _FakeCanvas()
+        pontos_originais = [
+            (0.0, 0.0),
+            (2.0, 0.6),
+            (4.0, 2.0),
+            (6.0, 3.0),
+            (8.0, 2.0),
+            (10.0, 0.0),
+            (10.0, 7.0),
+            (0.0, 0.0),
+        ]
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": list(pontos_originais),
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 7.0)],
+                "controle_auxiliares": [(10.0, 3.5), (5.0, 3.5)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 10.0, "y": 7.0},
+                ],
+                "pontos_auxiliares": [{"x": 10.0, "y": 3.5}, {"x": 5.0, "y": 3.5}],
+            }
+        )
+        ferramenta = FerramentaInserirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(6.0, 3.0), Qt.ShiftModifier)))
+
+        molde = canvas.cena.elementos[0]
+        self.assertIn((6.0, 3.0), molde["controle_cantos"])
+        cantos = [QPointF(x, y) for x, y in molde["controle_cantos"]]
+        auxiliares = [QPointF(x, y) for x, y in molde["controle_auxiliares"]]
+        pontos = [QPointF(x, y) for x, y in molde["pontos"]]
+        segmentos = ferramenta._helper._segmentos_cantos(cantos, fechado=True)
+        mapa = ferramenta._helper._mapa_segmentos_auxiliares_por_ordem_pontos(
+            canvas,
+            pontos,
+            cantos,
+            auxiliares,
+            segmentos,
+            fechado=True,
+        )
+        contagem = {idx: 0 for idx in range(len(segmentos))}
+        for seg_ordem in mapa:
+            contagem[int(seg_ordem)] += 1
+        self.assertGreaterEqual(contagem[0], 3)
+        self.assertGreaterEqual(contagem[1], 3)
+
     def test_inserir_principal_em_segmento_do_molde_apenas_divide_segmento(self):
         canvas = _FakeCanvas()
         pontos_originais = list(canvas.cena.elementos[0]["pontos"])
