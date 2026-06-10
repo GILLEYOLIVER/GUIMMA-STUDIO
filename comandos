@@ -6,6 +6,7 @@ git status
 git commit -m "Sincroniza GitHub com estado local"
 git push origin main
 
+
 ___________________________________________________________________________________
 
 empurrar forçado para o github
