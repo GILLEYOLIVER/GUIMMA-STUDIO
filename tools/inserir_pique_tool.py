@@ -253,8 +253,11 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = self._posicao_cena(canvas, event)
-        indices = {self._molde_idx} if self._molde_idx is not None else None
-        self._hover = self._alvo_no_contorno(canvas, pos, indices=indices)
+        if self._molde_idx is not None and self._dialog is not None and not self._dialog.chk_sobre_contorno.isChecked():
+            self._hover = (self._molde_idx, pos)
+        else:
+            indices = {self._molde_idx} if self._molde_idx is not None else None
+            self._hover = self._alvo_no_contorno(canvas, pos, indices=indices)
         canvas.update()
         event.accept()
         return True
@@ -280,7 +283,10 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        alvo = self._alvo_no_contorno(canvas, pos, indices={self._molde_idx})
+        if self._dialog is not None and not self._dialog.chk_sobre_contorno.isChecked():
+            alvo = (self._molde_idx, pos)
+        else:
+            alvo = self._alvo_no_contorno(canvas, pos, indices={self._molde_idx})
         if alvo is None:
             self.set_status("Clique no contorno do molde selecionado para inserir o pique.")
             return False
@@ -345,7 +351,7 @@ class Ferramenta(FerramentaBase):
         segmentos = self._segmentos_pique(
             el,
             ponto_final,
-            self._segmento_mais_proximo_elemento(el, ponto),
+            self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None,
             self._dialog.cmb_tipo.currentText(),
             self._dialog.largura(),
             self._dialog.altura(),
@@ -402,7 +408,7 @@ class Ferramenta(FerramentaBase):
         if sobre_contorno and not any(self._dist_tuple(tupla, item) <= 1e-6 for item in marcacoes):
             marcacoes.append(tupla)
         el["marcacoes_no_perimetro"] = marcacoes
-        segmento = self._segmento_mais_proximo_elemento(el, ponto)
+        segmento = self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None
         segmentos_pique = self._segmentos_pique(
             el,
             QPointF(ponto_final),
@@ -416,7 +422,7 @@ class Ferramenta(FerramentaBase):
         if not sobre_contorno and not self._segmentos_pique_dentro_molde(el, segmentos_pique):
             self.set_status("Pique interno fora do molde. Ajuste largura, altura, angulo ou clique em outro trecho.")
             return False
-        ponto_controle = QPointF(ponto_final) if sobre_contorno else self._centro_segmentos_pique(segmentos_pique, ponto_final)
+        ponto_controle = QPointF(ponto_final)
 
         config = {
             "ponto": tupla,
@@ -458,9 +464,9 @@ class Ferramenta(FerramentaBase):
         altura = max(0.01, abs(float(altura)))
         tangente = self._tangente_segmento(segmento)
         normal = QPointF(-tangente.y(), tangente.x())
-        normal = self._normal_orientada_para_fora(el, ponto, normal)
-        if not sobre_contorno:
-            normal = QPointF(-normal.x(), -normal.y())
+        if sobre_contorno and segmento is not None:
+            normal_fora = self._normal_orientada_para_fora(el, ponto, normal)
+            normal = QPointF(-normal_fora.x(), -normal_fora.y())
         if abs(float(angulo_extra)) > 1e-9:
             normal, tangente = self._rotacionar_base(normal, tangente, float(angulo_extra))
 
