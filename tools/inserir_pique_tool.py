@@ -297,14 +297,7 @@ class Ferramenta(FerramentaBase):
         self._desenhar_molde_selecionado(canvas, painter)
         if self._hover is None:
             return
-        _idx, ponto = self._hover
-        tela = canvas._cena_para_tela(ponto)
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor("#ff4fa3"))
-        painter.drawEllipse(tela, 5, 5)
-        painter.restore()
+        self._desenhar_preview_pique(canvas, painter)
 
     def _selecionar_molde(self, canvas, idx: int) -> None:
         self._molde_idx = int(idx)
@@ -338,6 +331,41 @@ class Ferramenta(FerramentaBase):
         painter.setPen(QPen(QColor("#2da8ff"), 2))
         for a, b in zip(pontos, pontos[1:]):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
+        painter.restore()
+
+    def _desenhar_preview_pique(self, canvas, painter) -> None:
+        if self._dialog is None or self._hover is None:
+            return
+        idx, ponto = self._hover
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return
+        el = canvas.cena.elementos[idx]
+        ponto_final = QPointF(ponto.x() + self._dialog.dx(), ponto.y() - self._dialog.dy())
+        sobre_contorno = bool(self._dialog.chk_sobre_contorno.isChecked())
+        segmentos = self._segmentos_pique(
+            el,
+            ponto_final,
+            self._segmento_mais_proximo_elemento(el, ponto),
+            self._dialog.cmb_tipo.currentText(),
+            self._dialog.largura(),
+            self._dialog.altura(),
+            self._dialog.angulo(),
+            sobre_contorno=sobre_contorno,
+        )
+        if not sobre_contorno and not self._segmentos_pique_dentro_molde(el, segmentos):
+            cor = "#ff4fa3"
+        else:
+            cor = "#2da8ff"
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        for a, b in segmentos:
+            pa = QPointF(float(a[0]), float(a[1]))
+            pb = QPointF(float(b[0]), float(b[1]))
+            if hasattr(canvas, "_desenhar_segmento"):
+                canvas._desenhar_segmento(painter, pa, pb, cor=cor, espessura=2.2)
+            else:
+                painter.setPen(QPen(QColor(cor), 2))
+                painter.drawLine(canvas._cena_para_tela(pa), canvas._cena_para_tela(pb))
         painter.restore()
 
     def set_status(self, texto: str):
