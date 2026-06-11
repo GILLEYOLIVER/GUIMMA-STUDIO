@@ -87,24 +87,35 @@ class _FakeCanvas:
     def window(self):
         return SimpleNamespace(_opcoes_app={"rotacionar_duplo_clique": True})
 
+    def findChildren(self, _tipo):
+        return []
+
 
 @unittest.skipIf(FerramentaSelecionar is None, "PySide6 não disponível neste ambiente")
 class SelecionarToolTestCase(unittest.TestCase):
-    def test_duplo_clique_esquerdo_cicla_eixos_do_fio(self):
+    def test_duplo_clique_esquerdo_alinha_linha_em_zero_e_depois_alterna_90(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSelecionar()
-        evento = _FakeEvent()
+        evento_linha = _FakeEvent(pos=QPointF(10.0, 2.0))
+        evento_molde = _FakeEvent(pos=QPointF(2.0, 1.0))
         molde = canvas.cena.elementos[0]
 
-        for esperado in (0.0, 270.0, 180.0, 90.0):
-            self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento))
+        self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_linha))
+        self.assertEqual(molde["fio_angulo"], 0.0)
+        estado = ferramenta._alinhamento_duplo_molde[(id(canvas), 0)]
+        self.assertAlmostEqual(ferramenta._angulo_segmento_referencia(molde, estado["segmento"]), 0.0)
+
+        for esperado in (90.0, 0.0, 90.0):
+            self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_molde))
             self.assertEqual(molde["fio_angulo"], esperado)
-            self.assertAlmostEqual(ferramenta._angulo_fio_atual(molde), esperado)
+            estado = ferramenta._alinhamento_duplo_molde[(id(canvas), 0)]
+            self.assertAlmostEqual(ferramenta._angulo_segmento_referencia(molde, estado["segmento"]), esperado)
 
         self.assertEqual(canvas._selecionados, {0})
         self.assertEqual(canvas.historico, 4)
         self.assertTrue(canvas.atualizou)
-        self.assertTrue(evento.accepted)
+        self.assertTrue(evento_linha.accepted)
+        self.assertTrue(evento_molde.accepted)
 
     def test_arrastar_item_ja_selecionado_move_toda_selecao(self):
         canvas = _FakeCanvas()

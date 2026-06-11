@@ -29,6 +29,7 @@ class Ferramenta(FerramentaBase):
         self._movido = False
         self._hover_idx: int | None = None
         self._originais_arraste: dict[int, dict] = {}
+        self._alinhamento_duplo_molde: dict[tuple[int, int], dict] = {}
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -369,13 +370,36 @@ class Ferramenta(FerramentaBase):
         if not molde.get("molde"):
             return False
 
-        angulo_atual = self._angulo_fio_atual(molde)
-        angulo_alvo = self._proximo_eixo_fio(angulo_atual)
+        chave = (id(canvas), idx)
+        estado = self._alinhamento_duplo_molde.get(chave)
+        if estado is None:
+            segmento = self._segmento_referencia_alinhamento(molde, pos)
+            if segmento is None:
+                return False
+            angulo_alvo = 0.0
+        else:
+            segmento = estado.get("segmento")
+            angulo_alvo = float(estado.get("proximo_alvo", 0.0))
+
+        angulo_atual = self._angulo_segmento_referencia(molde, segmento)
+        if angulo_atual is None:
+            segmento = self._segmento_referencia_alinhamento(molde, pos)
+            if segmento is None:
+                self._alinhamento_duplo_molde.pop(chave, None)
+                return False
+            angulo_atual = self._angulo_segmento_referencia(molde, segmento)
+        if angulo_atual is None:
+            return False
+
         delta = self._delta_angular(angulo_atual, angulo_alvo)
         pivo = self._pivo_rotacao_fio(molde)
         self._girar_molde_para_fio(molde, pivo, delta)
         molde["fio_angulo"] = angulo_alvo
         molde["mostrar_fio"] = True
+        self._alinhamento_duplo_molde[chave] = {
+            "segmento": segmento,
+            "proximo_alvo": 90.0 if self._distancia_angular(angulo_alvo, 0.0) <= 1e-6 else 0.0,
+        }
 
         self._arrastando_selecao = False
         self._ultimo_ponto_arrasto = None
@@ -516,6 +540,60 @@ class Ferramenta(FerramentaBase):
             return self._normalizar_angulo(float(el.get("fio_angulo") or 0.0))
         except Exception:
             return 0.0
+
+    def _segmento_referencia_alinhamento(self, el: dict, pos: QPointF) -> dict | None:
+        melhor: dict | None = None
+        melhor_dist = float("inf")
+        for segmento in self._segmentos_alinhamento_molde(el):
+            dist = self._distancia_ponto_segmento(pos, segmento["a"], segmento["b"])
+            if dist < melhor_dist:
+                melhor_dist = dist
+                melhor = segmento
+        return melhor
+
+    def _segmentos_alinhamento_molde(self, el: dict) -> list[dict]:
+        segmentos = self._segmentos_lista_indexada(el, "controle_cantos", fechado=True)
+        if segmentos:
+            return segmentos
+        return self._segmentos_lista_indexada(el, "pontos", fechado=False)
+
+    def _segmentos_lista_indexada(self, el: dict, chave: str, fechado: bool) -> list[dict]:
+        origem = el.get(chave)
+        if not isinstance(origem, list):
+            return []
+        pontos = [self._qpoint_item(item) for item in origem]
+        pares = [(idx, ponto) for idx, ponto in enumerate(pontos) if ponto is not None]
+        if len(pares) < 2:
+            return []
+
+        segmentos: list[dict] = []
+        for (a_idx, a), (b_idx, b) in zip(pares, pares[1:]):
+            if self._dist_qp(a, b) > 1e-9:
+                segmentos.append({"chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
+        if fechado and len(pares) > 2:
+            a_idx, a = pares[-1]
+            b_idx, b = pares[0]
+            if self._dist_qp(a, b) > 1e-9:
+                segmentos.append({"chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
+        return segmentos
+
+    def _angulo_segmento_referencia(self, el: dict, segmento: dict | None) -> float | None:
+        if not isinstance(segmento, dict):
+            return None
+        chave = segmento.get("chave")
+        try:
+            a_idx = int(segmento.get("a_idx"))
+            b_idx = int(segmento.get("b_idx"))
+        except Exception:
+            return None
+        origem = el.get(chave)
+        if not isinstance(origem, list) or not (0 <= a_idx < len(origem)) or not (0 <= b_idx < len(origem)):
+            return None
+        a = self._qpoint_item(origem[a_idx])
+        b = self._qpoint_item(origem[b_idx])
+        if a is None or b is None or self._dist_qp(a, b) <= 1e-9:
+            return None
+        return self._normalizar_angulo(degrees(atan2(-(b.y() - a.y()), b.x() - a.x())))
 
     def _proximo_eixo_fio(self, angulo_atual: float) -> float:
         atual = self._normalizar_angulo(angulo_atual)
