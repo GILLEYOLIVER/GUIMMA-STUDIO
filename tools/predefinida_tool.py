@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxL
 
 from tools.espiral_e_curvas_tool import Ferramenta as FerramentaEspiralCurvas
 from tools.espiral_e_curvas_tool import _gerar_curva_base
+from tools.espiral_e_curvas_tool import _gerar_pontos_controle_base
 
 
 class InserirPredefinidaDialog(QDialog):
@@ -98,6 +99,10 @@ class InserirPredefinidaDialog(QDialog):
 
     def pontos_processados(self):
         pts = _gerar_curva_base(self.cmb_curva.currentText())
+        return [p * self._fator_escala for p in pts]
+
+    def pontos_controle_processados(self):
+        pts = _gerar_pontos_controle_base(self.cmb_curva.currentText())
         return [p * self._fator_escala for p in pts]
 
     def _atualizar_metricas(self):
