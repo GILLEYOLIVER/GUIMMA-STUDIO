@@ -37,10 +37,13 @@ class RedefinirPerimetroDialog(QDialog):
         lay.setSpacing(6)
         form = QFormLayout()
         self.cmb_modo = QComboBox()
+        self.cmb_modo.setObjectName("modo")
         self.cmb_modo.addItems(["Manter extremos", "Uni-direcional", "Bi-direcional"])
         self.ed_de = QLineEdit("0")
+        self.ed_de.setObjectName("de")
         self.ed_de.setReadOnly(True)
         self.ed_para = QLineEdit("0")
+        self.ed_para.setObjectName("para")
         form.addRow("Modo", self.cmb_modo)
         form.addRow("De (cm)", self.ed_de)
         form.addRow("Para (cm)", self.ed_para)
@@ -242,6 +245,7 @@ class Ferramenta(FerramentaBase):
         if segmento_preview is None:
             return
         self._elemento_preview_por_canvas[chave] = el
+        canvas.cena.elementos[idx] = deepcopy(el)
         afetados = self._segmentos_originais_afetados(snapshot, el)
         if not afetados:
             afetados = [(QPointF(alvo_segmento["a"]), QPointF(alvo_segmento["b"]))]

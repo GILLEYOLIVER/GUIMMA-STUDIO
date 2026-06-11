@@ -121,7 +121,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
         self.assertEqual(canvas.historico, 0)
         self.assertEqual(dialog.ed_de.text(), "10.00")
-        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (10.0, 0.0))
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
         self.assertEqual(ferramenta._elemento_preview_por_canvas[id(canvas)]["controle_cantos"][1], (14.0, 0.0))
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
@@ -277,7 +277,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         original = deepcopy(canvas.cena.elementos[0])
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
-        self.assertEqual(canvas.cena.elementos[0], original)
+        self.assertNotEqual(canvas.cena.elementos[0], original)
         self.assertNotEqual(ferramenta._elemento_preview_por_canvas[id(canvas)], original)
 
         evento = _FakeEvent(QPointF(5.0, 0.0), button=Qt.RightButton)

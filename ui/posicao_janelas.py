@@ -19,15 +19,6 @@ def _grupo_estado(chave: str) -> str:
     return f"caixas_flutuantes_estado/{chave_limpa}"
 
 
-def _usar_fallback_como_regra(chave: str, fallback: QPoint | None) -> bool:
-    if fallback is None:
-        return False
-    chave_norm = str(chave or "")
-    if chave_norm == "painel:coordenadas":
-        return False
-    return chave_norm.startswith("dialog:") or chave_norm.startswith("painel:")
-
-
 def _valor_bool(valor) -> bool:
     if isinstance(valor, bool):
         return valor
@@ -171,16 +162,13 @@ def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:
 
 def restaurar_posicao(widget: QWidget, chave: str, fallback: QPoint | None = None) -> bool:
     restaurar_estado(widget, chave)
-    if _usar_fallback_como_regra(chave, fallback):
-        widget.move(ajustar_para_area(widget, fallback))
-        return False
     pos = posicao_salva(chave)
-    if pos is None:
-        if fallback is not None:
-            widget.move(ajustar_para_area(widget, fallback))
-        return False
-    widget.move(ajustar_para_area(widget, pos))
-    return True
+    if pos is not None:
+        widget.move(ajustar_para_area(widget, pos))
+        return True
+    if fallback is not None:
+        widget.move(ajustar_para_area(widget, fallback))
+    return False
 
 
 class _FiltroMemoriaPosicao(QObject):
@@ -195,11 +183,40 @@ class _FiltroMemoriaPosicao(QObject):
         return super().eventFilter(obj, event)
 
 
+def _conectar_sinal_salvamento(filho: QWidget, chave: str) -> None:
+    chaves = getattr(filho, "_guimma_memoria_estado_chaves", set())
+    if chave in chaves:
+        return
+    chaves = set(chaves)
+    chaves.add(chave)
+    filho._guimma_memoria_estado_chaves = chaves  # type: ignore[attr-defined]
+
+    def _salvar(*_args):
+        raiz = filho.window()
+        salvar_estado(raiz, chave)
+
+    if isinstance(filho, QLineEdit):
+        filho.textChanged.connect(_salvar)
+    elif isinstance(filho, QComboBox):
+        filho.currentIndexChanged.connect(_salvar)
+    elif isinstance(filho, (QCheckBox, QRadioButton)):
+        filho.toggled.connect(_salvar)
+    elif isinstance(filho, QSlider):
+        filho.valueChanged.connect(_salvar)
+    elif isinstance(filho, QAbstractSpinBox):
+        sinal = getattr(filho, "valueChanged", None)
+        if sinal is not None:
+            sinal.connect(_salvar)
+        filho.editingFinished.connect(_salvar)
+
+
 def instalar_memoria_posicao(widget: QWidget, chave: str) -> None:
     if widget is None or getattr(widget, "_guimma_memoria_posicao_instalada", False):
         return
     filtro = _FiltroMemoriaPosicao(widget, chave)
     widget.installEventFilter(filtro)
+    for filho in _widgets_com_estado(widget):
+        _conectar_sinal_salvamento(filho, chave)
     widget._guimma_memoria_posicao_instalada = True  # type: ignore[attr-defined]
     widget._guimma_memoria_posicao_chave = chave  # type: ignore[attr-defined]
     widget._guimma_memoria_posicao_filtro = filtro  # type: ignore[attr-defined]

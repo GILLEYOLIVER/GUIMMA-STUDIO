@@ -438,7 +438,6 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._cores_canvas_global = self._normalizar_cores_canvas(
             self.projeto_atual.preferencias_usuario.get("cores_canvas_global", {})
         )
-        self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
         self._cores_moldes_global = self._normalizar_cores_moldes(
             self.projeto_atual.preferencias_usuario.get("cores_moldes_global", {})
         )
@@ -3020,7 +3019,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._mostrar_cor_tecidos_global = bool(cfg.get("mostrar_cor_tecidos_global", True))
         self._mostrar_cor_tecidos_menu_global = bool(cfg.get("mostrar_cor_tecidos_menu_global", False))
         self._cores_tecidos_global = self._normalizar_cores_tecidos(cfg.get("cores_tecidos_global", {}))
-        self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
+        if cfg.get("sincronizar_cor_desenho_ativa", True):
+            self._estilo_desenho_atual["cor"] = self._cores_canvas_global["desenho"]
         if hasattr(self, "ribbon"):
             self.ribbon.aplicar_estilo(self._estilo_desenho_atual)
 
