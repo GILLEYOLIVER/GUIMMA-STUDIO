@@ -82,6 +82,10 @@ class _FakeCanvas(QWidget):
         self.atualizou = False
         self.segmentos_desenhados = []
         self.ferramenta_ativa = None
+        self._selecionados = {0}
+        self._marcacoes_temporarias = [QPointF(99.0, 99.0)]
+        self._piscando_ponto_restauracao_indices = {0}
+        self._piscando_ponto_restauracao_visivel = True
         self.lbl_status = SimpleNamespace(texto="", setText=lambda texto: setattr(self.lbl_status, "texto", texto))
 
     def _ponto_com_snap(self, pos):
@@ -336,6 +340,54 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertNotIn(id(canvas), ferramenta._segmentos_originais_afetados_por_canvas)
         self.assertNotIn(id(canvas), ferramenta._confirmacao_pendente_por_canvas)
         self.assertEqual(canvas.historico, 0)
+
+    def test_confirmar_remove_marcas_visuais_antigas_do_molde(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "contornos_dobra_original": [{"contorno_lado_dobrado": [(0.0, 0.0), (10.0, 0.0)]}],
+                "estado_dobra": {"ativo": True, "contorno_lado_dobrado": [(0.0, 0.0), (10.0, 0.0)]},
+                "dobra_eixo": {"inicio": (0.0, 0.0), "fim": (10.0, 0.0)},
+                "molde_dobrado": True,
+                "pontos_restauracao": [(0.0, 0.0)],
+            }
+        )
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        dialog.ed_para.setText("14")
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        for chave in ("contornos_dobra_original", "estado_dobra", "dobra_eixo", "molde_dobrado", "pontos_restauracao"):
+            self.assertNotIn(chave, canvas.cena.elementos[0])
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+
+        for chave in ("contornos_dobra_original", "estado_dobra", "dobra_eixo", "molde_dobrado", "pontos_restauracao"):
+            self.assertNotIn(chave, canvas.cena.elementos[0])
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertEqual(canvas._marcacoes_temporarias, [])
+        self.assertEqual(canvas._piscando_ponto_restauracao_indices, set())
+        self.assertFalse(canvas._piscando_ponto_restauracao_visivel)
+
+    def test_cancelar_restaura_metadados_visuais_do_snapshot(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0]["contornos_dobra_original"] = [{"contorno_lado_dobrado": [(0.0, 0.0), (10.0, 0.0)]}]
+        canvas.cena.elementos[0]["estado_dobra"] = {"ativo": True}
+        original = deepcopy(canvas.cena.elementos[0])
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        dialog.ed_para.setText("14")
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        self.assertNotIn("contornos_dobra_original", canvas.cena.elementos[0])
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0), button=Qt.RightButton))
+
+        self.assertEqual(canvas.cena.elementos[0], original)
 
     def test_dois_cliques_direitos_cancelam_e_soltem_ferramenta(self):
         canvas = _FakeCanvas()

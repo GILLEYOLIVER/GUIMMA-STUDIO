@@ -69,6 +69,7 @@ class Ferramenta(FerramentaBase):
     _segmentos_originais_afetados_por_canvas: dict[int, list[tuple[QPointF, QPointF]]] = {}
     _confirmacao_pendente_por_canvas: dict[int, bool] = {}
     _elemento_preview_por_canvas: dict[int, dict] = {}
+    _selecionados_snapshot_por_canvas: dict[int, set[int]] = {}
 
     def on_activate(self, canvas):
         chave = id(canvas)
@@ -80,6 +81,7 @@ class Ferramenta(FerramentaBase):
         self._segmentos_originais_afetados_por_canvas.pop(chave, None)
         self._confirmacao_pendente_por_canvas.pop(chave, None)
         self._elemento_preview_por_canvas.pop(chave, None)
+        self._selecionados_snapshot_por_canvas.pop(chave, None)
         dialog = self._obter_dialog(canvas)
         with QSignalBlocker(dialog.ed_de), QSignalBlocker(dialog.ed_para):
             dialog.ed_de.setText("0")
@@ -111,6 +113,7 @@ class Ferramenta(FerramentaBase):
         self._segmentos_originais_afetados_por_canvas.pop(id(canvas), None)
         self._confirmacao_pendente_por_canvas.pop(id(canvas), None)
         self._elemento_preview_por_canvas.pop(id(canvas), None)
+        self._selecionados_snapshot_por_canvas.pop(id(canvas), None)
 
     def on_mouse_press(self, canvas, event) -> bool:
         chave = id(canvas)
@@ -121,6 +124,7 @@ class Ferramenta(FerramentaBase):
                     canvas.lbl_status.setText("Redefinição cancelada. Clique em uma linha para recomeçar; outro direito sai.")
             else:
                 self._fechar(canvas)
+            canvas.update()
             event.accept()
             return True
         if event.button() != Qt.LeftButton:
@@ -139,6 +143,9 @@ class Ferramenta(FerramentaBase):
             self._segmentos_originais_afetados_por_canvas.pop(chave, None)
             self._confirmacao_pendente_por_canvas.pop(chave, None)
             self._elemento_preview_por_canvas.pop(chave, None)
+            self._selecionados_snapshot_por_canvas.pop(chave, None)
+            self._limpar_selecao_fantasma(canvas, idx)
+            canvas.update()
             if getattr(canvas, "lbl_status", None) is not None:
                 canvas.lbl_status.setText("Redefinição de perímetro aplicada.")
             event.accept()
@@ -157,6 +164,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         dialog.ed_de.setText(canvas.formatar_valor_unidade(per))
         self._snapshot_por_canvas[chave] = deepcopy(canvas.cena.elementos[idx])
+        self._selecionados_snapshot_por_canvas[chave] = set(getattr(canvas, "_selecionados", set()) or set())
         self._preview_ativo_por_canvas[chave] = True
         self._aplicar_preview(canvas)
         if getattr(canvas, "lbl_status", None) is not None:
@@ -179,6 +187,9 @@ class Ferramenta(FerramentaBase):
         self._segmentos_originais_afetados_por_canvas.pop(chave, None)
         self._confirmacao_pendente_por_canvas.pop(chave, None)
         self._elemento_preview_por_canvas.pop(chave, None)
+        selecionados_snapshot = self._selecionados_snapshot_por_canvas.pop(chave, None)
+        if selecionados_snapshot is not None and hasattr(canvas, "_selecionados"):
+            canvas._selecionados = set(selecionados_snapshot)
         dialog = self._obter_dialog(canvas)
         with QSignalBlocker(dialog.ed_de), QSignalBlocker(dialog.ed_para):
             dialog.ed_de.setText("0")
@@ -245,6 +256,7 @@ class Ferramenta(FerramentaBase):
             segmento_preview = self._aplicar_preview_segmento_polyline(canvas, el, alvo_segmento, alvo, modo)
         if segmento_preview is None:
             return
+        self._invalidar_metadados_visuais_molde(el)
         self._elemento_preview_por_canvas[chave] = el
         canvas.cena.elementos[idx] = deepcopy(el)
         afetados = self._segmentos_originais_afetados(snapshot, el)
@@ -275,6 +287,38 @@ class Ferramenta(FerramentaBase):
         if not self._segmentos_iguais_por_canvas.get(chave):
             self._aplicar_preview(canvas)
         return bool(self._segmentos_iguais_por_canvas.get(chave))
+
+    def _invalidar_metadados_visuais_molde(self, el: dict) -> None:
+        for chave in (
+            "contornos_dobra_original",
+            "estado_dobra",
+            "dobra_eixo",
+            "molde_dobrado",
+            "mostrar_contorno_dobra_original",
+            "contorno_original",
+            "contorno_dobrado",
+            "contorno_lado_original",
+            "contorno_lado_dobrado",
+            "contorno_lado_oculto",
+            "contorno_pontilhado",
+            "pontos_restauracao",
+            "pontos_de_restauracao",
+            "_pontos_restauracao",
+        ):
+            el.pop(chave, None)
+
+    def _limpar_selecao_fantasma(self, canvas, idx_atual: int | None) -> None:
+        if hasattr(canvas, "_selecionados"):
+            if idx_atual is not None and 0 <= idx_atual < len(canvas.cena.elementos):
+                canvas._selecionados = {idx_atual}
+            else:
+                canvas._selecionados = set()
+        for nome in ("_marcacoes_temporarias", "_piscando_ponto_restauracao_indices"):
+            valor = getattr(canvas, nome, None)
+            if hasattr(valor, "clear"):
+                valor.clear()
+        if hasattr(canvas, "_piscando_ponto_restauracao_visivel"):
+            canvas._piscando_ponto_restauracao_visivel = False
 
     def _segmento_alvo_para_posicao(self, canvas, idx: int, pos: QPointF) -> dict | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
