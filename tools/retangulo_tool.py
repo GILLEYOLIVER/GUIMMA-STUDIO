@@ -15,7 +15,7 @@ class Ferramenta(FerramentaBase):
     nome = "Retangulo"
     usa_painel_auxiliar = False
     gerencia_coordenadas_operacao = True
-    descricao_painel = "Clique em dois cantos para criar retângulo. RMB cancela a prévia."
+    descricao_painel = "Clique no primeiro canto, mova o retângulo na mão e clique novamente para finalizar. RMB cancela."
 
     def __init__(self):
         super().__init__()
@@ -41,6 +41,7 @@ class Ferramenta(FerramentaBase):
                 self._preview = pos
                 if hasattr(canvas, "iniciar_operacao_coordenadas"):
                     canvas.iniciar_operacao_coordenadas(pos)
+                self.set_status("Retângulo na mão. Mova até o canto oposto e clique para finalizar.")
             else:
                 self._preview = pos
                 if hasattr(canvas, "finalizar_operacao_coordenadas"):
@@ -54,6 +55,17 @@ class Ferramenta(FerramentaBase):
             self._preview = None
             if hasattr(canvas, "cancelar_operacao_coordenadas"):
                 canvas.cancelar_operacao_coordenadas(limpar_preview=True)
+            self.set_status("Retângulo cancelado. Clique no primeiro canto para começar novamente.")
+            canvas.update()
+            event.accept()
+            return True
+        return False
+
+    def on_mouse_release(self, canvas, event) -> bool:
+        if event.button() == Qt.LeftButton and self._inicio is not None:
+            self._preview = canvas._ponto_com_snap(event.position())
+            if hasattr(canvas, "atualizar_operacao_coordenadas"):
+                canvas.atualizar_operacao_coordenadas(self._preview)
             canvas.update()
             event.accept()
             return True
