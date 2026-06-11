@@ -257,6 +257,24 @@ class Ferramenta(FerramentaBase):
             novo_per = canvas.formatar_valor_unidade(self._dist(segmento_preview[0], segmento_preview[1]))
             canvas.lbl_status.setText(f"Prévia linha: {novo_per} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo aplica")
 
+    def _garantir_preview_visivel(self, canvas) -> bool:
+        chave = id(canvas)
+        if not self._preview_ativo_por_canvas.get(chave):
+            return False
+        idx = self._idx_por_canvas.get(chave)
+        preview = self._elemento_preview_por_canvas.get(chave)
+        if idx is None or preview is None or not (0 <= idx < len(canvas.cena.elementos)):
+            self._aplicar_preview(canvas)
+            idx = self._idx_por_canvas.get(chave)
+            preview = self._elemento_preview_por_canvas.get(chave)
+        if idx is None or preview is None or not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+        if canvas.cena.elementos[idx] != preview:
+            canvas.cena.elementos[idx] = deepcopy(preview)
+        if not self._segmentos_iguais_por_canvas.get(chave):
+            self._aplicar_preview(canvas)
+        return bool(self._segmentos_iguais_por_canvas.get(chave))
+
     def _segmento_alvo_para_posicao(self, canvas, idx: int, pos: QPointF) -> dict | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return None
@@ -497,6 +515,7 @@ class Ferramenta(FerramentaBase):
 
     def on_paint_overlay(self, canvas, painter):
         chave = id(canvas)
+        self._garantir_preview_visivel(canvas)
         if self._preview_ativo_por_canvas.get(chave):
             for a_original, b_original in self._segmentos_originais_afetados_por_canvas.get(chave, []):
                 canvas._desenhar_segmento(painter, a_original, b_original, tracejado=True, cor="#f4f4f4", espessura=1.4)

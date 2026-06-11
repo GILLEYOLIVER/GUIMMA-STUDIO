@@ -116,6 +116,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
@@ -167,6 +168,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("20")
         original = deepcopy(canvas.cena.elementos[0])
 
@@ -194,6 +196,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
@@ -240,6 +243,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
@@ -253,6 +257,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
@@ -268,11 +273,31 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertEqual((previa[0].x(), previa[0].y()), (0.0, 0.0))
         self.assertEqual((previa[1].x(), previa[1].y()), (14.0, 0.0))
 
+    def test_overlay_reaplica_previa_se_canvas_perder_estado_visual(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        dialog.ed_para.setText("14")
+        original = deepcopy(canvas.cena.elementos[0])
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        ferramenta._segmentos_iguais_por_canvas.pop(id(canvas), None)
+        canvas.cena.elementos[0] = original
+
+        ferramenta.on_paint_overlay(canvas, None)
+
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
+        self.assertTrue(canvas.segmentos_desenhados)
+        self.assertEqual(canvas.segmentos_desenhados[-1][3], "#2da8ff")
+
     def test_botao_direito_cancela_previa_e_restaura_linha(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
         original = deepcopy(canvas.cena.elementos[0])
 
@@ -298,6 +323,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))

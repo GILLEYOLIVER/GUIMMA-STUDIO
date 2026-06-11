@@ -117,6 +117,7 @@ def salvar_estado(widget: QWidget, chave: str) -> None:
         elif isinstance(filho, QAbstractSpinBox) and hasattr(filho, "value"):
             cfg.setValue(f"{chave_filho}/valor", filho.value())
     cfg.endGroup()
+    cfg.sync()
 
 
 def posicao_salva(chave: str) -> QPoint | None:
@@ -143,6 +144,7 @@ def salvar_posicao(widget: QWidget, chave: str) -> None:
     cfg.setValue("x", int(pos.x()))
     cfg.setValue("y", int(pos.y()))
     cfg.endGroup()
+    cfg.sync()
 
 
 def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:

@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog
 
 from tools.dialog_position import posicionar_dialogo_abaixo_coordenadas
-from ui.posicao_janelas import instalar_memoria_posicao, restaurar_estado
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 _CLASSES_IGNORADAS = {
@@ -62,9 +62,9 @@ def aplicar_patch_posicao_dialogos() -> None:
                 return
             chave = _chave_dialogo(dialogo)
             instalar_memoria_posicao(dialogo, chave)
-            restaurar_estado(dialogo, chave)
+            restaurou = restaurar_posicao(dialogo, chave)
             parent = dialogo.parentWidget() or dialogo.parent()
-            if parent is not None:
+            if parent is not None and not restaurou:
                 posicionar_dialogo_abaixo_coordenadas(dialogo, parent)
         except Exception:
             pass
