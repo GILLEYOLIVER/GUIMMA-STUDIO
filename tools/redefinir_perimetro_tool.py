@@ -204,6 +204,7 @@ class Ferramenta(FerramentaBase):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
             dialog.ed_para.returnPressed.connect(lambda: self._aplicar(canvas))
+            dialog.ed_para.textChanged.connect(lambda _txt: self._aplicar_preview(canvas))
             dialog.ed_para.editingFinished.connect(lambda: self._aplicar_preview(canvas))
             dialog.cmb_modo.currentTextChanged.connect(lambda _txt: self._aplicar_preview(canvas))
         return dialog

@@ -132,6 +132,24 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertNotIn(id(canvas), ferramenta._confirmacao_pendente_por_canvas)
         self.assertNotIn(id(canvas), ferramenta._elemento_preview_por_canvas)
 
+    def test_digitacao_no_para_atualiza_previa_ao_vivo(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        dialog.ed_para.setText("14")
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
+
+        dialog.ed_para.setText("18")
+
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (18.0, 0.0))
+        self.assertEqual(ferramenta._elemento_preview_por_canvas[id(canvas)]["controle_cantos"][1], (18.0, 0.0))
+        self.assertTrue(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
+        self.assertEqual(canvas.historico, 0)
+
     def test_abrir_ferramenta_zera_campos_e_estado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRedefinirPerimetro()
