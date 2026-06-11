@@ -115,7 +115,10 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            self._fechar(canvas)
+            if self._tem_operacao_em_andamento():
+                self._cancelar_operacao(canvas)
+            else:
+                self._fechar(canvas)
             event.accept()
             return True
 
@@ -349,7 +352,7 @@ class Ferramenta(FerramentaBase):
             self._limpar_selecao_canvas(canvas)
             canvas.update()
         self._operacao_finalizada = True
-        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; botão direito sai.")
+        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; botão direito cancela, outro direito sai.")
 
     def _fechar(self, canvas) -> None:
         self._limpar_estado()
@@ -357,6 +360,23 @@ class Ferramenta(FerramentaBase):
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Elemento Paralelo finalizada. Voltando para Selecionar.")
         canvas.update()
+
+    def _cancelar_operacao(self, canvas) -> None:
+        self._limpar_estado()
+        self._limpar_selecao_canvas(canvas)
+        self._operacao_finalizada = True
+        self._status(canvas, "Operação cancelada. Botão direito novamente sai da ferramenta.")
+        canvas.update()
+
+    def _tem_operacao_em_andamento(self) -> bool:
+        return bool(
+            self._fase != "selecionar"
+            or self._alvo_idx is not None
+            or self._preview
+            or self._preview_2
+            or self._realce_segmentos
+            or self._segmentos_selecionados
+        )
 
     def on_paint_overlay(self, canvas, painter):
         if len(self._preview) < 2 and len(self._preview_2) < 2 and not self._realce_segmentos:

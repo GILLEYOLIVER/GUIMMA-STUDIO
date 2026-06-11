@@ -83,7 +83,7 @@ class ElementoParaleloToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas.cena.elementos[-1]["cor"], "#001dff")
 
-    def test_elemento_paralelo_so_sai_com_botao_direito(self):
+    def test_elemento_paralelo_primeiro_direito_cancela_segundo_sai(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaElementoParalelo()
 
@@ -92,9 +92,20 @@ class ElementoParaleloToolTestCase(unittest.TestCase):
         self.assertTrue(duplo_esquerdo.accepted)
         self.assertIsNone(canvas.ferramenta_ativa)
 
-        direito = _FakeEvent(Qt.RightButton)
-        self.assertTrue(ferramenta.on_mouse_press(canvas, direito))
-        self.assertTrue(direito.accepted)
+        ferramenta._fase = "posicionar"
+        ferramenta._alvo_idx = 0
+        ferramenta._preview = [QPointF(0.0, 1.0), QPointF(10.0, 1.0)]
+
+        primeiro_direito = _FakeEvent(Qt.RightButton)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, primeiro_direito))
+        self.assertTrue(primeiro_direito.accepted)
+        self.assertIsNone(canvas.ferramenta_ativa)
+        self.assertEqual(ferramenta._fase, "selecionar")
+        self.assertEqual(ferramenta._preview, [])
+
+        segundo_direito = _FakeEvent(Qt.RightButton)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, segundo_direito))
+        self.assertTrue(segundo_direito.accepted)
         self.assertEqual(canvas.ferramenta_ativa, "selecionar")
 
 
