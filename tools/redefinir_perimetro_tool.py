@@ -441,10 +441,7 @@ class Ferramenta(FerramentaBase):
             novos_pontos[-1] = novos_pontos[0]
         el["pontos"] = novos_pontos
 
-        auxiliares = list(el.get("controle_auxiliares", []) or [])
-        novos_aux = [self._remapear_ponto_segmento(p, a, b, novo_a, novo_b, delta_a, delta_b) for p in auxiliares]
-        el["controle_auxiliares"] = novos_aux
-        el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in novos_aux]
+        self._sincronizar_auxiliares_molde(el)
 
     def _aplicar_segmento_pontos(self, el: dict, alvo_segmento: dict, a: QPointF, b: QPointF, novo_a: QPointF, novo_b: QPointF) -> None:
         p_idx = int(alvo_segmento.get("ponto_idx", -1))
@@ -456,6 +453,25 @@ class Ferramenta(FerramentaBase):
         if len(pontos) >= 2 and self._pontos_mesmos(pontos[0], pontos[-1]):
             pontos[-1] = pontos[0]
         el["pontos"] = pontos
+
+    def _sincronizar_auxiliares_molde(self, el: dict) -> None:
+        cantos = [self._ponto_qt(item) for item in el.get("controle_cantos", []) or []]
+        cantos = [p for p in cantos if p is not None]
+        if len(cantos) < 2:
+            return
+        fechado = bool(el.get("fechado")) or len(cantos) >= 3
+        limite = len(cantos) if fechado else len(cantos) - 1
+        auxiliares: list[tuple[float, float]] = []
+        for idx in range(max(limite, 0)):
+            proximo_idx = (idx + 1) % len(cantos)
+            if not fechado and proximo_idx <= idx:
+                continue
+            atual = cantos[idx]
+            proximo = cantos[proximo_idx]
+            auxiliares.append(((atual.x() + proximo.x()) / 2.0, (atual.y() + proximo.y()) / 2.0))
+        el["controle_auxiliares"] = auxiliares
+        el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
+        el["pontos_controle_principais"] = [{"x": float(p.x()), "y": float(p.y())} for p in cantos]
 
     def _remapear_ponto_segmento(self, item, a: QPointF, b: QPointF, novo_a: QPointF, novo_b: QPointF, delta_a: QPointF, delta_b: QPointF):
         pt = self._ponto_qt(item)

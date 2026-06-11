@@ -230,7 +230,10 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][2], (10.0, 5.0))
         self.assertEqual(molde["controle_cantos"][3], (0.0, 5.0))
         self.assertEqual(molde["controle_auxiliares"][0], (7.0, 0.0))
-        self.assertEqual(molde["controle_auxiliares"][1], (10.0, 2.5))
+        self.assertEqual(molde["controle_auxiliares"][1], (12.0, 2.5))
+        self.assertEqual(molde["controle_auxiliares"][2], (5.0, 5.0))
+        self.assertEqual(molde["controle_auxiliares"][3], (0.0, 2.5))
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in molde["controle_auxiliares"]])
         self.assertIn((14.0, 0.0), molde["pontos"])
         self.assertNotIn((14.0, 5.0), molde["pontos"])
 
@@ -247,6 +250,8 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][0], (-4.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (10.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][0], (3.0, 0.0))
+        self.assertEqual(molde["controle_auxiliares"][3], (-2.0, 2.5))
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in molde["controle_auxiliares"]])
 
         canvas = _FakeCanvas()
         ferramenta = FerramentaRedefinirPerimetro()
@@ -260,6 +265,8 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (14.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][0], (7.0, 0.0))
+        self.assertEqual(molde["controle_auxiliares"][1], (12.0, 2.5))
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in molde["controle_auxiliares"]])
 
     def test_previa_realca_novo_perimetro_em_azul(self):
         canvas = _FakeCanvas()
