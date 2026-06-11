@@ -341,7 +341,7 @@ class Ferramenta(FerramentaBase):
         novo = {
             "tipo": "polyline",
             "pontos": [(p.x(), p.y()) for p in pontos],
-            "cor": origem.get("cor", getattr(canvas, "_linha_cor", "#ffffff")),
+            "cor": getattr(canvas, "_linha_cor", origem.get("cor", "#ffffff")),
             "espessura": origem.get("espessura", getattr(canvas, "_linha_espessura", 1.0)),
             "estilo": origem.get("estilo", getattr(canvas, "_linha_estilo", "solid")),
             "id": str(uuid4()),
