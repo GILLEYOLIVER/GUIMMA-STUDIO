@@ -109,6 +109,28 @@ class GirarToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(ferramenta._estado_2p, "pivo")
+        self.assertIsNone(ferramenta._pivo_2p)
+        self.assertIsNone(ferramenta._referencia_2p)
+        self.assertIsNone(ferramenta._preview_2p)
+
+    def test_girar_em_2_pontos_guia_do_segundo_ponto_usa_snap_angular(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaGirar()
+        ferramenta.on_activate(canvas)
+        ferramenta._obter_dialog(canvas).cmb_modo.setCurrentText("Girar em 2 pontos")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
+
+        self.assertIsNotNone(ferramenta._preview_2p)
+        self.assertAlmostEqual(ferramenta._preview_2p.x(), 6.519202405202649)
+        self.assertAlmostEqual(ferramenta._preview_2p.y(), -6.519202405202649)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(7.0, -6.0))))
+        self.assertIsNotNone(ferramenta._referencia_2p)
+        self.assertAlmostEqual(ferramenta._referencia_2p.x(), 6.519202405202649)
+        self.assertAlmostEqual(ferramenta._referencia_2p.y(), -6.519202405202649)
+        self.assertEqual(ferramenta._estado_2p, "girando")
 
     def test_clique_direito_cancela_girar_em_2_pontos_sem_fechar(self):
         canvas = _FakeCanvas()

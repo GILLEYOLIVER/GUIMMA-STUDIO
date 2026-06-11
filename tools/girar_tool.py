@@ -152,6 +152,12 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         if dialog.cmb_modo.currentText() != "Girar em 2 pontos":
             return False
+        if self._estado_2p == "referencia" and self._pivo_2p is not None:
+            pos = canvas._ponto_com_snap(event.position())
+            self._preview_2p = self._ajustar_ponto_angular_2p(self._pivo_2p, pos)
+            canvas.update()
+            event.accept()
+            return True
         if self._estado_2p != "girando" or self._pivo_2p is None or self._referencia_2p is None:
             return False
         pos = canvas._ponto_com_snap(event.position())
@@ -248,6 +254,7 @@ class Ferramenta(FerramentaBase):
             return True
 
         if self._estado_2p == "referencia":
+            pos = self._ajustar_ponto_angular_2p(self._pivo_2p, pos)
             if self._pivo_2p is None or self._dist(self._pivo_2p, pos) <= 1e-6:
                 self._status(canvas, "Girar em 2 pontos: escolha um segundo ponto diferente do pivô.")
                 event.accept()
@@ -263,12 +270,13 @@ class Ferramenta(FerramentaBase):
 
         if self._estado_2p == "girando":
             self._aplicar_preview_2p(canvas, pos)
+            angulo_aplicado = self._angulo_preview_2p
             canvas._registrar_historico()
             self._snapshot_2p = []
-            self._estado_2p = "pivo"
+            self._resetar_2p()
             self._operacao_finalizada = True
             self._direito_confirma_fechamento = False
-            self._status(canvas, f"Giro em 2 pontos aplicado: {self._angulo_preview_2p:g}°.")
+            self._status(canvas, f"Giro em 2 pontos aplicado: {angulo_aplicado:g}°.")
             canvas.update()
             event.accept()
             return True
@@ -287,6 +295,15 @@ class Ferramenta(FerramentaBase):
                 el = deepcopy(original)
                 self._girar_elemento(el, self._pivo_2p, -delta)
                 canvas.cena.elementos[idx] = el
+
+    def _ajustar_ponto_angular_2p(self, origem: QPointF | None, pos: QPointF) -> QPointF:
+        if origem is None:
+            return QPointF(pos)
+        comprimento = self._dist(origem, pos)
+        if comprimento <= 1e-6:
+            return QPointF(pos)
+        angulo = self._angulo_principal_mais_proximo(self._angulo_entre(origem, pos))
+        return self._destino_polar(origem, comprimento, angulo)
 
     def _indices_selecionados(self, canvas) -> list[int]:
         return [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
@@ -356,8 +373,11 @@ class Ferramenta(FerramentaBase):
         painter.setFont(font)
         painter.drawText(int(pivo_tela.x() + 6), int(pivo_tela.y() - 6), "1")
 
-        if self._referencia_2p is not None:
-            ref_tela = canvas._cena_para_tela(self._referencia_2p)
+        referencia_guia = self._referencia_2p
+        if referencia_guia is None and self._estado_2p == "referencia":
+            referencia_guia = self._preview_2p
+        if referencia_guia is not None:
+            ref_tela = canvas._cena_para_tela(referencia_guia)
             painter.setPen(QPen(QColor("#8fe1ff"), 2.0, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawLine(pivo_tela, ref_tela)
