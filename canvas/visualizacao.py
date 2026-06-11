@@ -2425,26 +2425,13 @@ class VisualizacaoCanvas(QWidget):
                 )
                 afastamento = max(2.0, float(distancia_num_cm) * max(float(getattr(self, "zoom", 1.0)), 0.01))
                 cantos_numeracao = self._cantos_para_numeracao_horaria_tela(cantos)
+                centro_numeros = QPointF(cx, cy)
+                itens_numeracao = []
                 for i, pt in enumerate(cantos_numeracao, start=1):
-                    pt_tela = self._cena_para_tela(pt)
-                    painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
-                    dx = pt.x() - cx
-                    dy = pt.y() - cy
-                    mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
-                    off_x = (dx / mod) * afastamento
-                    off_y = (dy / mod) * afastamento
-                    texto_num = str(i)
-                    largura_num = metrics_num.horizontalAdvance(texto_num)
-                    altura_num = metrics_num.height()
-                    x_txt = pt_tela.x() + off_x
-                    y_txt = pt_tela.y() + off_y
-                    if off_x < 0:
-                        x_txt -= largura_num
-                    if off_y < 0:
-                        y_txt -= max(2.0, altura_num * 0.25)
-                    else:
-                        y_txt += altura_num
-                    painter.drawText(int(round(x_txt)), int(round(y_txt)), texto_num)
+                    itens_numeracao.append((pt, str(i), True))
+                for i, pt in enumerate(self._pontos_piques_para_numeracao(el, cantos), start=1):
+                    itens_numeracao.append((pt, str(i), False))
+                self._desenhar_numeros_molde_canvas(painter, metrics_num, itens_numeracao, centro_numeros, afastamento)
                 if el.get("mostrar_controles", True) and self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
                     painter.setPen(QPen(QColor("#ff3b30"), 1.0))
@@ -2452,6 +2439,137 @@ class VisualizacaoCanvas(QWidget):
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _desenhar_numeros_molde_canvas(
+        self,
+        painter: QPainter,
+        metrics: QFontMetrics,
+        itens: list[tuple[QPointF, str, bool]],
+        centro: QPointF,
+        afastamento: float,
+    ) -> None:
+        layouts = self._layout_numeros_molde_canvas(metrics, itens, centro, afastamento)
+        for item in layouts:
+            if item["marcador"]:
+                pt_tela = self._cena_para_tela(item["ponto"])
+                painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
+        for item in layouts:
+            largura = float(item["largura"])
+            altura = float(item["altura"])
+            rect = QRectF(
+                float(item["x"]) - (largura / 2.0),
+                float(item["y"]) - (altura / 2.0),
+                largura,
+                altura,
+            )
+            painter.drawText(rect, Qt.AlignCenter, str(item["texto"]))
+
+    def _layout_numeros_molde_canvas(
+        self,
+        metrics: QFontMetrics,
+        itens: list[tuple[QPointF, str, bool]],
+        centro: QPointF,
+        afastamento: float,
+    ) -> list[dict]:
+        layouts: list[dict] = []
+        for pt, texto, desenhar_marcador in itens:
+            texto = str(texto)
+            ancora, eixo = self._ancora_numero_molde(pt, centro, afastamento)
+            layouts.append(
+                {
+                    "ponto": QPointF(pt),
+                    "texto": texto,
+                    "marcador": bool(desenhar_marcador),
+                    "x": float(ancora.x()),
+                    "y": float(ancora.y()),
+                    "largura": float(max(1, metrics.horizontalAdvance(texto)) + 2),
+                    "altura": float(max(1, metrics.height())),
+                    "eixo": eixo,
+                }
+            )
+        self._distribuir_numeros_proximos(layouts)
+        return layouts
+
+    def _ancora_numero_molde(self, pt: QPointF, centro: QPointF, afastamento: float) -> tuple[QPointF, str]:
+        pt_tela = self._cena_para_tela(pt)
+        dx = pt.x() - centro.x()
+        dy = pt.y() - centro.y()
+        mod = max(1e-6, sqrt((dx * dx) + (dy * dy)))
+        ux = dx / mod
+        uy = dy / mod
+        eixo_distribuicao = "x" if abs(uy) >= abs(ux) else "y"
+        return QPointF(pt_tela.x() + (ux * afastamento), pt_tela.y() + (uy * afastamento)), eixo_distribuicao
+
+    def _distribuir_numeros_proximos(self, layouts: list[dict]) -> None:
+        for eixo in ("x", "y"):
+            candidatos = [item for item in layouts if item.get("eixo") == eixo]
+            if len(candidatos) < 2:
+                continue
+            transversal = "y" if eixo == "x" else "x"
+            tamanho_transversal = "altura" if eixo == "x" else "largura"
+            faixa = max(18.0, max(float(item[tamanho_transversal]) for item in candidatos) * 1.6)
+            grupos: list[list[dict]] = []
+            centros_grupo: list[float] = []
+            for item in sorted(candidatos, key=lambda atual: (float(atual[transversal]), float(atual[eixo]))):
+                valor = float(item[transversal])
+                if not grupos or abs(valor - centros_grupo[-1]) > faixa:
+                    grupos.append([item])
+                    centros_grupo.append(valor)
+                    continue
+                grupos[-1].append(item)
+                centros_grupo[-1] = sum(float(atual[transversal]) for atual in grupos[-1]) / len(grupos[-1])
+
+            for grupo in grupos:
+                ordenados = sorted(grupo, key=lambda atual: float(atual[eixo]))
+                cluster: list[dict] = []
+                for item in ordenados:
+                    if not cluster:
+                        cluster = [item]
+                        continue
+                    anterior = cluster[-1]
+                    tamanho_anterior = float(anterior["largura" if eixo == "x" else "altura"])
+                    tamanho_atual = float(item["largura" if eixo == "x" else "altura"])
+                    distancia_minima = (tamanho_anterior / 2.0) + (tamanho_atual / 2.0) + 6.0
+                    if float(item[eixo]) - float(anterior[eixo]) <= distancia_minima:
+                        cluster.append(item)
+                    else:
+                        self._centralizar_cluster_numeros(cluster, eixo)
+                        cluster = [item]
+                self._centralizar_cluster_numeros(cluster, eixo)
+
+    @staticmethod
+    def _centralizar_cluster_numeros(cluster: list[dict], eixo: str) -> None:
+        if len(cluster) < 2:
+            return
+        tamanho_chave = "largura" if eixo == "x" else "altura"
+        gap = 6.0
+        tamanhos = [float(item[tamanho_chave]) for item in cluster]
+        total = sum(tamanhos) + (gap * (len(cluster) - 1))
+        naturais = [float(item[eixo]) for item in cluster]
+        meio = (min(naturais) + max(naturais)) / 2.0
+        cursor = meio - (total / 2.0)
+        for item, tamanho in zip(cluster, tamanhos):
+            item[eixo] = cursor + (tamanho / 2.0)
+            cursor += tamanho + gap
+
+    def _pontos_piques_para_numeracao(self, el: dict, pontos_existentes: list[QPointF] | None = None) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        existentes = [QPointF(pt) for pt in (pontos_existentes or [])]
+        for cfg in el.get("piques_config", []) or []:
+            if not isinstance(cfg, dict):
+                continue
+            ponto = self._ponto_cfg_pique(cfg)
+            if ponto is not None and not self._ponto_ja_listado(existentes, ponto) and not self._ponto_ja_listado(pontos, ponto):
+                pontos.append(QPointF(ponto))
+        for item in el.get("marcacoes_no_perimetro", []) or []:
+            ponto = self._qpoint_serializado(item)
+            if ponto is not None and not self._ponto_ja_listado(existentes, ponto) and not self._ponto_ja_listado(pontos, ponto):
+                pontos.append(QPointF(ponto))
+        return pontos
+
+    @staticmethod
+    def _ponto_ja_listado(pontos: list[QPointF], ponto: QPointF, tolerancia: float = 1e-6) -> bool:
+        return any(sqrt((pt.x() - ponto.x()) ** 2 + (pt.y() - ponto.y()) ** 2) <= tolerancia for pt in pontos)
 
     @staticmethod
     def _cantos_para_numeracao_horaria_tela(cantos: list[QPointF]) -> list[QPointF]:
