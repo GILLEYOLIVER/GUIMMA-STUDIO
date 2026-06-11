@@ -80,6 +80,7 @@ class _FakeCanvas(QWidget):
         self.historico = 0
         self.atualizou = False
         self.segmentos_desenhados = []
+        self.ferramenta_ativa = None
         self.lbl_status = SimpleNamespace(texto="", setText=lambda texto: setattr(self.lbl_status, "texto", texto))
 
     def _ponto_com_snap(self, pos):
@@ -100,6 +101,9 @@ class _FakeCanvas(QWidget):
     def _desenhar_segmento(self, painter, a, b, tracejado=False, cor="#ffffff", espessura=1.0):
         self.segmentos_desenhados.append((a, b, tracejado, cor, espessura))
 
+    def set_ferramenta_ativa(self, nome):
+        self.ferramenta_ativa = nome
+
 
 @unittest.skipIf(FerramentaRedefinirPerimetro is None, "PySide6 nao disponivel neste ambiente")
 class RedefinirPerimetroToolTestCase(unittest.TestCase):
@@ -107,7 +111,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_primeiro_clique_aplica_previa_segundo_confirma_terceiro_aplica(self):
+    def test_primeiro_clique_mostra_previa_segundo_aplica(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
@@ -117,17 +121,15 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
         self.assertEqual(canvas.historico, 0)
         self.assertEqual(dialog.ed_de.text(), "10.00")
-        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
-
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
-        self.assertEqual(canvas.historico, 0)
-        self.assertTrue(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
-        self.assertTrue(ferramenta._confirmacao_pendente_por_canvas.get(id(canvas), False))
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (10.0, 0.0))
+        self.assertEqual(ferramenta._elemento_preview_por_canvas[id(canvas)]["controle_cantos"][1], (14.0, 0.0))
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
         self.assertEqual(canvas.historico, 1)
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
         self.assertFalse(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
         self.assertNotIn(id(canvas), ferramenta._confirmacao_pendente_por_canvas)
+        self.assertNotIn(id(canvas), ferramenta._elemento_preview_por_canvas)
 
     def test_abrir_ferramenta_zera_campos_e_estado(self):
         canvas = _FakeCanvas()
@@ -144,8 +146,10 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta._segmento_alvo_por_canvas[chave] = {"tipo": "pontos"}
         ferramenta._segmentos_originais_afetados_por_canvas[chave] = [(QPointF(0.0, 0.0), QPointF(1.0, 0.0))]
         ferramenta._confirmacao_pendente_por_canvas[chave] = True
+        ferramenta._elemento_preview_por_canvas[chave] = {"tipo": "polyline"}
 
         ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
 
         self.assertEqual(dialog.ed_de.text(), "0")
         self.assertEqual(dialog.ed_para.text(), "0")
@@ -156,6 +160,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertNotIn(chave, ferramenta._segmento_alvo_por_canvas)
         self.assertNotIn(chave, ferramenta._segmentos_originais_afetados_por_canvas)
         self.assertNotIn(chave, ferramenta._confirmacao_pendente_por_canvas)
+        self.assertNotIn(chave, ferramenta._elemento_preview_por_canvas)
 
     def test_aplicar_sem_linha_selecionada_nao_redefine_molde_inteiro(self):
         canvas = _FakeCanvas()
@@ -193,7 +198,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
 
-        molde = canvas.cena.elementos[0]
+        molde = ferramenta._elemento_preview_por_canvas[id(canvas)]
         self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (14.0, 0.0))
         self.assertEqual(molde["controle_cantos"][2], (10.0, 5.0))
@@ -212,7 +217,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(2.0, 0.0)))
-        molde = canvas.cena.elementos[0]
+        molde = ferramenta._elemento_preview_por_canvas[id(canvas)]
         self.assertEqual(molde["controle_cantos"][0], (-4.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (10.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][0], (3.0, 0.0))
@@ -225,7 +230,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         dialog.ed_para.setText("14")
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(8.0, 0.0)))
-        molde = canvas.cena.elementos[0]
+        molde = ferramenta._elemento_preview_por_canvas[id(canvas)]
         self.assertEqual(molde["controle_cantos"][0], (0.0, 0.0))
         self.assertEqual(molde["controle_cantos"][1], (14.0, 0.0))
         self.assertEqual(molde["controle_auxiliares"][0], (7.0, 0.0))
@@ -272,7 +277,8 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         original = deepcopy(canvas.cena.elementos[0])
 
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
-        self.assertNotEqual(canvas.cena.elementos[0], original)
+        self.assertEqual(canvas.cena.elementos[0], original)
+        self.assertNotEqual(ferramenta._elemento_preview_por_canvas[id(canvas)], original)
 
         evento = _FakeEvent(QPointF(5.0, 0.0), button=Qt.RightButton)
         self.assertTrue(ferramenta.on_mouse_press(canvas, evento))
@@ -286,6 +292,26 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertNotIn(id(canvas), ferramenta._segmentos_originais_afetados_por_canvas)
         self.assertNotIn(id(canvas), ferramenta._confirmacao_pendente_por_canvas)
         self.assertEqual(canvas.historico, 0)
+
+    def test_dois_cliques_direitos_cancelam_e_soltem_ferramenta(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.ed_para.setText("14")
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+
+        primeiro = _FakeEvent(QPointF(5.0, 0.0), button=Qt.RightButton)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, primeiro))
+        self.assertTrue(primeiro.accepted)
+        self.assertIsNone(canvas.ferramenta_ativa)
+        self.assertFalse(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
+
+        segundo = _FakeEvent(QPointF(5.0, 0.0), button=Qt.RightButton)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, segundo))
+        self.assertTrue(segundo.accepted)
+        self.assertEqual(canvas.ferramenta_ativa, "selecionar")
 
 
 if __name__ == "__main__":

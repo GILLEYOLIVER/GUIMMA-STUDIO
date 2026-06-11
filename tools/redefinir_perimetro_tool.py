@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from math import sqrt
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QSignalBlocker, Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from tools.medicao_utils import selecionar_segmento_mais_proximo
@@ -65,6 +65,7 @@ class Ferramenta(FerramentaBase):
     _segmento_alvo_por_canvas: dict[int, dict] = {}
     _segmentos_originais_afetados_por_canvas: dict[int, list[tuple[QPointF, QPointF]]] = {}
     _confirmacao_pendente_por_canvas: dict[int, bool] = {}
+    _elemento_preview_por_canvas: dict[int, dict] = {}
 
     def on_activate(self, canvas):
         chave = id(canvas)
@@ -75,9 +76,11 @@ class Ferramenta(FerramentaBase):
         self._segmento_alvo_por_canvas.pop(chave, None)
         self._segmentos_originais_afetados_por_canvas.pop(chave, None)
         self._confirmacao_pendente_por_canvas.pop(chave, None)
+        self._elemento_preview_por_canvas.pop(chave, None)
         dialog = self._obter_dialog(canvas)
-        dialog.ed_de.setText("0")
-        dialog.ed_para.setText("0")
+        with QSignalBlocker(dialog.ed_de), QSignalBlocker(dialog.ed_para):
+            dialog.ed_de.setText("0")
+            dialog.ed_para.setText("0")
         dialog.adjustSize()
         fallback = None
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
@@ -87,6 +90,9 @@ class Ferramenta(FerramentaBase):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+        with QSignalBlocker(dialog.ed_de), QSignalBlocker(dialog.ed_para):
+            dialog.ed_de.setText("0")
+            dialog.ed_para.setText("0")
         if getattr(canvas, "lbl_status", None) is not None:
             canvas.lbl_status.setText("Redefinir perímetro: clique em um contorno para carregar o valor atual.")
 
@@ -101,24 +107,26 @@ class Ferramenta(FerramentaBase):
         self._segmento_alvo_por_canvas.pop(id(canvas), None)
         self._segmentos_originais_afetados_por_canvas.pop(id(canvas), None)
         self._confirmacao_pendente_por_canvas.pop(id(canvas), None)
+        self._elemento_preview_por_canvas.pop(id(canvas), None)
 
     def on_mouse_press(self, canvas, event) -> bool:
         chave = id(canvas)
-        if event.button() == Qt.RightButton and self._preview_ativo_por_canvas.get(chave):
-            self._cancelar_preview(canvas)
-            if getattr(canvas, "lbl_status", None) is not None:
-                canvas.lbl_status.setText("Redefinição cancelada. Clique em uma linha para recomeçar.")
+        if event.button() == Qt.RightButton:
+            if self._preview_ativo_por_canvas.get(chave):
+                self._cancelar_preview(canvas)
+                if getattr(canvas, "lbl_status", None) is not None:
+                    canvas.lbl_status.setText("Redefinição cancelada. Clique em uma linha para recomeçar; outro direito sai.")
+            else:
+                self._fechar(canvas)
             event.accept()
             return True
         if event.button() != Qt.LeftButton:
             return False
         if self._preview_ativo_por_canvas.get(chave):
-            if not self._confirmacao_pendente_por_canvas.get(chave, False):
-                self._confirmacao_pendente_por_canvas[chave] = True
-                if getattr(canvas, "lbl_status", None) is not None:
-                    canvas.lbl_status.setText("Prévia confirmada. Clique esquerdo mais uma vez para aplicar.")
-                event.accept()
-                return True
+            idx = self._idx_por_canvas.get(chave)
+            preview = self._elemento_preview_por_canvas.get(chave)
+            if idx is not None and preview is not None and 0 <= idx < len(canvas.cena.elementos):
+                canvas.cena.elementos[idx] = deepcopy(preview)
             canvas._registrar_historico()
             self._preview_ativo_por_canvas[chave] = False
             self._idx_por_canvas.pop(chave, None)
@@ -127,6 +135,7 @@ class Ferramenta(FerramentaBase):
             self._segmento_alvo_por_canvas.pop(chave, None)
             self._segmentos_originais_afetados_por_canvas.pop(chave, None)
             self._confirmacao_pendente_por_canvas.pop(chave, None)
+            self._elemento_preview_por_canvas.pop(chave, None)
             if getattr(canvas, "lbl_status", None) is not None:
                 canvas.lbl_status.setText("Redefinição de perímetro aplicada.")
             event.accept()
@@ -148,7 +157,7 @@ class Ferramenta(FerramentaBase):
         self._preview_ativo_por_canvas[chave] = True
         self._aplicar_preview(canvas)
         if getattr(canvas, "lbl_status", None) is not None:
-            canvas.lbl_status.setText("Prévia aplicada. Clique esquerdo novamente para confirmar.")
+            canvas.lbl_status.setText("Prévia azul pronta. Clique esquerdo aplica; botão direito cancela.")
         canvas.update()
         event.accept()
         return True
@@ -166,10 +175,19 @@ class Ferramenta(FerramentaBase):
         self._segmento_alvo_por_canvas.pop(chave, None)
         self._segmentos_originais_afetados_por_canvas.pop(chave, None)
         self._confirmacao_pendente_por_canvas.pop(chave, None)
+        self._elemento_preview_por_canvas.pop(chave, None)
         dialog = self._obter_dialog(canvas)
-        dialog.ed_de.setText("0")
-        dialog.ed_para.setText("0")
+        with QSignalBlocker(dialog.ed_de), QSignalBlocker(dialog.ed_para):
+            dialog.ed_de.setText("0")
+            dialog.ed_para.setText("0")
         canvas.update()
+
+    def _fechar(self, canvas) -> None:
+        self._cancelar_preview(canvas)
+        if hasattr(canvas, "set_ferramenta_ativa"):
+            canvas.set_ferramenta_ativa("selecionar")
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText("Ferramenta Redefinir perímetro finalizada. Voltando para Selecionar.")
 
     def _obter_dialog(self, canvas) -> RedefinirPerimetroDialog:
         chave = id(canvas)
@@ -223,7 +241,7 @@ class Ferramenta(FerramentaBase):
             segmento_preview = self._aplicar_preview_segmento_polyline(canvas, el, alvo_segmento, alvo, modo)
         if segmento_preview is None:
             return
-        canvas.cena.elementos[idx] = el
+        self._elemento_preview_por_canvas[chave] = el
         afetados = self._segmentos_originais_afetados(snapshot, el)
         if not afetados:
             afetados = [(QPointF(alvo_segmento["a"]), QPointF(alvo_segmento["b"]))]
@@ -233,7 +251,7 @@ class Ferramenta(FerramentaBase):
         canvas.update()
         if getattr(canvas, "lbl_status", None) is not None:
             novo_per = canvas.formatar_valor_unidade(self._dist(segmento_preview[0], segmento_preview[1]))
-            canvas.lbl_status.setText(f"Prévia linha: {novo_per} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo confirma")
+            canvas.lbl_status.setText(f"Prévia linha: {novo_per} ({getattr(canvas, '_unidade_sigla', 'cm')}) | clique esquerdo aplica")
 
     def _segmento_alvo_para_posicao(self, canvas, idx: int, pos: QPointF) -> dict | None:
         if not (0 <= idx < len(canvas.cena.elementos)):
