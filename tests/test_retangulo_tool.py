@@ -128,6 +128,25 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.cena.elementos[3]["pontos"], [(0.0, 4.0), (0.0, 0.0)])
         self.assertEqual(canvas.historico, 1)
 
+    def test_retangulo_fica_na_mao_ate_segundo_clique(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRetangulo()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(6.0, 2.0))))
+        self.assertEqual(ferramenta._preview, QPointF(6.0, 2.0))
+        self.assertEqual(canvas.cena.elementos, [])
+        self.assertEqual(canvas.historico, 0)
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+        self.assertEqual(ferramenta._preview, QPointF(10.0, 4.0))
+        self.assertEqual(canvas.cena.elementos, [])
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+        self.assertEqual(len(canvas.cena.elementos), 1)
+        self.assertEqual(canvas.historico, 1)
+
     def test_preview_retangulo_nao_usa_preenchimento_herdado_do_painter(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRetangulo()

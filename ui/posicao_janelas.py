@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QRadioButton, QSlider, QWidget
 
 
 def _settings() -> QSettings:
@@ -12,6 +12,120 @@ def _settings() -> QSettings:
 def _grupo(chave: str) -> str:
     chave_limpa = "".join(c if c.isalnum() or c in "._:-" else "_" for c in str(chave))
     return f"caixas_flutuantes/{chave_limpa}"
+
+
+def _grupo_estado(chave: str) -> str:
+    chave_limpa = "".join(c if c.isalnum() or c in "._:-" else "_" for c in str(chave))
+    return f"caixas_flutuantes_estado/{chave_limpa}"
+
+
+def _usar_fallback_como_regra(chave: str, fallback: QPoint | None) -> bool:
+    if fallback is None:
+        return False
+    chave_norm = str(chave or "")
+    if chave_norm == "painel:coordenadas":
+        return False
+    return chave_norm.startswith("dialog:") or chave_norm.startswith("painel:")
+
+
+def _valor_bool(valor) -> bool:
+    if isinstance(valor, bool):
+        return valor
+    if isinstance(valor, (int, float)):
+        return bool(valor)
+    return str(valor).strip().lower() in {"1", "true", "sim", "yes", "on"}
+
+
+def _widgets_com_estado(widget: QWidget):
+    suportados = (QLineEdit, QComboBox, QCheckBox, QRadioButton, QAbstractSpinBox, QSlider)
+    return [filho for filho in widget.findChildren(QWidget) if isinstance(filho, suportados)]
+
+
+def _chave_widget_estado(filho: QWidget, contador: dict[str, int]) -> str:
+    nome = str(filho.objectName() or "").strip()
+    if nome:
+        return f"{filho.__class__.__name__}:{nome}"
+    classe = filho.__class__.__name__
+    indice = contador.get(classe, 0)
+    contador[classe] = indice + 1
+    return f"{classe}:{indice}"
+
+
+def restaurar_estado(widget: QWidget, chave: str) -> None:
+    if widget is None:
+        return
+    cfg = _settings()
+    cfg.beginGroup(_grupo_estado(chave))
+    contador: dict[str, int] = {}
+    setattr(widget, "_guimma_restaurando_estado", True)
+    try:
+        for filho in _widgets_com_estado(widget):
+            chave_filho = _chave_widget_estado(filho, contador)
+            if isinstance(filho, QLineEdit):
+                valor = cfg.value(f"{chave_filho}/texto", None)
+                if valor is not None:
+                    filho.setText(str(valor))
+            elif isinstance(filho, QComboBox):
+                texto = cfg.value(f"{chave_filho}/texto", None)
+                indice_salvo = cfg.value(f"{chave_filho}/indice", None)
+                aplicado = False
+                if texto is not None:
+                    indice = filho.findText(str(texto))
+                    if indice >= 0:
+                        filho.setCurrentIndex(indice)
+                        aplicado = True
+                if not aplicado and indice_salvo is not None:
+                    try:
+                        indice = int(float(indice_salvo))
+                    except (TypeError, ValueError):
+                        indice = -1
+                    if 0 <= indice < filho.count():
+                        filho.setCurrentIndex(indice)
+            elif isinstance(filho, (QCheckBox, QRadioButton)):
+                valor = cfg.value(f"{chave_filho}/marcado", None)
+                if valor is not None:
+                    filho.setChecked(_valor_bool(valor))
+            elif isinstance(filho, QSlider):
+                valor = cfg.value(f"{chave_filho}/valor", None)
+                if valor is not None:
+                    try:
+                        filho.setValue(int(float(valor)))
+                    except (TypeError, ValueError):
+                        pass
+            elif isinstance(filho, QAbstractSpinBox) and hasattr(filho, "value") and hasattr(filho, "setValue"):
+                valor = cfg.value(f"{chave_filho}/valor", None)
+                if valor is not None:
+                    try:
+                        atual = filho.value()
+                        novo = int(float(valor)) if isinstance(atual, int) and not isinstance(atual, bool) else float(valor)
+                        filho.setValue(novo)
+                    except (TypeError, ValueError):
+                        pass
+    finally:
+        setattr(widget, "_guimma_restaurando_estado", False)
+        cfg.endGroup()
+
+
+def salvar_estado(widget: QWidget, chave: str) -> None:
+    if widget is None or getattr(widget, "_guimma_restaurando_estado", False):
+        return
+    cfg = _settings()
+    cfg.beginGroup(_grupo_estado(chave))
+    contador: dict[str, int] = {}
+    for filho in _widgets_com_estado(widget):
+        chave_filho = _chave_widget_estado(filho, contador)
+        if isinstance(filho, QLineEdit):
+            cfg.setValue(f"{chave_filho}/texto", filho.text())
+        elif isinstance(filho, QComboBox):
+            cfg.setValue(f"{chave_filho}/texto", filho.currentText())
+            cfg.setValue(f"{chave_filho}/indice", filho.currentIndex())
+        elif isinstance(filho, (QCheckBox, QRadioButton)):
+            cfg.setValue(f"{chave_filho}/marcado", filho.isChecked())
+        elif isinstance(filho, QSlider):
+            cfg.setValue(f"{chave_filho}/valor", filho.value())
+        elif isinstance(filho, QAbstractSpinBox) and hasattr(filho, "value"):
+            cfg.setValue(f"{chave_filho}/valor", filho.value())
+    cfg.endGroup()
 
 
 def posicao_salva(chave: str) -> QPoint | None:
@@ -31,6 +145,7 @@ def posicao_salva(chave: str) -> QPoint | None:
 def salvar_posicao(widget: QWidget, chave: str) -> None:
     if widget is None:
         return
+    salvar_estado(widget, chave)
     pos = widget.pos()
     cfg = _settings()
     cfg.beginGroup(_grupo(chave))
@@ -55,6 +170,10 @@ def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:
 
 
 def restaurar_posicao(widget: QWidget, chave: str, fallback: QPoint | None = None) -> bool:
+    restaurar_estado(widget, chave)
+    if _usar_fallback_como_regra(chave, fallback):
+        widget.move(ajustar_para_area(widget, fallback))
+        return False
     pos = posicao_salva(chave)
     if pos is None:
         if fallback is not None:
@@ -82,4 +201,5 @@ def instalar_memoria_posicao(widget: QWidget, chave: str) -> None:
     filtro = _FiltroMemoriaPosicao(widget, chave)
     widget.installEventFilter(filtro)
     widget._guimma_memoria_posicao_instalada = True  # type: ignore[attr-defined]
+    widget._guimma_memoria_posicao_chave = chave  # type: ignore[attr-defined]
     widget._guimma_memoria_posicao_filtro = filtro  # type: ignore[attr-defined]
