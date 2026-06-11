@@ -44,6 +44,7 @@ class InserirPiqueDialog(QDialog):
         self.setWindowTitle("Inserir pique")
         self.setWindowFlags(Qt.Tool)
         self.setFixedWidth(242)
+        self._sincronizando_medidas = False
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 6, 6, 6)
@@ -129,8 +130,9 @@ class InserirPiqueDialog(QDialog):
         raiz.addWidget(self.lbl_status)
 
         self.cmb_tipo.currentTextChanged.connect(self.preview.set_tipo)
-        self.edt_largura.textChanged.connect(lambda _txt: self.preview.set_medidas(self.largura(), self.altura()))
-        self.edt_altura.textChanged.connect(lambda _txt: self.preview.set_medidas(self.largura(), self.altura()))
+        self.edt_largura.textChanged.connect(self._largura_alterada)
+        self.edt_altura.textChanged.connect(self._altura_alterada)
+        self.chk_manter_distancia.toggled.connect(self._manter_distancia_alterado)
         self.chk_dx.toggled.connect(self.edt_dx.setEnabled)
         self.chk_dy.toggled.connect(self.edt_dy.setEnabled)
         self.preview.set_tipo(self.cmb_tipo.currentText())
@@ -163,6 +165,28 @@ class InserirPiqueDialog(QDialog):
 
     def dy(self) -> float:
         return self._float(self.edt_dy.text(), 0.0) if self.chk_dy.isChecked() else 0.0
+
+    def _largura_alterada(self, texto: str) -> None:
+        if not self._sincronizando_medidas and self.chk_manter_distancia.isChecked():
+            self._copiar_medida(self.edt_altura, texto)
+        self.preview.set_medidas(self.largura(), self.altura())
+
+    def _altura_alterada(self, texto: str) -> None:
+        if not self._sincronizando_medidas and self.chk_manter_distancia.isChecked():
+            self._copiar_medida(self.edt_largura, texto)
+        self.preview.set_medidas(self.largura(), self.altura())
+
+    def _manter_distancia_alterado(self, ativo: bool) -> None:
+        if ativo:
+            self._copiar_medida(self.edt_altura, self.edt_largura.text())
+        self.preview.set_medidas(self.largura(), self.altura())
+
+    def _copiar_medida(self, destino: QLineEdit, texto: str) -> None:
+        self._sincronizando_medidas = True
+        try:
+            destino.setText(str(texto))
+        finally:
+            self._sincronizando_medidas = False
 
     @staticmethod
     def _float(texto: str, padrao: float) -> float:
@@ -327,14 +351,15 @@ class Ferramenta(FerramentaBase):
         pontos = [p for p in pontos if p is not None]
         if len(pontos) < 2:
             return
+        cor_realce = self._cor_realce_canvas(canvas)
         if hasattr(canvas, "_desenhar_polilinha"):
-            canvas._desenhar_polilinha(painter, pontos, cor="#2da8ff", espessura=2.2)
+            canvas._desenhar_polilinha(painter, pontos, cor=cor_realce, espessura=2.2)
             if hasattr(canvas, "_desenhar_marcacoes_piques_elemento"):
                 cor_molde = str(el.get("cor") or "#ffffff")
                 canvas._desenhar_marcacoes_piques_elemento(painter, el, cor_molde)
             return
         painter.save()
-        painter.setPen(QPen(QColor("#2da8ff"), 2))
+        painter.setPen(QPen(QColor(cor_realce), 2))
         for a, b in zip(pontos, pontos[1:]):
             painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
@@ -348,10 +373,12 @@ class Ferramenta(FerramentaBase):
         el = canvas.cena.elementos[idx]
         ponto_final = QPointF(ponto.x() + self._dialog.dx(), ponto.y() - self._dialog.dy())
         sobre_contorno = bool(self._dialog.chk_sobre_contorno.isChecked())
+        info_segmento = self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None
+        segmento = (info_segmento[1], info_segmento[2]) if info_segmento is not None else None
         segmentos = self._segmentos_pique(
             el,
             ponto_final,
-            self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None,
+            segmento,
             self._dialog.cmb_tipo.currentText(),
             self._dialog.largura(),
             self._dialog.altura(),
@@ -361,7 +388,7 @@ class Ferramenta(FerramentaBase):
         if not sobre_contorno and not self._segmentos_pique_dentro_molde(el, segmentos):
             cor = "#ff4fa3"
         else:
-            cor = "#2da8ff"
+            cor = self._cor_realce_canvas(canvas)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
         for a, b in segmentos:
@@ -408,7 +435,8 @@ class Ferramenta(FerramentaBase):
         if sobre_contorno and not any(self._dist_tuple(tupla, item) <= 1e-6 for item in marcacoes):
             marcacoes.append(tupla)
         el["marcacoes_no_perimetro"] = marcacoes
-        segmento = self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None
+        info_segmento = self._segmento_mais_proximo_elemento(el, ponto) if sobre_contorno else None
+        segmento = (info_segmento[1], info_segmento[2]) if info_segmento is not None else None
         segmentos_pique = self._segmentos_pique(
             el,
             QPointF(ponto_final),
@@ -445,7 +473,11 @@ class Ferramenta(FerramentaBase):
         el["piques_config"] = configs
 
         if self._dialog.chk_ponto_controle.isChecked() and el.get("molde"):
-            self._adicionar_ponto_controle(el, ponto_controle)
+            if sobre_contorno and info_segmento is not None:
+                self._inserir_ponto_no_contorno(el, ponto_controle, info_segmento[0])
+                self._adicionar_ponto_controle_principal(el, ponto_controle, info_segmento[0])
+            else:
+                self._adicionar_ponto_controle_auxiliar(el, ponto_controle)
         self.set_status(f"Pique inserido: {config['tipo']}.")
         return True
 
@@ -462,12 +494,8 @@ class Ferramenta(FerramentaBase):
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         largura = max(0.01, abs(float(largura)))
         altura = max(0.01, abs(float(altura)))
-        tangente = self._tangente_segmento(segmento)
-        normal = QPointF(-tangente.y(), tangente.x())
-        if sobre_contorno and segmento is not None:
-            normal_fora = self._normal_orientada_para_fora(el, ponto, normal)
-            normal = QPointF(-normal_fora.x(), -normal_fora.y())
-        if abs(float(angulo_extra)) > 1e-9:
+        normal, tangente = self._base_pique(el, ponto, segmento, sobre_contorno)
+        if not sobre_contorno and abs(float(angulo_extra)) > 1e-9:
             normal, tangente = self._rotacionar_base(normal, tangente, float(angulo_extra))
 
         def mapear(x: float, y: float) -> tuple[float, float]:
@@ -482,7 +510,7 @@ class Ferramenta(FerramentaBase):
         if codigo.startswith("T"):
             locais = [((0.0, 0.0), (altura, 0.0)), ((altura, -meia_largura), (altura, meia_largura))]
         elif codigo.startswith("I"):
-            locais = [((0.0, -meia_altura), (0.0, meia_altura))]
+            locais = [((0.0, 0.0), (altura, 0.0))]
         elif codigo == "V1":
             locais = [((0.0, -meia_altura), (0.0, meia_altura)), ((0.0, -meia_altura), (largura, meia_altura))]
         elif codigo == "V2":
@@ -565,20 +593,20 @@ class Ferramenta(FerramentaBase):
         qy = ay + (vy * t)
         return sqrt(((px - qx) ** 2) + ((py - qy) ** 2))
 
-    def _segmento_mais_proximo_elemento(self, el: dict, ponto: QPointF) -> tuple[QPointF, QPointF] | None:
+    def _segmento_mais_proximo_elemento(self, el: dict, ponto: QPointF) -> tuple[int, QPointF, QPointF] | None:
         pontos = [self._ponto_qt(p) for p in el.get("pontos", []) or []]
         pontos = [p for p in pontos if p is not None]
         if len(pontos) < 2:
             return None
-        melhor: tuple[float, QPointF, QPointF] | None = None
-        for a, b in zip(pontos, pontos[1:]):
+        melhor: tuple[float, int, QPointF, QPointF] | None = None
+        for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
             proj = self._projetar_ponto_segmento(ponto, a, b)
             dist = self._dist(ponto, proj)
             if melhor is None or dist < melhor[0]:
-                melhor = (dist, a, b)
+                melhor = (dist, seg_idx, a, b)
         if melhor is None:
             return None
-        return QPointF(melhor[1]), QPointF(melhor[2])
+        return int(melhor[1]), QPointF(melhor[2]), QPointF(melhor[3])
 
     @staticmethod
     def _tangente_segmento(segmento: tuple[QPointF, QPointF] | None) -> QPointF:
@@ -591,6 +619,65 @@ class Ferramenta(FerramentaBase):
         if comp <= 1e-9:
             return QPointF(0.0, 1.0)
         return QPointF(dx / comp, dy / comp)
+
+    def _base_pique(
+        self,
+        el: dict,
+        ponto: QPointF,
+        segmento: tuple[QPointF, QPointF] | None,
+        sobre_contorno: bool,
+    ) -> tuple[QPointF, QPointF]:
+        tangente = self._tangente_segmento(segmento)
+        normal = QPointF(-tangente.y(), tangente.x())
+        if not sobre_contorno:
+            return normal, tangente
+        normal_canto = self._normal_interna_canto(el, ponto)
+        if normal_canto is not None:
+            tangente_canto = QPointF(-normal_canto.y(), normal_canto.x())
+            return normal_canto, tangente_canto
+        if segmento is not None:
+            normal_fora = self._normal_orientada_para_fora(el, ponto, normal)
+            normal = QPointF(-normal_fora.x(), -normal_fora.y())
+        return normal, tangente
+
+    def _normal_interna_canto(self, el: dict, ponto: QPointF) -> QPointF | None:
+        pontos = [self._ponto_qt(item) for item in el.get("pontos", []) or []]
+        pontos = [pt for pt in pontos if pt is not None]
+        if len(pontos) < 3:
+            return None
+        fechado = self._dist(pontos[0], pontos[-1]) <= 1e-6
+        base = pontos[:-1] if fechado else pontos
+        if len(base) < 3:
+            return None
+        vertice_idx = None
+        for idx, pt in enumerate(base):
+            if self._dist(pt, ponto) <= 1e-6:
+                vertice_idx = idx
+                break
+        if vertice_idx is None:
+            return None
+        if not fechado and (vertice_idx == 0 or vertice_idx == len(base) - 1):
+            return None
+        anterior = base[(vertice_idx - 1) % len(base)]
+        atual = base[vertice_idx]
+        proximo = base[(vertice_idx + 1) % len(base)]
+        n_anterior = self._normal_interna_segmento(el, atual, (anterior, atual))
+        n_proximo = self._normal_interna_segmento(el, atual, (atual, proximo))
+        soma = QPointF(n_anterior.x() + n_proximo.x(), n_anterior.y() + n_proximo.y())
+        return self._normalizar_vetor(soma)
+
+    def _normal_interna_segmento(self, el: dict, ponto: QPointF, segmento: tuple[QPointF, QPointF]) -> QPointF:
+        tangente = self._tangente_segmento(segmento)
+        normal = QPointF(-tangente.y(), tangente.x())
+        normal_fora = self._normal_orientada_para_fora(el, ponto, normal)
+        return QPointF(-normal_fora.x(), -normal_fora.y())
+
+    @staticmethod
+    def _normalizar_vetor(vetor: QPointF) -> QPointF | None:
+        comp = sqrt((vetor.x() * vetor.x()) + (vetor.y() * vetor.y()))
+        if comp <= 1e-9:
+            return None
+        return QPointF(vetor.x() / comp, vetor.y() / comp)
 
     def _normal_orientada_para_fora(self, el: dict, ponto: QPointF, normal: QPointF) -> QPointF:
         pontos = [self._tupla_ponto(p) for p in el.get("pontos", []) or []]
@@ -614,7 +701,7 @@ class Ferramenta(FerramentaBase):
         t = QPointF((tangente.x() * c) - (normal.x() * s), (tangente.y() * c) - (normal.y() * s))
         return n, t
 
-    def _adicionar_ponto_controle(self, el: dict, ponto: QPointF) -> None:
+    def _adicionar_ponto_controle_auxiliar(self, el: dict, ponto: QPointF) -> None:
         novo = (float(ponto.x()), float(ponto.y()))
         auxiliares = []
         for item in el.get("controle_auxiliares", []) or []:
@@ -625,6 +712,67 @@ class Ferramenta(FerramentaBase):
             auxiliares.append(novo)
         el["controle_auxiliares"] = auxiliares
         el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
+
+    def _adicionar_ponto_controle_principal(self, el: dict, ponto: QPointF, seg_idx: int) -> None:
+        novo = (float(ponto.x()), float(ponto.y()))
+        cantos = [pt for pt in (self._tupla_ponto(item) for item in el.get("controle_cantos", []) or []) if pt is not None]
+        if not cantos:
+            pontos = [pt for pt in (self._tupla_ponto(item) for item in el.get("pontos", []) or []) if pt is not None]
+            if len(pontos) >= 2 and self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6:
+                pontos = pontos[:-1]
+            cantos = [pt for pt in pontos if self._dist_tuple(pt, novo) > 1e-6]
+        if not any(self._dist_tuple(novo, item) <= 1e-6 for item in cantos):
+            inserir_em = self._indice_insercao_canto(el, novo, seg_idx, cantos)
+            cantos.insert(inserir_em, novo)
+        el["controle_cantos"] = cantos
+        el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
+
+    def _indice_insercao_canto(self, el: dict, novo: tuple[float, float], seg_idx: int, cantos: list[tuple[float, float]]) -> int:
+        pontos = [pt for pt in (self._tupla_ponto(item) for item in el.get("pontos", []) or []) if pt is not None]
+        if len(pontos) >= 2 and self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6:
+            pontos = pontos[:-1]
+        if not pontos:
+            return len(cantos)
+        novo_idx = self._indice_ponto_mais_proximo(pontos, novo)
+        if novo_idx is None:
+            novo_idx = max(0, min(int(seg_idx) + 1, len(pontos) - 1))
+        inserir_em = 0
+        for i, canto in enumerate(cantos):
+            canto_idx = self._indice_ponto_mais_proximo(pontos, canto)
+            if canto_idx is not None and canto_idx <= novo_idx:
+                inserir_em = i + 1
+        return max(0, min(len(cantos), inserir_em))
+
+    def _indice_ponto_mais_proximo(self, pontos: list[tuple[float, float]], alvo: tuple[float, float]) -> int | None:
+        if not pontos:
+            return None
+        melhor_idx = 0
+        melhor_dist = float("inf")
+        for idx, ponto in enumerate(pontos):
+            dist = self._dist_tuple(ponto, alvo)
+            if dist < melhor_dist:
+                melhor_idx = idx
+                melhor_dist = dist
+        return melhor_idx
+
+    def _inserir_ponto_no_contorno(self, el: dict, ponto: QPointF, seg_idx: int) -> None:
+        pontos = [self._tupla_ponto(item) for item in el.get("pontos", []) or []]
+        pontos = [item for item in pontos if item is not None]
+        if len(pontos) < 2 or not (0 <= int(seg_idx) < len(pontos) - 1):
+            return
+        novo = (float(ponto.x()), float(ponto.y()))
+        if any(self._dist_tuple(item, novo) <= 1e-6 for item in pontos):
+            return
+        pontos.insert(int(seg_idx) + 1, novo)
+        el["pontos"] = pontos
+
+    @staticmethod
+    def _cor_realce_canvas(canvas) -> str:
+        try:
+            cor = str(getattr(canvas, "_cores_canvas", {}).get("selecao", "#2da8ff"))
+            return cor if QColor(cor).isValid() else "#2da8ff"
+        except Exception:
+            return "#2da8ff"
 
     def _alvo_no_contorno(self, canvas, pos: QPointF, indices: set[int] | None = None) -> tuple[int, QPointF] | None:
         tolerancia = 14.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)

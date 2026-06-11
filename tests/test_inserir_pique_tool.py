@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 if find_spec("PySide6") is None:
     QApplication = None
     QPointF = None
+    Qt = SimpleNamespace(LeftButton=1, RightButton=2)
     QWidget = None
     InserirPiqueDialog = None
     FerramentaInserirPique = None
@@ -94,6 +95,16 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         self.assertTrue(dialog.chk_ponto_controle.isChecked())
         self.assertEqual(dialog.cmb_costura.currentText(), "Estendido")
 
+    def test_manter_distancia_sincroniza_largura_e_altura(self):
+        dialog = InserirPiqueDialog()
+
+        dialog.chk_manter_distancia.setChecked(True)
+        dialog.edt_largura.setText("2")
+        self.assertEqual(dialog.edt_altura.text(), "2")
+
+        dialog.edt_altura.setText("3")
+        self.assertEqual(dialog.edt_largura.text(), "3")
+
     def test_aplicar_pique_registra_marcacao_config_e_controle(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPique()
@@ -105,8 +116,11 @@ class InserirPiqueToolTestCase(unittest.TestCase):
 
         molde = canvas.cena.elementos[0]
         self.assertEqual(molde["marcacoes_no_perimetro"], [(5.0, 0.0)])
-        self.assertEqual(molde["controle_auxiliares"], [(5.0, 0.0)])
-        self.assertEqual(molde["pontos_auxiliares"], [{"x": 5.0, "y": 0.0}])
+        self.assertIn((5.0, 0.0), molde["pontos"])
+        self.assertIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
+        self.assertEqual(molde["controle_auxiliares"], [])
+        self.assertEqual(molde["pontos_auxiliares"], [])
         self.assertEqual(molde["piques_config"][0]["tipo"], "T - forma T")
         self.assertEqual(molde["piques_config"][0]["pique_na_costura"], "Estendido")
         self.assertEqual(len(molde["piques_config"][0]["segmentos"]), 2)
@@ -163,6 +177,93 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         pontos = [p for segmento in segmentos for p in segmento]
         self.assertAlmostEqual(max(x for x, _y in pontos) - min(x for x, _y in pontos), 3.0)
         self.assertAlmostEqual(max(y for _x, y in pontos) - min(y for _x, y in pontos), 1.0)
+
+    def test_pique_traco_sobre_contorno_fica_perpendicular_a_borda(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+        ferramenta._dialog.cmb_tipo.setCurrentText("I - forma I")
+        ferramenta._dialog.edt_largura.setText("1")
+        ferramenta._dialog.edt_altura.setText("2")
+        ferramenta._dialog.chk_ponto_controle.setChecked(False)
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(10.0, 2.5)))
+
+        segmentos = canvas.cena.elementos[0]["piques_config"][0]["segmentos"]
+        self.assertEqual(len(segmentos), 1)
+        (a, b) = segmentos[0]
+        self.assertAlmostEqual(abs(a[1] - b[1]), 0.0)
+        self.assertAlmostEqual(abs(a[0] - b[0]), 2.0)
+
+    def test_pique_sobre_contorno_ignora_angulo_manual_para_manter_90_graus(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+        ferramenta._dialog.cmb_tipo.setCurrentText("I - forma I")
+        ferramenta._dialog.edt_altura.setText("2")
+        ferramenta._dialog.edt_angulo.setText("45")
+        ferramenta._dialog.chk_ponto_controle.setChecked(False)
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(10.0, 2.5)))
+
+        (a, b) = canvas.cena.elementos[0]["piques_config"][0]["segmentos"][0]
+        self.assertAlmostEqual(abs(a[1] - b[1]), 0.0)
+        self.assertAlmostEqual(abs(a[0] - b[0]), 2.0)
+
+    def test_pique_em_canto_usa_bissetriz_do_angulo(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+        ferramenta._dialog.cmb_tipo.setCurrentText("I - forma I")
+        ferramenta._dialog.edt_altura.setText("2")
+        ferramenta._dialog.chk_ponto_controle.setChecked(False)
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(10.0, 0.0)))
+
+        (a, b) = canvas.cena.elementos[0]["piques_config"][0]["segmentos"][0]
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        self.assertLess(dx, 0.0)
+        self.assertGreater(dy, 0.0)
+        self.assertAlmostEqual(abs(dx), abs(dy))
+        self.assertAlmostEqual(((dx * dx) + (dy * dy)) ** 0.5, 2.0)
+
+    def test_piques_para_numeracao_nao_duplica_marcacao_configurada(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "piques_config": [{"ponto": (5.0, 0.0)}, {"ponto": (10.0, 2.5)}],
+            "marcacoes_no_perimetro": [(5.0, 0.0), (0.0, 2.5)],
+        }
+
+        pontos = canvas._pontos_piques_para_numeracao(molde)
+
+        self.assertEqual([(p.x(), p.y()) for p in pontos], [(5.0, 0.0), (10.0, 2.5), (0.0, 2.5)])
+
+    def test_piques_para_numeracao_ignora_pique_que_ja_e_ponto_principal(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "piques_config": [{"ponto": (5.0, 0.0)}, {"ponto": (10.0, 2.5)}],
+        }
+
+        pontos = canvas._pontos_piques_para_numeracao(molde, [QPointF(5.0, 0.0)])
+
+        self.assertEqual([(p.x(), p.y()) for p in pontos], [(10.0, 2.5)])
+
+    def test_sem_ponto_controle_nao_divide_contorno(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+        ferramenta._dialog.chk_ponto_controle.setChecked(False)
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 0.0)))
+
+        molde = canvas.cena.elementos[0]
+        self.assertNotIn((5.0, 0.0), molde["pontos"])
+        self.assertNotIn("controle_cantos", molde)
 
     def test_pique_interno_fica_na_mao_e_insere_longe_do_contorno(self):
         canvas = _FakeCanvas()
