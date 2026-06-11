@@ -6,6 +6,7 @@ from math import atan2, cos, degrees, isfinite, radians, sin, sqrt
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 
+from core.formatacao import formatar_numero
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
@@ -135,8 +136,10 @@ class Ferramenta(FerramentaBase):
         if self._inicio_caixa is None:
             if canvas.lbl_status:
                 snap_info = f" | {canvas.descricao_snap_atual()}" if hasattr(canvas, "descricao_snap_atual") and canvas.descricao_snap_atual() else ""
-                canvas.lbl_status.setText(f"Selecionar | X {pos_sem_snap.x():.2f} Y {pos_sem_snap.y():.2f}{snap_info}")
-                self.set_status(f"Cursor X {pos_sem_snap.x():.2f} Y {pos_sem_snap.y():.2f}{snap_info}")
+                x_txt = formatar_numero(pos_sem_snap.x(), 2)
+                y_txt = formatar_numero(pos_sem_snap.y(), 2)
+                canvas.lbl_status.setText(f"Selecionar | X {x_txt} Y {y_txt}{snap_info}")
+                self.set_status(f"Cursor X {x_txt} Y {y_txt}{snap_info}")
             canvas.update()
             return True
         self._fim_caixa = pos_sem_snap

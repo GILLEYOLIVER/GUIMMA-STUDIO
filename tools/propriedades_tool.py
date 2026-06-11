@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
+from core.formatacao import formatar_numero
 from tools.tool_base import FerramentaBase
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
@@ -634,7 +635,7 @@ class PreviewMoldeWidget(QWidget):
         valor = round(float(angulo), 1)
         if abs(valor - round(valor)) <= 1e-9:
             return f"{int(round(valor))}°"
-        return f"{valor:.1f}°"
+        return f"{formatar_numero(valor, 1)}°"
 
     def _desenhar_rotulo_angulo_fio(self, painter: QPainter, p1: QPointF, p2: QPointF):
         angulo = self._fio_angulo_temp

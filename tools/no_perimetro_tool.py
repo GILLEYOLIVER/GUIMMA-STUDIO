@@ -5,6 +5,7 @@ from math import sqrt
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QPushButton, QVBoxLayout
 
+from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
 
@@ -268,8 +269,8 @@ class Ferramenta(FerramentaBase):
         passo = canvas.converter_para_cena(passo_u) if hasattr(canvas, "converter_para_cena") else passo_u * max(1e-9, float(getattr(canvas, "_unidade_fator", 1.0)))
         self._pontos_preview = self._pontos_por_progresso(self._inicio_dist, self._progresso_assinado, passo)
         progresso_abs = abs(self._progresso_assinado)
-        prog_u = canvas.formatar_valor_unidade(progresso_abs) if hasattr(canvas, "formatar_valor_unidade") else f"{progresso_abs:.2f}"
-        per_u = canvas.formatar_valor_unidade(total) if hasattr(canvas, "formatar_valor_unidade") else f"{total:.2f}"
+        prog_u = canvas.formatar_valor_unidade(progresso_abs) if hasattr(canvas, "formatar_valor_unidade") else formatar_numero(progresso_abs, 2)
+        per_u = canvas.formatar_valor_unidade(total) if hasattr(canvas, "formatar_valor_unidade") else formatar_numero(total, 2)
         unidade = getattr(canvas, "_unidade_sigla", "cm")
         txt = (
             f"No perímetro (prévia): percurso {prog_u} ({unidade}) | "

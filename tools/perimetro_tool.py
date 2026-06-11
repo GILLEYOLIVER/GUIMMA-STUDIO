@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
+from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
 
@@ -203,9 +204,9 @@ class Ferramenta(FerramentaBase):
             try:
                 valor = canvas.formatar_valor_unidade(valor_cena)
             except Exception:
-                valor = f"{valor_cena:.2f}"
+                valor = formatar_numero(valor_cena, 2)
         else:
-            valor = f"{valor_cena:.2f}"
+            valor = formatar_numero(valor_cena, 2)
 
         unidade = getattr(canvas, "_unidade_sigla", "cm")
         return f"{valor} {unidade}"

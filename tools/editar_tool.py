@@ -4,6 +4,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QSizePolicy, QSlider, QVBoxLayout
 
+from core.formatacao import formatar_numero
 from tools.editar_pontos_de_curva_tool import Ferramenta as FerramentaEditarPontosCurva
 from tools.preview_original_utils import desenhar_elementos_originais
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
@@ -228,7 +229,7 @@ class Ferramenta(FerramentaEditarPontosCurva):
             self._aplicar_bezier_no_elemento(el, pontos)
             self._idx_elemento = idx
             self._pontos_exibidos = self._pontos_controle_do_elemento(el)
-            self.set_status(f"Movendo ponto {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}")
+            self.set_status(f"Movendo ponto {indice + 1}: X {formatar_numero(pos.x(), 2)} | Y {formatar_numero(pos.y(), 2)}")
             canvas.update()
             event.accept()
             return True
@@ -246,7 +247,7 @@ class Ferramenta(FerramentaEditarPontosCurva):
             self._salvar_alcas_bezier(el, alcas)
             self._aplicar_bezier_no_elemento(el, pontos)
             self._pontos_exibidos = pontos
-            self.set_status(f"Alca {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}")
+            self.set_status(f"Alca {indice + 1}: X {formatar_numero(pos.x(), 2)} | Y {formatar_numero(pos.y(), 2)}")
             canvas.update()
             event.accept()
             return True

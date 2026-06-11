@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
 
@@ -300,8 +301,7 @@ class CompararDistanciaDialog(QDialog):
 
     @staticmethod
     def _fmt(valor: float) -> str:
-        texto = f"{float(valor):.2f}"
-        return texto.rstrip("0").rstrip(".") if "." in texto else texto
+        return formatar_numero(valor, 2)
 
     @staticmethod
     def _tamanhos_padrao() -> list[dict]:
@@ -494,7 +494,7 @@ class Ferramenta(FerramentaBase):
         texto = (
             f"{prefixo}: distancia {canvas.formatar_valor_unidade(distancia)} "
             f"| DX {canvas.formatar_valor_unidade(dx)} | DY {canvas.formatar_valor_unidade(dy)} "
-            f"| angulo {angulo:.1f}"
+            f"| angulo {formatar_numero(angulo, 1)}"
         )
         self._status(canvas, texto)
 

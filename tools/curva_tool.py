@@ -13,6 +13,7 @@ from core.geometry.engine import (
     quadratic_bezier_parameter_for_point,
     sample_quadratic_bezier_through_point,
 )
+from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
@@ -743,7 +744,7 @@ class Ferramenta(FerramentaBase):
                 return canvas.formatar_valor_unidade(valor)
             except Exception:
                 pass
-        return f"{valor:.2f}"
+        return formatar_numero(valor, 2)
 
     def _atualizar_status_metricas(self, canvas, pontos: List[QPointF] | None = None):
         pontos = pontos if pontos is not None else getattr(canvas, "_curva_np_preview", [])

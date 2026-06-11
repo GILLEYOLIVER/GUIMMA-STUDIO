@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
 from canvas.cena import CenaDocumento
+from core.formatacao import formatar_numero
 
 
 class ReguaWidget(QWidget):
@@ -115,9 +116,9 @@ class ReguaWidget(QWidget):
         valor_unidade = valor / self._fator_unidade
         passo_unidade = passo / self._fator_unidade
         if passo_unidade >= 1:
-            return f"{valor_unidade:.0f}"
+            return formatar_numero(valor_unidade, 0)
         dec = max(0, min(6, int(abs(floor(log10(passo_unidade))))))
-        return f"{valor_unidade:.{dec}f}"
+        return formatar_numero(valor_unidade, dec)
 
 
 class AreaDocumentoWidget(QWidget):

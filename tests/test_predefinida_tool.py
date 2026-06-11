@@ -17,6 +17,7 @@ else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from core.formatacao import formatar_numero
     from tools.predefinida_tool import Ferramenta as FerramentaPredefinida
 
 
@@ -58,7 +59,7 @@ class _FakeCanvas(_BaseWidget):
         self.historico += 1
 
     def formatar_valor_unidade(self, valor):
-        return f"{float(valor):.2f}"
+        return formatar_numero(valor, 2)
 
     def update(self):
         self.atualizou = True

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
 from canvas.snap import SnapManager, SnapResult, rotulo_tipo_snap, tipo_snap_movimento_fluido
+from core.formatacao import formatar_numero
 from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from ui.posicao_janelas import salvar_posicao
@@ -411,7 +412,7 @@ class VisualizacaoCanvas(QWidget):
     def formatar_valor_unidade(self, valor_cena: float, casas: int | None = None) -> str:
         casas_final = self._casas_precisao if casas is None else max(0, int(casas))
         valor_unidade = self.converter_de_cena(valor_cena)
-        return f"{valor_unidade:.{casas_final}f}"
+        return formatar_numero(valor_unidade, casas_final)
 
     def formatar_distancia(self, valor_cena: float, casas: int | None = None) -> str:
         txt = self.formatar_valor_unidade(valor_cena, casas=casas)
@@ -420,7 +421,7 @@ class VisualizacaoCanvas(QWidget):
     def formatar_distancia_quadrado(self, valor_cena: float, casas: int | None = None) -> str:
         casas_final = self._casas_precisao if casas is None else max(0, int(casas))
         valor_unidade = float(valor_cena) / max(self._unidade_quadrado_fator, 1e-9)
-        txt = f"{valor_unidade:.{casas_final}f}"
+        txt = formatar_numero(valor_unidade, casas_final)
         return f"{txt} {self._unidade_quadrado_sigla}"
 
     def set_passo_snap_angular(self, passo: float):

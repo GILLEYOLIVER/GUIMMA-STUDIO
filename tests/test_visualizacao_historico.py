@@ -109,16 +109,16 @@ class VisualizacaoHistoricoTestCase(unittest.TestCase):
         canvas.iniciar_operacao_coordenadas(QPointF(10.0, 5.0))
         canvas.atualizar_operacao_coordenadas(QPointF(13.0, 1.0))
 
-        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
-        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
-        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5.00")
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4")
+        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5")
 
         canvas.finalizar_operacao_coordenadas(QPointF(13.0, 1.0))
         canvas._atualizar_preview_coordenadas_mouse(QPointF(50.0, 50.0))
 
-        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
-        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
-        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5.00")
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4")
+        self.assertEqual(canvas.painel_coordenadas.d_preview.text(), "5")
 
     def test_ferramenta_futura_usa_ciclo_automatico_de_coordenadas(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -128,15 +128,15 @@ class VisualizacaoHistoricoTestCase(unittest.TestCase):
         canvas.atualizar_operacao_coordenadas(QPointF(7.0, 2.0))
 
         self.assertTrue(canvas._operacao_coordenadas_ativa)
-        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
-        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4")
 
         canvas._coordenadas_auto_apos_release(_FakeMouseEvent(QPointF(7.0, 2.0)), True)
         canvas._atualizar_preview_coordenadas_mouse(QPointF(50.0, 50.0))
 
         self.assertFalse(canvas._operacao_coordenadas_ativa)
-        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3.00")
-        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4.00")
+        self.assertEqual(canvas.painel_coordenadas.dx_preview.text(), "3")
+        self.assertEqual(canvas.painel_coordenadas.dy_preview.text(), "-4")
 
     def test_desfazer_consulta_ferramenta_ativa_antes_de_marcacoes(self):
         class _Ferramenta:

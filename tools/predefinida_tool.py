@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
+from core.formatacao import formatar_numero
 from tools.espiral_e_curvas_tool import Ferramenta as FerramentaEspiralCurvas
 from tools.espiral_e_curvas_tool import _gerar_curva_base
 from tools.espiral_e_curvas_tool import _gerar_pontos_controle_base
@@ -68,9 +69,9 @@ class InserirPredefinidaDialog(QDialog):
         grid.addWidget(QLabel("Incremento perímetro (cm)"), 0, 0)
         self.ed_incremento = QLineEdit("1")
         grid.addWidget(self.ed_incremento, 0, 1)
-        self.lbl_total = QLabel("0.00")
-        self.lbl_ext1 = QLabel("0.00")
-        self.lbl_ext2 = QLabel("0.00")
+        self.lbl_total = QLabel("0")
+        self.lbl_ext1 = QLabel("0")
+        self.lbl_ext2 = QLabel("0")
         grid.addWidget(QLabel("Total (cm)"), 1, 0)
         grid.addWidget(self.lbl_total, 1, 1)
         grid.addWidget(QLabel("Extremo 1 (cm)"), 2, 0)
@@ -117,9 +118,9 @@ class InserirPredefinidaDialog(QDialog):
             ext1, ext2 = total, 0.0
         else:
             ext1, ext2 = 0.0, total
-        self.lbl_total.setText(f"{total:.2f}")
-        self.lbl_ext1.setText(f"{ext1:.2f}")
-        self.lbl_ext2.setText(f"{ext2:.2f}")
+        self.lbl_total.setText(formatar_numero(total, 2))
+        self.lbl_ext1.setText(formatar_numero(ext1, 2))
+        self.lbl_ext2.setText(formatar_numero(ext2, 2))
         self.configuracao_alterada.emit()
 
 

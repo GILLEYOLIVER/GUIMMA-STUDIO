@@ -18,6 +18,7 @@ else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from core.formatacao import formatar_numero
     from tools.redefinir_perimetro_tool import Ferramenta as FerramentaRedefinirPerimetro
 
 
@@ -87,7 +88,7 @@ class _FakeCanvas(QWidget):
         return QPointF(pos)
 
     def formatar_valor_unidade(self, valor):
-        return f"{float(valor):.2f}"
+        return formatar_numero(valor, 2)
 
     def calcular_posicao_painel_auxiliar(self, largura, altura, abaixo_coordenadas=False):
         return QPointF(0.0, 0.0)
@@ -121,7 +122,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
         self.assertEqual(canvas.historico, 0)
-        self.assertEqual(dialog.ed_de.text(), "10.00")
+        self.assertEqual(dialog.ed_de.text(), "10")
         self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
         self.assertEqual(ferramenta._elemento_preview_por_canvas[id(canvas)]["controle_cantos"][1], (14.0, 0.0))
 
@@ -155,7 +156,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta = FerramentaRedefinirPerimetro()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
-        dialog.ed_de.setText("10.00")
+        dialog.ed_de.setText("10")
         dialog.ed_para.setText("14")
         chave = id(canvas)
         ferramenta._idx_por_canvas[chave] = 0
@@ -204,7 +205,7 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
         ferramenta.on_paint_overlay(canvas, None)
 
-        self.assertEqual(ferramenta._obter_dialog(canvas).ed_de.text(), "10.00")
+        self.assertEqual(ferramenta._obter_dialog(canvas).ed_de.text(), "10")
         self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (10.0, 0.0))
         self.assertTrue(canvas.segmentos_desenhados)
         self.assertEqual(canvas.segmentos_desenhados[-1][3], "#2da8ff")

@@ -5,6 +5,7 @@ from math import atan2, cos, sin, sqrt
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
+from core.formatacao import formatar_numero
 from tools.texto_config import aplicar_fonte_texto, cor_texto
 
 
@@ -60,7 +61,7 @@ def formatar_medida(canvas, valor: float) -> str:
     if hasattr(canvas, "formatar_valor_unidade"):
         unidade = getattr(canvas, "_unidade_sigla", "cm")
         return f"{canvas.formatar_valor_unidade(valor)} {unidade}"
-    return f"{valor:.2f} cm"
+    return f"{formatar_numero(valor, 2)} cm"
 
 
 def desenhar_cota_perimetro(canvas, painter: QPainter, elemento: dict) -> None:

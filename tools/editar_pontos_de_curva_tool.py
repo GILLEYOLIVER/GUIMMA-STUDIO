@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.formatacao import formatar_numero
 from core.geometry.engine import point_segment_distance, sample_quadratic_bezier_through_point
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
@@ -325,7 +326,7 @@ class Ferramenta(FerramentaBase):
                 snap_info = f" | {descricao}" if descricao else ""
             except Exception:
                 snap_info = ""
-        self.set_status(f"Movendo ponto {indice + 1}: X {pos.x():.2f} | Y {pos.y():.2f}{snap_info}")
+        self.set_status(f"Movendo ponto {indice + 1}: X {formatar_numero(pos.x(), 2)} | Y {formatar_numero(pos.y(), 2)}{snap_info}")
         canvas.update()
         event.accept()
         return True

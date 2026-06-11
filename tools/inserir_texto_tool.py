@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from canvas.visualizacao_texto_nativo_patch import aplicar_patch_texto_nativo_canvas
+from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status
 from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
 from tools.tool_base import FerramentaBase
@@ -49,7 +50,7 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
 
     def _formatar_numero(self, value: float) -> str:
         valor = round(float(value), 2)
-        texto = f"{valor:.2f}".rstrip("0").rstrip(".")
+        texto = formatar_numero(valor, 2)
         if texto.startswith("0.") and valor > 0:
             texto = texto[1:]
         elif texto.startswith("-0."):

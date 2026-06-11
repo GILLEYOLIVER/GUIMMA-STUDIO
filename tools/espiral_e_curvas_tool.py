@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QComboBox, QDialog, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
 
+from core.formatacao import formatar_numero
 from tools.tool_base import FerramentaBase
 
 
@@ -171,8 +172,8 @@ class InserirCurvaDialog(QDialog):
                 self.sl_e1.setValue(max(0, self.sl_e2.value() - 1))
             else:
                 self.sl_e2.setValue(min(100, self.sl_e1.value() + 1))
-        self.lbl_e1.setText(f"Extremo 1 - {float(self.sl_e1.value()):.1f} %")
-        self.lbl_e2.setText(f"Extremo 2 - {float(self.sl_e2.value()):.1f} %")
+        self.lbl_e1.setText(f"Extremo 1 - {formatar_numero(float(self.sl_e1.value()), 1)} %")
+        self.lbl_e2.setText(f"Extremo 2 - {formatar_numero(float(self.sl_e2.value()), 1)} %")
         self.preview.set_pontos(self.pontos_processados())
         self.configuracao_alterada.emit()
 

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
+from core.formatacao import formatar_numero
 from core.geometry.engine import internal_angle, point_segment_distance, polyline_perimeter
 from core.geometry_bridge_accelerated import (
     compose_closed_contour,
@@ -1756,7 +1757,7 @@ class Ferramenta(FerramentaBase):
         if not elementos_locais:
             elementos_locais = list(canvas.cena.elementos)
         self._log_extracao(
-            f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={raio_max_local:.2f} zoom={canvas.zoom:.4f}"
+            f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={formatar_numero(raio_max_local, 2)} zoom={formatar_numero(canvas.zoom, 4)}"
         )
 
         # Micro-faces: tentativa dedicada para fechamentos muito pequenos.

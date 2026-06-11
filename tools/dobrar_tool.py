@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QVBoxLayout
 
 from canvas.snap import SnapResult
+from core.formatacao import formatar_numero
 from config import ICONS_DIR
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -842,8 +843,8 @@ class Ferramenta(FerramentaBase):
             return
         partes = []
         for nome, met in resultados:
-            max_txt = canvas.formatar_distancia(met["diferenca_maxima"]) if hasattr(canvas, "formatar_distancia") else f"{met['diferenca_maxima']:.2f}"
-            media_txt = canvas.formatar_distancia(met["diferenca_media"]) if hasattr(canvas, "formatar_distancia") else f"{met['diferenca_media']:.2f}"
+            max_txt = canvas.formatar_distancia(met["diferenca_maxima"]) if hasattr(canvas, "formatar_distancia") else formatar_numero(met["diferenca_maxima"], 2)
+            media_txt = canvas.formatar_distancia(met["diferenca_media"]) if hasattr(canvas, "formatar_distancia") else formatar_numero(met["diferenca_media"], 2)
             situacao = "simétrico" if met["diferenca_maxima"] <= met["tolerancia"] else "assimétrico"
             partes.append(f"{nome}: {situacao} | máx. {max_txt} | média {media_txt}")
         self._status(canvas, "Conferência da dobra: " + " ; ".join(partes))

@@ -5,6 +5,7 @@ from math import atan2, cos, sin, sqrt
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 
+from core.formatacao import formatar_numero
 from tools.cota_persistente_utils import aplicar_patch_canvas_cotas, serializar_cota
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo
 from tools.texto_config import aplicar_fonte_texto, cor_texto, configurar_texto_canvas
@@ -240,6 +241,6 @@ class Ferramenta(FerramentaBase):
                 return canvas.formatar_distancia(valor_cena)
             except Exception:
                 pass
-        valor = canvas.formatar_valor_unidade(valor_cena) if hasattr(canvas, "formatar_valor_unidade") else f"{valor_cena:.2f}"
+        valor = canvas.formatar_valor_unidade(valor_cena) if hasattr(canvas, "formatar_valor_unidade") else formatar_numero(valor_cena, 2)
         unidade = getattr(canvas, "_unidade_sigla", "cm")
         return f"{valor} {unidade}"

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.formatacao import formatar_numero
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -170,7 +171,7 @@ class RetaToolUI(QFrame):
         layout.addWidget(self._linha())
 
         layout.addWidget(self._section_label("Cursor"))
-        self.mouse_coord_label = QLabel("X 0.00  |  Y 0.00")
+        self.mouse_coord_label = QLabel("X 0  |  Y 0")
         self.mouse_coord_label.setObjectName("mouseCoord")
         self.mouse_coord_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.mouse_coord_label)
@@ -297,7 +298,9 @@ class RetaToolUI(QFrame):
 
     def atualizar_coordenadas_mouse(self, x: float, y: float):
         fator = max(1e-9, float(self._unidade_fator))
-        self.mouse_coord_label.setText(f"X {x / fator:.2f} {self._unidade_sigla}  |  Y {y / fator:.2f} {self._unidade_sigla}")
+        x_txt = formatar_numero(x / fator, 2)
+        y_txt = formatar_numero(y / fator, 2)
+        self.mouse_coord_label.setText(f"X {x_txt} {self._unidade_sigla}  |  Y {y_txt} {self._unidade_sigla}")
 
     def set_unidade(self, sigla: str, fator: float):
         self._unidade_sigla = str(sigla or "cm")
@@ -622,7 +625,7 @@ class Ferramenta(FerramentaBase):
         else:
             comp = self._distancia(self._pontos_atuais[-2], self._pontos_atuais[-1])
             ang = self._angulo_entre(self._pontos_atuais[-2], self._pontos_atuais[-1])
-            msg = f"Segmento inserido: {self.canvas.formatar_distancia(comp)} | {ang:.1f}° | Pontos: {len(self._pontos_atuais)}"
+            msg = f"Segmento inserido: {self.canvas.formatar_distancia(comp)} | {formatar_numero(ang, 1)}° | Pontos: {len(self._pontos_atuais)}"
         if self.canvas.lbl_status:
             self.canvas.lbl_status.setText(msg)
         if self.ui_flutuante:
@@ -812,10 +815,10 @@ class Ferramenta(FerramentaBase):
                 snap_info = f" | Snap: {canvas._snap_resultado.tipo}" if canvas._snap_resultado else ""
                 if self.modo in {"paralela", "perpendicular"} and not self.reta_referencia:
                     canvas.lbl_status.setText(
-                        f"Selecione uma referência | X: {pos_real.x():.2f} | Y: {pos_real.y():.2f}{snap_info}"
+                        f"Selecione uma referência | X: {formatar_numero(pos_real.x(), 2)} | Y: {formatar_numero(pos_real.y(), 2)}{snap_info}"
                     )
                 else:
-                    canvas.lbl_status.setText(f"Posição: X {pos_real.x():.2f} | Y {pos_real.y():.2f}{snap_info}")
+                    canvas.lbl_status.setText(f"Posição: X {formatar_numero(pos_real.x(), 2)} | Y {formatar_numero(pos_real.y(), 2)}{snap_info}")
 
         canvas.update()
         return False
@@ -836,7 +839,7 @@ class Ferramenta(FerramentaBase):
         x_u = canvas.formatar_valor_unidade(pos_real.x())
         y_u = canvas.formatar_valor_unidade(pos_real.y())
         texto = (
-            f"Prévia: {canvas.formatar_distancia(comp)} | {ang:.1f}° | "
+            f"Prévia: {canvas.formatar_distancia(comp)} | {formatar_numero(ang, 1)}° | "
             f"Cursor X {x_u} Y {y_u}{sufixo}"
         )
         if canvas.lbl_status:
@@ -948,7 +951,7 @@ class Ferramenta(FerramentaBase):
 
         meio = QPointF((origem.x() + destino.x()) / 2.0, (origem.y() + destino.y()) / 2.0)
         meio_tela = canvas._cena_para_tela(meio)
-        texto = f"{canvas.formatar_distancia(comp)}  |  {ang:.1f}°"
+        texto = f"{canvas.formatar_distancia(comp)}  |  {formatar_numero(ang, 1)}°"
 
         font = QFont("Arial", 8)
         font.setBold(True)

@@ -5,6 +5,7 @@ from math import atan2, degrees, sqrt
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
+from core.formatacao import formatar_numero
 from ui.posicao_janelas import salvar_posicao
 
 
@@ -165,10 +166,10 @@ class PainelCoordenadas(QFrame):
         dy = destino.y() - origem.y()
         ang = degrees(atan2(-dy, dx)) % 360.0
         dist = sqrt(dx * dx + dy * dy)
-        self.dx_preview.setText(f"{dx / self._unidade_fator:.{self._casas_decimais}f}")
-        self.dy_preview.setText(f"{dy / self._unidade_fator:.{self._casas_decimais}f}")
+        self.dx_preview.setText(formatar_numero(dx / self._unidade_fator, self._casas_decimais))
+        self.dy_preview.setText(formatar_numero(dy / self._unidade_fator, self._casas_decimais))
         self.a_preview.setText(f"{ang:.0f}°")
-        self.d_preview.setText(f"{dist / self._unidade_fator:.{self._casas_decimais}f}")
+        self.d_preview.setText(formatar_numero(dist / self._unidade_fator, self._casas_decimais))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and event.position().y() <= 28:

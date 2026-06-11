@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from core.formatacao import formatar_numero
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -426,7 +427,7 @@ class Ferramenta(FerramentaBase):
         painter.drawLine(QPointF(destino_tela.x(), destino_tela.y() - 9), QPointF(destino_tela.x(), destino_tela.y() + 9))
 
         meio = QPointF((pivo_tela.x() + destino_tela.x()) / 2.0, (pivo_tela.y() + destino_tela.y()) / 2.0)
-        texto = f"{comp:.2f}  |  {self._angulo_preview_2p:.1f}°"
+        texto = f"{formatar_numero(comp, 2)}  |  {formatar_numero(self._angulo_preview_2p, 1)}°"
         font = QFont("Arial", 8)
         font.setBold(True)
         painter.setFont(font)

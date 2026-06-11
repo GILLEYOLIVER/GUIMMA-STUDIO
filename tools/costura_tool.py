@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.formatacao import formatar_numero
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -34,7 +35,7 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
             self.setLocale(QLocale(QLocale.Portuguese, QLocale.Brazil))
 
     def textFromValue(self, value: float) -> str:  # noqa: N802 - API Qt
-        texto = f"{float(value):.2f}".rstrip("0").rstrip(".")
+        texto = formatar_numero(value, 2)
         if texto == "-0":
             texto = "0"
         return texto.replace(".", ",")
@@ -1610,7 +1611,7 @@ class Ferramenta(FerramentaBase):
 
     @staticmethod
     def _fmt(valor: float) -> str:
-        texto = f"{float(valor):.2f}".rstrip("0").rstrip(".")
+        texto = formatar_numero(valor, 2)
         if texto == "-0":
             texto = "0"
         return texto.replace(".", ",")
