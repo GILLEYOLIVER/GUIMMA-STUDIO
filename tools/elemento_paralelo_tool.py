@@ -92,7 +92,7 @@ class Ferramenta(FerramentaBase):
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Elemento paralelo: clique no perímetro para iniciar a seleção. Duplo clique esquerdo sai da ferramenta.")
+        self._status(canvas, "Elemento paralelo: clique no perímetro para iniciar a seleção. Botão direito sai da ferramenta.")
 
     def on_deactivate(self, canvas):
         self._limpar_estado()
@@ -115,11 +115,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() == Qt.RightButton:
-            self._limpar_estado()
-            self._limpar_selecao_canvas(canvas)
-            self._operacao_finalizada = True
-            self._status(canvas, "Operação cancelada/finalizada. A ferramenta continua ativa. Duplo clique esquerdo sai.")
-            canvas.update()
+            self._fechar(canvas)
             event.accept()
             return True
 
@@ -135,7 +131,7 @@ class Ferramenta(FerramentaBase):
 
         if self._fase == "selecionar" and self._alvo_idx is None:
             if not self._iniciar_selecao(canvas, pos):
-                self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho. Duplo clique esquerdo sai.")
+                self._status(canvas, "Clique sobre uma linha do molde para selecionar o trecho. Botão direito sai.")
                 return False
             event.accept()
             return True
@@ -161,14 +157,11 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_double_click(self, canvas, event) -> bool:
         if event.button() == Qt.LeftButton:
-            self._fechar(canvas)
+            self._status(canvas, "Duplo clique esquerdo mantem a ferramenta ativa. Use botão direito para sair.")
             event.accept()
             return True
         if event.button() == Qt.RightButton:
-            # Impede que o canvas solte a ferramenta por duplo clique direito.
-            self._limpar_estado()
-            self._limpar_selecao_canvas(canvas)
-            self._status(canvas, "A ferramenta continua ativa. Para sair, dê dois cliques seguidos com o botão esquerdo.")
+            self._fechar(canvas)
             canvas.update()
             event.accept()
             return True
@@ -215,7 +208,7 @@ class Ferramenta(FerramentaBase):
                 criou += 1
         self._limpar_selecao_canvas(canvas)
         if criou:
-            self._status(canvas, f"Criado(s) {criou} elemento(s) paralelo(s). Duplo clique esquerdo sai.")
+            self._status(canvas, f"Criado(s) {criou} elemento(s) paralelo(s). Botão direito sai.")
         else:
             self._status(canvas, "Não foi possível criar paralelo da seleção.")
         canvas.update()
@@ -328,7 +321,7 @@ class Ferramenta(FerramentaBase):
         self._preview_2 = []
         self._realce_segmentos = []
         self._limpar_selecao_canvas(canvas)
-        self._status(canvas, "Elemento paralelo criado. Nada ficou selecionado. Clique esquerdo continua; duplo clique esquerdo sai.")
+        self._status(canvas, "Elemento paralelo criado. Nada ficou selecionado. Clique esquerdo continua; botão direito sai.")
         canvas.update()
         return True
 
@@ -356,7 +349,7 @@ class Ferramenta(FerramentaBase):
             self._limpar_selecao_canvas(canvas)
             canvas.update()
         self._operacao_finalizada = True
-        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; duplo clique esquerdo sai.")
+        self._status(canvas, "Elemento paralelo criado. Clique esquerdo continua; botão direito sai.")
 
     def _fechar(self, canvas) -> None:
         self._limpar_estado()

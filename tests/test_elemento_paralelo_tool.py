@@ -13,7 +13,7 @@ if find_spec("PySide6") is None:
     QWidget = None
     FerramentaElementoParalelo = None
 else:
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.elemento_paralelo_tool import Ferramenta as FerramentaElementoParalelo
@@ -40,12 +40,28 @@ class _FakeCanvas(_BaseWidget):
         self._linha_cor = "#001dff"
         self._linha_espessura = 2.0
         self._linha_estilo = "dash"
+        self.ferramenta_ativa = None
 
     def _registrar_historico(self):
         pass
 
     def update(self):
         pass
+
+    def set_ferramenta_ativa(self, nome):
+        self.ferramenta_ativa = nome
+
+
+class _FakeEvent:
+    def __init__(self, button):
+        self._button = button
+        self.accepted = False
+
+    def button(self):
+        return self._button
+
+    def accept(self):
+        self.accepted = True
 
 
 @unittest.skipIf(FerramentaElementoParalelo is None, "PySide6 nao disponivel neste ambiente")
@@ -66,6 +82,20 @@ class ElementoParaleloToolTestCase(unittest.TestCase):
         )
 
         self.assertEqual(canvas.cena.elementos[-1]["cor"], "#001dff")
+
+    def test_elemento_paralelo_so_sai_com_botao_direito(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaElementoParalelo()
+
+        duplo_esquerdo = _FakeEvent(Qt.LeftButton)
+        self.assertTrue(ferramenta.on_mouse_double_click(canvas, duplo_esquerdo))
+        self.assertTrue(duplo_esquerdo.accepted)
+        self.assertIsNone(canvas.ferramenta_ativa)
+
+        direito = _FakeEvent(Qt.RightButton)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, direito))
+        self.assertTrue(direito.accepted)
+        self.assertEqual(canvas.ferramenta_ativa, "selecionar")
 
 
 if __name__ == "__main__":
