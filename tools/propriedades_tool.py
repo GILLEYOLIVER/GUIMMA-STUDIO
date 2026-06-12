@@ -55,6 +55,28 @@ TAMANHO_NUMERO_PADRAO_CM = 0.7
 # Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
 QLocale.setDefault(QLocale.c())
 
+FLAGS_VISUALIZACAO_MOLDE = (
+    ("chk_mostrar_nome", "mostrar_nome", True),
+    ("chk_visual_descricao", "visual_descricao", False),
+    ("chk_modelo", "visual_modelo", False),
+    ("chk_preencher", "visual_preencher", False),
+    ("chk_linhas_aux", "mostrar_linhas_auxiliares", True),
+    ("chk_grade_tam", "visual_grade_tamanhos", False),
+    ("chk_mostrar_fio", "mostrar_fio", True),
+    ("chk_costura", "mostrar_costura", True),
+    ("chk_tecido_visual", "visual_tecido", False),
+    ("chk_mostrar_numeros", "mostrar_numeros", True),
+    ("chk_caminho_grade", "visual_caminho_grade", False),
+    ("chk_quantidade_visual", "visual_quantidade", False),
+    ("chk_graduacao", "mostrar_graduacao", True),
+    ("chk_perimetro_molde", "visual_perimetro_molde", False),
+    ("chk_giro_visual", "visual_giro", False),
+    ("chk_pique", "mostrar_piques", True),
+    ("chk_margem_visual", "mostrar_margem", False),
+)
+
+CHAVES_FLAGS_VISUALIZACAO_MOLDE = tuple(chave for _attr, chave, _padrao in FLAGS_VISUALIZACAO_MOLDE)
+
 
 def _eh_elemento_numeros(valor) -> bool:
     texto = str(valor or "").strip().lower()
@@ -509,6 +531,9 @@ class PreviewMoldeWidget(QWidget):
         self._desenhar_margem(painter, base, mapear, cor_desenho)
         self._desenhar_fio(painter, base, mapear)
         self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
+        self._desenhar_metadados_visual(painter, base, mapear)
+        self._desenhar_caminho_grade(painter, base, mapear)
+        self._desenhar_piques(painter, mapear)
         self._desenhar_controles(painter, mapear)
 
     def _dados_transformacao(self) -> dict | None:
@@ -925,6 +950,98 @@ class PreviewMoldeWidget(QWidget):
         painter.setPen(QPen(cor, 1.0))
         rect = self._retangulo_texto_por_referencia(largura, altura, referencia)
         painter.drawText(rect, flags, texto_draw)
+        painter.restore()
+
+    def _desenhar_metadados_visual(self, painter: QPainter, base: list[QPointF], mapear):
+        if not self._molde:
+            return
+        linhas: list[str] = []
+        modelo = str(self._molde.get("modelo") or self._molde.get("nome_modelo") or self._molde.get("modelo_nome") or "").strip()
+        if self._molde.get("visual_modelo", False) and modelo:
+            linhas.append(f"Modelo {modelo}")
+        grade = str(self._molde.get("graduacao_grade_nome") or "").strip()
+        if self._molde.get("visual_grade_tamanhos", False) and grade:
+            linhas.append(f"Grade {grade}")
+        tecido = str(self._molde.get("tecido") or "").strip()
+        if self._molde.get("visual_tecido", False) and tecido:
+            linhas.append(f"Tecido {tecido}")
+        giro = str(self._molde.get("giro") or "").strip()
+        if self._molde.get("visual_giro", False) and giro:
+            linhas.append(f"Giro {giro}")
+        if self._molde.get("visual_perimetro_molde", False):
+            perimetro = 0.0
+            for a, b in zip(base, base[1:] + [base[0]]):
+                perimetro += sqrt((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2)
+            linhas.append(f"Perímetro {formatar_numero(perimetro)} cm")
+        if not linhas:
+            return
+        cx = sum(p.x() for p in base) / len(base)
+        cy = sum(p.y() for p in base) / len(base)
+        pos = mapear(QPointF(cx, cy))
+        painter.save()
+        fonte = QFont(painter.font())
+        fonte.setPointSize(8)
+        painter.setFont(fonte)
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        metrics = painter.fontMetrics()
+        altura = metrics.height() + 2
+        y = pos.y() + 34
+        for linha in linhas:
+            largura = max(80, metrics.horizontalAdvance(linha) + 10)
+            painter.drawText(QRectF(pos.x() - largura / 2.0, y, largura, altura), Qt.AlignCenter, linha)
+            y += altura
+        painter.restore()
+
+    def _desenhar_caminho_grade(self, painter: QPainter, base: list[QPointF], mapear):
+        if (
+            not self._molde
+            or not self._molde.get("visual_caminho_grade", False)
+            or self._molde.get("mostrar_graduacao", True) is False
+        ):
+            return
+        try:
+            from canvas.visualizacao import VisualizacaoCanvas
+
+            caminhos = VisualizacaoCanvas._caminhos_graduacao_tabela(self._molde, base)
+        except Exception:
+            return
+        if not caminhos:
+            return
+        painter.save()
+        try:
+            for _nome, cor, origem, destino in caminhos:
+                cor_linha = QColor(str(cor or "#ffcc00"))
+                if not cor_linha.isValid():
+                    cor_linha = QColor("#ffcc00")
+                pen = QPen(cor_linha, 1.0, Qt.DashLine)
+                pen.setCapStyle(Qt.RoundCap)
+                painter.setPen(pen)
+                painter.drawLine(mapear(origem), mapear(destino))
+        finally:
+            painter.restore()
+
+    def _desenhar_piques(self, painter: QPainter, mapear):
+        if not self._molde or self._molde.get("mostrar_piques", True) is False:
+            return
+        pontos: list[QPointF] = []
+        for item in self._molde.get("marcacoes_no_perimetro", []) or []:
+            ponto = self._ponto_xy(item)
+            if ponto is not None:
+                pontos.append(ponto)
+        for cfg in self._molde.get("piques_config", []) or []:
+            if not isinstance(cfg, dict):
+                continue
+            ponto = self._ponto_xy(cfg.get("ponto"))
+            if ponto is not None:
+                pontos.append(ponto)
+        if not pontos:
+            return
+        painter.save()
+        painter.setPen(QPen(QColor("#ff5a00"), 1.0))
+        for ponto in pontos:
+            tela = mapear(ponto)
+            painter.drawLine(int(tela.x() - 5), int(tela.y() - 5), int(tela.x() + 5), int(tela.y() + 5))
+            painter.drawLine(int(tela.x() - 5), int(tela.y() + 5), int(tela.x() + 5), int(tela.y() - 5))
         painter.restore()
 
     @staticmethod
@@ -2710,6 +2827,34 @@ class PropriedadesMoldesDialog(QDialog):
         with QSignalBlocker(self.ed_nome_visualizacao):
             self.ed_nome_visualizacao.setText(self._texto_entry_visualizacao(self._molde_atual(), elemento))
 
+    @staticmethod
+    def _flags_visualizacao_do_molde(molde: dict | None) -> dict[str, bool]:
+        fonte = molde if isinstance(molde, dict) else {}
+        return {
+            chave: bool(fonte.get(chave, padrao))
+            for _attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE
+        }
+
+    def _ler_flags_visualizacao_formulario(self) -> dict[str, bool]:
+        flags: dict[str, bool] = {}
+        for attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE:
+            widget = getattr(self, attr, None)
+            flags[chave] = bool(widget.isChecked()) if hasattr(widget, "isChecked") else bool(padrao)
+        return flags
+
+    def _preencher_flags_visualizacao(self, molde: dict | None):
+        flags = self._flags_visualizacao_do_molde(molde)
+        for attr, chave, _padrao in FLAGS_VISUALIZACAO_MOLDE:
+            widget = getattr(self, attr, None)
+            if hasattr(widget, "setChecked"):
+                widget.setChecked(bool(flags[chave]))
+
+    @staticmethod
+    def _aplicar_flags_visualizacao_molde(molde: dict, flags: dict):
+        for chave in CHAVES_FLAGS_VISUALIZACAO_MOLDE:
+            if chave in flags:
+                molde[chave] = bool(flags[chave])
+
     def _salvar_config_visual_molde(self, molde: dict):
         if not hasattr(self, "cmb_elementos_molde"):
             return
@@ -3152,6 +3297,7 @@ class PropriedadesMoldesDialog(QDialog):
         _log_propriedades_debug("recarregar_lista() iniciado")
         atual_idx = self._indice_atual
         self._refs = self._coletar_moldes()
+        self._atualizar_conflitos_grade_modelo()
         self._itens_molde_por_indice = {}
         self._combos_tecido_por_item = {}
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
@@ -3517,13 +3663,27 @@ class PropriedadesMoldesDialog(QDialog):
                 return assinatura
         return ""
 
+    def _atualizar_conflitos_grade_modelo(self) -> None:
+        referencia = self._assinatura_grade_referencia_global()
+        for ref in self._refs:
+            dados = ref.dados if isinstance(ref.dados, dict) else None
+            if not isinstance(dados, dict):
+                continue
+            assinatura = self._assinatura_grade(dados)
+            conflito = bool(referencia and assinatura and assinatura != referencia)
+            dados["conflito_grade_modelo"] = conflito
+            if conflito:
+                dados["grade_modelo_referencia"] = referencia
+            else:
+                dados.pop("grade_modelo_referencia", None)
+
     def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
         dados = ref.dados if isinstance(ref.dados, dict) else {}
         pronto = bool(dados.get("molde_pronto", False))
         assinatura = self._assinatura_grade(dados)
         if not pronto:
             return QIcon(str(ICONS_DIR / "molde-nao-pronto.svg"))
-        if referencia_grade and assinatura and assinatura != referencia_grade:
+        if bool(dados.get("conflito_grade_modelo")) or (referencia_grade and assinatura and assinatura != referencia_grade):
             return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
         return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
 
@@ -3669,6 +3829,7 @@ class PropriedadesMoldesDialog(QDialog):
             self.chk_dobra_h.setChecked(False)
             self.chk_reflete_v.setChecked(False)
             self.chk_reflete_h.setChecked(False)
+            self._preencher_flags_visualizacao(None)
             self._cor_visual = "#ffffff"
             self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
             if hasattr(self, "ed_nome_visualizacao"):
@@ -3713,14 +3874,8 @@ class PropriedadesMoldesDialog(QDialog):
         tipo_giro = str(molde.get("giro") or "180 graus")
         idx_giro = self.cmb_giro.findText(tipo_giro)
         self.cmb_giro.setCurrentIndex(idx_giro if idx_giro >= 0 else 0)
-        self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
-        self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
-        self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", True)))
-        self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
-        self.chk_quantidade_visual.setChecked(bool(molde.get("visual_quantidade", False)))
-        self.chk_margem_visual.setChecked(bool(molde.get("mostrar_margem", False)))
+        self._preencher_flags_visualizacao(molde)
         self._preencher_tabela_margem(molde)
-        self.chk_preencher.setChecked(bool(molde.get("visual_preencher", False)))
         self.chk_mostrar_cor_tecidos.blockSignals(True)
         self.chk_mostrar_cor_tecidos.setChecked(bool(getattr(self, "_mostrar_cor_tecidos_rascunho", getattr(self.canvas, "_mostrar_cor_tecidos", False))))
         self.chk_mostrar_cor_tecidos.blockSignals(False)
@@ -3801,20 +3956,14 @@ class PropriedadesMoldesDialog(QDialog):
         molde_atual = self._molde_atual()
         dados = {
             "bbox_origem": _bbox_visual_molde(molde_atual) if isinstance(molde_atual, dict) else None,
-            "mostrar_nome": self.chk_mostrar_nome.isChecked(),
-            "mostrar_fio": self.chk_mostrar_fio.isChecked(),
-            "mostrar_numeros": self.chk_mostrar_numeros.isChecked(),
-            "visual_descricao": self.chk_visual_descricao.isChecked(),
             "visual_observacoes": bool(molde_atual.get("visual_observacoes", False)) if isinstance(molde_atual, dict) else False,
-            "visual_quantidade": self.chk_quantidade_visual.isChecked(),
-            "visual_preencher": self.chk_preencher.isChecked(),
             "cor": self._cor_visual,
-            "mostrar_margem": self.chk_margem_visual.isChecked(),
             "margens": self._coletar_margens_tabela(),
             "textos": {},
             "fio": {},
             "numeros": {},
         }
+        dados.update(self._ler_flags_visualizacao_formulario())
         if isinstance(molde_atual, dict):
             for chave in ("nome", "descricao", "observacoes"):
                 dados_texto = {}
@@ -3879,17 +4028,9 @@ class PropriedadesMoldesDialog(QDialog):
             return
         bbox_origem = dados.get("bbox_origem")
         bbox_destino = _bbox_visual_molde(molde)
-        for chave in (
-            "mostrar_nome",
-            "mostrar_fio",
-            "mostrar_numeros",
-            "visual_descricao",
-            "visual_observacoes",
-            "visual_quantidade",
-            "visual_preencher",
-            "cor",
-        ):
-            molde[chave] = dados[chave]
+        self._aplicar_flags_visualizacao_molde(molde, dados)
+        molde["visual_observacoes"] = bool(dados.get("visual_observacoes", False))
+        molde["cor"] = dados["cor"]
         self._salvar_margens_no_molde(
             molde,
             dict(dados.get("margens") or {}),
@@ -4267,14 +4408,9 @@ class PropriedadesMoldesDialog(QDialog):
         molde["dobra_horizontal"] = self.chk_dobra_h.isChecked()
         molde["refletido_vertical"] = self.chk_reflete_v.isChecked()
         molde["refletido_horizontal"] = self.chk_reflete_h.isChecked()
-        molde["mostrar_nome"] = self.chk_mostrar_nome.isChecked()
-        molde["mostrar_fio"] = self.chk_mostrar_fio.isChecked()
-        molde["mostrar_numeros"] = self.chk_mostrar_numeros.isChecked()
-        molde["visual_descricao"] = self.chk_visual_descricao.isChecked()
-        molde["visual_quantidade"] = self.chk_quantidade_visual.isChecked()
+        self._aplicar_flags_visualizacao_molde(molde, self._ler_flags_visualizacao_formulario())
         margens_dict = self._coletar_margens_tabela()
         self._salvar_margens_no_molde(molde, margens_dict, mostrar_margem=self.chk_margem_visual.isChecked())
-        molde["visual_preencher"] = self.chk_preencher.isChecked()
         molde["cor"] = self._cor_visual
         self._salvar_config_visual_molde(molde)
 
@@ -4318,9 +4454,19 @@ class PropriedadesMoldesDialog(QDialog):
             self.chk_mostrar_fio.toggled,
             self.chk_mostrar_numeros.toggled,
             self.chk_visual_descricao.toggled,
+            self.chk_modelo.toggled,
             self.chk_quantidade_visual.toggled,
             self.chk_margem_visual.toggled,
             self.chk_preencher.toggled,
+            self.chk_linhas_aux.toggled,
+            self.chk_grade_tam.toggled,
+            self.chk_costura.toggled,
+            self.chk_tecido_visual.toggled,
+            self.chk_caminho_grade.toggled,
+            self.chk_graduacao.toggled,
+            self.chk_perimetro_molde.toggled,
+            self.chk_giro_visual.toggled,
+            self.chk_pique.toggled,
             self.chk_mostrar_cor_tecidos.toggled,
             self.cmb_elementos_molde.currentTextChanged,
             self.ed_referencia.currentTextChanged,

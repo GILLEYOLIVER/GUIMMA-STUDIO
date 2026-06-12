@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHeaderView,
+    QMessageBox,
 )
 
 from core.graduacao import grade_graduacao_padrao
@@ -581,7 +582,10 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        self._definir_molde_idx(canvas, self._molde_selecionado(canvas))
+        molde_inicial = self._molde_selecionado(canvas)
+        if molde_inicial is not None and not self._preparar_molde_para_tabela(canvas, molde_inicial):
+            molde_inicial = None
+        self._definir_molde_idx(canvas, molde_inicial)
         self._ponto_idx = None
         self._hover_ponto_idx = None
         self._pontos_selecionados.clear()
@@ -617,6 +621,9 @@ class Ferramenta(FerramentaBase):
         molde_idx = alvo[0] if alvo is not None else self._molde_em_posicao(canvas, pos)
         if molde_idx is None:
             self._status(canvas, "Tabela: clique sobre um molde graduável.")
+            event.accept()
+            return True
+        if not self._preparar_molde_para_tabela(canvas, molde_idx):
             event.accept()
             return True
         if self._processar_clique_modo_copia(canvas, molde_idx, alvo, pos):
@@ -741,6 +748,8 @@ class Ferramenta(FerramentaBase):
             return False
         molde = canvas.cena.elementos[self._molde_idx]
         if not isinstance(molde, dict) or not molde.get("molde"):
+            return False
+        if not self._preparar_molde_para_tabela(canvas, self._molde_idx):
             return False
         dialog = self._obter_dialog(canvas)
         self._garantir_tamanhos_no_molde(molde, dialog)
@@ -951,6 +960,8 @@ class Ferramenta(FerramentaBase):
         self._molde_chave = self._chave_molde(molde) if molde is not None else None
 
     def _selecionar_molde(self, canvas, molde_idx: int | None) -> None:
+        if molde_idx is not None and not self._preparar_molde_para_tabela(canvas, int(molde_idx)):
+            return
         self._definir_molde_idx(canvas, molde_idx)
         self._ponto_idx = None
         self._hover_ponto_idx = None
@@ -1005,6 +1016,8 @@ class Ferramenta(FerramentaBase):
         self._hover_ponto_idx = None
         if hasattr(canvas, "_selecionados"):
             canvas._selecionados = {int(molde_idx)}
+        if not self._preparar_molde_para_tabela(canvas, molde_idx):
+            return
         dialog = self._obter_dialog(canvas)
         molde = canvas.cena.elementos[int(molde_idx)]
         self._garantir_tamanhos_no_molde(molde, dialog)
@@ -1222,6 +1235,111 @@ class Ferramenta(FerramentaBase):
         ]
         grade_nome, _linhas_padrao = grade_graduacao_padrao()
         molde.setdefault("graduacao_grade_nome", grade_nome)
+
+    def _preparar_molde_para_tabela(self, canvas, molde_idx: int | None) -> bool:
+        if molde_idx is None or not (0 <= int(molde_idx) < len(canvas.cena.elementos)):
+            return False
+        molde = canvas.cena.elementos[int(molde_idx)]
+        if not self._eh_molde_graduavel(molde):
+            return False
+        if not self._eh_tamanho_separado_sem_grade(molde):
+            return True
+        if not self._confirmar_definir_grade_molde_separado(canvas, molde):
+            self._status(canvas, "Tabela: esse molde separado ainda não possui grade.")
+            return False
+        self._definir_grade_base_molde_separado(molde)
+        self._status(canvas, "Tabela: grade definida; o tamanho separado virou base.")
+        return True
+
+    def _confirmar_definir_grade_molde_separado(self, canvas, molde: dict) -> bool:
+        confirmador = getattr(canvas, "confirmar_definir_grade_molde_separado", None)
+        if callable(confirmador):
+            return bool(confirmador(molde))
+
+        parent = canvas.window() if hasattr(canvas, "window") else canvas
+        caixa = QMessageBox(parent)
+        estilizar = getattr(parent, "_estilizar_message_box", None)
+        if callable(estilizar):
+            estilizar(caixa)
+        caixa.setWindowTitle("Definir grade")
+        caixa.setIcon(QMessageBox.Question)
+        caixa.setText("Esse molde não possui grade.\nDeseja definir agora?")
+        caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        caixa.setDefaultButton(QMessageBox.Yes)
+        traduzir = getattr(parent, "_traduzir_botoes_padrao_message_box", None)
+        if callable(traduzir):
+            traduzir(caixa)
+        return caixa.exec() == QMessageBox.Yes
+
+    def _definir_grade_base_molde_separado(self, molde: dict) -> None:
+        grade_nome, linhas_padrao = grade_graduacao_padrao()
+        linhas = [dict(linha) for linha in linhas_padrao if isinstance(linha, dict)]
+        if not linhas:
+            return
+
+        tamanho_base = self._tamanho_base_molde_separado(molde)
+        base_idx = next((idx for idx, linha in enumerate(linhas) if bool(linha.get("base"))), len(linhas) // 2)
+        if tamanho_base:
+            idx_tamanho = next(
+                (
+                    idx
+                    for idx, linha in enumerate(linhas)
+                    if str(linha.get("tamanho") or linha.get("nome") or "").strip() == tamanho_base
+                ),
+                None,
+            )
+            if idx_tamanho is None:
+                linhas[base_idx]["tamanho"] = tamanho_base
+                idx_tamanho = base_idx
+            base_idx = int(idx_tamanho)
+            grade_nome = self._grade_nome_com_base(grade_nome, tamanho_base)
+
+        cor_base = str(molde.get("cor") or "").strip()
+        for idx, linha in enumerate(linhas):
+            linha["base"] = idx == base_idx
+            linha["ativo"] = bool(linha.get("ativo", True))
+            if idx == base_idx and cor_base:
+                linha["cor"] = cor_base
+
+        molde["graduacao_grade_nome"] = grade_nome
+        molde["graduacao_tamanhos"] = linhas
+        molde["graduacao_tamanhos_ativos"] = [
+            str(linha.get("tamanho") or linha.get("nome") or "")
+            for linha in linhas
+            if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
+        ]
+        molde["mostrar_graduacao"] = True
+
+    @staticmethod
+    def _eh_tamanho_separado_sem_grade(molde: dict) -> bool:
+        if not isinstance(molde, dict):
+            return False
+        if str(molde.get("origem_extracao") or "").strip() != "separar_tamanho":
+            return False
+        linhas = molde.get("graduacao_tamanhos")
+        return not (isinstance(linhas, list) and any(isinstance(linha, dict) for linha in linhas))
+
+    @staticmethod
+    def _tamanho_base_molde_separado(molde: dict) -> str:
+        tamanho = str(molde.get("tamanho_extraido") or "").strip()
+        if tamanho:
+            return tamanho
+        nome = str(molde.get("nome_molde") or "").strip()
+        if " - " in nome:
+            return nome.rsplit(" - ", 1)[-1].strip()
+        return ""
+
+    @staticmethod
+    def _grade_nome_com_base(grade_nome: str, tamanho_base: str) -> str:
+        grade = str(grade_nome or "").strip()
+        base = str(tamanho_base or "").strip()
+        if not grade or not base:
+            return grade
+        inicio = grade.rfind("(")
+        fim = grade.rfind(")")
+        if 0 <= inicio < fim:
+            return f"{grade[:inicio + 1]}{base}{grade[fim:]}"
+        return f"{grade}({base})"
 
     def _valores_ponto(self, molde: dict | None, ponto_idx: int | None) -> dict[str, dict]:
         if not isinstance(molde, dict) or ponto_idx is None:

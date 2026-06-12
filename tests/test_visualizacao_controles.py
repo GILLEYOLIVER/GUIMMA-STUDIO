@@ -12,7 +12,7 @@ if find_spec("PySide6") is None:
     VisualizacaoCanvas = None
     CenaDocumento = None
 else:
-    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtGui import QColor, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
@@ -155,6 +155,83 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(cor, QColor("#00ff00").name())
         self.assertEqual(forma, "Quadrado preenchido")
 
+    def test_flags_visualizacao_do_molde_ocultam_costura_e_linha_vinculada(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "molde_id": "m1",
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+                "mostrar_costura": False,
+                "mostrar_linhas_auxiliares": False,
+            },
+            {"tipo": "polyline", "subtipo_audaces": "costura", "costura_de_molde_id": "m1", "pontos": []},
+            {"tipo": "polyline", "subtipo_audaces": "linha_interna", "molde_id": "m1", "pontos": []},
+            {"tipo": "polyline", "subtipo_audaces": "linha_interna", "molde_id": "outro", "pontos": []},
+        ]
+
+        self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[1]))
+        self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
+        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[3]))
+
+    def test_linhas_vinculadas_ficam_visiveis_quando_flag_nao_existe(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.cena.elementos = [
+            {"tipo": "polyline", "molde": True, "molde_id": "m1", "pontos": []},
+            {"tipo": "polyline", "subtipo_audaces": "costura", "costura_de_molde_id": "m1", "pontos": []},
+            {"tipo": "polyline", "subtipo_audaces": "linha_interna", "molde_id": "m1", "pontos": []},
+        ]
+
+        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[1]))
+        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
+
+    def test_colar_buffer_de_outro_arquivo_preserva_grade_diferente(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(400, 300)
+        canvas.zoom = 10.0
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "nome_molde": "K1",
+                "pontos": [(0.0, 0.0), (10.0, 0.0)],
+                "graduacao_grade_nome": "P-G(M)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "base": False},
+                    {"ativo": True, "tamanho": "M", "base": True},
+                    {"ativo": True, "tamanho": "G", "base": False},
+                ],
+            }
+        )
+        canvas.definir_buffer_copia(
+            {
+                "versao": 2,
+                "origem": "GUIMMA_STUDIO",
+                "elementos": [
+                    {
+                        "tipo": "polyline",
+                        "molde": True,
+                        "nome_molde": "K2",
+                        "pontos": [(20.0, 0.0), (30.0, 0.0)],
+                        "graduacao_grade_nome": "36-44(40)",
+                        "graduacao_tamanhos": [
+                            {"ativo": True, "tamanho": "36", "base": False},
+                            {"ativo": True, "tamanho": "40", "base": True},
+                            {"ativo": True, "tamanho": "44", "base": False},
+                        ],
+                    }
+                ],
+            }
+        )
+
+        canvas.colar()
+
+        self.assertEqual(len(canvas.cena.elementos), 2)
+        colado = canvas.cena.elementos[1]
+        self.assertEqual(colado["graduacao_grade_nome"], "36-44(40)")
+        self.assertEqual([linha["tamanho"] for linha in colado["graduacao_tamanhos"]], ["36", "40", "44"])
+
     def test_cor_graduacao_usa_config_por_lado_da_base(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.set_config_cores_moldes(
@@ -280,6 +357,42 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         canvas._finalizar_zoom_interativo()
 
         self.assertFalse(canvas._zoom_interativo)
+
+    def test_zoom_interativo_nao_oculta_overlays_do_canvas(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(240, 160)
+        canvas.zoom = 8.0
+        canvas._grid_visivel = False
+        canvas._zoom_interativo = True
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                "nome_molde": "K1",
+                "fio_origem": (2.0, 1.0),
+                "fio_fim": (8.0, 1.0),
+            }
+        )
+        chamadas = []
+
+        class _Ferramenta:
+            def on_paint_overlay(self, _canvas, _painter):
+                chamadas.append(("runtime", None))
+
+        canvas._desenhar_overlays_moldes = lambda _painter, visiveis=None: chamadas.append(("overlays", set(visiveis or set())))
+        canvas._runtime_tool = _Ferramenta()
+
+        image = QImage(240, 160, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        try:
+            canvas.render(painter, QPoint(0, 0))
+        finally:
+            painter.end()
+
+        self.assertIn(("overlays", {0}), chamadas)
+        self.assertIn(("runtime", None), chamadas)
 
     def test_espessura_aplica_em_molde_selecionado_e_tamanhos_graduados(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -433,6 +546,39 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(len(chamadas), 1)
         self.assertIs(chamadas[0][0], canvas.cena.elementos[0])
+
+    def test_caminho_grade_liga_ponto_base_ao_tamanho_graduado(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False, "cor": "#00ff00"},
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {
+                            "P": {"dx": 0.0, "dy": 1.0},
+                            "G": {"dx": 0.0, "dy": -1.0},
+                        },
+                    }
+                }
+            },
+        }
+
+        caminhos = VisualizacaoCanvas._caminhos_graduacao_tabela(molde, base)
+
+        self.assertEqual(len(caminhos), 2)
+        self.assertEqual(caminhos[0][0], "P")
+        self.assertEqual(caminhos[0][2], QPointF(10.0, 0.0))
+        self.assertEqual(caminhos[0][3], QPointF(10.0, 1.0))
+        self.assertEqual(caminhos[1][0], "G")
+        self.assertEqual(caminhos[1][2], QPointF(10.0, 0.0))
+        self.assertEqual(caminhos[1][3], QPointF(10.0, -1.0))
 
 
 if __name__ == "__main__":

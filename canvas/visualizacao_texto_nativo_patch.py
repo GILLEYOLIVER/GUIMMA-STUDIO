@@ -291,8 +291,6 @@ def aplicar_patch_texto_nativo_canvas() -> None:
 
     def paintEvent_com_texto(self, event):  # noqa: N802
         original_paint(self, event)
-        if getattr(self, "_zoom_interativo", False):
-            return
         try:
             painter = QPainter(self)
             try:

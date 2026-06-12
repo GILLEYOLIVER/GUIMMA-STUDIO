@@ -128,6 +128,50 @@ class SepararToolTestCase(unittest.TestCase):
         self.assertEqual(len(canvas.cena.elementos), 1)
         self.assertEqual(canvas._selecionados, set())
 
+    def test_tamanho_separado_mantem_mesma_quantidade_de_pontos_da_base(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["pontos"] = [
+            (0.0, 0.0),
+            (2.0, 0.3),
+            (4.0, 0.5),
+            (6.0, 0.3),
+            (8.0, 0.0),
+            (8.0, 5.0),
+            (0.0, 5.0),
+            (0.0, 0.0),
+        ]
+        base = [
+            {"x": 0.0, "y": 0.0},
+            {"x": 8.0, "y": 0.0},
+            {"x": 8.0, "y": 5.0},
+            {"x": 0.0, "y": 5.0},
+        ]
+        molde["pontos_controle_principais"] = list(base)
+        molde["controle_cantos"] = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
+        molde["controle_auxiliares"] = [(4.0, 0.5), (4.0, 5.0)]
+        molde["pontos_auxiliares"] = [{"x": 4.0, "y": 0.5}, {"x": 4.0, "y": 5.0}]
+        valores_g = {
+            str(idx): {"valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 1.0, "dy": 0.0}}}
+            for idx in range(len(base))
+        }
+        molde["graduacao_tabela"] = {"pontos": valores_g}
+        molde["graduacao_pontos"] = valores_g
+        ferramenta = FerramentaSeparar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(9.0, 2.5))))
+
+        copia = canvas.cena.elementos[1]
+        self.assertEqual(len(copia["controle_cantos"]), len(base))
+        self.assertEqual(len(copia["pontos_controle_principais"]), len(base))
+        self.assertEqual(len(copia["pontos"]) - 1, 7)
+        self.assertGreater(len(copia["pontos"]) - 1, len(base))
+        self.assertTrue(copia["pontos_tracado_real"])
+        self.assertEqual(copia["controle_cantos"][0], (1.0, 0.0))
+        self.assertEqual(copia["controle_auxiliares"], [(5.0, 0.5), (5.0, 5.0)])
+        self.assertEqual(copia["pontos_auxiliares"], [{"x": 5.0, "y": 0.5}, {"x": 5.0, "y": 5.0}])
+
 
 if __name__ == "__main__":
     unittest.main()

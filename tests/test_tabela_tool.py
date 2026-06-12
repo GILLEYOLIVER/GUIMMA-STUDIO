@@ -66,6 +66,8 @@ class _FakeCanvas(QWidget):
         self.atualizou = False
         self.ferramenta_ativa = None
         self.lbl_status = None
+        self.resposta_definir_grade = True
+        self.confirmacoes_definir_grade = []
 
     def _indice_molde_em_ponto(self, pos):
         return 0 if 0.0 <= pos.x() <= 10.0 and 0.0 <= pos.y() <= 5.0 else None
@@ -84,6 +86,10 @@ class _FakeCanvas(QWidget):
 
     def set_ferramenta_ativa(self, nome):
         self.ferramenta_ativa = nome
+
+    def confirmar_definir_grade_molde_separado(self, molde):
+        self.confirmacoes_definir_grade.append(molde)
+        return self.resposta_definir_grade
 
 
 @unittest.skipIf(FerramentaTabela is None, "PySide6 não disponível neste ambiente")
@@ -434,6 +440,57 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual([linha["cor"] for linha in molde["graduacao_tamanhos"]], ["#ffff00", "#2b7cd3", "#ff8c00"])
         self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "M", "G"])
         self.assertTrue(molde["graduacao_tamanhos"][1]["base"])
+
+    def test_molde_separado_sem_grade_pergunta_e_define_tamanho_extraido_como_base(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["origem_extracao"] = "separar_tamanho"
+        molde["tamanho_extraido"] = "G"
+        molde["nome_molde"] = "K1 - G"
+        molde["cor"] = "#ff8c00"
+        molde.pop("graduacao_tamanhos", None)
+        molde.pop("graduacao_tamanhos_ativos", None)
+        molde.pop("graduacao_grade_nome", None)
+
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
+        self.assertEqual([linha["tamanho"] for linha in molde["graduacao_tamanhos"]], ["P", "M", "G"])
+        self.assertEqual([linha["base"] for linha in molde["graduacao_tamanhos"]], [False, False, True])
+        self.assertEqual(molde["graduacao_grade_nome"], "P-G(G)")
+        self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "M", "G"])
+        self.assertTrue(molde["mostrar_graduacao"])
+
+        ferramenta.selecionar_ponto(canvas, 1)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.sp_incremento.setValue(1.0)
+        dialog.btn_cima.click()
+        ferramenta.aplicar_dialog(canvas)
+
+        valores = molde["graduacao_tabela"]["pontos"]["1"]["valores"]
+        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 1.0})
+        self.assertEqual(valores["M"], {"dx": 0.0, "dy": 1.0})
+        self.assertEqual(valores["G"], {"dx": 0.0, "dy": 0.0})
+        self.assertEqual(canvas.historico, 1)
+
+    def test_molde_separado_sem_grade_recusado_nao_inicializa_grade(self):
+        canvas = _FakeCanvas()
+        canvas.resposta_definir_grade = False
+        molde = canvas.cena.elementos[0]
+        molde["origem_extracao"] = "separar_tamanho"
+        molde["tamanho_extraido"] = "G"
+        molde.pop("graduacao_tamanhos", None)
+        molde.pop("graduacao_tamanhos_ativos", None)
+        molde.pop("graduacao_grade_nome", None)
+
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
+        self.assertIsNone(ferramenta._molde_idx)
+        self.assertNotIn("graduacao_tamanhos", molde)
+        self.assertNotIn("graduacao_tabela", molde)
 
     def test_abrir_tabela_reconhece_molde_sem_selecao_e_mostra_tamanhos_reais(self):
         canvas = _FakeCanvas()

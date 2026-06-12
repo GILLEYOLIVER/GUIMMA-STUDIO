@@ -151,6 +151,8 @@ class Ferramenta(FerramentaBase):
             base = self._pontos_base_molde(molde)
             if len(base) < 2:
                 continue
+            controles_base = self._controles_base_molde(molde)
+            auxiliares_base = self._auxiliares_base_molde(molde)
             linhas = self._linhas_tamanhos(molde)
             base_linha = self._linha_base(linhas)
             if base_linha is not None:
@@ -160,15 +162,20 @@ class Ferramenta(FerramentaBase):
                         "nome_tamanho": self._nome_tamanho(base_linha),
                         "cor": str(base_linha.get("cor") or molde.get("cor") or "#ffffff"),
                         "pontos": self._fechar_contorno(base),
+                        "controles": [QPointF(p) for p in controles_base],
+                        "auxiliares": [QPointF(p) for p in auxiliares_base],
                     }
                 )
             for nome, cor, pontos in VisualizacaoCanvas._contornos_graduacao_tabela(molde, base):
+                pontos_tamanho = [QPointF(p) for p in pontos]
                 candidatos.append(
                     {
                         "molde_idx": idx,
                         "nome_tamanho": str(nome),
                         "cor": str(cor),
-                        "pontos": [QPointF(p) for p in pontos],
+                        "pontos": pontos_tamanho,
+                        "controles": self._pontos_para_contorno_tamanho(base, pontos_tamanho, controles_base),
+                        "auxiliares": self._pontos_para_contorno_tamanho(base, pontos_tamanho, auxiliares_base),
                     }
                 )
         return candidatos
@@ -199,11 +206,20 @@ class Ferramenta(FerramentaBase):
         novo["tamanho_extraido"] = nome_tamanho
         novo["origem_extracao"] = "separar_tamanho"
         novo["mostrar_graduacao"] = False
+        novo["pontos_tracado_real"] = True
         novo["pontos"] = [(float(p.x()), float(p.y())) for p in pontos]
         sem_fechamento = pontos[:-1] if len(pontos) > 1 and self._dist(pontos[0], pontos[-1]) <= 1e-7 else pontos
-        novo["controle_cantos"] = [(float(p.x()), float(p.y())) for p in sem_fechamento]
-        novo["pontos_controle_principais"] = [{"x": float(p.x()), "y": float(p.y())} for p in sem_fechamento]
-        novo["pontos_auxiliares"] = []
+        controles = [self._ponto_qt(p) for p in candidato.get("controles", []) or []]
+        controles = [p for p in controles if p is not None]
+        if not controles:
+            controles = [QPointF(p) for p in sem_fechamento]
+        auxiliares = [self._ponto_qt(p) for p in candidato.get("auxiliares", []) or []]
+        auxiliares = [p for p in auxiliares if p is not None]
+        novo["controle_cantos"] = [(float(p.x()), float(p.y())) for p in controles]
+        novo["pontos_controle_principais"] = [{"x": float(p.x()), "y": float(p.y())} for p in controles]
+        novo["pontos_graduacao"] = [{"x": float(p.x()), "y": float(p.y())} for p in controles]
+        novo["controle_auxiliares"] = [(float(p.x()), float(p.y())) for p in auxiliares]
+        novo["pontos_auxiliares"] = [{"x": float(p.x()), "y": float(p.y())} for p in auxiliares]
         novo["cor"] = str(candidato.get("cor") or novo.get("cor") or "#ffffff")
         self._reposicionar_textos_e_fio(novo, sem_fechamento)
 
@@ -344,17 +360,105 @@ class Ferramenta(FerramentaBase):
         return str(linha.get("tamanho") or linha.get("nome") or "").strip()
 
     def _pontos_base_molde(self, molde: dict) -> list[QPointF]:
-        origem = molde.get("pontos") if isinstance(molde.get("pontos"), list) else molde.get("controle_cantos")
+        origem = None
+        for chave in (
+            "pontos",
+            "curva_pontos",
+            "vertices",
+            "pontos_molde",
+            "pontos_tracado",
+            "pontos_controle_curva",
+            "pontos_controle",
+            "pontos_graduacao",
+            "pontos_controle_principais",
+            "controle_cantos",
+        ):
+            valor = molde.get(chave)
+            if isinstance(valor, list) and valor:
+                origem = valor
+                break
         pontos = [self._ponto_qt(p) for p in origem or []]
         pontos = [p for p in pontos if p is not None]
         if len(pontos) > 1 and self._dist(pontos[0], pontos[-1]) <= 1e-7:
             pontos.pop()
         return pontos
 
+    def _controles_base_molde(self, molde: dict) -> list[QPointF]:
+        origem = None
+        for chave in ("pontos_controle_principais", "controle_cantos", "pontos_graduacao"):
+            valor = molde.get(chave)
+            if isinstance(valor, list) and valor:
+                origem = valor
+                break
+        pontos = [self._ponto_qt(p) for p in origem or []]
+        pontos = [p for p in pontos if p is not None]
+        if len(pontos) > 1 and self._dist(pontos[0], pontos[-1]) <= 1e-7:
+            pontos.pop()
+        return pontos
+
+    def _auxiliares_base_molde(self, molde: dict) -> list[QPointF]:
+        origem = None
+        for chave in ("controle_auxiliares", "pontos_auxiliares"):
+            valor = molde.get(chave)
+            if isinstance(valor, list) and valor:
+                origem = valor
+                break
+        pontos = [self._ponto_qt(p) for p in origem or []]
+        return [p for p in pontos if p is not None]
+
+    def _pontos_para_contorno_tamanho(
+        self,
+        base: list[QPointF],
+        pontos_tamanho: list[QPointF],
+        pontos_base: list[QPointF],
+    ) -> list[QPointF]:
+        base_aberta = self._abrir_contorno(base)
+        tamanho_aberto = self._abrir_contorno(pontos_tamanho)
+        if not base_aberta or len(base_aberta) != len(tamanho_aberto):
+            return [QPointF(p) for p in pontos_base]
+        return [
+            self._mapear_ponto_para_contorno_tamanho(ponto, base_aberta, tamanho_aberto)
+            for ponto in pontos_base
+        ]
+
+    def _mapear_ponto_para_contorno_tamanho(
+        self,
+        ponto: QPointF,
+        base: list[QPointF],
+        tamanho: list[QPointF],
+    ) -> QPointF:
+        if not base or len(base) != len(tamanho):
+            return QPointF(ponto)
+        if len(base) == 1:
+            return QPointF(tamanho[0])
+
+        melhor: tuple[float, int, int, float] | None = None
+        total = len(base)
+        for idx in range(total):
+            prox = (idx + 1) % total
+            distancia, t = self._distancia_e_parametro_segmento(ponto, base[idx], base[prox])
+            if melhor is None or distancia < melhor[0]:
+                melhor = (distancia, idx, prox, t)
+        if melhor is None:
+            return QPointF(ponto)
+        _distancia, idx, prox, t = melhor
+        origem = tamanho[idx]
+        destino = tamanho[prox]
+        return QPointF(
+            origem.x() + ((destino.x() - origem.x()) * t),
+            origem.y() + ((destino.y() - origem.y()) * t),
+        )
+
     def _fechar_contorno(self, pontos: list[QPointF]) -> list[QPointF]:
         saida = [QPointF(p) for p in pontos]
         if len(saida) > 1 and self._dist(saida[0], saida[-1]) > 1e-7:
             saida.append(QPointF(saida[0]))
+        return saida
+
+    def _abrir_contorno(self, pontos: list[QPointF]) -> list[QPointF]:
+        saida = [QPointF(p) for p in pontos]
+        if len(saida) > 1 and self._dist(saida[0], saida[-1]) <= 1e-7:
+            saida.pop()
         return saida
 
     def _distancia_contorno(self, pontos: list[QPointF], pos: QPointF) -> float:
@@ -364,6 +468,11 @@ class Ferramenta(FerramentaBase):
 
     @staticmethod
     def _distancia_segmento(p: QPointF, a: QPointF, b: QPointF) -> float:
+        distancia, _t = Ferramenta._distancia_e_parametro_segmento(p, a, b)
+        return distancia
+
+    @staticmethod
+    def _distancia_e_parametro_segmento(p: QPointF, a: QPointF, b: QPointF) -> tuple[float, float]:
         ax, ay = a.x(), a.y()
         bx, by = b.x(), b.y()
         px, py = p.x(), p.y()
@@ -371,9 +480,9 @@ class Ferramenta(FerramentaBase):
         dy = by - ay
         denom = (dx * dx) + (dy * dy)
         if denom <= 1e-12:
-            return hypot(px - ax, py - ay)
+            return hypot(px - ax, py - ay), 0.0
         t = max(0.0, min(1.0, (((px - ax) * dx) + ((py - ay) * dy)) / denom))
-        return hypot(px - (ax + dx * t), py - (ay + dy * t))
+        return hypot(px - (ax + dx * t), py - (ay + dy * t)), t
 
     @staticmethod
     def _ponto_qt(valor) -> QPointF | None:
