@@ -79,7 +79,7 @@ class Ferramenta(FerramentaBase):
 
     _dialog_por_canvas: dict[int, SentidoFioDialog] = {}
     ANGULOS_PRINCIPAIS = (0.0, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0, 180.0, 210.0, 225.0, 240.0, 270.0, 300.0, 315.0, 330.0)
-    TOLERANCIA_SNAP_ANGULAR_GRAUS = 5.0
+    TOLERANCIA_SNAP_ANGULAR_GRAUS = 1.5
 
     def __init__(self):
         super().__init__()

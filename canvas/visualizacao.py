@@ -2298,6 +2298,8 @@ class VisualizacaoCanvas(QWidget):
             if self._deve_desenhar_eixo_dobra_salvo():
                 self._desenhar_eixo_dobra_salvo(painter, el)
 
+            self._desenhar_graduacao_tabela_molde(painter, el, base)
+
             if idx in getattr(self, "_piscando_ponto_restauracao_indices", set()) and getattr(self, "_piscando_ponto_restauracao_visivel", False):
                 self._desenhar_piscar_ponto_restauracao(painter, base)
 
@@ -2440,6 +2442,117 @@ class VisualizacaoCanvas(QWidget):
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
+
+    def _desenhar_graduacao_tabela_molde(self, painter: QPainter, el: dict, base: list[QPointF]) -> None:
+        if el.get("mostrar_graduacao", True) is False:
+            return
+        contornos = self._contornos_graduacao_tabela(el, base)
+        if not contornos:
+            return
+        painter.save()
+        try:
+            for _nome, cor, pontos in contornos:
+                self._desenhar_polilinha(
+                    painter,
+                    pontos,
+                    cor=cor,
+                    espessura=max(1.0, float(el.get("espessura_graduacao", 1.0) or 1.0)),
+                    estilo="solid",
+                )
+        finally:
+            painter.restore()
+
+    @staticmethod
+    def _contornos_graduacao_tabela(el: dict, base: list[QPointF]) -> list[tuple[str, str, list[QPointF]]]:
+        if not isinstance(el, dict) or not isinstance(base, list) or len(base) < 2:
+            return []
+        tabela = el.get("graduacao_tabela") if isinstance(el.get("graduacao_tabela"), dict) else {}
+        pontos_cfg = tabela.get("pontos") if isinstance(tabela, dict) else None
+        if not isinstance(pontos_cfg, dict):
+            pontos_cfg = el.get("graduacao_pontos")
+        if not isinstance(pontos_cfg, dict) or not pontos_cfg:
+            return []
+
+        tamanhos = el.get("graduacao_tamanhos")
+        if not isinstance(tamanhos, list) or not tamanhos:
+            return []
+        linhas = [dict(linha) for linha in tamanhos if isinstance(linha, dict) and linha.get("ativo", True)]
+        if not linhas:
+            return []
+        base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
+        base_nome = str(linhas[base_idx].get("tamanho") or linhas[base_idx].get("nome") or "").strip()
+
+        contorno = [QPointF(pt) for pt in base]
+        if len(contorno) > 1 and contorno[0] == contorno[-1]:
+            contorno = contorno[:-1]
+        if len(contorno) < 2:
+            return []
+
+        saida: list[tuple[str, str, list[QPointF]]] = []
+        for linha in linhas:
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not nome or nome == base_nome:
+                continue
+            cor = str(linha.get("cor") or "#ffcc00")
+            if not QColor(cor).isValid():
+                cor = "#ffcc00"
+            deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(pontos_cfg, nome, len(contorno))
+            if not deslocamentos:
+                continue
+            pontos_tamanho = [
+                QPointF(pt.x() + dx, pt.y() + dy)
+                for pt, (dx, dy) in zip(contorno, deslocamentos)
+            ]
+            if len(pontos_tamanho) >= 2:
+                pontos_tamanho.append(QPointF(pontos_tamanho[0]))
+                saida.append((nome, cor, pontos_tamanho))
+        return saida
+
+    @staticmethod
+    def _deslocamentos_graduacao_tamanho(pontos_cfg: dict, tamanho: str, quantidade: int) -> list[tuple[float, float]]:
+        if quantidade <= 0:
+            return []
+        ancoras: dict[int, tuple[float, float]] = {}
+        for idx in range(quantidade):
+            cfg = pontos_cfg.get(str(idx))
+            if not isinstance(cfg, dict):
+                cfg = pontos_cfg.get(idx)
+            valores = cfg.get("valores") if isinstance(cfg, dict) else None
+            valor_tamanho = valores.get(tamanho) if isinstance(valores, dict) else None
+            if not isinstance(valor_tamanho, dict):
+                continue
+            dx = VisualizacaoCanvas._float_graduacao(valor_tamanho.get("dx"))
+            dy = VisualizacaoCanvas._float_graduacao(valor_tamanho.get("dy"))
+            ancoras[idx] = (dx, dy)
+        if not ancoras or not any(abs(dx) > 1e-9 or abs(dy) > 1e-9 for dx, dy in ancoras.values()):
+            return []
+        if len(ancoras) == 1:
+            deslocamento = next(iter(ancoras.values()))
+            return [deslocamento for _ in range(quantidade)]
+
+        saida = [(0.0, 0.0) for _ in range(quantidade)]
+        ordenadas = sorted(ancoras)
+        for pos, inicio in enumerate(ordenadas):
+            fim = ordenadas[(pos + 1) % len(ordenadas)]
+            fim_ciclo = fim if fim > inicio else fim + quantidade
+            trecho = max(1, fim_ciclo - inicio)
+            dx1, dy1 = ancoras[inicio]
+            dx2, dy2 = ancoras[fim]
+            for passo in range(trecho):
+                idx_real = (inicio + passo) % quantidade
+                t = passo / trecho
+                saida[idx_real] = (
+                    dx1 + ((dx2 - dx1) * t),
+                    dy1 + ((dy2 - dy1) * t),
+                )
+        return saida
+
+    @staticmethod
+    def _float_graduacao(valor) -> float:
+        try:
+            return float(str(valor).replace(",", "."))
+        except (TypeError, ValueError):
+            return 0.0
 
     def _desenhar_numeros_molde_canvas(
         self,

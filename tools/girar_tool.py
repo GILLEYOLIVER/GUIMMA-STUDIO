@@ -70,6 +70,7 @@ class Ferramenta(FerramentaBase):
 
     _dialog_por_canvas: dict[int, GirarDialog] = {}
     ANGULOS_PRINCIPAIS = (0.0, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0, 180.0, 210.0, 225.0, 240.0, 270.0, 300.0, 315.0, 330.0)
+    TOLERANCIA_IMA_ANGULAR_GRAUS = 1.5
 
     def __init__(self):
         super().__init__()
@@ -159,7 +160,7 @@ class Ferramenta(FerramentaBase):
             return False
         if self._estado_2p == "referencia" and self._pivo_2p is not None:
             pos = canvas._ponto_com_snap(event.position())
-            self._preview_2p = self._ajustar_ponto_angular_2p(self._pivo_2p, pos)
+            self._preview_2p = self._ajustar_ponto_angular_2p(self._pivo_2p, pos, canvas)
             canvas.update()
             event.accept()
             return True
@@ -259,7 +260,7 @@ class Ferramenta(FerramentaBase):
             return True
 
         if self._estado_2p == "referencia":
-            pos = self._ajustar_ponto_angular_2p(self._pivo_2p, pos)
+            pos = self._ajustar_ponto_angular_2p(self._pivo_2p, pos, canvas)
             if self._pivo_2p is None or self._dist(self._pivo_2p, pos) <= 1e-6:
                 self._status(canvas, "Girar em 2 pontos: escolha um segundo ponto diferente do pivô.")
                 event.accept()
@@ -268,7 +269,7 @@ class Ferramenta(FerramentaBase):
             self._preview_2p = QPointF(pos)
             self._snapshot_2p = [(idx, deepcopy(canvas.cena.elementos[idx])) for idx in indices]
             self._estado_2p = "girando"
-            self._status(canvas, "Mova para girar. O ângulo trava em 0, 30, 45, 60, 90... Clique para confirmar.")
+            self._status(canvas, "Mova para girar livremente. Há imã leve em 0, 30, 45, 60, 90... Clique para confirmar.")
             canvas.update()
             event.accept()
             return True
@@ -292,7 +293,7 @@ class Ferramenta(FerramentaBase):
         if self._pivo_2p is None or self._referencia_2p is None or not self._snapshot_2p:
             return
         ang_ref = self._angulo_entre(self._pivo_2p, self._referencia_2p)
-        ang_atual = self._angulo_principal_mais_proximo(self._angulo_entre(self._pivo_2p, pos))
+        ang_atual = self._angulo_com_ima_principal(self._angulo_entre(self._pivo_2p, pos), canvas)
         delta = self._delta_angular(ang_ref, ang_atual)
         self._angulo_preview_2p = delta
         for idx, original in self._snapshot_2p:
@@ -301,13 +302,16 @@ class Ferramenta(FerramentaBase):
                 self._girar_elemento(el, self._pivo_2p, -delta)
                 canvas.cena.elementos[idx] = el
 
-    def _ajustar_ponto_angular_2p(self, origem: QPointF | None, pos: QPointF) -> QPointF:
+    def _ajustar_ponto_angular_2p(self, origem: QPointF | None, pos: QPointF, canvas=None) -> QPointF:
         if origem is None:
             return QPointF(pos)
         comprimento = self._dist(origem, pos)
         if comprimento <= 1e-6:
             return QPointF(pos)
-        angulo = self._angulo_principal_mais_proximo(self._angulo_entre(origem, pos))
+        angulo_mouse = self._angulo_entre(origem, pos)
+        angulo = self._angulo_com_ima_principal(angulo_mouse, canvas)
+        if self._distancia_angular_abs(angulo_mouse, angulo) <= 1e-9:
+            return QPointF(pos)
         return self._destino_polar(origem, comprimento, angulo)
 
     def _indices_selecionados(self, canvas) -> list[int]:
@@ -498,9 +502,21 @@ class Ferramenta(FerramentaBase):
             key=lambda alvo: min(abs(normalizado - alvo), 360.0 - abs(normalizado - alvo)),
         )
 
+    def _angulo_com_ima_principal(self, angulo: float, canvas=None) -> float:
+        normalizado = float(angulo) % 360.0
+        alvo = self._angulo_principal_mais_proximo(normalizado)
+        forcar = bool(getattr(canvas, "_tecla_w_trava_principal", False)) if canvas is not None else False
+        if forcar or self._distancia_angular_abs(normalizado, alvo) <= self.TOLERANCIA_IMA_ANGULAR_GRAUS:
+            return alvo
+        return normalizado
+
     @staticmethod
     def _delta_angular(origem: float, destino: float) -> float:
         return ((float(destino) - float(origem) + 180.0) % 360.0) - 180.0
+
+    @staticmethod
+    def _distancia_angular_abs(a: float, b: float) -> float:
+        return abs(((float(a) - float(b) + 180.0) % 360.0) - 180.0)
 
     def _todos_pontos(self, el: dict) -> list[tuple[float, float]]:
         pts: list[tuple[float, float]] = []
