@@ -6,6 +6,7 @@ from math import sqrt
 from PySide6.QtCore import QPointF, QSignalBlocker, Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
+from core.formatacao import numero_decimal_ponto
 from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -240,10 +241,7 @@ class Ferramenta(FerramentaBase):
         if alvo_segmento is None:
             return
         dialog = self._obter_dialog(canvas)
-        try:
-            alvo = float(str(dialog.ed_para.text()).replace(",", "."))
-        except Exception:
-            return
+        alvo = numero_decimal_ponto(dialog.ed_para.text(), 0.0)
         atual = float(alvo_segmento.get("comprimento", 0.0))
         if atual <= 1e-9:
             return

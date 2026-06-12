@@ -48,6 +48,17 @@ flowchart LR
 - No clique de seleção (sem arrastar caixa), se existir alvo de snap ativo, a seleção prioriza o `elemento_idx` vindo do snap.
 - O marcador de snap mostra o tipo do alvo (ex.: `nó`, `ponto médio`, `borda`, `centro`) ao aproximar o cursor.
 
+## Regras funcionais recentes
+
+| Area | Comportamento esperado | Arquivos principais |
+|---|---|---|
+| Entrada numerica | Aceitar `.5` como `0.5`, usar apenas ponto decimal e rejeitar virgula em campos visiveis. | `core/formatacao.py`, `tools/*_tool.py`, `canvas/painel_coordenadas.py` |
+| Selecao | A ferramenta Selecionar escolhe moldes e elementos soltos, incluindo linha, curva, polyline e desenho livre. | `canvas/visualizacao.py`, `tools/selecionar_tool.py` |
+| Cores de tecido | Com "Mostrar cor dos tecidos" marcado, moldes usam a cor do tecido configurado; sem a opcao, usam a cor propria. | `canvas/visualizacao.py`, `tools/propriedades_tool.py` |
+| Grade de tamanhos | Moldes novos iniciam ou herdam grade, nomes, base e cores; propriedades e tabela devem ficar sincronizadas. | `core/graduacao.py`, `tools/tabela_tool.py`, `tools/propriedades_tool.py` |
+| Graduacao de pontos | A tabela gradua pontos oficiais de moldes retangulares, moldes com curvas e moldes extraidos. | `tools/tabela_tool.py`, `canvas/visualizacao.py`, `core/geometry_bridge.py` |
+| Espessura de linha | Desenhos, moldes criados, moldes extraidos e tamanhos graduados devem respeitar a espessura definida. | `canvas/visualizacao.py`, `tools/criar_molde_tool.py`, `tools/extrair_molde_tool.py` |
+
 ## 3) Mapa detalhado do Ribbon (todas as ferramentas)
 
 | Aba | Grupo | Tool ID | Texto do botão | Módulo Python | Classe | Ícone |

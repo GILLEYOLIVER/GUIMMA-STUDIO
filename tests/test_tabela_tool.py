@@ -124,6 +124,60 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(pontos[0], QPointF(0.0, 0.0))
         self.assertEqual(pontos[-1], QPointF(10.0, 5.0))
 
+    def test_pontos_contorno_prioriza_controles_principais_de_molde_extraido(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+            "controle_cantos": [(0.0, 0.0), (10.0, 5.0)],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 3.0, "y": 1.0},
+                {"x": 6.0, "y": 2.0},
+                {"x": 10.0, "y": 5.0},
+            ],
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(len(pontos), 4)
+        self.assertEqual(pontos[1], QPointF(3.0, 1.0))
+        self.assertEqual(pontos[2], QPointF(6.0, 2.0))
+
+    def test_pontos_contorno_nao_usa_amostras_de_curva_quando_ha_pontos_principais(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (2.0, 0.4), (4.0, 0.8), (6.0, 0.4), (8.0, 0.0), (0.0, 0.0)],
+            "pontos_graduacao": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 2.0, "y": 0.4},
+                {"x": 4.0, "y": 0.8},
+                {"x": 6.0, "y": 0.4},
+                {"x": 8.0, "y": 0.0},
+            ],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 8.0, "y": 0.0},
+            ],
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(pontos, [QPointF(0.0, 0.0), QPointF(8.0, 0.0)])
+
+    def test_pontos_contorno_ignora_desenho_livre_sem_molde(self):
+        ferramenta = FerramentaTabela()
+        desenho_livre = {
+            "tipo": "polyline",
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+        }
+
+        self.assertEqual(ferramenta._pontos_contorno(desenho_livre), [])
+
     def test_seta_para_cima_distribui_dy_negativo_a_partir_da_base(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()
@@ -212,9 +266,109 @@ class TabelaToolTestCase(unittest.TestCase):
         dialog.btn_cima.click()
 
         valores = dialog.valores()
-        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 2.0})
+        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 1.0})
         self.assertEqual(valores["M"], {"dx": 0.0, "dy": 1.0})
         self.assertEqual(valores["G"], {"dx": 0.0, "dy": 0.0})
+
+    def test_incremental_aplica_mesmo_valor_para_todos_os_tamanhos_do_mesmo_lado_da_base(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.definir_tamanhos(
+            [
+                {"ativo": True, "tamanho": "PP", "cor": "#00ffcc", "base": False},
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": True},
+                {"ativo": True, "tamanho": "M", "cor": "#0000ff", "base": False},
+                {"ativo": True, "tamanho": "G", "cor": "#00a9ff", "base": False},
+                {"ativo": True, "tamanho": "GG", "cor": "#12a5d9", "base": False},
+                {"ativo": True, "tamanho": "G1", "cor": "#008000", "base": False},
+                {"ativo": True, "tamanho": "G2", "cor": "#80ff00", "base": False},
+            ],
+            {},
+        )
+        dialog.sp_incremento.lineEdit().setText("2")
+
+        dialog.btn_dir.click()
+        dialog.btn_baixo.click()
+
+        valores = dialog.valores()
+        self.assertEqual(valores["PP"], {"dx": -2.0, "dy": -2.0})
+        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 0.0})
+        for tamanho in ("M", "G", "GG", "G1", "G2"):
+            self.assertEqual(valores[tamanho], {"dx": 2.0, "dy": 2.0})
+
+    def test_aba_distancia_angulo_reflete_dx_dy_da_tabela(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.sp_incremento.lineEdit().setText("2")
+
+        dialog.btn_dir.click()
+        dialog.btn_baixo.click()
+
+        self.assertEqual(dialog.tbl_polar.item(0, 1).text(), "2.83")
+        self.assertEqual(dialog.tbl_polar.item(0, 2).text(), "225")
+        self.assertEqual(dialog.tbl_polar.item(1, 1).text(), "0")
+        self.assertEqual(dialog.tbl_polar.item(1, 2).text(), "0")
+        self.assertEqual(dialog.tbl_polar.item(2, 1).text(), "2.83")
+        self.assertEqual(dialog.tbl_polar.item(2, 2).text(), "45")
+
+    def test_editar_distancia_angulo_recalcula_dx_dy(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+
+        dialog.tbl_polar.item(2, 1).setText("2.828")
+        dialog.tbl_polar.item(2, 2).setText("45")
+
+        valores = dialog.valores()
+        self.assertAlmostEqual(valores["G"]["dx"], 2.0, places=3)
+        self.assertAlmostEqual(valores["G"]["dy"], 2.0, places=3)
+
+    def test_aba_perimetro_mostra_base_e_tamanho_graduado(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        ferramenta.selecionar_ponto(canvas, 1)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.tbl.item(2, 1).setText("2")
+        ferramenta.aplicar_dialog(canvas)
+
+        perimetro_base = 10.0 + 5.0 + (125.0 ** 0.5)
+        perimetro_g = 12.0 + (29.0 ** 0.5) + (125.0 ** 0.5)
+        self.assertEqual(dialog.tbl_perimetro.item(1, 0).text(), "M")
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 1).text()), perimetro_base, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 2).text()), 0.0, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 3).text()), perimetro_base, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 4).text()), 0.0, places=2)
+        self.assertEqual(dialog.tbl_perimetro.item(2, 0).text(), "G")
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 1).text()), perimetro_g, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 2).text()), perimetro_g - perimetro_base, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 3).text()), perimetro_base, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 4).text()), 0.0, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 5).text()), perimetro_g, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(2, 6).text()), perimetro_g - perimetro_base, places=2)
+
+    def test_aba_perimetro_indica_eixo_dx_dy_ou_dy(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        ferramenta.selecionar_ponto(canvas, 0)
+        dialog.tbl.item(0, 2).setText("1")
+        dialog.tbl.item(2, 1).setText("1")
+        dialog.tbl.item(2, 2).setText("1")
+        ferramenta.aplicar_dialog(canvas)
+
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(0, 2).text()), 0.0, places=2)
+        self.assertNotAlmostEqual(float(dialog.tbl_perimetro.item(0, 4).text()), 0.0, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 2).text()), 0.0, places=2)
+        self.assertAlmostEqual(float(dialog.tbl_perimetro.item(1, 4).text()), 0.0, places=2)
+        self.assertNotAlmostEqual(float(dialog.tbl_perimetro.item(2, 2).text()), 0.0, places=2)
+        self.assertNotAlmostEqual(float(dialog.tbl_perimetro.item(2, 4).text()), 0.0, places=2)
 
     def test_canvas_monta_contornos_graduados_com_dx_dy_da_tabela(self):
         canvas = _FakeCanvas()
@@ -251,6 +405,7 @@ class TabelaToolTestCase(unittest.TestCase):
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
         dialog.sp_incremento.setValue(1.0)
+        ferramenta.selecionar_ponto(canvas, 0)
 
         dialog.btn_cima.click()
 
@@ -276,6 +431,7 @@ class TabelaToolTestCase(unittest.TestCase):
         ferramenta.on_activate(canvas)
 
         self.assertEqual([linha["tamanho"] for linha in molde["graduacao_tamanhos"]], ["P", "M", "G"])
+        self.assertEqual([linha["cor"] for linha in molde["graduacao_tamanhos"]], ["#ffff00", "#2b7cd3", "#ff8c00"])
         self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "M", "G"])
         self.assertTrue(molde["graduacao_tamanhos"][1]["base"])
 
@@ -294,8 +450,12 @@ class TabelaToolTestCase(unittest.TestCase):
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
 
+        self.assertIsNone(ferramenta._molde_idx)
+        self.assertEqual(canvas._selecionados, set())
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(5.0, 2.5))))
         self.assertEqual(ferramenta._molde_idx, 0)
         self.assertEqual(canvas._selecionados, {0})
+        self.assertIsNone(ferramenta._ponto_idx)
         self.assertEqual(dialog.cmb_ponto.currentText(), "1")
         self.assertEqual([dialog.tbl.item(row, 0).text() for row in range(dialog.tbl.rowCount())], ["36", "38", "40", "42"])
         self.assertEqual(dialog.tbl.item(2, 0).background().color().name().lower(), "#ffff00")
@@ -312,6 +472,104 @@ class TabelaToolTestCase(unittest.TestCase):
         deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(pontos_cfg, "G", 4)
 
         self.assertEqual(deslocamentos, [(0.0, 0.0), (2.0, -1.0), (0.0, 0.0), (0.0, 0.0)])
+
+    def test_canvas_mapeia_graduacao_de_ponto_principal_para_contorno_curvo_extraido(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [
+                (0.0, 0.0),
+                (2.0, 0.4),
+                (4.0, 0.8),
+                (6.0, 0.4),
+                (8.0, 0.0),
+                (8.0, -4.0),
+                (0.0, -4.0),
+                (0.0, 0.0),
+            ],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 4.0, "y": 0.8},
+                {"x": 8.0, "y": 0.0},
+                {"x": 8.0, "y": -4.0},
+                {"x": 0.0, "y": -4.0},
+            ],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "indice": 1,
+                        "numero": 2,
+                        "ponto": (4.0, 0.8),
+                        "valores": {
+                            "P": {"dx": 0.0, "dy": -1.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 0.0, "dy": 1.0},
+                        },
+                    }
+                }
+            },
+        }
+        base = [QPointF(x, y) for x, y in molde["pontos"][:-1]]
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        self.assertEqual([nome for nome, _cor, _pontos in contornos], ["P", "G"])
+        contorno_p = next(pontos for nome, _cor, pontos in contornos if nome == "P")
+        contorno_g = next(pontos for nome, _cor, pontos in contornos if nome == "G")
+        self.assertEqual(contorno_p[2], QPointF(4.0, -0.2))
+        self.assertEqual(contorno_g[2], QPointF(4.0, 1.8))
+
+    def test_canvas_mapeia_graduacao_antiga_sem_coordenada_para_ponto_principal(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [
+                (0.0, 0.0),
+                (2.0, 0.4),
+                (4.0, 0.8),
+                (6.0, 0.4),
+                (8.0, 0.0),
+                (8.0, -4.0),
+                (0.0, -4.0),
+                (0.0, 0.0),
+            ],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 4.0, "y": 0.8},
+                {"x": 8.0, "y": 0.0},
+                {"x": 8.0, "y": -4.0},
+                {"x": 0.0, "y": -4.0},
+            ],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "indice": 1,
+                        "numero": 2,
+                        "valores": {
+                            "P": {"dx": 0.0, "dy": -1.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 0.0, "dy": 1.0},
+                        },
+                    }
+                }
+            },
+        }
+        base = [QPointF(x, y) for x, y in molde["pontos"][:-1]]
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        contorno_g = next(pontos for nome, _cor, pontos in contornos if nome == "G")
+        self.assertEqual(contorno_g[2], QPointF(4.0, 1.8))
 
     def test_ctrl_click_graduar_varios_pontos_sem_fechar_tabela(self):
         canvas = _FakeCanvas()
@@ -359,6 +617,137 @@ class TabelaToolTestCase(unittest.TestCase):
 
         self.assertEqual(ferramenta._pontos_selecionados, {2})
         self.assertEqual(ferramenta._ponto_idx, 2)
+
+    def test_hover_realca_ponto_sem_alterar_selecao_da_tabela(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        selecionados_antes = set(ferramenta._pontos_selecionados)
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeMouseEvent(QPointF(10.0, 0.02))))
+
+        self.assertEqual(ferramenta._hover_ponto_idx, 1)
+        self.assertEqual(ferramenta._pontos_selecionados, selecionados_antes)
+        self.assertIsNone(ferramenta._ponto_idx)
+
+    def test_hover_sai_quando_cursor_afasta_do_ponto(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        ferramenta.on_mouse_move(canvas, _FakeMouseEvent(QPointF(10.0, 0.02)))
+        self.assertEqual(ferramenta._hover_ponto_idx, 1)
+        ferramenta.on_mouse_move(canvas, _FakeMouseEvent(QPointF(5.0, 2.5)))
+
+        self.assertIsNone(ferramenta._hover_ponto_idx)
+
+    def test_clique_em_ponto_de_outro_molde_troca_alvo_da_tabela(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0), (100.0, 0.0)],
+                "controle_cantos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0), (100.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                    {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                    {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                ],
+            }
+        )
+        canvas._indice_molde_em_ponto = lambda _pos: 0
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 0.0))))
+        self.assertIsNone(ferramenta._ponto_idx)
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 0.0))))
+        dialog.tbl.item(2, 1).setText("2")
+        ferramenta.aplicar_dialog(canvas)
+
+        self.assertEqual(ferramenta._molde_idx, 1)
+        self.assertEqual(ferramenta._ponto_idx, 1)
+        self.assertEqual(canvas._selecionados, {1})
+        self.assertNotIn("graduacao_tabela", canvas.cena.elementos[0])
+        ponto = canvas.cena.elementos[1]["graduacao_tabela"]["pontos"]["1"]
+        self.assertEqual(ponto["ponto"], (110.0, 0.0))
+        self.assertEqual(ponto["valores"]["G"], {"dx": 2.0, "dy": 0.0})
+
+    def test_clique_no_corpo_de_outro_molde_troca_alvo_da_tabela(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(100.0, 0.0), (120.0, 0.0), (120.0, 10.0), (100.0, 10.0), (100.0, 0.0)],
+                "controle_cantos": [(100.0, 0.0), (120.0, 0.0), (120.0, 10.0), (100.0, 10.0), (100.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                    {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                    {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                ],
+            }
+        )
+        canvas._indice_molde_em_ponto = lambda _pos: 0
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 5.0))))
+
+        self.assertEqual(ferramenta._molde_idx, 1)
+        self.assertEqual(canvas._selecionados, {1})
+        self.assertIsNone(ferramenta._ponto_idx)
+
+    def test_clique_em_desenho_livre_nao_troca_molde_da_tabela(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0)],
+                "controle_cantos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0)],
+            }
+        )
+        canvas._indice_molde_em_ponto = lambda _pos: 1
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 0.0))))
+
+        self.assertEqual(ferramenta._molde_idx, 0)
+        self.assertEqual(canvas._selecionados, {0})
+
+    def test_copiar_graduacao_e_colar_em_ponto_de_outro_molde(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0), (100.0, 0.0)],
+                "controle_cantos": [(100.0, 0.0), (110.0, 0.0), (110.0, 5.0), (100.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                    {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                    {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                ],
+            }
+        )
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        ferramenta.selecionar_ponto(canvas, 1)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.tbl.item(0, 1).setText("-1")
+        dialog.tbl.item(2, 2).setText("1.5")
+        ferramenta.aplicar_dialog(canvas)
+
+        dialog._copiar()
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 0.0))))
+
+        destino = canvas.cena.elementos[1]["graduacao_tabela"]["pontos"]["1"]["valores"]
+        self.assertEqual(destino["P"], {"dx": -1.0, "dy": 0.0})
+        self.assertEqual(destino["G"], {"dx": 0.0, "dy": 1.5})
+        self.assertFalse(ferramenta._modo_copia_graduacao)
 
     def test_janela_fecha_quando_molde_sai_do_canvas(self):
         canvas = _FakeCanvas()

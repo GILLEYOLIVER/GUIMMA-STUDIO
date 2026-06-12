@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit
 
+from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -146,10 +147,7 @@ class Ferramenta(FerramentaBase):
 
     def _ler_quantidade(self) -> int:
         texto = self._edt_pontos.text() if self._edt_pontos else "2"
-        try:
-            valor = int(float(str(texto).replace(",", ".")))
-        except Exception:
-            valor = 2
+        valor = int(numero_decimal_ponto(texto, 2.0))
         valor = max(2, min(valor, 99))
         if self._edt_pontos:
             self._edt_pontos.setText(str(valor))

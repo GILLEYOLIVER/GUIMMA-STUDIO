@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from shiboken6 import isValid
 
 from core.formatacao import formatar_numero
+from core.graduacao import aplicar_grade_graduacao_referencia_canvas
 from core.geometry.engine import internal_angle, point_segment_distance, polyline_perimeter
 from core.geometry_bridge_accelerated import (
     compose_closed_contour,
@@ -965,6 +966,7 @@ class Ferramenta(FerramentaBase):
         layout_visual = self._layout_visual_interno(base, str(molde.get("nome_molde") or ""))
 
         molde["pontos"] = pontos
+        self._aplicar_estilo_atual_molde(molde)
         molde.setdefault("molde_id", str(uuid4()))
         self._aplicar_layout_visual_interno_molde(molde, base, layout_visual)
         molde.setdefault("numero_altura_cm", 0.7)
@@ -974,6 +976,7 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_controles", True)
         molde.setdefault("molde_pronto", True)
         molde.setdefault("permitir_alteracoes_encaixe", True)
+        aplicar_grade_graduacao_referencia_canvas(molde, self._canvas, sobrescrever=True)
 
         refs_emenda = self._referencias_emenda_molde(molde, pontos)
         refs_controle = list(molde.get("pontos_controle_referencia", []) or [])
@@ -1021,7 +1024,19 @@ class Ferramenta(FerramentaBase):
 
         molde["controle_auxiliares"] = [(float(x), float(y)) for x, y in auxiliares]
         molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
+        molde["pontos_graduacao"] = [{"x": float(x), "y": float(y)} for x, y in base]
         molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
+
+    def _aplicar_estilo_atual_molde(self, molde: dict) -> None:
+        canvas = getattr(self, "_canvas", None)
+        esp_padrao = max(1.0, float(getattr(canvas, "_linha_espessura", molde.get("espessura", 1.0)) or 1.0))
+        molde["espessura"] = max(1.0, float(molde.get("espessura", esp_padrao) or esp_padrao))
+        molde["espessura_graduacao"] = max(
+            1.0,
+            float(molde.get("espessura_graduacao", molde.get("espessura", esp_padrao)) or esp_padrao),
+        )
+        molde.setdefault("estilo", getattr(canvas, "_linha_estilo", "solid"))
+        molde.setdefault("amplitude", getattr(canvas, "_linha_amplitude", 1.0))
 
     def _ordenar_controles_principais_extraidos(self, cantos: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(cantos) != 2:

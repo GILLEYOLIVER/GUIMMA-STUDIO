@@ -3,20 +3,41 @@ from __future__ import annotations
 from math import acos, sqrt
 from uuid import uuid4
 
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPen
+from PySide6.QtCore import QLocale, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPen, QValidator
 from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QDialog, QDoubleSpinBox, QFormLayout, QLabel, QVBoxLayout
 
+from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class MedidaSpinBox(QDoubleSpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLocale(QLocale.c())
+
     def textFromValue(self, value: float) -> str:  # noqa: N802 - assinatura Qt
         texto = f"{value:.3f}".rstrip("0").rstrip(".")
         if not texto:
             texto = "0"
-        return texto.replace(".", self.locale().decimalPoint())
+        return texto
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        return numero_decimal_ponto(text, float(self.value()))
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        try:
+            texto = normalizar_decimal_ponto(text)
+        except Exception:
+            return QValidator.Invalid, text, pos
+        if texto in {"", "+", "-", "0.", "+0.", "-0."}:
+            return QValidator.Intermediate, text, pos
+        try:
+            float(texto)
+        except ValueError:
+            return QValidator.Invalid, text, pos
+        return QValidator.Acceptable, text, pos
 
 
 class ElementoParaleloDialog(QDialog):

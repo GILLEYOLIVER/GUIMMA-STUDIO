@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QScrollArea, QSizePolicy, QWidget
 
 from config import APP_NOME
+from ui.hover_style import aplicar_hover_global, aplicar_hover_menu
 from ui.janela_principal import GuimmaStudioMainWindow
 
 
@@ -116,6 +117,7 @@ class GuimmaStudioApp:
         self.qt_app.setApplicationName(APP_NOME)
         self._aplicar_traducao_qt_ptbr()
         self._aplicar_tema_claro_global()
+        aplicar_hover_global(self.qt_app)
         self.janela_principal = GuimmaStudioMainWindow()
         self._instalar_nome_fixo_aba_usuario()
         self._instalar_menu_contexto_usuario()
@@ -134,7 +136,7 @@ class GuimmaStudioApp:
         for idioma in ("pt_BR", "pt"):
             if self._tradutor_qt.load(f"qtbase_{idioma}", caminho_i18n):
                 self.qt_app.installTranslator(self._tradutor_qt)
-                QLocale.setDefault(QLocale(idioma))
+                QLocale.setDefault(QLocale.c())
                 return
 
     def _aplicar_tema_claro_global(self):
@@ -202,6 +204,7 @@ class GuimmaStudioApp:
                     return
 
                 menu = QMenu(janela_ref)
+                aplicar_hover_menu(menu)
                 submenu_usuarios = menu.addMenu("Usuários")
                 acao_add_aba = submenu_usuarios.addAction("Adicionar ferramentas desta aba")
                 acao_add_todas = submenu_usuarios.addAction("Adicionar todas as ferramentas para usuário")

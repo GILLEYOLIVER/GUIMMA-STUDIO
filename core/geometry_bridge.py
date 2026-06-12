@@ -10,6 +10,7 @@ from core.geometry.engine import (
     normalize_closed_polyline,
     point_in_polygon,
 )
+from core.graduacao import aplicar_grade_graduacao_padrao
 
 
 def polyline_from_element(element: dict) -> list[tuple[float, float]]:
@@ -45,15 +46,22 @@ def create_mold_payload(element: dict) -> dict:
         raise ValueError("Contorno inválido para criação de molde.")
     shape = build_shape_from_polyline(polyline)
     mold = build_mold_from_shape(shape)
-    return {
+    payload = {
         "shape_id": shape.id,
         "node_ids": [n.id for n in shape.nodes],
         "segment_ids": [s.id for s in shape.segments],
         "pontos": polyline,
+        "cor": element.get("cor", "#ffffff"),
+        "espessura": element.get("espessura", 1.0),
+        "espessura_graduacao": element.get("espessura_graduacao", element.get("espessura", 1.0)),
+        "estilo": element.get("estilo", "solid"),
+        "amplitude": element.get("amplitude", 1.0),
         "controle_cantos": mold.corner_controls,
         "pontos_controle_principais": mold.main_controls,
         "pontos_auxiliares": mold.helper_controls,
     }
+    aplicar_grade_graduacao_padrao(payload)
+    return payload
 
 
 def compose_closed_contour(elements: list[dict], tol: float = 0.001) -> list[tuple[float, float]]:

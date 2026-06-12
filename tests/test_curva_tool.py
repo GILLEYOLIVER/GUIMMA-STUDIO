@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from math import acos, degrees, hypot
+from math import acos, cos, degrees, hypot, radians, sin
 import unittest
 from importlib.util import find_spec
 from types import SimpleNamespace
@@ -200,6 +200,34 @@ class CurvaToolTestCase(unittest.TestCase):
         self.assertEqual(pontos[len(pontos) // 2], (5.0, -6.0))
         self.assertEqual(pontos[-1], (10.0, 0.0))
         self.assertLess(abs(pontos[(len(pontos) // 2) - 1][1] - pontos[(len(pontos) // 2) + 1][1]), 1e-6)
+
+    def test_snap_angular_curva_gruda_em_angulo_padrao_quando_snap_ligado(self):
+        canvas = _FakeCanvas()
+        canvas._snap_ativo = True
+        canvas._snap_angular_passo = 45.0
+        canvas._snap_resultado = None
+        canvas._curva_np_nos = [QPointF(0.0, 0.0)]
+        ferramenta = FerramentaCurva()
+        distancia = 10.0
+        destino = QPointF(distancia * cos(radians(31.0)), -distancia * sin(radians(31.0)))
+
+        ajustado = ferramenta._snap_angular_curva(canvas, destino)
+
+        self.assertAlmostEqual(ajustado.x(), distancia * cos(radians(30.0)), places=6)
+        self.assertAlmostEqual(ajustado.y(), -distancia * sin(radians(30.0)), places=6)
+
+    def test_snap_angular_curva_preserva_snap_exato_em_no(self):
+        canvas = _FakeCanvas()
+        canvas._snap_ativo = True
+        canvas._snap_angular_passo = 45.0
+        canvas._snap_resultado = SimpleNamespace(tipo="nó")
+        canvas._curva_np_nos = [QPointF(0.0, 0.0)]
+        ferramenta = FerramentaCurva()
+        destino = QPointF(8.0, -4.0)
+
+        ajustado = ferramenta._snap_angular_curva(canvas, destino)
+
+        self.assertEqual(ajustado, destino)
 
 
 if __name__ == "__main__":

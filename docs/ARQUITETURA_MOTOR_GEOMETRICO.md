@@ -48,6 +48,14 @@ A ferramenta `Extrair Molde` já passou a consumir a bridge para:
 - construção do molde
 - preenchimento de metadados de identidade (`shape_id`, `node_ids`, `segment_ids`)
 
+## Regras transversais que o motor deve preservar
+
+- Campos numericos de UI usam ponto decimal; `.5` deve ser tratado como `0.5` e virgula decimal deve ser rejeitada.
+- Moldes precisam manter pontos oficiais separados de amostras visuais de curvas. A graduacao por tabela atua nos pontos oficiais.
+- Moldes com curvas e moldes extraidos devem continuar graduaveis por ponto, usando referencias estaveis no contorno.
+- Elementos soltos podem ser selecionados e manipulados, mas nao devem ser confundidos com pontos oficiais de graduacao.
+- Cores de tecido e espessura de linha sao propriedades visuais que devem acompanhar moldes criados, extraidos e graduados.
+
 ## Estratégia de migração incremental
 
 1. **Padronizar payload** das ferramentas no bridge.

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from math import cos, radians, sin, sqrt
 
-from PySide6.QtCore import QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen
+from PySide6.QtCore import QLocale, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPen, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -35,8 +36,28 @@ def _formatar_numero(valor: float, casas: int = 2) -> str:
 
 
 class _SpinBoxSemZeros(QDoubleSpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLocale(QLocale.c())
+
     def textFromValue(self, value: float) -> str:  # noqa: N802
         return _formatar_numero(value, self.decimals())
+
+    def valueFromText(self, text: str) -> float:  # noqa: N802
+        return numero_decimal_ponto(text, float(self.value()))
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        try:
+            texto = normalizar_decimal_ponto(text)
+        except Exception:
+            return QValidator.Invalid, text, pos
+        if texto in {"", "+", "-", "0.", "+0.", "-0."}:
+            return QValidator.Intermediate, text, pos
+        try:
+            float(texto)
+        except ValueError:
+            return QValidator.Invalid, text, pos
+        return QValidator.Acceptable, text, pos
 
 
 class _PainelPorAngulo(QFrame):

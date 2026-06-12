@@ -1,5 +1,42 @@
 # Manual do Programa — Ferramentas
 
+## Regras funcionais atuais
+
+### Entrada numerica
+
+- Todos os campos numericos visiveis usam ponto como separador decimal.
+- A virgula decimal nao deve ser aceita.
+- Entradas como `.5`, `.1`, `.9`, `-.5` e `+.5` sao normalizadas como `0.5`, `0.1`, `0.9`, `-0.5` e `+0.5`.
+- Campos com unidade, como centimetros, podem exibir a unidade no texto, mas a leitura numerica continua usando ponto.
+
+### Selecao no canvas
+
+- A ferramenta **Selecionar** deve selecionar moldes e tambem elementos soltos, como linhas, curvas, polylines e desenhos livres.
+- Quando a ferramenta de graduacao por tabela esta aberta, o primeiro clique pode ativar o molde alvo e os pontos oficiais desse molde passam a receber hover.
+- Elementos livres nao devem virar pontos de graduacao; a tabela gradua somente pontos oficiais de moldes.
+
+### Cores, tecidos e espessura
+
+- Se **Mostrar cor dos tecidos** estiver marcado, o contorno do molde usa a cor configurada para o tecido.
+- Se essa opcao estiver desmarcada, o molde usa a propria cor gravada no elemento ou a cor definida pela ferramenta.
+- A espessura de linha definida nas ferramentas deve acompanhar desenhos, moldes criados, moldes extraidos e tamanhos graduados.
+- A configuracao inicial de tecido sem cor explicita usa branco para o tecido 1 e verde para o tecido 2.
+
+### Grade de tamanhos e graduacao
+
+- Em portugues, moldes novos iniciam com `P`, `M`, `G`, sendo `M` o tamanho base.
+- Em espanhol, moldes novos iniciam com `S`, `M`, `L`, sendo `M` o tamanho base.
+- Moldes novos devem herdar grade, nomes e cores dos moldes ja existentes no canvas quando houver uma grade ativa.
+- A janela de propriedades e a tabela de graduacao devem mostrar a mesma grade, mesmas cores e mesmo tamanho base.
+- A tabela deve graduar moldes retangulares, moldes com curvas e moldes extraidos, usando os pontos oficiais do molde.
+- Ao adicionar novos tamanhos em um molde ja graduado, os novos tamanhos devem aparecer no canvas seguindo a regra de proporcao ja definida.
+
+### Abas da tabela de graduacao
+
+- **DX / DY** mostra deslocamentos por eixo em centimetros.
+- **Distancia / Angulo** mostra a distancia e o angulo equivalentes ao deslocamento.
+- **Perimetro** mostra perimetros por tamanho e deve indicar separadamente quando a variacao vem do eixo X, do eixo Y ou de ambos.
+
 Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDIO.
 
 ## Como ler este manual

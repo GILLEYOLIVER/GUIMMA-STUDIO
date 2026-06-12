@@ -12,6 +12,7 @@ from core.geometry.engine import (
     quadratic_bezier_parameter_for_point,
     sample_quadratic_bezier_through_point,
 )
+from core.formatacao import numero_decimal_ponto
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -139,14 +140,8 @@ class Ferramenta(FerramentaBase):
             restaurar_posicao(self._dlg_passo, f"dialog:{self.id_ferramenta}", fallback=canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
-        try:
-            dx = float((self._edt_dx.text() if self._edt_dx else "0").replace(",", "."))
-        except Exception:
-            dx = 0.0
-        try:
-            dy = float((self._edt_dy.text() if self._edt_dy else "0").replace(",", "."))
-        except Exception:
-            dy = 0.0
+        dx = numero_decimal_ponto(self._edt_dx.text() if self._edt_dx else "0", 0.0)
+        dy = numero_decimal_ponto(self._edt_dy.text() if self._edt_dy else "0", 0.0)
         return dx, dy
 
     def _modo_n_pontos(self) -> bool:

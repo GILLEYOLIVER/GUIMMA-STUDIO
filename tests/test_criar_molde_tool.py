@@ -45,6 +45,9 @@ class _FakeCanvas:
             ]
         )
         self._selecionados = set()
+        self._linha_espessura = 4.0
+        self._linha_estilo = "solid"
+        self._linha_amplitude = 1.0
         self.historico = 0
         self.atualizou = False
 
@@ -75,9 +78,64 @@ class CriarMoldeToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, event))
 
         self.assertTrue(canvas.cena.elementos[0]["molde"])
+        self.assertEqual(
+            canvas.cena.elementos[0]["graduacao_tamanhos"],
+            [
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+            ],
+        )
+        self.assertEqual(canvas.cena.elementos[0]["graduacao_tamanhos_ativos"], ["P", "M", "G"])
+        self.assertEqual(canvas.cena.elementos[0]["espessura"], 4.0)
+        self.assertEqual(canvas.cena.elementos[0]["espessura_graduacao"], 4.0)
+        self.assertEqual(
+            canvas.cena.elementos[0]["pontos_controle_principais"],
+            [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+        )
+        self.assertEqual(
+            canvas.cena.elementos[0]["pontos_graduacao"],
+            [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+            ],
+        )
         self.assertEqual(canvas._selecionados, set())
         self.assertEqual(canvas.historico, 1)
         self.assertTrue(event.accepted)
+
+    def test_criar_molde_herda_grade_de_molde_existente_no_canvas(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.insert(
+            0,
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0), (20.0, 0.0)],
+                "graduacao_grade_nome": "36-44(40)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "36", "cor": "#3355ff", "base": False},
+                    {"ativo": True, "tamanho": "40", "cor": "#22aa88", "base": True},
+                    {"ativo": True, "tamanho": "44", "cor": "#dd7733", "base": False},
+                ],
+                "graduacao_tamanhos_ativos": ["36", "40", "44"],
+            },
+        )
+        canvas._indices_elementos_em_ponto = lambda _pos: [1]
+        ferramenta = FerramentaCriarMolde()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(1.0, 1.0))))
+
+        novo = canvas.cena.elementos[1]
+        self.assertEqual(novo["graduacao_grade_nome"], "36-44(40)")
+        self.assertEqual([linha["tamanho"] for linha in novo["graduacao_tamanhos"]], ["36", "40", "44"])
+        self.assertEqual([linha["cor"] for linha in novo["graduacao_tamanhos"]], ["#3355ff", "#22aa88", "#dd7733"])
 
 
 if __name__ == "__main__":

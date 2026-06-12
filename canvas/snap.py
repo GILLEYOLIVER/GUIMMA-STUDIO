@@ -85,6 +85,8 @@ class SnapManager:
         zoom: float,
         tolerancia_px: float | None = None,
     ) -> list[SnapResult]:
+        if type(self)._segmentos_polyline is not SnapManager._segmentos_polyline:
+            return self._calcular_candidatos_python(cena, cursor, zoom, tolerancia_px=tolerancia_px)
         candidatos_cpp = self._calcular_candidatos_cpp(cena, cursor, zoom, tolerancia_px=tolerancia_px)
         if candidatos_cpp is not None:
             return candidatos_cpp

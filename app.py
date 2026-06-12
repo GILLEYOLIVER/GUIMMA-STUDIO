@@ -7,6 +7,7 @@ from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
 from PySide6.QtWidgets import QApplication
 
 from config import APP_NOME
+from ui.hover_style import aplicar_hover_global
 from ui.janela_principal import GuimmaStudioMainWindow
 
 
@@ -16,6 +17,7 @@ class GuimmaStudioApp:
         self.qt_app = QApplication(self._argv)
         self.qt_app.setApplicationName(APP_NOME)
         self._aplicar_traducao_qt_ptbr()
+        aplicar_hover_global(self.qt_app)
         self.janela_principal = GuimmaStudioMainWindow()
 
     def _aplicar_traducao_qt_ptbr(self):
@@ -24,7 +26,7 @@ class GuimmaStudioApp:
         for idioma in ("pt_BR", "pt"):
             if self._tradutor_qt.load(f"qtbase_{idioma}", caminho_i18n):
                 self.qt_app.installTranslator(self._tradutor_qt)
-                QLocale.setDefault(QLocale(idioma))
+                QLocale.setDefault(QLocale.c())
                 return
 
     def run(self) -> int:

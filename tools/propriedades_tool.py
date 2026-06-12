@@ -42,7 +42,8 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from core.formatacao import formatar_numero
+from core.formatacao import formatar_numero, numero_decimal_ponto
+from core.graduacao import grade_graduacao_padrao
 from tools.tool_base import FerramentaBase
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
@@ -53,6 +54,11 @@ TAMANHO_NUMERO_PADRAO_CM = 0.7
 # Regra do GUIMMA STUDIO: valores decimais sempre usam ponto.
 # Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
 QLocale.setDefault(QLocale.c())
+
+
+def _eh_elemento_numeros(valor) -> bool:
+    texto = str(valor or "").strip().lower()
+    return texto in {"números", "numeros"}
 
 
 class NumeroLimpoDoubleSpinBox(QDoubleSpinBox):
@@ -305,7 +311,7 @@ class PreviewMoldeWidget(QWidget):
     def _atualizar_cursor_modo(self):
         if self._hand_active:
             self.setCursor(Qt.OpenHandCursor)
-        elif self._modo_elemento in {"Nome", "Descrição", "Observações", "Fio", "Números"}:
+        elif self._modo_elemento in {"Nome", "Descrição", "Observações", "Fio"} or _eh_elemento_numeros(self._modo_elemento):
             self.setCursor(Qt.CrossCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
@@ -761,11 +767,7 @@ class PreviewMoldeWidget(QWidget):
 
     @staticmethod
     def _valor_margem_float(valor) -> float:
-        try:
-            texto = str(valor).replace("cm", "").replace(",", ".").strip()
-            return max(0.0, float(texto or 0.0))
-        except (TypeError, ValueError):
-            return 0.0
+        return max(0.0, numero_decimal_ponto(valor, 0.0, ("cm",)))
 
     @staticmethod
     def _indice_segmento_margem(elemento: str, total_segmentos: int) -> int | None:
@@ -927,10 +929,7 @@ class PreviewMoldeWidget(QWidget):
 
     @staticmethod
     def _float_seguro(valor, padrao: float = 0.0) -> float:
-        try:
-            return float(str(valor).replace(",", "."))
-        except (TypeError, ValueError):
-            return float(padrao)
+        return numero_decimal_ponto(valor, padrao)
 
     def _desenhar_controles(self, painter: QPainter, mapear):
         if not self._molde.get("mostrar_controles", True):
@@ -955,7 +954,7 @@ class PreviewMoldeWidget(QWidget):
             centro = QPointF(0.0, 0.0)
         for idx, pt in enumerate(pontos):
             tela = mapear(pt)
-            if self._modo_elemento == "Números" and self._hover_control_index == idx:
+            if _eh_elemento_numeros(self._modo_elemento) and self._hover_control_index == idx:
                 painter.save()
                 painter.setPen(QPen(QColor("#008cff"), 2.0))
                 painter.drawRect(int(tela.x() - 8), int(tela.y() - 8), 16, 16)
@@ -1109,7 +1108,7 @@ class PreviewMoldeWidget(QWidget):
                 self.update()
                 event.accept()
                 return
-            if self._modo_elemento == "Números":
+            if _eh_elemento_numeros(self._modo_elemento):
                 idx, dist = self._controle_mais_proximo(event.position())
                 if idx is not None and dist <= 18:
                     self._molde["numero_ponto_inicio"] = int(idx)
@@ -1162,7 +1161,7 @@ class PreviewMoldeWidget(QWidget):
                 event.accept()
                 return
 
-        if self._molde and self._modo_elemento == "Números":
+        if self._molde and _eh_elemento_numeros(self._modo_elemento):
             idx, dist = self._controle_mais_proximo(event.position())
             novo_hover = idx if idx is not None and dist <= 18 else None
             if novo_hover != self._hover_control_index:
@@ -2041,18 +2040,32 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _aplicar_grade_tamanhos(self, grade_texto: str):
         tamanhos, base = self._extrair_tamanhos_grade(grade_texto)
+        cores_existentes = {
+            str(linha.get("tamanho") or linha.get("nome") or ""): str(linha.get("cor") or "")
+            for linha in self._graduacao_linhas
+            if isinstance(linha, dict)
+        }
+        cores_padrao = self._cores_padrao_grade(grade_texto)
         self._graduacao_linhas = []
         for tamanho in tamanhos:
             self._graduacao_linhas.append({
                 "ativo": True,
                 "tamanho": tamanho,
-                "cor": self._gerar_cor_aleatoria(),
+                "cor": cores_existentes.get(str(tamanho)) or cores_padrao.get(str(tamanho)) or self._gerar_cor_aleatoria(),
                 "base": str(tamanho) == str(base),
             })
         if self._graduacao_linhas and not any(l.get("base") for l in self._graduacao_linhas):
             self._graduacao_linhas[len(self._graduacao_linhas) // 2]["base"] = True
         self._renderizar_tabela_graduacao()
         self._sincronizar_gradacao_no_molde()
+
+    @staticmethod
+    def _cores_padrao_grade(grade_texto: str) -> dict[str, str]:
+        for idioma in ("pt", "es"):
+            grade_nome, linhas = grade_graduacao_padrao(idioma)
+            if str(grade_texto or "").strip() == grade_nome:
+                return {str(linha["tamanho"]): str(linha["cor"]) for linha in linhas}
+        return {}
 
     def _extrair_tamanhos_grade(self, grade_texto: str) -> tuple[list[str], str | None]:
         texto = str(grade_texto or "").strip()
@@ -2180,10 +2193,14 @@ class PropriedadesMoldesDialog(QDialog):
         linhas = [dict(l) for l in self._graduacao_linhas]
         ativos = [str(l.get("tamanho")) for l in self._graduacao_linhas if l.get("ativo", True)]
         for molde in moldes_alvo:
+            linhas_antigas = molde.get("graduacao_tamanhos")
+            self._sincronizar_valores_graduacao_tamanhos(molde, linhas, linhas_antigas=linhas_antigas)
             molde["graduacao_grade_nome"] = grade_nome
             molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
             molde["graduacao_tamanhos_ativos"] = list(ativos)
         for molde in self._moldes_reais_alvo_graduacao():
+            linhas_antigas = molde.get("graduacao_tamanhos")
+            self._sincronizar_valores_graduacao_tamanhos(molde, linhas, linhas_antigas=linhas_antigas)
             molde["graduacao_grade_nome"] = grade_nome
             molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
             molde["graduacao_tamanhos_ativos"] = list(ativos)
@@ -2194,6 +2211,133 @@ class PropriedadesMoldesDialog(QDialog):
             self.canvas.elementos_alterados.emit()
         if hasattr(self.canvas, "update"):
             self.canvas.update()
+
+    def _sincronizar_valores_graduacao_tamanhos(
+        self,
+        molde: dict,
+        novas_linhas: list[dict],
+        *,
+        linhas_antigas: list[dict] | None = None,
+    ) -> None:
+        """Preenche valores DX/DY dos tamanhos novos usando a proporcao da grade."""
+        if not isinstance(molde, dict) or not isinstance(novas_linhas, list) or not novas_linhas:
+            return
+        mapas_pontos = self._mapas_pontos_graduacao_molde(molde)
+        if not mapas_pontos:
+            return
+        linhas = [dict(l) for l in novas_linhas if isinstance(l, dict) and l.get("ativo", True)]
+        nomes = [str(l.get("tamanho") or l.get("nome") or "").strip() for l in linhas]
+        if not any(nomes):
+            return
+        base_idx = next((i for i, l in enumerate(linhas) if l.get("base")), len(linhas) // 2)
+        linhas_anteriores = [
+            dict(l)
+            for l in (linhas_antigas or [])
+            if isinstance(l, dict) and l.get("ativo", True)
+        ]
+        for pontos_cfg in mapas_pontos:
+            for cfg in pontos_cfg.values():
+                if not isinstance(cfg, dict):
+                    continue
+                valores = cfg.setdefault("valores", {})
+                if not isinstance(valores, dict):
+                    continue
+                anchors = self._anchors_graduacao_tamanho(linhas, valores, base_idx)
+                anchors.extend(self._anchors_graduacao_tamanho_antigo(linhas_anteriores, valores, linhas, base_idx))
+                anchors = self._normalizar_anchors_graduacao(anchors)
+                for idx, nome in enumerate(nomes):
+                    if not nome or nome in valores:
+                        continue
+                    dx, dy = self._interpolar_graduacao_por_indice(idx, anchors)
+                    valores[nome] = {"dx": dx, "dy": dy}
+
+    @staticmethod
+    def _mapas_pontos_graduacao_molde(molde: dict) -> list[dict]:
+        mapas: list[dict] = []
+        tabela = molde.get("graduacao_tabela")
+        pontos = tabela.get("pontos") if isinstance(tabela, dict) else None
+        if isinstance(pontos, dict):
+            mapas.append(pontos)
+        legado = molde.get("graduacao_pontos")
+        if isinstance(legado, dict) and legado is not pontos:
+            mapas.append(legado)
+        return mapas
+
+    def _anchors_graduacao_tamanho(self, linhas: list[dict], valores: dict, base_idx: int) -> list[tuple[int, float, float]]:
+        anchors: dict[int, tuple[float, float]] = {int(base_idx): (0.0, 0.0)}
+        for idx, linha in enumerate(linhas):
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            item = valores.get(nome)
+            if not isinstance(item, dict):
+                continue
+            anchors[idx] = (
+                self._float_campo(item.get("dx"), 0.0),
+                self._float_campo(item.get("dy"), 0.0),
+            )
+        return sorted((idx, dx, dy) for idx, (dx, dy) in anchors.items())
+
+    def _anchors_graduacao_tamanho_antigo(
+        self,
+        linhas_antigas: list[dict],
+        valores: dict,
+        novas_linhas: list[dict],
+        novo_base_idx: int,
+    ) -> list[tuple[float, float, float]]:
+        if not linhas_antigas or not novas_linhas:
+            return []
+        velho_base_idx = next((i for i, l in enumerate(linhas_antigas) if l.get("base")), len(linhas_antigas) // 2)
+        velho_abaixo = max(1, velho_base_idx)
+        velho_acima = max(1, (len(linhas_antigas) - 1) - velho_base_idx)
+        novo_abaixo = max(1, int(novo_base_idx))
+        novo_acima = max(1, (len(novas_linhas) - 1) - int(novo_base_idx))
+        anchors: list[tuple[float, float, float]] = []
+        for idx, linha in enumerate(linhas_antigas):
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            item = valores.get(nome)
+            if not isinstance(item, dict):
+                continue
+            deslocamento = idx - velho_base_idx
+            if deslocamento < 0:
+                alvo = float(novo_base_idx) + (float(deslocamento) * (float(novo_abaixo) / float(velho_abaixo)))
+            elif deslocamento > 0:
+                alvo = float(novo_base_idx) + (float(deslocamento) * (float(novo_acima) / float(velho_acima)))
+            else:
+                alvo = float(novo_base_idx)
+            anchors.append((
+                alvo,
+                self._float_campo(item.get("dx"), 0.0),
+                self._float_campo(item.get("dy"), 0.0),
+            ))
+        return anchors
+
+    @staticmethod
+    def _normalizar_anchors_graduacao(anchors: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
+        normalizados: dict[float, tuple[float, float]] = {}
+        for idx, dx, dy in anchors:
+            chave = round(float(idx), 6)
+            normalizados[chave] = (float(dx), float(dy))
+        return sorted((idx, dx, dy) for idx, (dx, dy) in normalizados.items())
+
+    @staticmethod
+    def _interpolar_graduacao_por_indice(alvo: int, anchors: list[tuple[float, float, float]]) -> tuple[float, float]:
+        if not anchors:
+            return 0.0, 0.0
+        if len(anchors) == 1:
+            return anchors[0][1], anchors[0][2]
+        menores = [a for a in anchors if a[0] <= alvo]
+        maiores = [a for a in anchors if a[0] >= alvo]
+        if menores and maiores:
+            a1, a2 = menores[-1], maiores[0]
+        elif menores:
+            a1, a2 = anchors[-2], anchors[-1]
+        else:
+            a1, a2 = anchors[0], anchors[1]
+        if a1[0] == a2[0]:
+            return a1[1], a1[2]
+        fator = (float(alvo) - float(a1[0])) / (float(a2[0]) - float(a1[0]))
+        dx = a1[1] + ((a2[1] - a1[1]) * fator)
+        dy = a1[2] + ((a2[2] - a1[2]) * fator)
+        return dx, dy
 
     def _moldes_alvo_graduacao(self) -> list[dict]:
         combo_aplicar = getattr(self, "cmb_aplicar_grade", None)
@@ -2450,16 +2594,10 @@ class PropriedadesMoldesDialog(QDialog):
     def _valor_spin_visual(self, widget, padrao: float = 0.0) -> float:
         if hasattr(widget, "value"):
             return float(widget.value())
-        try:
-            return float(str(widget.text()).replace(",", "."))
-        except Exception:
-            return float(padrao)
+        return numero_decimal_ponto(widget.text(), padrao)
 
     def _float_campo(self, valor, padrao: float = 0.0) -> float:
-        try:
-            return float(str(valor).replace(",", "."))
-        except Exception:
-            return float(padrao)
+        return numero_decimal_ponto(valor, padrao)
 
     def _texto_combo_visual(self, widget, padrao: str = "") -> str:
         if hasattr(widget, "currentText"):
@@ -2485,7 +2623,7 @@ class PropriedadesMoldesDialog(QDialog):
         eh_texto = elemento in {"Nome", "Descrição", "Observações"}
         eh_nome = elemento == "Nome"
         eh_texto_longo = elemento in {"Descrição", "Observações"}
-        eh_numero = elemento == "Números"
+        eh_numero = _eh_elemento_numeros(elemento)
         eh_fio = elemento == "Fio"
 
         self._atualizar_entry_visualizacao_por_elemento()
@@ -2602,7 +2740,7 @@ class PropriedadesMoldesDialog(QDialog):
                 molde["visual_descricao"] = True
             elif chave == "observacoes":
                 molde["visual_observacoes"] = True
-        elif elemento == "Números":
+        elif _eh_elemento_numeros(elemento):
             molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
         elif elemento == "Fio":
             molde["mostrar_fio"] = True
@@ -2787,13 +2925,9 @@ class PropriedadesMoldesDialog(QDialog):
             item_elemento = self.tbl_margem.item(row, 0)
             item_margem = self.tbl_margem.item(row, 1)
             elemento = (item_elemento.text() if item_elemento else "").strip()
-            texto = (item_margem.text() if item_margem else "0").replace("cm", "").replace(",", ".").strip()
             if not elemento:
                 continue
-            try:
-                valor = float(texto or 0)
-            except ValueError:
-                valor = 0.0
+            valor = numero_decimal_ponto(item_margem.text() if item_margem else "0", 0.0, ("cm",))
             margens[elemento] = max(0.0, valor)
         return margens
 
@@ -2804,7 +2938,7 @@ class PropriedadesMoldesDialog(QDialog):
             numero = 0.0
         if abs(numero - round(numero)) < 1e-9:
             return str(int(round(numero)))
-        return (f"{numero:.3f}".rstrip("0").rstrip(".")).replace(".", ",")
+        return f"{numero:.3f}".rstrip("0").rstrip(".")
 
     def _atualizar_margem_em_tempo_real(self):
         molde = self._molde_atual()
@@ -3606,7 +3740,7 @@ class PropriedadesMoldesDialog(QDialog):
                     )
                 )
                 self.ed_espaco_linhas.setValue(self._float_campo(molde.get(f"espaco_linhas_texto_{chave}"), 0.33))
-            elif elemento == "Números":
+            elif _eh_elemento_numeros(elemento):
                 self.ed_altura_texto.setValue(
                     self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
                 )
@@ -3725,7 +3859,7 @@ class PropriedadesMoldesDialog(QDialog):
             dados["textos"][chave][f"espaco_linhas_texto_{chave}"] = dados["espaco_linhas"]
             dados["textos"][chave][f"referencia_texto_{chave}"] = dados["referencia_texto"]
             dados["textos"][chave][f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
-        elif elemento == "Números":
+        elif _eh_elemento_numeros(elemento):
             dados["elemento_visual"] = elemento
             dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
             dados["numeros"]["numero_altura_cm"] = dados["numero_altura_cm"]
@@ -3802,7 +3936,7 @@ class PropriedadesMoldesDialog(QDialog):
                 molde["visual_descricao"] = True
             elif chave == "observacoes":
                 molde["visual_observacoes"] = True
-        elif dados.get("elemento_visual") == "Números":
+        elif _eh_elemento_numeros(dados.get("elemento_visual")):
             molde["numero_altura_cm"] = dados["numero_altura_cm"]
             molde["numero_ponto_inicio"] = int(dados.get("numero_ponto_inicio", 0) or 0)
         elif dados.get("elemento_visual") == "Fio":
@@ -4550,7 +4684,7 @@ class ConfigurarCoresTecidosDialog(QDialog):
         valores = list(dict.fromkeys(["1", "2", *tecidos, *self._mapa.keys()]))
         self.tbl.setRowCount(0)
         for tecido in valores:
-            self._adicionar_linha(tecido, self._mapa.get(tecido) or self._cor_aleatoria())
+            self._adicionar_linha(tecido, self._mapa.get(tecido) or self._cor_padrao_tecido(tecido))
 
     def _adicionar_linha(self, tecido: str, cor: str):
         row = self.tbl.rowCount()
@@ -4603,6 +4737,12 @@ class ConfigurarCoresTecidosDialog(QDialog):
 
     def _cor_aleatoria(self) -> str:
         return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
+
+    @staticmethod
+    def _cor_padrao_tecido(tecido: str) -> str:
+        if str(tecido).strip() == "2":
+            return "#00b050"
+        return "#ffffff"
 
 
 def _log_propriedades_debug(mensagem: str):

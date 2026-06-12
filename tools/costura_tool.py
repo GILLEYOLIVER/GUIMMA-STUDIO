@@ -4,7 +4,7 @@ from math import atan2, pi, sqrt
 from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt, QLocale
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPen, QValidator
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from core.formatacao import formatar_numero
+from core.formatacao import formatar_numero, normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -29,23 +29,30 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        try:
-            self.setLocale(QLocale(QLocale.Language.Portuguese, QLocale.Country.Brazil))
-        except AttributeError:
-            self.setLocale(QLocale(QLocale.Portuguese, QLocale.Brazil))
+        self.setLocale(QLocale.c())
 
     def textFromValue(self, value: float) -> str:  # noqa: N802 - API Qt
         texto = formatar_numero(value, 2)
         if texto == "-0":
             texto = "0"
-        return texto.replace(".", ",")
+        return texto
 
     def valueFromText(self, text: str) -> float:  # noqa: N802 - API Qt
-        texto = str(text or "").strip().replace(" ", "").replace(",", ".")
+        texto = str(text or "").strip().replace(" ", "")
+        return numero_decimal_ponto(texto, float(self.value()))
+
+    def validate(self, text: str, pos: int):  # noqa: N802 - API Qt
         try:
-            return float(texto)
+            texto = normalizar_decimal_ponto(str(text or "").strip().replace(" ", ""))
+        except Exception:
+            return QValidator.Invalid, text, pos
+        if texto in {"", "+", "-", "0.", "+0.", "-0."}:
+            return QValidator.Intermediate, text, pos
+        try:
+            float(texto)
         except ValueError:
-            return 0.0
+            return QValidator.Invalid, text, pos
+        return QValidator.Acceptable, text, pos
 
 
 class CosturaDialog(QDialog):
@@ -1614,4 +1621,4 @@ class Ferramenta(FerramentaBase):
         texto = formatar_numero(valor, 2)
         if texto == "-0":
             texto = "0"
-        return texto.replace(".", ",")
+        return texto

@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
 
+from core.graduacao import aplicar_grade_graduacao_referencia_canvas
 from tools.tool_base import FerramentaBase
 
 
@@ -39,10 +40,21 @@ class Ferramenta(FerramentaBase):
             if pontos[0] != pontos[-1]:
                 pontos.append(pontos[0])
             el["pontos"] = pontos
+            espessura_atual = max(1.0, float(getattr(canvas, "_linha_espessura", 1.0) or 1.0))
+            el["espessura"] = max(1.0, float(el.get("espessura", espessura_atual) or espessura_atual))
+            el["espessura_graduacao"] = max(
+                1.0,
+                float(el.get("espessura_graduacao", el.get("espessura", espessura_atual)) or espessura_atual),
+            )
+            el.setdefault("estilo", getattr(canvas, "_linha_estilo", "solid"))
+            el.setdefault("amplitude", getattr(canvas, "_linha_amplitude", 1.0))
             el["molde"] = True
             el["molde_id"] = str(el.get("molde_id") or uuid4())
             el["fio_angulo"] = float(el.get("fio_angulo", 0.0))
             el["controle_cantos"] = self._estimar_cantos(pontos)
+            el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in el["controle_cantos"]]
+            el["pontos_graduacao"] = [{"x": float(x), "y": float(y)} for x, y in pontos[:-1]]
+            aplicar_grade_graduacao_referencia_canvas(el, canvas, sobrescrever=True)
             alterou = True
         if alterou:
             canvas._selecionados.clear()

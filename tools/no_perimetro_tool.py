@@ -5,7 +5,7 @@ from math import sqrt
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QPushButton, QVBoxLayout
 
-from core.formatacao import formatar_numero
+from core.formatacao import formatar_numero, numero_decimal_ponto
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
 
@@ -46,10 +46,7 @@ class PontosNoPerimetroDialog(QDialog):
         lay.addWidget(self.btn_remover_marcacoes)
 
     def passo_unidade(self) -> float:
-        try:
-            return max(0.001, float(self.ed_passo.text().replace(",", ".").strip()))
-        except Exception:
-            return 2.0
+        return max(0.001, numero_decimal_ponto(self.ed_passo.text(), 2.0))
 
 
 class Ferramenta(FerramentaBase):

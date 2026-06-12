@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import hypot, isfinite
+from math import atan2, cos, degrees, hypot, isfinite, radians, sin
 
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QPen
+from PySide6.QtCore import QLocale, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QFont, QPainterPath, QPen, QValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+from core.graduacao import grade_graduacao_padrao
+from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -29,6 +31,7 @@ from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 class MedidaCmSpinBox(QDoubleSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setLocale(QLocale.c())
         self.setRange(0.0, 1000.0)
         self.setDecimals(3)
         self.setSingleStep(0.05)
@@ -41,11 +44,24 @@ class MedidaCmSpinBox(QDoubleSpinBox):
         return f"{texto} cm"
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
-        texto = str(text or "").lower().replace("cm", "").replace(",", ".").strip()
+        texto = str(text or "").lower()
         try:
-            return float(texto or 0.0)
+            return numero_decimal_ponto(texto, float(self.value()), ("cm",))
         except ValueError:
-            return 0.0
+            return float(self.value())
+
+    def validate(self, text: str, pos: int):  # noqa: N802
+        try:
+            texto = normalizar_decimal_ponto(str(text or "").lower(), ("cm",))
+        except Exception:
+            return QValidator.Invalid, text, pos
+        if texto in {"", "+", "-", "0.", "+0.", "-0."}:
+            return QValidator.Intermediate, text, pos
+        try:
+            float(texto)
+        except Exception:
+            return QValidator.Invalid, text, pos
+        return QValidator.Acceptable, text, pos
 
     def valor_atual(self) -> float:
         texto = self.lineEdit().text() if self.lineEdit() is not None else ""
@@ -124,6 +140,7 @@ class GraduarTabelaDialog(QDialog):
         raiz.addLayout(linha_ponto)
 
         tabs = QTabWidget()
+        self.tabs = tabs
         pagina_dxdy = QWidget()
         lay_dxdy = QVBoxLayout(pagina_dxdy)
         lay_dxdy.setContentsMargins(0, 0, 0, 0)
@@ -139,10 +156,30 @@ class GraduarTabelaDialog(QDialog):
 
         pagina_dist = QWidget()
         lay_dist = QVBoxLayout(pagina_dist)
-        lay_dist.addWidget(QLabel("Distância / Ângulo será usado para graduação polar em uma próxima etapa."))
-        lay_dist.addStretch(1)
+        lay_dist.setContentsMargins(0, 0, 0, 0)
+        self.tbl_polar = QTableWidget(0, 3)
+        self.tbl_polar.setHorizontalHeaderLabels(["Tamanho", "Dist.(cm)", "Ang°"])
+        self.tbl_polar.verticalHeader().setVisible(False)
+        self.tbl_polar.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.tbl_polar.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl_polar.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.tbl_polar.itemChanged.connect(self._celula_polar_alterada)
+        lay_dist.addWidget(self.tbl_polar)
         tabs.addTab(pagina_dist, "Distância / Ângulo")
-        tabs.setTabEnabled(1, False)
+
+        pagina_perimetro = QWidget()
+        lay_perimetro = QVBoxLayout(pagina_perimetro)
+        lay_perimetro.setContentsMargins(0, 0, 0, 0)
+        self.tbl_perimetro = QTableWidget(0, 7)
+        self.tbl_perimetro.setHorizontalHeaderLabels(
+            ["Tamanho", "Perim. X", "Dif. X", "Perim. Y", "Dif. Y", "Total", "Dif. total"]
+        )
+        self.tbl_perimetro.verticalHeader().setVisible(False)
+        self.tbl_perimetro.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for col in range(1, 7):
+            self.tbl_perimetro.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+        lay_perimetro.addWidget(self.tbl_perimetro)
+        tabs.addTab(pagina_perimetro, "Perímetro")
         raiz.addWidget(tabs, 1)
 
         botoes_topo = QGridLayout()
@@ -150,12 +187,13 @@ class GraduarTabelaDialog(QDialog):
         self.btn_zerar_dx = QPushButton("DX = 0")
         self.btn_zerar_dy = QPushButton("DY = 0")
         self.btn_aplicar.clicked.connect(self._aplicar)
-        self.btn_zerar_dx.clicked.connect(lambda: self._preencher_coluna(1, 0.0))
-        self.btn_zerar_dy.clicked.connect(lambda: self._preencher_coluna(2, 0.0))
+        self.btn_zerar_dx.clicked.connect(lambda: self._preencher_coluna_atual(1, 0.0))
+        self.btn_zerar_dy.clicked.connect(lambda: self._preencher_coluna_atual(2, 0.0))
         botoes_topo.addWidget(self.btn_aplicar, 0, 0)
         botoes_topo.addWidget(self.btn_zerar_dx, 0, 1)
         botoes_topo.addWidget(self.btn_zerar_dy, 0, 2)
         raiz.addLayout(botoes_topo)
+        tabs.currentChanged.connect(self._aba_alterada)
 
         linha_inc = QHBoxLayout()
         self.chk_incremental = QCheckBox("Incremental")
@@ -196,6 +234,7 @@ class GraduarTabelaDialog(QDialog):
             btn.clicked.connect(slot)
             botoes_copia.addWidget(btn, linha, col)
         raiz.addLayout(botoes_copia)
+        self._aba_alterada(0)
 
     def conectar(self, ferramenta, canvas):
         self._ferramenta = ferramenta
@@ -213,6 +252,7 @@ class GraduarTabelaDialog(QDialog):
     def definir_tamanhos(self, tamanhos: list[dict], valores: dict[str, dict]):
         self._bloquear_eventos = True
         self.tbl.setRowCount(len(tamanhos))
+        self.tbl_polar.setRowCount(len(tamanhos))
         base_row = next((i for i, t in enumerate(tamanhos) if t.get("base")), len(tamanhos) // 2 if tamanhos else 0)
         self._base_row = base_row
         for row, tamanho in enumerate(tamanhos):
@@ -226,6 +266,14 @@ class GraduarTabelaDialog(QDialog):
             if row == base_row:
                 self._destacar_item_tamanho_base(item_t, cor)
             self.tbl.setItem(row, 0, item_t)
+            item_polar_t = QTableWidgetItem(nome)
+            item_polar_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item_polar_t.setTextAlignment(Qt.AlignCenter)
+            if cor:
+                item_polar_t.setBackground(QColor(cor))
+            if row == base_row:
+                self._destacar_item_tamanho_base(item_polar_t, cor)
+            self.tbl_polar.setItem(row, 0, item_polar_t)
 
             dados = valores.get(nome, {}) if isinstance(valores, dict) else {}
             for col, chave in ((1, "dx"), (2, "dy")):
@@ -235,6 +283,7 @@ class GraduarTabelaDialog(QDialog):
                 if row == base_row:
                     self._destacar_item_valor_base(item)
                 self.tbl.setItem(row, col, item)
+            self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
 
     def valores(self) -> dict[str, dict]:
@@ -252,15 +301,60 @@ class GraduarTabelaDialog(QDialog):
             }
         return saida
 
+    def definir_perimetros(self, linhas: list[dict]) -> None:
+        self._bloquear_eventos = True
+        self.tbl_perimetro.setRowCount(len(linhas))
+        for row, linha in enumerate(linhas):
+            cor = str(linha.get("cor") or "")
+            base = bool(linha.get("base", False))
+            item_t = QTableWidgetItem(str(linha.get("tamanho") or ""))
+            item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            item_t.setTextAlignment(Qt.AlignCenter)
+            if cor:
+                item_t.setBackground(QColor(cor))
+            if base:
+                self._destacar_item_tamanho_base(item_t, cor)
+            self.tbl_perimetro.setItem(row, 0, item_t)
+            for col, chave in (
+                (1, "perimetro_x"),
+                (2, "diferenca_x"),
+                (3, "perimetro_y"),
+                (4, "diferenca_y"),
+                (5, "perimetro"),
+                (6, "diferenca"),
+            ):
+                item = QTableWidgetItem(self._formatar_float(linha.get(chave, 0.0), casas=2))
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                item.setTextAlignment(Qt.AlignCenter)
+                if base:
+                    self._destacar_item_valor_base(item)
+                self.tbl_perimetro.setItem(row, col, item)
+        self._bloquear_eventos = False
+
     def _ponto_alterado(self):
         if self._bloquear_eventos or self._ferramenta is None or self._canvas is None:
             return
         idx = self.cmb_ponto.currentData()
         self._ferramenta.selecionar_ponto(self._canvas, int(idx) if idx is not None else None)
 
-    def _celula_alterada(self, _item):
+    def _celula_alterada(self, item):
         if self._bloquear_eventos:
             return
+        if item is not None and item.column() in (1, 2):
+            self._bloquear_eventos = True
+            self._sincronizar_polar_linha(item.row())
+            self._bloquear_eventos = False
+        if self._ferramenta is not None and self._canvas is not None:
+            self._ferramenta.atualizar_preview_dialog(self._canvas)
+
+    def _celula_polar_alterada(self, item):
+        if self._bloquear_eventos:
+            return
+        if item is None or item.column() not in (1, 2):
+            return
+        self._bloquear_eventos = True
+        self._sincronizar_dxdy_linha_de_polar(item.row())
+        self._bloquear_eventos = False
         if self._ferramenta is not None and self._canvas is not None:
             self._ferramenta.atualizar_preview_dialog(self._canvas)
 
@@ -274,6 +368,7 @@ class GraduarTabelaDialog(QDialog):
             item = self.tbl.item(row, col)
             if item is not None:
                 item.setText(self._formatar_float(valor))
+                self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
@@ -288,9 +383,10 @@ class GraduarTabelaDialog(QDialog):
             if zerar:
                 self._set_valor(row, 1, 0.0)
                 self._set_valor(row, 2, 0.0)
+                self._sincronizar_polar_linha(row)
                 continue
             elif self.chk_incremental.isChecked():
-                fator = row - base_row
+                fator = 1 if row > base_row else (-1 if row < base_row else 0)
                 dx = dx_dir * incremento * fator
                 dy = dy_dir * incremento * fator
             elif row == row_atual:
@@ -302,11 +398,14 @@ class GraduarTabelaDialog(QDialog):
                 self._set_valor(row, 1, dx)
             if abs(dy_dir) > 1e-9:
                 self._set_valor(row, 2, dy)
+            self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
     def _copiar(self):
         self._copiado = self.valores()
+        if self._ferramenta is not None and self._canvas is not None:
+            self._ferramenta.iniciar_copia_graduacao(self._canvas)
 
     def _colar(self):
         dados = getattr(self, "_copiado", None)
@@ -327,13 +426,34 @@ class GraduarTabelaDialog(QDialog):
                 continue
             valor = dados.get(nome_item.text().strip(), {}).get(chave, 0.0)
             self._set_valor(row, col, valor)
+            self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
         self._celula_alterada(None)
+
+    def _preencher_coluna_atual(self, col: int, valor: float):
+        if self._aba_polar_ativa():
+            self._bloquear_eventos = True
+            for row in range(self.tbl_polar.rowCount()):
+                self._set_valor_polar(row, col, valor, casas=2 if col == 1 else 3)
+                self._sincronizar_dxdy_linha_de_polar(row)
+            self._bloquear_eventos = False
+            self._celula_polar_alterada(None)
+            return
+        self._preencher_coluna(col, valor)
+
+    def _aba_polar_ativa(self) -> bool:
+        return getattr(self, "tabs", None) is not None and self.tabs.currentIndex() == 1
+
+    def _aba_alterada(self, idx: int):
+        polar = int(idx) == 1
+        self.btn_zerar_dx.setText("dist" if polar else "DX = 0")
+        self.btn_zerar_dy.setText("âng" if polar else "DY = 0")
 
     def _inverter_coluna(self, col: int):
         self._bloquear_eventos = True
         for row in range(self.tbl.rowCount()):
             self._set_valor(row, col, -self._valor_item(row, col))
+            self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
@@ -359,10 +479,7 @@ class GraduarTabelaDialog(QDialog):
         item = self.tbl.item(row, col)
         if item is None:
             return 0.0
-        try:
-            return float((item.text() or "0").replace(",", "."))
-        except ValueError:
-            return 0.0
+        return numero_decimal_ponto(item.text(), 0.0)
 
     def _set_valor(self, row: int, col: int, valor: float):
         item = self.tbl.item(row, col)
@@ -373,6 +490,46 @@ class GraduarTabelaDialog(QDialog):
         item.setTextAlignment(Qt.AlignCenter)
         if row == self._linha_base():
             self._destacar_item_valor_base(item)
+
+    def _set_valor_polar(self, row: int, col: int, valor: float, *, casas: int = 3):
+        item = self.tbl_polar.item(row, col)
+        if item is None:
+            item = QTableWidgetItem()
+            self.tbl_polar.setItem(row, col, item)
+        item.setText(self._formatar_float(valor, casas=casas))
+        item.setTextAlignment(Qt.AlignCenter)
+        if row == self._linha_base():
+            self._destacar_item_valor_base(item)
+
+    def _sincronizar_polar_linha(self, row: int) -> None:
+        if not (0 <= int(row) < self.tbl.rowCount()):
+            return
+        dx = self._valor_item(row, 1)
+        dy = self._valor_item(row, 2)
+        distancia = hypot(dx, dy)
+        angulo = 0.0 if distancia <= 1e-9 else degrees(atan2(dy, dx)) % 360.0
+        self._set_valor_polar(row, 1, distancia, casas=2)
+        self._set_valor_polar(row, 2, angulo, casas=3)
+
+    def _sincronizar_dxdy_linha_de_polar(self, row: int) -> None:
+        if not (0 <= int(row) < self.tbl_polar.rowCount()):
+            return
+        distancia = self._valor_item_polar(row, 1)
+        angulo = self._valor_item_polar(row, 2)
+        dx = distancia * cos(radians(angulo))
+        dy = distancia * sin(radians(angulo))
+        if abs(dx) < 1e-9:
+            dx = 0.0
+        if abs(dy) < 1e-9:
+            dy = 0.0
+        self._set_valor(row, 1, dx)
+        self._set_valor(row, 2, dy)
+
+    def _valor_item_polar(self, row: int, col: int) -> float:
+        item = self.tbl_polar.item(row, col)
+        if item is None:
+            return 0.0
+        return numero_decimal_ponto(item.text(), 0.0)
 
     @staticmethod
     def _destacar_item_tamanho_base(item: QTableWidgetItem, cor: str):
@@ -394,12 +551,12 @@ class GraduarTabelaDialog(QDialog):
         item.setBackground(QColor("#2b7cd3"))
 
     @staticmethod
-    def _formatar_float(valor) -> str:
+    def _formatar_float(valor, casas: int = 3) -> str:
         try:
             numero = float(valor or 0.0)
         except (TypeError, ValueError):
             numero = 0.0
-        texto = f"{numero:.3f}".rstrip("0").rstrip(".")
+        texto = f"{numero:.{max(0, int(casas))}f}".rstrip("0").rstrip(".")
         return "0" if texto in {"", "-0"} else texto
 
 
@@ -415,13 +572,18 @@ class Ferramenta(FerramentaBase):
         self._molde_idx: int | None = None
         self._molde_chave: str | None = None
         self._ponto_idx: int | None = None
+        self._hover_ponto_idx: int | None = None
         self._pontos_selecionados: set[int] = set()
         self._canvas_observados: set[int] = set()
+        self._modo_copia_graduacao = False
+        self._graduacao_copiada: dict | None = None
+        self._origem_copia: tuple[int, int] | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        self._definir_molde_idx(canvas, self._molde_padrao(canvas))
+        self._definir_molde_idx(canvas, self._molde_selecionado(canvas))
         self._ponto_idx = None
+        self._hover_ponto_idx = None
         self._pontos_selecionados.clear()
         if self._molde_idx is not None and hasattr(canvas, "_selecionados"):
             canvas._selecionados = {self._molde_idx}
@@ -432,12 +594,13 @@ class Ferramenta(FerramentaBase):
         self._restaurar_dialog(canvas, dialog)
         dialog.show()
         dialog.raise_()
-        self._status(canvas, "Tabela: selecione um molde e clique no ponto do contorno para graduar.")
+        self._status(canvas, "Tabela: clique em um molde; depois clique no ponto do contorno para graduar.")
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is not None:
             dialog.hide()
+        self._hover_ponto_idx = None
         if canvas is not None:
             canvas.update()
 
@@ -450,22 +613,44 @@ class Ferramenta(FerramentaBase):
         if event.button() not in (Qt.LeftButton, Qt.RightButton):
             return False
         pos = canvas._ponto_com_snap(event.position()) if hasattr(canvas, "_ponto_com_snap") else QPointF(event.position())
-        molde_idx = self._molde_em_posicao(canvas, pos)
+        alvo = self._molde_e_ponto_em_posicao(canvas, pos)
+        molde_idx = alvo[0] if alvo is not None else self._molde_em_posicao(canvas, pos)
         if molde_idx is None:
-            self._status(canvas, "Tabela: clique sobre um molde ou sobre um ponto do contorno.")
+            self._status(canvas, "Tabela: clique sobre um molde graduável.")
+            event.accept()
+            return True
+        if self._processar_clique_modo_copia(canvas, molde_idx, alvo, pos):
             event.accept()
             return True
         if molde_idx != self._molde_idx:
-            self._definir_molde_idx(canvas, molde_idx)
-            self._ponto_idx = None
-            self._pontos_selecionados.clear()
-            canvas._selecionados = {molde_idx}
-        ponto_idx = self._ponto_mais_proximo(canvas.cena.elementos[molde_idx], pos)
+            self._selecionar_molde(canvas, molde_idx)
+            self._status(canvas, "Tabela: molde selecionado; passe o mouse nos pontos e clique no ponto para graduar.")
+            event.accept()
+            return True
+        if alvo is None:
+            self._selecionar_molde(canvas, molde_idx)
+            self._status(canvas, "Tabela: molde selecionado; clique diretamente em um ponto para graduar.")
+            event.accept()
+            return True
+        ponto_idx = alvo[1] if alvo is not None else self._ponto_mais_proximo(canvas.cena.elementos[molde_idx], pos)
         if ponto_idx is not None:
             self._selecionar_ponto_contorno(canvas, ponto_idx, acumular=acumular)
         self._atualizar_dialog(canvas)
         canvas.update()
         event.accept()
+        return True
+
+    def on_mouse_move(self, canvas, event) -> bool:
+        molde = self._molde_atual(canvas)
+        hover_idx = None
+        if molde is not None:
+            pos = canvas._ponto_com_snap(event.position()) if hasattr(canvas, "_ponto_com_snap") else QPointF(event.position())
+            hover_idx = self._ponto_hover(molde, pos, canvas)
+        if hover_idx == self._hover_ponto_idx:
+            return False
+        self._hover_ponto_idx = hover_idx
+        if hasattr(canvas, "update"):
+            canvas.update()
         return True
 
     def on_paint_overlay(self, canvas, painter):
@@ -475,12 +660,21 @@ class Ferramenta(FerramentaBase):
             return
         pontos = self._pontos_contorno(canvas.cena.elementos[self._molde_idx])
         selecionados = self._pontos_validos_selecionados(len(pontos))
-        if not selecionados:
+        hover_idx = self._hover_ponto_idx if self._hover_ponto_idx is not None and 0 <= int(self._hover_ponto_idx) < len(pontos) else None
+        if not pontos:
             return
         painter.save()
         font = QFont("Arial", 8)
         font.setBold(True)
         painter.setFont(font)
+        for idx, ponto in enumerate(pontos):
+            if idx in selecionados or idx == hover_idx:
+                continue
+            tela = canvas._cena_para_tela(ponto)
+            cor_ponto = QColor("#008cff")
+            painter.setPen(QPen(cor_ponto, 1.6))
+            painter.setBrush(QColor(0, 140, 255, 34))
+            painter.drawEllipse(tela, 5, 5)
         for idx in selecionados:
             tela = canvas._cena_para_tela(pontos[idx])
             ativo = idx == self._ponto_idx
@@ -490,6 +684,19 @@ class Ferramenta(FerramentaBase):
             painter.drawEllipse(tela, 7, 7)
             painter.setPen(QColor("#ffffff"))
             painter.drawText(int(tela.x() + 8), int(tela.y() - 8), str(idx + 1))
+        if hover_idx is not None:
+            idx = int(hover_idx)
+            tela = canvas._cena_para_tela(pontos[idx])
+            cor_hover = QColor("#008cff")
+            painter.setPen(QPen(cor_hover, 3.0))
+            painter.setBrush(QColor(0, 140, 255, 60))
+            painter.drawEllipse(tela, 11, 11)
+            painter.drawLine(QPointF(tela.x() - 14, tela.y()), QPointF(tela.x() - 8, tela.y()))
+            painter.drawLine(QPointF(tela.x() + 8, tela.y()), QPointF(tela.x() + 14, tela.y()))
+            painter.drawLine(QPointF(tela.x(), tela.y() - 14), QPointF(tela.x(), tela.y() - 8))
+            painter.drawLine(QPointF(tela.x(), tela.y() + 8), QPointF(tela.x(), tela.y() + 14))
+            painter.setPen(cor_hover)
+            painter.drawText(int(tela.x() + 13), int(tela.y() - 12), str(idx + 1))
         painter.restore()
 
     def selecionar_ponto(self, canvas, ponto_idx: int | None):
@@ -498,8 +705,27 @@ class Ferramenta(FerramentaBase):
         self._atualizar_dialog(canvas)
         canvas.update()
 
+    def iniciar_copia_graduacao(self, canvas) -> None:
+        self._modo_copia_graduacao = True
+        self._origem_copia = None
+        if self._molde_idx is not None and self._ponto_idx is not None:
+            molde = self._molde_atual(canvas)
+            valores = self._valores_ponto(molde, self._ponto_idx)
+            if not valores:
+                valores = self._obter_dialog(canvas).valores()
+            if valores:
+                self._graduacao_copiada = deepcopy(valores)
+                self._origem_copia = (int(self._molde_idx), int(self._ponto_idx))
+                self._status(canvas, "Tabela: graduação copiada; clique no molde e no ponto de destino para colar.")
+                self._repintar_canvas_agora(canvas)
+                return
+        self._graduacao_copiada = None
+        self._status(canvas, "Tabela: modo copiar; clique no molde e no ponto de origem.")
+        self._repintar_canvas_agora(canvas)
+
     def atualizar_preview_dialog(self, canvas):
         self._salvar_valores_dialog(canvas, registrar_historico=False)
+        self._atualizar_perimetros_dialog(canvas)
         self._repintar_canvas_agora(canvas)
 
     def aplicar_dialog(self, canvas):
@@ -577,10 +803,11 @@ class Ferramenta(FerramentaBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is None or not dialog.isVisible():
             return
-        selecionado = self._molde_padrao(canvas)
+        selecionado = self._molde_selecionado(canvas)
         if selecionado is not None and selecionado != self._molde_idx:
             self._definir_molde_idx(canvas, selecionado)
             self._ponto_idx = None
+            self._hover_ponto_idx = None
             self._pontos_selecionados.clear()
         if not self._molde_atual_corresponde(canvas):
             self._fechar_dialog_molde_indisponivel(canvas)
@@ -589,9 +816,9 @@ class Ferramenta(FerramentaBase):
         if not pontos:
             self._fechar_dialog_molde_indisponivel(canvas)
             return
-        if self._ponto_idx is None or not (0 <= self._ponto_idx < len(pontos)):
-            self._ponto_idx = 0
-        self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos)) or {int(self._ponto_idx)}
+        if self._ponto_idx is not None and not (0 <= self._ponto_idx < len(pontos)):
+            self._ponto_idx = None
+        self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos))
         self._atualizar_dialog(canvas)
         self._repintar_canvas_agora(canvas)
 
@@ -602,6 +829,7 @@ class Ferramenta(FerramentaBase):
         self._molde_idx = None
         self._molde_chave = None
         self._ponto_idx = None
+        self._hover_ponto_idx = None
         self._pontos_selecionados.clear()
         self._status(canvas, "Tabela fechada: o molde não está mais disponível no canvas.")
         if hasattr(canvas, "update"):
@@ -609,14 +837,10 @@ class Ferramenta(FerramentaBase):
 
     def _atualizar_dialog(self, canvas):
         dialog = self._obter_dialog(canvas)
-        if self._molde_atual(canvas) is None:
-            self._definir_molde_idx(canvas, self._molde_padrao(canvas))
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
         if molde is not None:
             self._garantir_tamanhos_no_molde(molde)
-        if self._ponto_idx is None and pontos:
-            self._ponto_idx = 0
         if self._ponto_idx is not None and not self._pontos_selecionados:
             self._pontos_selecionados = {int(self._ponto_idx)}
         if pontos:
@@ -625,17 +849,170 @@ class Ferramenta(FerramentaBase):
         tamanhos = self._tamanhos_molde(molde)
         valores = self._valores_ponto(molde, self._ponto_idx)
         dialog.definir_tamanhos(tamanhos, valores)
+        self._atualizar_perimetros_dialog(canvas)
+
+    def _atualizar_perimetros_dialog(self, canvas) -> None:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is None:
+            return
+        molde = self._molde_atual(canvas)
+        pontos = self._pontos_contorno(molde) if molde else []
+        tamanhos = self._tamanhos_molde(molde)
+        dialog.definir_perimetros(self._linhas_perimetro_graduacao(molde, pontos, tamanhos))
+
+    def _linhas_perimetro_graduacao(self, molde: dict | None, pontos: list[QPointF], tamanhos: list[dict]) -> list[dict]:
+        if not pontos:
+            return []
+        perimetro_base = self._perimetro_pontos(pontos)
+        pontos_cfg = {}
+        if isinstance(molde, dict):
+            tabela = molde.get("graduacao_tabela")
+            if isinstance(tabela, dict) and isinstance(tabela.get("pontos"), dict):
+                pontos_cfg = tabela.get("pontos") or {}
+            elif isinstance(molde.get("graduacao_pontos"), dict):
+                pontos_cfg = molde.get("graduacao_pontos") or {}
+        linhas: list[dict] = []
+        for linha in tamanhos:
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not nome:
+                continue
+            if bool(linha.get("base", False)):
+                perimetro = perimetro_base
+                perimetro_x = perimetro_base
+                perimetro_y = perimetro_base
+            else:
+                pontos_graduados = []
+                pontos_x = []
+                pontos_y = []
+                for idx, ponto in enumerate(pontos):
+                    valores = {}
+                    dados_ponto = pontos_cfg.get(str(idx)) if isinstance(pontos_cfg, dict) else None
+                    if isinstance(dados_ponto, dict) and isinstance(dados_ponto.get("valores"), dict):
+                        valores = dados_ponto["valores"].get(nome, {}) or {}
+                    dx = self._float_seguro(valores.get("dx", 0.0) if isinstance(valores, dict) else 0.0)
+                    dy = self._float_seguro(valores.get("dy", 0.0) if isinstance(valores, dict) else 0.0)
+                    pontos_x.append(QPointF(ponto.x() + dx, ponto.y()))
+                    pontos_y.append(QPointF(ponto.x(), ponto.y() + dy))
+                    pontos_graduados.append(QPointF(ponto.x() + dx, ponto.y() + dy))
+                perimetro_x = self._perimetro_pontos(pontos_x)
+                perimetro_y = self._perimetro_pontos(pontos_y)
+                perimetro = self._perimetro_pontos(pontos_graduados)
+            linhas.append(
+                {
+                    "tamanho": nome,
+                    "cor": linha.get("cor"),
+                    "base": bool(linha.get("base", False)),
+                    "perimetro_x": perimetro_x,
+                    "diferenca_x": perimetro_x - perimetro_base,
+                    "perimetro_y": perimetro_y,
+                    "diferenca_y": perimetro_y - perimetro_base,
+                    "perimetro": perimetro,
+                    "diferenca": perimetro - perimetro_base,
+                }
+            )
+        return linhas
+
+    @staticmethod
+    def _perimetro_pontos(pontos: list[QPointF]) -> float:
+        if len(pontos) < 2:
+            return 0.0
+        total = 0.0
+        for idx, atual in enumerate(pontos):
+            prox = pontos[(idx + 1) % len(pontos)]
+            total += hypot(prox.x() - atual.x(), prox.y() - atual.y())
+        return total
+
+    @staticmethod
+    def _float_seguro(valor) -> float:
+        try:
+            numero = numero_decimal_ponto(valor, 0.0)
+            return numero if isfinite(numero) else 0.0
+        except Exception:
+            return 0.0
 
     def _molde_atual(self, canvas) -> dict | None:
         if self._molde_idx is None or not (0 <= self._molde_idx < len(canvas.cena.elementos)):
             return None
         molde = canvas.cena.elementos[self._molde_idx]
-        return molde if isinstance(molde, dict) and molde.get("molde") else None
+        return molde if self._eh_molde_graduavel(molde) else None
+
+    @staticmethod
+    def _eh_molde_graduavel(elemento) -> bool:
+        if not isinstance(elemento, dict) or not elemento.get("molde"):
+            return False
+        tipo = str(elemento.get("tipo") or "").strip().lower()
+        if tipo and tipo not in {"polyline", "molde"}:
+            return False
+        return True
 
     def _definir_molde_idx(self, canvas, molde_idx: int | None) -> None:
         self._molde_idx = int(molde_idx) if molde_idx is not None else None
         molde = self._molde_atual(canvas)
         self._molde_chave = self._chave_molde(molde) if molde is not None else None
+
+    def _selecionar_molde(self, canvas, molde_idx: int | None) -> None:
+        self._definir_molde_idx(canvas, molde_idx)
+        self._ponto_idx = None
+        self._hover_ponto_idx = None
+        self._pontos_selecionados.clear()
+        if molde_idx is not None and hasattr(canvas, "_selecionados"):
+            canvas._selecionados = {int(molde_idx)}
+        self._atualizar_dialog(canvas)
+        self._repintar_canvas_agora(canvas)
+
+    def _processar_clique_modo_copia(
+        self,
+        canvas,
+        molde_idx: int,
+        alvo: tuple[int, int] | None,
+        pos: QPointF,
+    ) -> bool:
+        if not self._modo_copia_graduacao:
+            return False
+        if molde_idx != self._molde_idx:
+            self._selecionar_molde(canvas, molde_idx)
+            if alvo is None:
+                self._status(canvas, "Tabela: molde selecionado no modo copiar; clique em um ponto.")
+                return True
+        if alvo is None:
+            alvo = self._molde_e_ponto_em_posicao(canvas, pos)
+        if alvo is None or int(alvo[0]) != int(molde_idx):
+            self._status(canvas, "Tabela: clique diretamente em um ponto do molde para copiar ou colar.")
+            return True
+        ponto_idx = int(alvo[1])
+        if self._graduacao_copiada is None:
+            self._selecionar_ponto_contorno(canvas, ponto_idx, acumular=False)
+            valores = self._valores_ponto(canvas.cena.elementos[molde_idx], ponto_idx)
+            if not valores:
+                valores = self._obter_dialog(canvas).valores()
+            self._graduacao_copiada = deepcopy(valores)
+            self._origem_copia = (int(molde_idx), ponto_idx)
+            self._atualizar_dialog(canvas)
+            self._status(canvas, "Tabela: graduação copiada; clique no ponto de destino.")
+            self._repintar_canvas_agora(canvas)
+            return True
+        self._colar_graduacao_copiada(canvas, int(molde_idx), ponto_idx)
+        self._modo_copia_graduacao = False
+        self._status(canvas, "Tabela: graduação colada no ponto de destino.")
+        return True
+
+    def _colar_graduacao_copiada(self, canvas, molde_idx: int, ponto_idx: int) -> None:
+        if self._graduacao_copiada is None:
+            return
+        self._definir_molde_idx(canvas, molde_idx)
+        self._ponto_idx = int(ponto_idx)
+        self._pontos_selecionados = {int(ponto_idx)}
+        self._hover_ponto_idx = None
+        if hasattr(canvas, "_selecionados"):
+            canvas._selecionados = {int(molde_idx)}
+        dialog = self._obter_dialog(canvas)
+        molde = canvas.cena.elementos[int(molde_idx)]
+        self._garantir_tamanhos_no_molde(molde, dialog)
+        dialog.definir_pontos(len(self._pontos_contorno(molde)), int(ponto_idx))
+        dialog.definir_tamanhos(self._tamanhos_molde(molde), deepcopy(self._graduacao_copiada))
+        self._salvar_valores_dialog(canvas, registrar_historico=True)
+        self._atualizar_dialog(canvas)
+        self._repintar_canvas_agora(canvas)
 
     def _selecionar_ponto_contorno(self, canvas, ponto_idx: int, *, acumular: bool) -> None:
         ponto_idx = int(ponto_idx)
@@ -687,7 +1064,7 @@ class Ferramenta(FerramentaBase):
 
     def _molde_selecionado(self, canvas) -> int | None:
         for idx in sorted(getattr(canvas, "_selecionados", set()) or []):
-            if 0 <= int(idx) < len(canvas.cena.elementos) and canvas.cena.elementos[int(idx)].get("molde"):
+            if 0 <= int(idx) < len(canvas.cena.elementos) and self._eh_molde_graduavel(canvas.cena.elementos[int(idx)]):
                 return int(idx)
         return None
 
@@ -696,19 +1073,28 @@ class Ferramenta(FerramentaBase):
         if selecionado is not None:
             return selecionado
         for idx, elemento in enumerate(getattr(canvas.cena, "elementos", []) or []):
-            if isinstance(elemento, dict) and elemento.get("molde"):
+            if self._eh_molde_graduavel(elemento):
                 return int(idx)
         return None
 
     def _molde_em_posicao(self, canvas, pos: QPointF) -> int | None:
+        alvo = self._molde_e_ponto_em_posicao(canvas, pos)
+        if alvo is not None:
+            return alvo[0]
+        idx_area = self._molde_por_area_em_posicao(canvas, pos)
+        if idx_area is not None:
+            return idx_area
+        idx_segmento = self._molde_por_segmento_em_posicao(canvas, pos)
+        if idx_segmento is not None:
+            return idx_segmento
         if hasattr(canvas, "_indice_molde_em_ponto"):
             idx = canvas._indice_molde_em_ponto(pos)
-            if idx is not None:
+            if idx is not None and 0 <= int(idx) < len(canvas.cena.elementos) and self._eh_molde_graduavel(canvas.cena.elementos[int(idx)]):
                 return int(idx)
         melhor: tuple[float, int] | None = None
         tolerancia = max(0.15, 16.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001))
         for idx, el in enumerate(canvas.cena.elementos):
-            if not isinstance(el, dict) or not el.get("molde"):
+            if not self._eh_molde_graduavel(el):
                 continue
             ponto_idx = self._ponto_mais_proximo(el, pos)
             if ponto_idx is None:
@@ -718,6 +1104,59 @@ class Ferramenta(FerramentaBase):
                 melhor = (dist, idx)
         return melhor[1] if melhor else None
 
+    def _molde_e_ponto_em_posicao(self, canvas, pos: QPointF) -> tuple[int, int] | None:
+        melhor: tuple[float, int, int] | None = None
+        tolerancia = max(0.18, 24.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001))
+        for idx, el in enumerate(getattr(canvas.cena, "elementos", []) or []):
+            if not self._eh_molde_graduavel(el):
+                continue
+            pontos = self._pontos_contorno(el)
+            if not pontos:
+                continue
+            dist, ponto_idx = min((self._dist(ponto, pos), p_idx) for p_idx, ponto in enumerate(pontos))
+            if dist <= tolerancia and (melhor is None or dist < melhor[0]):
+                melhor = (dist, int(idx), int(ponto_idx))
+        if melhor is not None:
+            return melhor[1], melhor[2]
+        return None
+
+    def _molde_por_area_em_posicao(self, canvas, pos: QPointF) -> int | None:
+        elementos = getattr(canvas.cena, "elementos", []) or []
+        for idx in range(len(elementos) - 1, -1, -1):
+            el = elementos[idx]
+            if not self._eh_molde_graduavel(el):
+                continue
+            pontos = self._pontos_contorno(el)
+            if len(pontos) < 3:
+                continue
+            path = QPainterPath(pontos[0])
+            for ponto in pontos[1:]:
+                path.lineTo(ponto)
+            path.closeSubpath()
+            if path.contains(pos):
+                return int(idx)
+        return None
+
+    def _molde_por_segmento_em_posicao(self, canvas, pos: QPointF) -> int | None:
+        melhor: tuple[float, int] | None = None
+        tolerancia = max(0.18, 18.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001))
+        elementos = getattr(canvas.cena, "elementos", []) or []
+        for idx in range(len(elementos) - 1, -1, -1):
+            el = elementos[idx]
+            if not self._eh_molde_graduavel(el):
+                continue
+            pontos = self._pontos_contorno(el)
+            if len(pontos) < 2:
+                continue
+            segmentos = list(zip(pontos, pontos[1:]))
+            if len(pontos) > 2:
+                segmentos.append((pontos[-1], pontos[0]))
+            for a, b in segmentos:
+                dist = self._distancia_ponto_segmento(pos, a, b)
+                if dist <= tolerancia and (melhor is None or dist < melhor[0]):
+                    melhor = (dist, int(idx))
+        return melhor[1] if melhor is not None else None
+
     def _ponto_mais_proximo(self, molde: dict, pos: QPointF) -> int | None:
         pontos = self._pontos_contorno(molde)
         if not pontos:
@@ -725,10 +1164,30 @@ class Ferramenta(FerramentaBase):
         distancias = [(self._dist(ponto, pos), idx) for idx, ponto in enumerate(pontos)]
         return min(distancias, key=lambda item: item[0])[1]
 
+    def _ponto_hover(self, molde: dict, pos: QPointF, canvas) -> int | None:
+        pontos = self._pontos_contorno(molde)
+        if not pontos:
+            return None
+        tolerancia = max(0.12, min(0.6, 14.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)))
+        dist, idx = min((self._dist(ponto, pos), idx) for idx, ponto in enumerate(pontos))
+        return int(idx) if dist <= tolerancia else None
+
     def _pontos_contorno(self, molde: dict | None) -> list[QPointF]:
-        if not isinstance(molde, dict):
+        if not self._eh_molde_graduavel(molde):
             return []
-        origem = molde.get("controle_cantos") if isinstance(molde.get("controle_cantos"), list) else molde.get("pontos")
+        origem = None
+        for chave in (
+            "pontos_controle_principais",
+            "controle_cantos",
+            "pontos_graduacao",
+            "pontos_controle_curva",
+            "pontos_controle",
+            "pontos",
+        ):
+            valor = molde.get(chave)
+            if isinstance(valor, list) and valor:
+                origem = valor
+                break
         pontos: list[QPointF] = []
         for item in origem or []:
             ponto = self._ponto_qt(item)
@@ -742,11 +1201,8 @@ class Ferramenta(FerramentaBase):
         linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
         if isinstance(linhas, list) and linhas:
             return [dict(l) for l in linhas if isinstance(l, dict) and l.get("ativo", True)]
-        return [
-            {"tamanho": "P", "cor": "#c87575", "base": False},
-            {"tamanho": "M", "cor": "#d60b0b", "base": True},
-            {"tamanho": "G", "cor": "#5d95b7", "base": False},
-        ]
+        _grade_nome, linhas_padrao = grade_graduacao_padrao()
+        return [dict(linha) for linha in linhas_padrao]
 
     def _garantir_tamanhos_no_molde(self, molde: dict, dialog: GraduarTabelaDialog | None = None) -> None:
         linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
@@ -764,7 +1220,8 @@ class Ferramenta(FerramentaBase):
             for linha in linhas_normalizadas
             if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
         ]
-        molde.setdefault("graduacao_grade_nome", "P-G(M)")
+        grade_nome, _linhas_padrao = grade_graduacao_padrao()
+        molde.setdefault("graduacao_grade_nome", grade_nome)
 
     def _valores_ponto(self, molde: dict | None, ponto_idx: int | None) -> dict[str, dict]:
         if not isinstance(molde, dict) or ponto_idx is None:
@@ -825,3 +1282,17 @@ class Ferramenta(FerramentaBase):
     @staticmethod
     def _dist(a: QPointF, b: QPointF) -> float:
         return hypot(a.x() - b.x(), a.y() - b.y())
+
+    @staticmethod
+    def _distancia_ponto_segmento(ponto: QPointF, a: QPointF, b: QPointF) -> float:
+        ax, ay = float(a.x()), float(a.y())
+        bx, by = float(b.x()), float(b.y())
+        px, py = float(ponto.x()), float(ponto.y())
+        dx, dy = bx - ax, by - ay
+        comprimento2 = dx * dx + dy * dy
+        if comprimento2 <= 1e-12:
+            return hypot(px - ax, py - ay)
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / comprimento2))
+        proj_x = ax + t * dx
+        proj_y = ay + t * dy
+        return hypot(px - proj_x, py - proj_y)
