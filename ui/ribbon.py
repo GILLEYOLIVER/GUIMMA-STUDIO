@@ -381,15 +381,15 @@ class ColorControlWidget(QFrame):
 
     def _selecionar_estilo(self, estilo: str):
         self._estilo = estilo
-        self.estilo_changed.emit(self.valor())
+        self.estilo_changed.emit({"estilo": self._estilo})
 
     def _selecionar_espessura(self, espessura: float):
         self._espessura = espessura
-        self.estilo_changed.emit(self.valor())
+        self.estilo_changed.emit({"espessura": self._espessura})
 
     def _selecionar_amplitude(self, amplitude: float):
         self._amplitude = max(0.2, float(amplitude))
-        self.estilo_changed.emit(self.valor())
+        self.estilo_changed.emit({"amplitude": self._amplitude})
 
     def _adicionar_acao_estilo(self, estilo: str, titulo: str):
         self._adicionar_acao_menu(
@@ -519,7 +519,7 @@ class ColorControlWidget(QFrame):
             return
         self._cor = cor.name()
         self._atualizar_preview_cor()
-        self.estilo_changed.emit(self.valor())
+        self.estilo_changed.emit({"cor": self._cor})
 
     def _atualizar_preview_cor(self):
         tema = self._tema

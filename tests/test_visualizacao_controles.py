@@ -17,6 +17,7 @@ else:
     from PySide6.QtWidgets import QApplication
 
     from canvas.cena import CenaDocumento
+    from canvas.snap import SnapResult
     from canvas.visualizacao import VisualizacaoCanvas
 
 
@@ -169,6 +170,100 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         canvas._finalizar_zoom_interativo()
 
         self.assertFalse(canvas._zoom_interativo)
+
+    def test_espessura_aplica_em_molde_selecionado_e_tamanhos_graduados(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "cor": "#ffff00",
+            "espessura": 1.0,
+            "espessura_graduacao": 1.0,
+        }
+        canvas.cena.elementos.append(molde)
+        canvas._selecionados = {0}
+
+        alterou = canvas.aplicar_estilo_linha_selecionados({"espessura": 4.0})
+
+        self.assertTrue(alterou)
+        self.assertEqual(molde["espessura"], 4.0)
+        self.assertEqual(molde["espessura_graduacao"], 4.0)
+        self.assertEqual(molde["cor"], "#ffff00")
+
+    def test_estilo_em_selecionado_nao_altera_cor_de_molde(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "cor": "#ffff00",
+        }
+        canvas.cena.elementos.append(molde)
+        canvas._selecionados = {0}
+
+        alterou = canvas.aplicar_estilo_linha_selecionados({"cor": "#ff0000", "espessura": 3.0})
+
+        self.assertTrue(alterou)
+        self.assertEqual(molde["cor"], "#ffff00")
+        self.assertEqual(molde["espessura"], 3.0)
+        self.assertEqual(molde["espessura_graduacao"], 3.0)
+
+    def test_espessura_aplica_em_linha_selecionada(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        linha = {
+            "tipo": "polyline",
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "espessura": 1.0,
+        }
+        canvas.cena.elementos.append(linha)
+        canvas._selecionados = {0}
+
+        alterou = canvas.aplicar_estilo_linha_selecionados({"espessura": 5.0})
+
+        self.assertTrue(alterou)
+        self.assertEqual(linha["espessura"], 5.0)
+        self.assertNotIn("espessura_graduacao", linha)
+
+    def test_alternar_graduacao_altera_visualizacao_dos_moldes(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+        }
+        canvas.cena.elementos.append(molde)
+
+        self.assertTrue(canvas.set_graduacao_visivel(False))
+        self.assertFalse(molde["mostrar_graduacao"])
+        self.assertTrue(canvas.set_graduacao_visivel(True))
+        self.assertTrue(molde["mostrar_graduacao"])
+
+    def test_snap_sobre_graduacao_visivel_nao_deve_sobrepor_tamanhos(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        valores_g = {
+            str(idx): {"valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 1.0, "dy": 0.0}}}
+            for idx in range(4)
+        }
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True},
+                    {"ativo": True, "tamanho": "G", "base": False},
+                ],
+                "graduacao_tabela": {"pontos": valores_g},
+            }
+        )
+
+        sobre_tamanho = SnapResult(QPointF(11.0, 2.5), "borda", 0.0, 0)
+        sobre_base = SnapResult(QPointF(0.0, 2.5), "borda", 0.0, 0)
+
+        self.assertTrue(canvas._snap_sobre_graduacao_visivel(sobre_tamanho))
+        self.assertFalse(canvas._snap_sobre_graduacao_visivel(sobre_base))
 
 
 if __name__ == "__main__":
