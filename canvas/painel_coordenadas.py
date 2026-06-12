@@ -5,7 +5,7 @@ from math import atan2, degrees, sqrt
 from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from core.formatacao import formatar_numero
+from core.formatacao import formatar_numero, normalizar_decimal_ponto
 from ui.posicao_janelas import salvar_posicao
 
 
@@ -137,7 +137,10 @@ class PainelCoordenadas(QFrame):
         self.limpar.emit()
 
     def _parse(self, txt: str) -> float | None:
-        txt = txt.strip().replace(",", ".")
+        try:
+            txt = normalizar_decimal_ponto(txt)
+        except Exception:
+            return None
         if not txt:
             return None
         try:

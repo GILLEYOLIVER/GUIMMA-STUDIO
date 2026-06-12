@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -190,10 +191,7 @@ class InserirPiqueDialog(QDialog):
 
     @staticmethod
     def _float(texto: str, padrao: float) -> float:
-        try:
-            return float(str(texto).strip().replace(",", "."))
-        except Exception:
-            return padrao
+        return numero_decimal_ponto(texto, padrao)
 
 
 class _PiquePreview(QFrame):

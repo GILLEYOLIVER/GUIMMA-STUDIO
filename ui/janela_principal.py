@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 from canvas.cena import CenaDocumento
 from canvas.workspace import AreaDocumentoWidget
 from config import EXTENSAO_PROJETO, ICONS_DIR
+from core.formatacao import numero_decimal_ponto
 from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
@@ -63,6 +64,7 @@ from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
 from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
+from ui.hover_style import folha_estilo_hover_global
 from ui.ribbon import RibbonWidget
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
@@ -594,7 +596,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _estilo_menu_popup_topo(self) -> str:
         tema = self._tema_interface()
-        return (
+        return folha_estilo_hover_global() + (
             f"QMenu {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; padding:4px; }}"
             f"QMenu::item {{ color:{tema['texto']}; padding:6px 12px; }}"
             f"QMenu::item:selected {{ background:{tema['hover_menu']}; color:{tema['primaria_escura']}; }}"
@@ -746,6 +748,8 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
         tema = self._tema_interface()
         self.setStyleSheet(
+            folha_estilo_hover_global()
+            +
             f"""
             QMainWindow {{ background: {tema['janela']}; }}
             QWidget {{
@@ -2333,7 +2337,7 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _estilo_menu_backstage(self) -> str:
         tema = self._tema_interface()
-        return (
+        return folha_estilo_hover_global() + (
             f"QMenu {{ background:{tema['painel']}; color:{tema['texto']}; border:1px solid {tema['borda']}; padding:3px; }}"
             f"QMenu::item {{ color:{tema['texto']}; padding:7px 22px 7px 18px; min-width:220px; }}"
             f"QMenu::item:selected {{ background:{tema['hover_menu']}; color:{tema['primaria_escura']}; }}"
@@ -2521,15 +2525,9 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         if dialog.exec() != QDialog.Accepted:
             return
-        try:
-            mins = int(float(edt_auto.text().strip().replace(",", ".")))
-        except Exception:
-            mins = 1
+        mins = int(numero_decimal_ponto(edt_auto.text(), 1.0))
         def _float_val(edt: QLineEdit, default: float) -> float:
-            try:
-                return float(edt.text().strip().replace(",", "."))
-            except Exception:
-                return default
+            return numero_decimal_ponto(edt.text(), default)
         self._opcoes_app["auto_recuperacao_min"] = max(1, mins)
         self._opcoes_app["texto_tamanho_cm"] = _float_val(edt_texto_tam, 1.0)
         self._opcoes_app["usar_truetype"] = chk_truetype.isChecked()
@@ -6944,6 +6942,8 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _abrir_menu_unidade_medida_em(self, gx: int, gy: int):
         menu = QMenu(self)
         menu.setStyleSheet(
+            folha_estilo_hover_global()
+            +
             "QMenu { background:#ffffff; color:#111111; border:1px solid #cfd6de; }"
             "QMenu::item { color:#111111; padding:6px 16px; }"
             "QMenu::item:selected { background:#e9f3ff; color:#0b4f82; }"
@@ -7184,11 +7184,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._painel_coordenadas_pos_global = None
 
     def _assinatura_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
+        payload = {
+            "elementos": area.canvas.elementos_para_salvar(),
+        }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
     def _assinatura_estado_canvas(self, area: AreaDocumentoWidget) -> str:
-        payload = self._capturar_estado_documento_canvas(area)
+        payload = {
+            "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
+            "zoom": float(area.canvas.zoom),
+            "origem_cena": {
+                "x": float(area.canvas.origem_cena.x()),
+                "y": float(area.canvas.origem_cena.y()),
+            },
+            "snap_ativo": bool(area.canvas._snap_ativo),
+        }
         return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
 
@@ -7204,6 +7214,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         area.setProperty("assinatura_salva_conteudo", self._assinatura_canvas(area))
         area.setProperty("assinatura_salva_estado", self._assinatura_estado_canvas(area))
 
+    def _marcar_estado_area_como_salvo(self, area: AreaDocumentoWidget):
+        area.setProperty("assinatura_salva_estado", self._assinatura_estado_canvas(area))
+
     def _marcar_documentos_como_salvos(self):
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
@@ -7213,12 +7226,17 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _salvar_estado_projeto_silenciosamente(self):
         if self._arquivo_atual is None:
             return
+        if self._ha_alteracoes_nao_salvas():
+            return
         if not self._ha_alteracoes_estado_nao_salvas():
             return
         try:
             self._sincronizar_documentos_canvas_no_projeto()
             GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
-            self._marcar_documentos_como_salvos()
+            for i in range(self.abas_documentos.count()):
+                area = self.abas_documentos.widget(i)
+                if isinstance(area, AreaDocumentoWidget):
+                    self._marcar_estado_area_como_salvo(area)
         except Exception:
             pass
 

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.formatacao import numero_decimal_ponto
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -155,11 +156,11 @@ class ManipulacaoRapidaDialog(QDialog):
         raiz.addLayout(linha)
 
     def valor_float(self, campo: QLineEdit, padrao: float) -> float:
-        try:
-            return float(campo.text().strip().replace(",", "."))
-        except Exception:
+        valor = numero_decimal_ponto(campo.text(), float(padrao))
+        if "," in str(campo.text() or ""):
             campo.setText(self._fmt(padrao))
             return float(padrao)
+        return valor
 
     @staticmethod
     def _fmt(valor: float) -> str:

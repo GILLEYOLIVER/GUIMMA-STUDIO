@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import cos, pi, sin, sqrt
+from math import atan2, cos, degrees, pi, radians, sin, sqrt
 from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
@@ -132,6 +132,7 @@ class Ferramenta(FerramentaBase):
     COR_NO_ATIVO = "#ffaa00"
     COR_SNAP = "#7df9ff"
     COR_FECHAR = "#00ff88"
+    TIPOS_SNAP_EXATO = {"nó", "no", "controle", "controle principal", "controle auxiliar", "ponto médio", "centro", "borda", "coord", "interseção"}
 
     def __init__(self):
         super().__init__()
@@ -281,6 +282,42 @@ class Ferramenta(FerramentaBase):
                 pass
         canvas._curva_snap_preview = None
         return QPointF(pos)
+
+    def _snap_angular_curva(self, canvas, destino: QPointF) -> QPointF:
+        if not bool(getattr(canvas, "_snap_ativo", False)):
+            return QPointF(destino)
+        nos = getattr(canvas, "_curva_np_nos", []) or []
+        if not nos:
+            return QPointF(destino)
+        snap_res = getattr(canvas, "_snap_resultado", None)
+        tipo_snap = str(getattr(snap_res, "tipo", "") or "").strip().lower()
+        if tipo_snap in self.TIPOS_SNAP_EXATO:
+            return QPointF(destino)
+        origem = QPointF(nos[-1])
+        dx = destino.x() - origem.x()
+        dy = destino.y() - origem.y()
+        dist = sqrt((dx * dx) + (dy * dy))
+        if dist <= 0.0001:
+            return QPointF(destino)
+        ang = degrees(atan2(-dy, dx))
+        candidatos = set()
+        for passo in (float(getattr(canvas, "_snap_angular_passo", 45.0) or 45.0), 30.0, 45.0):
+            passo = max(1.0, passo)
+            for mult in range(int(360 // passo) + 2):
+                candidatos.add(round(mult * passo, 6))
+        melhor = min(candidatos, key=lambda a: self._dist_angular(ang, a))
+        tolerancia = max(1.8, min(5.0, float(getattr(canvas, "_snap_angular_passo", 45.0) or 45.0) * 0.12))
+        if self._dist_angular(ang, melhor) > tolerancia:
+            return QPointF(destino)
+        return QPointF(
+            origem.x() + (dist * cos(radians(melhor))),
+            origem.y() - (dist * sin(radians(melhor))),
+        )
+
+    @staticmethod
+    def _dist_angular(a: float, b: float) -> float:
+        diff = abs((float(a) - float(b)) % 360.0)
+        return min(diff, 360.0 - diff)
 
     @staticmethod
     def _dist(a: QPointF, b: QPointF) -> float:
@@ -955,6 +992,7 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         self._garantir_estado(canvas)
         pos = self._snap(canvas, event.position())
+        pos = self._snap_angular_curva(canvas, pos)
 
         # Botão direito finaliza
         if event.button() == Qt.RightButton:
@@ -1024,6 +1062,7 @@ class Ferramenta(FerramentaBase):
     def on_mouse_move(self, canvas, event) -> bool:
         self._garantir_estado(canvas)
         pos = self._snap(canvas, event.position())
+        pos = self._snap_angular_curva(canvas, pos)
 
         # Atualizar estado de fechamento
         fechando = False

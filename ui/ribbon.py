@@ -28,6 +28,7 @@ from shiboken6 import isValid as _qt_objeto_valido
 
 from config import ICONS_DIR
 from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
+from ui.hover_style import aplicar_hover_menu, folha_estilo_hover_global
 
 
 @dataclass(slots=True)
@@ -208,6 +209,7 @@ class RibbonButton(QToolButton):
 
     def _abrir_menu_contexto(self, pos: QPoint):
         menu = QMenu(self)
+        aplicar_hover_menu(menu)
         adicionar = menu.addAction("Adicionar à linha Usuários")
         acao = menu.exec(self.mapToGlobal(pos))
         if acao == adicionar:
@@ -360,10 +362,11 @@ class ColorControlWidget(QFrame):
             }}
             """
         )
-        menu_style = (
+        menu_style = folha_estilo_hover_global() + (
             f"QMenu {{ background:{tema.get('painel', '#ffffff')}; color:{tema.get('texto', '#111111')}; "
             f"border:1px solid {tema.get('borda', '#d1d7de')}; }}"
-            f"QMenu::item:selected {{ background:{tema.get('hover_menu', tema.get('hover', '#eef5fd'))}; }}"
+            f"QMenu::item:selected {{ background:{tema.get('hover_menu', tema.get('hover', '#eef5fd'))}; "
+            f"color:{tema.get('primaria_escura', '#1f5f99')}; }}"
         )
         self._menu_estilo.setStyleSheet(menu_style)
         self._menu_espessura.setStyleSheet(menu_style)

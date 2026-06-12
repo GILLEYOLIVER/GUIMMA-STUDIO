@@ -73,6 +73,9 @@ class _FakeCanvasCriacaoMolde:
     def __init__(self):
         self.cena = SimpleNamespace(elementos=[])
         self._selecionados = {99}
+        self._linha_espessura = 5.0
+        self._linha_estilo = "solid"
+        self._linha_amplitude = 1.0
 
     def _registrar_historico(self):
         pass
@@ -104,6 +107,21 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertIn((5.0, 4.0), auxiliares)
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
+
+    def test_enriquecer_molde_usa_espessura_atual_e_todos_pontos_como_graduaveis(self):
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._canvas = _FakeCanvasCriacaoMolde()
+        pontos = [(0.0, 0.0), (4.0, 0.5), (8.0, 0.0), (8.0, 4.0), (0.0, 4.0), (0.0, 0.0)]
+        molde = {"tipo": "molde", "pontos": pontos, "preservar_todos_vertices_controle": True}
+
+        ferramenta._enriquecer_metadados_molde(molde)
+
+        self.assertEqual(molde["espessura"], 5.0)
+        self.assertEqual(molde["espessura_graduacao"], 5.0)
+        self.assertEqual(
+            molde["pontos_graduacao"],
+            [{"x": float(x), "y": float(y)} for x, y in pontos[:-1]],
+        )
 
     def test_auxiliares_detectados_na_curva_preservam_trecho_sem_ponto_extra(self):
         ferramenta = FerramentaExtrairMolde()

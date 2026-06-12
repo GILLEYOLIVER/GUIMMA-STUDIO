@@ -109,7 +109,38 @@ class RetanguloToolTestCase(unittest.TestCase):
         self.assertIn((5.0, 0.0), auxiliares)
         self.assertIn((0.0, 2.0), auxiliares)
         self.assertEqual(molde["pontos_auxiliares"], [{"x": x, "y": y} for x, y in auxiliares])
+        self.assertEqual([linha["tamanho"] for linha in molde["graduacao_tamanhos"]], ["P", "M", "G"])
+        self.assertEqual([linha["cor"] for linha in molde["graduacao_tamanhos"]], ["#ffff00", "#2b7cd3", "#ff8c00"])
+        self.assertTrue(molde["graduacao_tamanhos"][1]["base"])
         self.assertEqual(canvas._selecionados, set())
+
+    def test_retangulo_molde_herda_grade_de_molde_existente_no_canvas(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0), (20.0, 0.0)],
+                "graduacao_grade_nome": "36-44(40)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "36", "cor": "#3355ff", "base": False},
+                    {"ativo": True, "tamanho": "40", "cor": "#22aa88", "base": True},
+                    {"ativo": True, "tamanho": "44", "cor": "#dd7733", "base": False},
+                ],
+                "graduacao_tamanhos_ativos": ["36", "40", "44"],
+            }
+        )
+        ferramenta = FerramentaRetangulo()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 4.0))))
+
+        novo = canvas.cena.elementos[-1]
+        self.assertEqual(novo["graduacao_grade_nome"], "36-44(40)")
+        self.assertEqual([linha["tamanho"] for linha in novo["graduacao_tamanhos"]], ["36", "40", "44"])
+        self.assertEqual([linha["cor"] for linha in novo["graduacao_tamanhos"]], ["#3355ff", "#22aa88", "#dd7733"])
+        self.assertEqual(novo["graduacao_tamanhos_ativos"], ["36", "40", "44"])
 
     def test_retangulo_desenho_quando_criar_molde_desmarcado(self):
         canvas = _FakeCanvas()

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import ICONS_DIR
+from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -202,10 +203,7 @@ class AjusteAutomaticoDialog(QDialog):
         return txt or "0"
 
     def _ler_numero(self, campo: QLineEdit, padrao: float, minimo: float, maximo: float) -> float:
-        try:
-            valor = float(str(campo.text()).strip().replace(",", "."))
-        except Exception:
-            valor = float(padrao)
+        valor = numero_decimal_ponto(campo.text(), float(padrao))
         valor = max(float(minimo), min(float(maximo), valor))
         return valor
 

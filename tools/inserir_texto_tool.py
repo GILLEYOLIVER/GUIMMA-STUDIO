@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from canvas.visualizacao_texto_nativo_patch import aplicar_patch_texto_nativo_canvas
-from core.formatacao import formatar_numero
+from core.formatacao import formatar_numero, normalizar_decimal_ponto, numero_decimal_ponto
 from tools.medicao_utils import mensagem_status
 from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
 from tools.tool_base import FerramentaBase
@@ -51,10 +51,6 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
     def _formatar_numero(self, value: float) -> str:
         valor = round(float(value), 2)
         texto = formatar_numero(valor, 2)
-        if texto.startswith("0.") and valor > 0:
-            texto = texto[1:]
-        elif texto.startswith("-0."):
-            texto = "-" + texto[2:]
         if not texto or texto == "-":
             texto = "0"
         return texto
@@ -64,24 +60,15 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
         return f"{texto}{self._sufixo_limpo}" if self._sufixo_limpo else texto
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
-        texto = str(text or "").lower().replace("cm", "").replace("°", "").replace("º", "").strip().replace(",", ".")
-        if texto.startswith("."):
-            texto = "0" + texto
-        elif texto.startswith("-."):
-            texto = "-0" + texto[1:]
-        try:
-            return float(texto)
-        except Exception:
-            return float(self.value())
+        return numero_decimal_ponto(str(text or "").lower(), float(self.value()), ("cm", "°", "º"))
 
     def validate(self, text: str, pos: int):  # noqa: N802
-        texto = str(text or "").lower().replace("cm", "").replace("°", "").replace("º", "").strip().replace(",", ".")
-        if texto in {"", ".", "-", "-."}:
+        try:
+            texto = normalizar_decimal_ponto(str(text or "").lower(), ("cm", "°", "º"))
+        except Exception:
+            return QValidator.Invalid, text, pos
+        if texto in {"", "+", "-", "0.", "+0.", "-0."}:
             return QValidator.Intermediate, text, pos
-        if texto.startswith("."):
-            texto = "0" + texto
-        elif texto.startswith("-."):
-            texto = "-0" + texto[1:]
         try:
             float(texto)
         except Exception:

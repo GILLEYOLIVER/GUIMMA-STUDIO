@@ -6,6 +6,7 @@ from uuid import uuid4
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPen
 
+from core.graduacao import aplicar_grade_graduacao_referencia_canvas
 from core.geometry_bridge import create_mold_payload
 from tools.tool_base import FerramentaBase
 
@@ -201,8 +202,7 @@ class Ferramenta(FerramentaBase):
             controle_cantos = self._cantos_horarios_retangulo(p1, p3)
             controle_auxiliares = self._pontos_auxiliares_entre_cantos(controle_cantos)
             pontos = [*controle_cantos, controle_cantos[0]]
-            canvas.cena.elementos.append(
-                {
+            novo_molde = {
                     "tipo": "polyline",
                     "pontos": pontos,
                     "cor": canvas._linha_cor,
@@ -232,8 +232,9 @@ class Ferramenta(FerramentaBase):
                     "controle_auxiliares": controle_auxiliares,
                     "pontos_controle_principais": [{"x": float(x), "y": float(y)} for x, y in controle_cantos],
                     "pontos_auxiliares": [{"x": float(x), "y": float(y)} for x, y in controle_auxiliares],
-                }
-            )
+            }
+            aplicar_grade_graduacao_referencia_canvas(novo_molde, canvas, sobrescrever=True)
+            canvas.cena.elementos.append(novo_molde)
             canvas._selecionados = set()
         else:
             p2 = QPointF(p3.x(), p1.y())
