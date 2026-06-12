@@ -12,6 +12,10 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 
 - **Curva**: ao fechar uma figura em modo curva, o fechamento passa a ser suave; o último ponto não deve quebrar a curva formando quina indevida.
 - **Extrair Molde**: ao extrair um molde, pontos principais devem representar nós reais, emendas ou encontros de segmentos. Curvas continuam sustentadas por pontos auxiliares, evitando excesso de pontos principais no molde extraído.
+- **Graduação via Tabela**: a tabela lê os tamanhos, nomes, cores e tamanho base do molde ativo. Clique normal seleciona apenas um ponto do contorno; `Ctrl + clique` acumula vários pontos para aplicar a mesma graduação. As setas alteram somente o eixo correspondente, preservando a graduação já existente no outro eixo.
+- **Remover Graduação**: remove toda a graduação apenas do molde clicado, sem afetar outros moldes.
+- **Giro e fio**: duplo clique na borda ou no fio alinha o molde a 0°/90° quando a opção de rotacionar com clique duplo está ativa. A ferramenta Girar permite ângulo livre com ímã leve nos ângulos usuais.
+- **Propriedades dos moldes**: a janela abre centralizada e a grade de tamanhos sincroniza imediatamente com as ferramentas que dependem dos tamanhos do molde.
 - **Prévia/sombra do molde original**: sombras e prévias devem respeitar os controles atuais do molde e não exibir pontos antigos que já não fazem parte da estrutura oficial.
 - **Simplificar Contorno**: remove pontos redundantes da amostragem do contorno, mas mantém controles principais e auxiliares que definem a forma.
 
@@ -29,14 +33,14 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 - **Simplificar Contorno** (`simplificar_contorno`): simplifica contornos selecionados ou clicados, removendo amostras redundantes e preservando controles oficiais.
 - **Redefinir Perímetro** (`redefinir_perimetro`): ajusta o perímetro preservando controles e auxiliares do molde.
 - **Elemento Paralelo** (`elemento_paralelo`): cria linhas ou contornos paralelos a partir de clique ou seleção.
-- **Girar** (`girar`): gira elementos selecionados por ângulo mantendo controles, piques, fio e dados do molde.
+- **Girar** (`girar`): gira elementos selecionados por ângulo mantendo controles, piques, fio e dados do molde. Na ferramenta de giro, o ângulo é livre e tem apenas um ímã leve nos ângulos mais usados.
 - **Espelhar** (`espelhar`): espelha elementos ou moldes preservando controles e metadados.
 - **Dobrar** (`dobrar`): dobra moldes como papel por reta, meio ou linha interna, preservando o original.
 - **Desdobrar** (`desdobrar`): reabre dobra preservada usando eixo original, linha interna, perímetro ou reta manual.
 - **Sentido Fio** (`sentido_fio`): define o fio do molde por dois pontos ou por ângulo.
 - **Costura** (`costura`): cria e edita margens/acabamentos de costura no molde.
 - **Remover Costura** (`remover_costura`): remove margens de costura aplicadas.
-- **Propriedades** (`propriedades`): abre a janela de propriedades do molde para editar nome, fio, numeração, grade e exibição.
+- **Propriedades** (`propriedades`): abre a janela de propriedades do molde para editar nome, fio, numeração, grade e exibição. A janela abre centralizada; alterações na grade de tamanhos, base e cores são propagadas para as ferramentas de graduação.
 - **Auto Ajuste** (`ajuste_automatico`): reposiciona automaticamente textos, fio e informações visuais dos moldes.
 - **Ponto de Restauração** (`ponto_restauracao`) e **Restaurar** (`restaurar_copia`): salvam e restauram cópias internas de segurança do molde.
 
@@ -156,13 +160,21 @@ Estas ferramentas já possuem comportamento implementado e devem ser usadas como
 ## Aba Graduação
 
 ### Graduar
-- **Tabela** (`tabela`): Gerencia regras e tabelas de graduação.
+- **Tabela** (`tabela`): gradua pontos do contorno via tabela `DX/DY`.
+  - A janela sempre usa os tamanhos, nomes, cores e tamanho base gravados no molde atual.
+  - Clique normal em um ponto do contorno seleciona somente aquele ponto para graduação.
+  - `Ctrl + clique` acumula ou remove pontos da seleção, permitindo graduar vários pontos juntos sem fechar a janela.
+  - Os valores aplicados pela tabela afetam apenas os pontos selecionados.
+  - As setas horizontais alteram `DX`; as setas verticais alteram `DY`. Usar uma seta de um eixo não apaga os valores já definidos no outro eixo.
+  - O campo incremental aceita medidas limpas, como `1 cm`, `1.1 cm`, `1.78 cm` ou `2 cm`, sem zeros desnecessários.
+  - A linha do tamanho base preserva a cor do tamanho; o destaque azul aparece apenas nas células numéricas `DX/DY` da base.
+  - Se o molde for fechado/removido do canvas, a janela da Tabela fecha automaticamente.
 - **Mouse** (`mouse`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Regras** (`regras`): Gerencia regras e tabelas de graduação.
 - **Criar Regra** (`criar_regra`): Gerencia regras e tabelas de graduação.
 
 ### Manipular graduação
-- **Remover Graduacao** (`remover_graduacao`): Transforma a geometria para reposicionamento e ajuste.
+- **Remover Graduacao** (`remover_graduacao`): clique em um molde para remover toda a graduação daquele molde, incluindo tabela, pontos graduados e grade de tamanhos. Não altera outros moldes.
 - **Separar Tamanhos** (`separar`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Agrupar** (`agrupar`): Executa a ação específica indicada pelo nome da ferramenta.
 - **Graduar Curva** (`graduar_curva`): Executa operação de criação, ajuste ou conferência de curvas.

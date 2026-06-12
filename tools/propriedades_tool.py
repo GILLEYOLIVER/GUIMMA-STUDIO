@@ -2020,8 +2020,14 @@ class PropriedadesMoldesDialog(QDialog):
             item_t.setTextAlignment(Qt.AlignCenter)
             item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             if dado.get("base", False):
-                item_t.setBackground(QColor("#2b7cd3"))
-                item_t.setForeground(QColor("#ffffff"))
+                cor_base = QColor(str(dado.get("cor") or "#ffffff"))
+                if cor_base.isValid():
+                    item_t.setBackground(cor_base)
+                    luminosidade = (0.299 * cor_base.red()) + (0.587 * cor_base.green()) + (0.114 * cor_base.blue())
+                    item_t.setForeground(QColor("#111111" if luminosidade >= 150 else "#ffffff"))
+                fonte = item_t.font()
+                fonte.setBold(True)
+                item_t.setFont(fonte)
             self.tbl_graduacao.setItem(linha, 1, item_t)
 
             item_c = QTableWidgetItem("")
@@ -2083,16 +2089,24 @@ class PropriedadesMoldesDialog(QDialog):
         if coluna == 0:
             item["ativo"] = not bool(item.get("ativo", True))
             self._renderizar_tabela_graduacao()
-        elif coluna == 2:
-            cor_inicial = QColor(str(item.get("cor") or "#ffffff"))
-            cor = self._selecionar_cor_clara(cor_inicial, "Cor do tamanho")
-            if cor.isValid():
-                item["cor"] = cor.name()
-                self._renderizar_tabela_graduacao()
+        elif coluna == 2 or (coluna == 1 and item.get("base", False)):
+            self._alterar_cor_tamanho_graduacao(linha)
             if hasattr(self, "tbl_graduacao"):
                 self.tbl_graduacao.clearSelection()
                 self.tbl_graduacao.setCurrentCell(linha, 1)
         self._sincronizar_gradacao_no_molde()
+
+    def _alterar_cor_tamanho_graduacao(self, linha: int) -> bool:
+        if not (0 <= linha < len(self._graduacao_linhas)):
+            return False
+        item = self._graduacao_linhas[linha]
+        cor_inicial = QColor(str(item.get("cor") or "#ffffff"))
+        cor = self._selecionar_cor_clara(cor_inicial, "Cor do tamanho")
+        if not cor.isValid():
+            return False
+        item["cor"] = cor.name()
+        self._renderizar_tabela_graduacao()
+        return True
 
     def _linha_selecionada_graduacao(self) -> int:
         row = int(getattr(self, "_linha_gradacao_atual", -1))
@@ -2169,6 +2183,17 @@ class PropriedadesMoldesDialog(QDialog):
             molde["graduacao_grade_nome"] = grade_nome
             molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
             molde["graduacao_tamanhos_ativos"] = list(ativos)
+        for molde in self._moldes_reais_alvo_graduacao():
+            molde["graduacao_grade_nome"] = grade_nome
+            molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
+            molde["graduacao_tamanhos_ativos"] = list(ativos)
+        runtime = getattr(self.canvas, "_runtime_tool", None)
+        if getattr(runtime, "id_ferramenta", "") == "tabela" and hasattr(runtime, "_atualizar_dialog"):
+            runtime._atualizar_dialog(self.canvas)
+        if hasattr(self.canvas, "elementos_alterados"):
+            self.canvas.elementos_alterados.emit()
+        if hasattr(self.canvas, "update"):
+            self.canvas.update()
 
     def _moldes_alvo_graduacao(self) -> list[dict]:
         combo_aplicar = getattr(self, "cmb_aplicar_grade", None)
@@ -2179,6 +2204,27 @@ class PropriedadesMoldesDialog(QDialog):
         if modo_aplicar == "ao molde":
             return [molde_atual]
         return [ref.dados for ref in self._refs if isinstance(ref.dados, dict)]
+
+    def _moldes_reais_alvo_graduacao(self) -> list[dict]:
+        elementos = self._elementos_canvas_reais()
+        if not isinstance(elementos, list):
+            return []
+        combo_aplicar = getattr(self, "cmb_aplicar_grade", None)
+        modo_aplicar = combo_aplicar.currentText().strip().lower() if isinstance(combo_aplicar, QComboBox) else "ao molde"
+        indices = [self._indice_atual] if modo_aplicar == "ao molde" else [ref.indice for ref in self._refs]
+        moldes: list[dict] = []
+        for idx in indices:
+            if idx is None:
+                continue
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(elementos):
+                el = elementos[i]
+                if isinstance(el, dict) and el.get("molde"):
+                    moldes.append(el)
+        return moldes
 
     def _atualizar_opcoes_tecido(self):
         elementos = self._elementos_edicao()
@@ -3949,6 +3995,20 @@ class PropriedadesMoldesDialog(QDialog):
         self._alerta_tremor_passos = 0
         self._alerta_pos_original = None
 
+    def centralizar_na_tela(self):
+        tela = self.screen()
+        if tela is None and self.parentWidget() is not None:
+            janela = self.parentWidget().windowHandle()
+            tela = janela.screen() if janela is not None else None
+        if tela is None:
+            tela = QApplication.primaryScreen()
+        if tela is None:
+            return
+        geo = tela.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(geo.center())
+        self.move(frame.topLeft())
+
     def _limpar_preview_temporario(self):
         try:
             self.preview.set_molde(None)
@@ -4582,6 +4642,7 @@ class Ferramenta(FerramentaBase):
                     pass
                 self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
                 return
+            dialog.centralizar_na_tela()
             dialog.show()
             dialog.raise_()
             dialog.activateWindow()

@@ -53,11 +53,13 @@ class _FakeCanvas:
         )
         self._selecionados = set()
         self._snap_resultado = None
+        self.zoom = 1.0
         self.snap_points = []
         self.ignorar_snap_movimento = []
         self.sombras_snap_movimento = []
         self.historico = 0
         self.atualizou = False
+        self.rotacionar_duplo_clique = True
 
     def _tela_para_cena(self, pos):
         return QPointF(pos)
@@ -73,7 +75,9 @@ class _FakeCanvas:
         return self._ponto_com_snap(pos)
 
     def _indice_molde_em_ponto(self, pos):
-        return 0
+        x = float(pos.x())
+        y = float(pos.y())
+        return 0 if -4.0 <= x <= 14.0 and -4.0 <= y <= 8.0 else None
 
     def _indices_elementos_em_ponto(self, pos):
         return [0]
@@ -85,7 +89,7 @@ class _FakeCanvas:
         self.atualizou = True
 
     def window(self):
-        return SimpleNamespace(_opcoes_app={"rotacionar_duplo_clique": True})
+        return SimpleNamespace(_opcoes_app={"rotacionar_duplo_clique": self.rotacionar_duplo_clique})
 
     def findChildren(self, _tipo):
         return []
@@ -93,29 +97,48 @@ class _FakeCanvas:
 
 @unittest.skipIf(FerramentaSelecionar is None, "PySide6 não disponível neste ambiente")
 class SelecionarToolTestCase(unittest.TestCase):
-    def test_duplo_clique_esquerdo_alinha_linha_em_zero_e_depois_alterna_90(self):
+    def test_duplo_clique_esquerdo_alinha_borda_ou_fio_em_0_ou_90(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSelecionar()
-        evento_linha = _FakeEvent(pos=QPointF(10.0, 2.0))
-        evento_molde = _FakeEvent(pos=QPointF(2.0, 1.0))
+        evento_borda = _FakeEvent(pos=QPointF(5.0, -1.0))
         molde = canvas.cena.elementos[0]
+        molde["pontos"] = [(0.0, 0.0), (10.0, -2.0), (10.0, 4.0), (0.0, 0.0)]
+        molde["controle_cantos"] = [(0.0, 0.0), (10.0, -2.0), (10.0, 4.0)]
+        ang = math.radians(53.0)
+        molde["fio_origem"] = (5.0, 2.0)
+        molde["fio_fim"] = (5.0 + (math.cos(ang) * 4.0), 2.0 - (math.sin(ang) * 4.0))
+        molde["fio_angulo"] = 53.0
 
-        self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_linha))
+        self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_borda))
+        referencia_borda = {"tipo": "borda", "chave": "controle_cantos", "a_idx": 0, "b_idx": 1}
+        self.assertAlmostEqual(ferramenta._angulo_referencia_alinhamento(molde, referencia_borda), 0.0)
+
+        fo = molde["fio_origem"]
+        ff = molde["fio_fim"]
+        evento_fio = _FakeEvent(pos=QPointF((fo[0] + ff[0]) / 2.0, (fo[1] + ff[1]) / 2.0))
+
+        self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_fio))
         self.assertEqual(molde["fio_angulo"], 0.0)
-        estado = ferramenta._alinhamento_duplo_molde[(id(canvas), 0)]
-        self.assertAlmostEqual(ferramenta._angulo_segmento_referencia(molde, estado["segmento"]), 0.0)
-
-        for esperado in (90.0, 0.0, 90.0):
-            self.assertTrue(ferramenta.on_mouse_double_click(canvas, evento_molde))
-            self.assertEqual(molde["fio_angulo"], esperado)
-            estado = ferramenta._alinhamento_duplo_molde[(id(canvas), 0)]
-            self.assertAlmostEqual(ferramenta._angulo_segmento_referencia(molde, estado["segmento"]), esperado)
+        self.assertAlmostEqual(ferramenta._angulo_fio_atual(molde), 0.0)
+        self.assertEqual(ferramenta._eixo_fio_0_90_mais_proximo(179.0), 0.0)
 
         self.assertEqual(canvas._selecionados, {0})
-        self.assertEqual(canvas.historico, 4)
+        self.assertEqual(canvas.historico, 2)
         self.assertTrue(canvas.atualizou)
-        self.assertTrue(evento_linha.accepted)
-        self.assertTrue(evento_molde.accepted)
+        self.assertTrue(evento_borda.accepted)
+        self.assertTrue(evento_fio.accepted)
+
+    def test_duplo_clique_nao_rotaciona_quando_opcao_desligada(self):
+        canvas = _FakeCanvas()
+        canvas.rotacionar_duplo_clique = False
+        ferramenta = FerramentaSelecionar()
+        molde = canvas.cena.elementos[0]
+        fio_antes = molde["fio_angulo"]
+
+        self.assertFalse(ferramenta.on_mouse_double_click(canvas, _FakeEvent(pos=QPointF(10.0, 2.0))))
+
+        self.assertEqual(molde["fio_angulo"], fio_antes)
+        self.assertEqual(canvas.historico, 0)
 
     def test_arrastar_item_ja_selecionado_move_toda_selecao(self):
         canvas = _FakeCanvas()

@@ -17,7 +17,6 @@ class Ferramenta(FerramentaBase):
     nome = "Selecionar"
     usa_painel_auxiliar = False
     descricao_painel = "Selecione elementos com clique, caixa de seleção e ciclo com botão direito."
-    EIXOS_FIO = (0.0, 270.0, 180.0, 90.0)
     DISTANCIA_VISUAL_SELECAO_CM = 1.5
 
     def __init__(self):
@@ -359,10 +358,25 @@ class Ferramenta(FerramentaBase):
             return False
 
         pos = canvas._tela_para_cena(event.position())
-        idx = canvas._indice_molde_em_ponto(pos) if hasattr(canvas, "_indice_molde_em_ponto") else None
-        if idx is None:
+        alvo = self._alvo_duplo_clique(canvas, pos)
+        if alvo is None:
             pos_snap = canvas._ponto_com_snap(event.position())
-            idx = canvas._indice_molde_em_ponto(pos_snap) if hasattr(canvas, "_indice_molde_em_ponto") else None
+            alvo = self._alvo_duplo_clique(canvas, pos_snap)
+        if alvo is None and getattr(canvas, "_snap_resultado", None) is not None:
+            idx_snap = getattr(canvas._snap_resultado, "elemento_idx", None)
+            try:
+                idx_candidato = int(idx_snap)
+            except Exception:
+                idx_candidato = -1
+            if 0 <= idx_candidato < len(canvas.cena.elementos) and canvas.cena.elementos[idx_candidato].get("molde"):
+                ponto_snap = getattr(canvas._snap_resultado, "ponto", pos)
+                alvo = self._alvo_duplo_clique(canvas, ponto_snap)
+                if alvo is None:
+                    alvo = (idx_candidato, self._referencia_fio())
+        if alvo is None:
+            return False
+
+        idx, referencia = alvo
         if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
             return False
 
@@ -372,32 +386,20 @@ class Ferramenta(FerramentaBase):
 
         chave = (id(canvas), idx)
         estado = self._alinhamento_duplo_molde.get(chave)
-        if estado is None:
-            segmento = self._segmento_referencia_alinhamento(molde, pos)
-            if segmento is None:
-                return False
-            angulo_alvo = 0.0
-        else:
-            segmento = estado.get("segmento")
-            angulo_alvo = float(estado.get("proximo_alvo", 0.0))
-
-        angulo_atual = self._angulo_segmento_referencia(molde, segmento)
+        angulo_atual = self._angulo_referencia_alinhamento(molde, referencia)
         if angulo_atual is None:
-            segmento = self._segmento_referencia_alinhamento(molde, pos)
-            if segmento is None:
-                self._alinhamento_duplo_molde.pop(chave, None)
-                return False
-            angulo_atual = self._angulo_segmento_referencia(molde, segmento)
-        if angulo_atual is None:
+            self._alinhamento_duplo_molde.pop(chave, None)
             return False
+        mesmo_alvo = bool(estado and self._mesma_referencia(estado.get("referencia"), referencia))
+        angulo_alvo = float(estado.get("proximo_alvo", 0.0)) if mesmo_alvo else self._eixo_fio_0_90_mais_proximo(angulo_atual)
 
-        delta = self._delta_angular(angulo_atual, angulo_alvo)
+        delta = self._delta_para_eixo(angulo_atual, angulo_alvo)
         pivo = self._pivo_rotacao_fio(molde)
         self._girar_molde_para_fio(molde, pivo, delta)
-        molde["fio_angulo"] = angulo_alvo
+        self._atualizar_angulo_fio_molde(molde, fallback=angulo_alvo if referencia.get("tipo") == "fio" else None)
         molde["mostrar_fio"] = True
         self._alinhamento_duplo_molde[chave] = {
-            "segmento": segmento,
+            "referencia": referencia,
             "proximo_alvo": 90.0 if self._distancia_angular(angulo_alvo, 0.0) <= 1e-6 else 0.0,
         }
 
@@ -407,7 +409,8 @@ class Ferramenta(FerramentaBase):
         canvas._selecionados = {idx}
         canvas._registrar_historico()
         canvas.update()
-        self.set_status(f"Molde girado: fio alinhado em {int(angulo_alvo)}°.")
+        rotulo = "fio" if referencia.get("tipo") == "fio" else "borda"
+        self.set_status(f"Molde girado: {rotulo} alinhada em {int(angulo_alvo)}°.")
         event.accept()
         return True
 
@@ -541,17 +544,59 @@ class Ferramenta(FerramentaBase):
         except Exception:
             return 0.0
 
-    def _segmento_referencia_alinhamento(self, el: dict, pos: QPointF) -> dict | None:
+    def _alvo_duplo_clique(self, canvas, pos: QPointF) -> tuple[int, dict] | None:
+        idx = canvas._indice_molde_em_ponto(pos) if hasattr(canvas, "_indice_molde_em_ponto") else None
+        if idx is not None and 0 <= int(idx) < len(canvas.cena.elementos):
+            el = canvas.cena.elementos[int(idx)]
+            referencia = self._referencia_fio_em_ponto(el, pos) or self._referencia_borda_em_ponto(el, pos)
+            if referencia is not None:
+                return int(idx), referencia
+
+        idx_fio = self._indice_molde_por_fio(canvas, pos)
+        if idx_fio is not None:
+            return idx_fio, self._referencia_fio()
+        return None
+
+    def _indice_molde_por_fio(self, canvas, pos: QPointF) -> int | None:
+        tolerancia = max(10.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001), 0.12)
+        for idx in range(len(canvas.cena.elementos) - 1, -1, -1):
+            el = canvas.cena.elementos[idx]
+            if not isinstance(el, dict) or not el.get("molde"):
+                continue
+            origem = self._qpoint_item(el.get("fio_origem"))
+            fim = self._qpoint_item(el.get("fio_fim"))
+            if origem is None or fim is None or self._dist_qp(origem, fim) <= 1e-9:
+                continue
+            if self._distancia_ponto_segmento(pos, origem, fim) <= tolerancia:
+                return idx
+        return None
+
+    def _referencia_fio_em_ponto(self, el: dict, pos: QPointF) -> dict | None:
+        origem = self._qpoint_item(el.get("fio_origem"))
+        fim = self._qpoint_item(el.get("fio_fim"))
+        if origem is None or fim is None or self._dist_qp(origem, fim) <= 1e-9:
+            return None
+        if self._distancia_ponto_segmento(pos, origem, fim) <= self.DISTANCIA_VISUAL_SELECAO_CM:
+            return self._referencia_fio()
+        return None
+
+    @staticmethod
+    def _referencia_fio() -> dict:
+        return {"tipo": "fio"}
+
+    def _referencia_borda_em_ponto(self, el: dict, pos: QPointF) -> dict | None:
         melhor: dict | None = None
         melhor_dist = float("inf")
-        for segmento in self._segmentos_alinhamento_molde(el):
+        for segmento in self._segmentos_borda_molde(el):
             dist = self._distancia_ponto_segmento(pos, segmento["a"], segmento["b"])
             if dist < melhor_dist:
                 melhor_dist = dist
                 melhor = segmento
+        if melhor is None:
+            return None
         return melhor
 
-    def _segmentos_alinhamento_molde(self, el: dict) -> list[dict]:
+    def _segmentos_borda_molde(self, el: dict) -> list[dict]:
         segmentos = self._segmentos_lista_indexada(el, "controle_cantos", fechado=True)
         if segmentos:
             return segmentos
@@ -569,21 +614,25 @@ class Ferramenta(FerramentaBase):
         segmentos: list[dict] = []
         for (a_idx, a), (b_idx, b) in zip(pares, pares[1:]):
             if self._dist_qp(a, b) > 1e-9:
-                segmentos.append({"chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
+                segmentos.append({"tipo": "borda", "chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
         if fechado and len(pares) > 2:
             a_idx, a = pares[-1]
             b_idx, b = pares[0]
             if self._dist_qp(a, b) > 1e-9:
-                segmentos.append({"chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
+                segmentos.append({"tipo": "borda", "chave": chave, "a_idx": a_idx, "b_idx": b_idx, "a": QPointF(a), "b": QPointF(b)})
         return segmentos
 
-    def _angulo_segmento_referencia(self, el: dict, segmento: dict | None) -> float | None:
-        if not isinstance(segmento, dict):
+    def _angulo_referencia_alinhamento(self, el: dict, referencia: dict | None) -> float | None:
+        if not isinstance(referencia, dict):
             return None
-        chave = segmento.get("chave")
+        if referencia.get("tipo") == "fio":
+            return self._angulo_fio_atual(el)
+        if referencia.get("tipo") != "borda":
+            return None
+        chave = referencia.get("chave")
         try:
-            a_idx = int(segmento.get("a_idx"))
-            b_idx = int(segmento.get("b_idx"))
+            a_idx = int(referencia.get("a_idx"))
+            b_idx = int(referencia.get("b_idx"))
         except Exception:
             return None
         origem = el.get(chave)
@@ -595,16 +644,42 @@ class Ferramenta(FerramentaBase):
             return None
         return self._normalizar_angulo(degrees(atan2(-(b.y() - a.y()), b.x() - a.x())))
 
-    def _proximo_eixo_fio(self, angulo_atual: float) -> float:
+    @staticmethod
+    def _mesma_referencia(a: dict | None, b: dict | None) -> bool:
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return False
+        if a.get("tipo") != b.get("tipo"):
+            return False
+        if a.get("tipo") == "fio":
+            return True
+        return (
+            a.get("chave") == b.get("chave")
+            and int(a.get("a_idx", -1)) == int(b.get("a_idx", -2))
+            and int(a.get("b_idx", -1)) == int(b.get("b_idx", -2))
+        )
+
+    def _atualizar_angulo_fio_molde(self, el: dict, fallback: float | None = None) -> None:
+        origem = el.get("fio_origem")
+        fim = el.get("fio_fim")
+        if self._eh_ponto(origem) and self._eh_ponto(fim):
+            el["fio_angulo"] = self._angulo_fio_atual(el)
+        elif fallback is not None:
+            el["fio_angulo"] = self._normalizar_angulo(fallback)
+
+    def _eixo_fio_0_90_mais_proximo(self, angulo_atual: float) -> float:
         atual = self._normalizar_angulo(angulo_atual)
-        for idx, eixo in enumerate(self.EIXOS_FIO):
-            if self._distancia_angular(atual, eixo) <= 1e-6:
-                return self.EIXOS_FIO[(idx + 1) % len(self.EIXOS_FIO)]
-        return self.EIXOS_FIO[0]
+        eixo = atual % 180.0
+        return min((0.0, 90.0), key=lambda alvo: self._distancia_eixo_abs(eixo, alvo))
+
+    def _delta_para_eixo(self, angulo_atual: float, angulo_alvo: float) -> float:
+        atual = self._normalizar_angulo(angulo_atual) % 180.0
+        alvo = self._normalizar_angulo(angulo_alvo) % 180.0
+        return ((alvo - atual + 90.0) % 180.0) - 90.0
 
     @staticmethod
-    def _delta_angular(origem: float, destino: float) -> float:
-        return ((float(destino) - float(origem) + 180.0) % 360.0) - 180.0
+    def _distancia_eixo_abs(a: float, b: float) -> float:
+        diferenca = abs((float(a) - float(b)) % 180.0)
+        return min(diferenca, 180.0 - diferenca)
 
     @staticmethod
     def _distancia_angular(a: float, b: float) -> float:
