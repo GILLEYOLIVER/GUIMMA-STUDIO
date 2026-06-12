@@ -254,6 +254,36 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
             3.0,
         )
 
+    def test_graduacao_redesenha_tamanho_base_por_ultimo(self):
+        class _Painter:
+            def save(self):
+                pass
+
+            def restore(self):
+                pass
+
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+            ],
+        }
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0), QPointF(0.0, 5.0)]
+        contorno = base + [QPointF(base[0])]
+        chamadas = []
+
+        canvas._contornos_graduacao_tabela = lambda _el, _base: [
+            ("P", "#ffff00", contorno),
+            ("G", "#ff8c00", contorno),
+        ]
+        canvas._desenhar_polilinha = lambda _painter, _pontos, **kwargs: chamadas.append(kwargs["cor"])
+
+        canvas._desenhar_graduacao_tabela_molde(_Painter(), molde, base)
+
+        self.assertEqual(chamadas, ["#ffff00", "#ff8c00", "#2b7cd3"])
+
     def test_estilo_em_selecionado_nao_altera_cor_de_molde(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         molde = {

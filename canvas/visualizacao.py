@@ -2573,8 +2573,32 @@ class VisualizacaoCanvas(QWidget):
                     espessura=self._espessura_graduacao_molde(el),
                     estilo="solid",
                 )
+            cor_base = self._cor_tamanho_base_graduacao(el)
+            if cor_base:
+                pontos_base = [QPointF(pt) for pt in base]
+                if len(pontos_base) >= 2:
+                    pontos_base.append(QPointF(pontos_base[0]))
+                    self._desenhar_polilinha(
+                        painter,
+                        pontos_base,
+                        cor=cor_base,
+                        espessura=self._espessura_graduacao_molde(el),
+                        estilo="solid",
+                    )
         finally:
             painter.restore()
+
+    @staticmethod
+    def _cor_tamanho_base_graduacao(el: dict) -> str | None:
+        tamanhos = el.get("graduacao_tamanhos") if isinstance(el, dict) else None
+        if not isinstance(tamanhos, list) or not tamanhos:
+            return None
+        linhas = [linha for linha in tamanhos if isinstance(linha, dict) and linha.get("ativo", True)]
+        if not linhas:
+            return None
+        base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
+        cor = QColor(str(linhas[base_idx].get("cor") or ""))
+        return cor.name() if cor.isValid() else None
 
     @staticmethod
     def _espessura_graduacao_molde(el: dict) -> float:
