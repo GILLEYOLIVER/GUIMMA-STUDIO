@@ -6879,11 +6879,18 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _atualizar_estilo_desenho(self, estilo: dict):
         self._estilo_desenho_atual.update(estilo)
+        estilo_para_selecionados = {
+            chave: self._estilo_desenho_atual[chave]
+            for chave in ("cor", "estilo", "espessura", "amplitude")
+            if chave in estilo
+        }
         self.projeto_atual.preferencias_usuario["estilo_desenho"] = dict(self._estilo_desenho_atual)
         self._sincronizar_perfil_usuario_atual()
         area_atual = self._area_documento_atual()
         if area_atual:
             area_atual.canvas.set_estilo_linha(**self._estilo_desenho_atual)
+            if estilo_para_selecionados and hasattr(area_atual.canvas, "aplicar_estilo_linha_selecionados"):
+                area_atual.canvas.aplicar_estilo_linha_selecionados(estilo_para_selecionados)
         self.lbl_status.setText(
             f"Cor {self._estilo_desenho_atual['cor']} | Estilo {self._estilo_desenho_atual['estilo']} | "
             f"Espessura {self._estilo_desenho_atual['espessura']:.0f} | Altura {self._estilo_desenho_atual['amplitude']:.1f}"
@@ -7101,6 +7108,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                 area.canvas.set_grid_visivel(bool(ativo))
         self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado")
 
+    def _alternar_graduacao_canvas(self, ativo: bool):
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            if isinstance(area, AreaDocumentoWidget):
+                area.canvas.set_graduacao_visivel(bool(ativo))
+        self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
+
     def _on_snap_changed(self, ativo: bool):
         self._snap_ativo_global = bool(ativo)
         self.projeto_atual.preferencias_usuario["snap_ativo"] = self._snap_ativo_global
@@ -7308,12 +7322,10 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         self.btn_graduacao = _BotaoRodapeHover("⇅", "Mostra ou esconde graduação")
         self.btn_graduacao.setCheckable(True)
-        self.btn_graduacao.setChecked(False)
+        self.btn_graduacao.setChecked(True)
         self.btn_graduacao.setFixedHeight(20)
         self.btn_graduacao.setStyleSheet(estilo_botao_icone)
-        self.btn_graduacao.toggled.connect(
-            lambda ativo: self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
-        )
+        self.btn_graduacao.toggled.connect(self._alternar_graduacao_canvas)
         row.addWidget(self.btn_graduacao)
 
         self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")

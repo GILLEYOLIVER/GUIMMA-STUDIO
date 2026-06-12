@@ -47,6 +47,14 @@ class MedidaCmSpinBox(QDoubleSpinBox):
         except ValueError:
             return 0.0
 
+    def valor_atual(self) -> float:
+        texto = self.lineEdit().text() if self.lineEdit() is not None else ""
+        valor = self.valueFromText(texto)
+        if abs(valor) > 1e-9:
+            self.setValue(valor)
+            return valor
+        return float(self.value())
+
 
 class GraduarTabelaDialog(QDialog):
     def __init__(self, parent=None):
@@ -92,6 +100,13 @@ class GraduarTabelaDialog(QDialog):
                 padding:2px 6px;
             }
             QPushButton:hover { background:#ffffff; }
+            QPushButton:pressed {
+                background:#2b7cd3;
+                color:#ffffff;
+                border:1px solid #0f5fae;
+                padding-top:3px;
+                padding-left:7px;
+            }
             """
         )
         self._construir_ui()
@@ -156,11 +171,11 @@ class GraduarTabelaDialog(QDialog):
         self.btn_esq = QPushButton("◀")
         self.btn_dir = QPushButton("▶")
         self.btn_zero = QPushButton("0")
-        self.btn_cima.clicked.connect(lambda: self._aplicar_incremento(0.0, -1.0))
-        self.btn_baixo.clicked.connect(lambda: self._aplicar_incremento(0.0, 1.0))
-        self.btn_esq.clicked.connect(lambda: self._aplicar_incremento(-1.0, 0.0))
-        self.btn_dir.clicked.connect(lambda: self._aplicar_incremento(1.0, 0.0))
-        self.btn_zero.clicked.connect(lambda: self._aplicar_incremento(0.0, 0.0, zerar=True))
+        self.btn_cima.pressed.connect(lambda: self._aplicar_incremento(0.0, -1.0))
+        self.btn_baixo.pressed.connect(lambda: self._aplicar_incremento(0.0, 1.0))
+        self.btn_esq.pressed.connect(lambda: self._aplicar_incremento(-1.0, 0.0))
+        self.btn_dir.pressed.connect(lambda: self._aplicar_incremento(1.0, 0.0))
+        self.btn_zero.pressed.connect(lambda: self._aplicar_incremento(0.0, 0.0, zerar=True))
         grade_setas.addWidget(self.btn_cima, 0, 1)
         grade_setas.addWidget(self.btn_esq, 1, 0)
         grade_setas.addWidget(self.btn_zero, 1, 1)
@@ -267,7 +282,7 @@ class GraduarTabelaDialog(QDialog):
         if row_atual < 0:
             row_atual = 0
         base_row = self._linha_base()
-        incremento = float(self.sp_incremento.value())
+        incremento = float(self.sp_incremento.valor_atual())
         self._bloquear_eventos = True
         for row in range(self.tbl.rowCount()):
             if zerar:
@@ -405,9 +420,11 @@ class Ferramenta(FerramentaBase):
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
-        self._definir_molde_idx(canvas, self._molde_selecionado(canvas))
+        self._definir_molde_idx(canvas, self._molde_padrao(canvas))
         self._ponto_idx = None
         self._pontos_selecionados.clear()
+        if self._molde_idx is not None and hasattr(canvas, "_selecionados"):
+            canvas._selecionados = {self._molde_idx}
         self._observar_canvas(canvas)
         dialog = self._obter_dialog(canvas)
         dialog.conectar(self, canvas)
@@ -425,11 +442,12 @@ class Ferramenta(FerramentaBase):
             canvas.update()
 
     def on_mouse_press(self, canvas, event) -> bool:
-        if event.button() == Qt.RightButton:
+        acumular = self._evento_ctrl(event)
+        if event.button() == Qt.RightButton and not acumular:
             self._fechar(canvas)
             event.accept()
             return True
-        if event.button() != Qt.LeftButton:
+        if event.button() not in (Qt.LeftButton, Qt.RightButton):
             return False
         pos = canvas._ponto_com_snap(event.position()) if hasattr(canvas, "_ponto_com_snap") else QPointF(event.position())
         molde_idx = self._molde_em_posicao(canvas, pos)
@@ -444,7 +462,7 @@ class Ferramenta(FerramentaBase):
             canvas._selecionados = {molde_idx}
         ponto_idx = self._ponto_mais_proximo(canvas.cena.elementos[molde_idx], pos)
         if ponto_idx is not None:
-            self._selecionar_ponto_contorno(canvas, ponto_idx, acumular=self._evento_ctrl(event))
+            self._selecionar_ponto_contorno(canvas, ponto_idx, acumular=acumular)
         self._atualizar_dialog(canvas)
         canvas.update()
         event.accept()
@@ -482,7 +500,7 @@ class Ferramenta(FerramentaBase):
 
     def atualizar_preview_dialog(self, canvas):
         self._salvar_valores_dialog(canvas, registrar_historico=False)
-        canvas.update()
+        self._repintar_canvas_agora(canvas)
 
     def aplicar_dialog(self, canvas):
         if self._salvar_valores_dialog(canvas, registrar_historico=True):
@@ -499,6 +517,7 @@ class Ferramenta(FerramentaBase):
         if not isinstance(molde, dict) or not molde.get("molde"):
             return False
         dialog = self._obter_dialog(canvas)
+        self._garantir_tamanhos_no_molde(molde, dialog)
         pontos = self._pontos_contorno(molde)
         alvo_indices = self._pontos_alvo_salvar(len(pontos))
         if not alvo_indices:
@@ -558,7 +577,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is None or not dialog.isVisible():
             return
-        selecionado = self._molde_selecionado(canvas)
+        selecionado = self._molde_padrao(canvas)
         if selecionado is not None and selecionado != self._molde_idx:
             self._definir_molde_idx(canvas, selecionado)
             self._ponto_idx = None
@@ -574,7 +593,7 @@ class Ferramenta(FerramentaBase):
             self._ponto_idx = 0
         self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos)) or {int(self._ponto_idx)}
         self._atualizar_dialog(canvas)
-        canvas.update()
+        self._repintar_canvas_agora(canvas)
 
     def _fechar_dialog_molde_indisponivel(self, canvas) -> None:
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -590,8 +609,12 @@ class Ferramenta(FerramentaBase):
 
     def _atualizar_dialog(self, canvas):
         dialog = self._obter_dialog(canvas)
+        if self._molde_atual(canvas) is None:
+            self._definir_molde_idx(canvas, self._molde_padrao(canvas))
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
+        if molde is not None:
+            self._garantir_tamanhos_no_molde(molde)
         if self._ponto_idx is None and pontos:
             self._ponto_idx = 0
         if self._ponto_idx is not None and not self._pontos_selecionados:
@@ -642,7 +665,8 @@ class Ferramenta(FerramentaBase):
     @staticmethod
     def _evento_ctrl(event) -> bool:
         try:
-            return bool(event.modifiers() & Qt.ControlModifier)
+            mods = event.modifiers()
+            return bool(mods & Qt.ControlModifier or mods & Qt.MetaModifier)
         except Exception:
             return False
 
@@ -664,6 +688,15 @@ class Ferramenta(FerramentaBase):
     def _molde_selecionado(self, canvas) -> int | None:
         for idx in sorted(getattr(canvas, "_selecionados", set()) or []):
             if 0 <= int(idx) < len(canvas.cena.elementos) and canvas.cena.elementos[int(idx)].get("molde"):
+                return int(idx)
+        return None
+
+    def _molde_padrao(self, canvas) -> int | None:
+        selecionado = self._molde_selecionado(canvas)
+        if selecionado is not None:
+            return selecionado
+        for idx, elemento in enumerate(getattr(canvas.cena, "elementos", []) or []):
+            if isinstance(elemento, dict) and elemento.get("molde"):
                 return int(idx)
         return None
 
@@ -715,6 +748,24 @@ class Ferramenta(FerramentaBase):
             {"tamanho": "G", "cor": "#5d95b7", "base": False},
         ]
 
+    def _garantir_tamanhos_no_molde(self, molde: dict, dialog: GraduarTabelaDialog | None = None) -> None:
+        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        if isinstance(linhas, list) and linhas:
+            return
+        tamanhos = dialog._tamanhos_atuais() if dialog is not None else self._tamanhos_molde(molde)
+        linhas_normalizadas = [dict(linha) for linha in tamanhos if isinstance(linha, dict)]
+        if not linhas_normalizadas:
+            return
+        if not any(linha.get("base") for linha in linhas_normalizadas):
+            linhas_normalizadas[len(linhas_normalizadas) // 2]["base"] = True
+        molde["graduacao_tamanhos"] = linhas_normalizadas
+        molde["graduacao_tamanhos_ativos"] = [
+            str(linha.get("tamanho") or linha.get("nome") or "")
+            for linha in linhas_normalizadas
+            if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
+        ]
+        molde.setdefault("graduacao_grade_nome", "P-G(M)")
+
     def _valores_ponto(self, molde: dict | None, ponto_idx: int | None) -> dict[str, dict]:
         if not isinstance(molde, dict) or ponto_idx is None:
             return {}
@@ -738,6 +789,15 @@ class Ferramenta(FerramentaBase):
             dialog.hide()
         canvas.set_ferramenta_ativa("selecionar")
         self._status(canvas, "Ferramenta Tabela finalizada. Voltando para Selecionar.")
+
+    @staticmethod
+    def _repintar_canvas_agora(canvas) -> None:
+        if canvas is None:
+            return
+        if hasattr(canvas, "update"):
+            canvas.update()
+        if hasattr(canvas, "repaint"):
+            canvas.repaint()
 
     def _status(self, canvas, texto: str):
         self.set_status(texto)

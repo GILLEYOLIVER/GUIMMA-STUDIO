@@ -284,6 +284,66 @@ class VisualizacaoCanvas(QWidget):
             self._linha_amplitude = max(0.2, float(amplitude))
         self.update()
 
+    def set_graduacao_visivel(self, visivel: bool) -> bool:
+        alterou = False
+        for elemento in self.cena.elementos:
+            if not isinstance(elemento, dict) or not elemento.get("molde"):
+                continue
+            novo = bool(visivel)
+            if bool(elemento.get("mostrar_graduacao", True)) != novo:
+                elemento["mostrar_graduacao"] = novo
+                alterou = True
+        if alterou:
+            self._emitir_elementos_alterados()
+        self.update()
+        return alterou
+
+    def aplicar_estilo_linha_selecionados(self, estilo: dict | None) -> bool:
+        if not self._selecionados or not isinstance(estilo, dict):
+            return False
+        alterou = False
+        for idx in sorted(self._selecionados):
+            if not (0 <= int(idx) < len(self.cena.elementos)):
+                continue
+            elemento = self.cena.elementos[int(idx)]
+            if not isinstance(elemento, dict):
+                continue
+            is_molde = bool(elemento.get("molde"))
+            if "espessura" in estilo:
+                try:
+                    espessura = max(1.0, float(estilo.get("espessura")))
+                except (TypeError, ValueError):
+                    espessura = 1.0
+                if float(elemento.get("espessura", 1.0) or 1.0) != espessura:
+                    elemento["espessura"] = espessura
+                    alterou = True
+                if is_molde and float(elemento.get("espessura_graduacao", 1.0) or 1.0) != espessura:
+                    elemento["espessura_graduacao"] = espessura
+                    alterou = True
+            if "estilo" in estilo:
+                novo_estilo = str(estilo.get("estilo") or "solid")
+                if str(elemento.get("estilo", "solid")) != novo_estilo:
+                    elemento["estilo"] = novo_estilo
+                    alterou = True
+            if "amplitude" in estilo:
+                try:
+                    amplitude = max(0.2, float(estilo.get("amplitude")))
+                except (TypeError, ValueError):
+                    amplitude = 1.0
+                if float(elemento.get("amplitude", 1.0) or 1.0) != amplitude:
+                    elemento["amplitude"] = amplitude
+                    alterou = True
+            if "cor" in estilo and not is_molde:
+                cor = str(estilo.get("cor") or "").strip()
+                if cor and str(elemento.get("cor", "")) != cor:
+                    elemento["cor"] = cor
+                    alterou = True
+        if alterou:
+            self._registrar_historico()
+            self._emitir_elementos_alterados()
+            self.update()
+        return alterou
+
     def _cor_hex_segura(self, valor: object, padrao: str) -> str:
         """Normaliza uma cor recebida da janela principal sem quebrar o canvas."""
         try:
@@ -2193,6 +2253,8 @@ class VisualizacaoCanvas(QWidget):
     def _desenhar_overlay_snap_ativo(self, painter: QPainter):
         if not self._snap_ativo or not self._snap_resultado:
             return
+        if self._snap_sobre_graduacao_visivel(self._snap_resultado):
+            return
         snap_tela = self._cena_para_tela(self._snap_resultado.ponto)
         cor = QColor("#ffd400")
         if self._snap_resultado.tipo in {"controle", "controle principal", "controle auxiliar"}:
@@ -2228,6 +2290,33 @@ class VisualizacaoCanvas(QWidget):
             painter.drawRoundedRect(caixa, 4, 4)
             painter.setPen(QPen(cor, 1.0))
             painter.drawText(caixa.adjusted(6, 2, -6, -2), Qt.AlignCenter, rotulo)
+
+    def _snap_sobre_graduacao_visivel(self, resultado: SnapResult | None) -> bool:
+        if resultado is None:
+            return False
+        tipo = str(getattr(resultado, "tipo", "") or "").strip().lower()
+        if tipo not in {"borda", "nó", "no", "controle", "controle principal", "controle auxiliar", "ponto médio"}:
+            return False
+        ponto = getattr(resultado, "ponto", None)
+        if not isinstance(ponto, QPointF):
+            return False
+        tolerancia = max(0.04, 8.0 / max(float(getattr(self, "zoom", 1.0)), 0.001))
+        for elemento in getattr(self.cena, "elementos", []) or []:
+            if not isinstance(elemento, dict) or not elemento.get("molde"):
+                continue
+            if elemento.get("mostrar_graduacao", True) is False:
+                continue
+            pontos = [QPointF(float(x), float(y)) for x, y in elemento.get("pontos", []) or []]
+            if len(pontos) < 3:
+                continue
+            base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
+            for _nome, _cor, contorno in self._contornos_graduacao_tabela(elemento, base):
+                if any(
+                    self._distancia_ponto_segmento(a, b, ponto) <= tolerancia
+                    for a, b in zip(contorno, contorno[1:])
+                ):
+                    return True
+        return False
 
     def _ferramenta_dobra_ativa(self) -> bool:
         ferramenta = str(getattr(self, "ferramenta_ativa", "") or "").strip().lower()
@@ -2526,25 +2615,10 @@ class VisualizacaoCanvas(QWidget):
             ancoras[idx] = (dx, dy)
         if not ancoras or not any(abs(dx) > 1e-9 or abs(dy) > 1e-9 for dx, dy in ancoras.values()):
             return []
-        if len(ancoras) == 1:
-            deslocamento = next(iter(ancoras.values()))
-            return [deslocamento for _ in range(quantidade)]
-
         saida = [(0.0, 0.0) for _ in range(quantidade)]
-        ordenadas = sorted(ancoras)
-        for pos, inicio in enumerate(ordenadas):
-            fim = ordenadas[(pos + 1) % len(ordenadas)]
-            fim_ciclo = fim if fim > inicio else fim + quantidade
-            trecho = max(1, fim_ciclo - inicio)
-            dx1, dy1 = ancoras[inicio]
-            dx2, dy2 = ancoras[fim]
-            for passo in range(trecho):
-                idx_real = (inicio + passo) % quantidade
-                t = passo / trecho
-                saida[idx_real] = (
-                    dx1 + ((dx2 - dx1) * t),
-                    dy1 + ((dy2 - dy1) * t),
-                )
+        for idx, deslocamento in ancoras.items():
+            if 0 <= idx < quantidade:
+                saida[idx] = deslocamento
         return saida
 
     @staticmethod
