@@ -446,6 +446,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._estilo_linha_costura_global = str(
             self.projeto_atual.preferencias_usuario.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)
         )
+        self._usar_cores_ferramentas_global = bool(
+            self.projeto_atual.preferencias_usuario.get("usar_cores_ferramentas_global", False)
+        )
+        self._snap_cores_automaticas_global = bool(
+            self.projeto_atual.preferencias_usuario.get("snap_cores_automaticas_global", True)
+        )
+        self._opacidade_imagens_global = max(
+            0.0,
+            min(float(self.projeto_atual.preferencias_usuario.get("opacidade_imagens_global", 1.0)), 1.0),
+        )
         self._mostrar_cor_tecidos_global = bool(self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_global", True))
         self._mostrar_cor_tecidos_menu_global = bool(
             self.projeto_atual.preferencias_usuario.get("mostrar_cor_tecidos_menu_global", False)
@@ -938,6 +948,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             "cores_canvas_global": dict(self._cores_canvas_global),
             "cores_moldes_global": {chave: dict(valor) for chave, valor in self._cores_moldes_global.items()},
             "estilo_linha_costura_global": self._estilo_linha_costura_global,
+            "usar_cores_ferramentas_global": bool(self._usar_cores_ferramentas_global),
+            "snap_cores_automaticas_global": bool(self._snap_cores_automaticas_global),
+            "opacidade_imagens_global": float(self._opacidade_imagens_global),
             "mostrar_cor_tecidos_global": bool(self._mostrar_cor_tecidos_global),
             "mostrar_cor_tecidos_menu_global": bool(self._mostrar_cor_tecidos_menu_global),
             "cores_tecidos_global": dict(self._cores_tecidos_global),
@@ -968,6 +981,16 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._cores_moldes_global = self._normalizar_cores_moldes(cfg.get("cores_moldes_global", self._cores_moldes_global))
         self._estilo_linha_costura_global = str(
             cfg.get("estilo_linha_costura_global", self._estilo_linha_costura_global)
+        )
+        self._usar_cores_ferramentas_global = bool(
+            cfg.get("usar_cores_ferramentas_global", self._usar_cores_ferramentas_global)
+        )
+        self._snap_cores_automaticas_global = bool(
+            cfg.get("snap_cores_automaticas_global", self._snap_cores_automaticas_global)
+        )
+        self._opacidade_imagens_global = max(
+            0.0,
+            min(float(cfg.get("opacidade_imagens_global", self._opacidade_imagens_global)), 1.0),
         )
         self._mostrar_cor_tecidos_global = bool(cfg.get("mostrar_cor_tecidos_global", self._mostrar_cor_tecidos_global))
         self._mostrar_cor_tecidos_menu_global = bool(
@@ -2762,7 +2785,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         gb_snap = QGroupBox("Cores do snap")
         gb_snap_lay = QVBoxLayout(gb_snap)
         chk_auto_snap = QCheckBox("Usar cores automaticas")
-        chk_auto_snap.setChecked(True)
+        chk_auto_snap.setChecked(bool(self._snap_cores_automaticas_global))
         gb_snap_lay.addWidget(chk_auto_snap)
         botoes_canvas["snap_desenho"] = botao_cor(self._cores_canvas_global["snap_desenho"], "Cor: Desenho do Snap")
         botoes_canvas["snap_referencia"] = botao_cor(self._cores_canvas_global["snap_referencia"], "Cor: Referencia do Snap")
@@ -2843,7 +2866,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             moldes.addWidget(cmb, linha, 3, 1, 3)
         layout.addWidget(gb_moldes)
 
-        layout.addWidget(QCheckBox("Mostrar conforme definicao das ferramentas"))
+        chk_conforme = QCheckBox("Mostrar conforme definicao das ferramentas")
+        chk_conforme.setChecked(bool(self._usar_cores_ferramentas_global))
+        layout.addWidget(chk_conforme)
 
         cores_tecidos_temp = dict(self._cores_tecidos_global)
         linha_tecidos = QHBoxLayout()
@@ -2863,10 +2888,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         linha_opacidade.addWidget(QLabel("Opacidade das imagens"))
         slider = QSlider(Qt.Horizontal)
         slider.setRange(0, 100)
-        slider.setValue(100)
+        slider.setValue(int(round(float(self._opacidade_imagens_global) * 100.0)))
         linha_opacidade.addWidget(slider, 1)
         lbl_opacidade = QLabel("100 / 100")
         slider.valueChanged.connect(lambda valor: lbl_opacidade.setText(f"{valor} / 100"))
+        lbl_opacidade.setText(f"{slider.value()} / 100")
         linha_opacidade.addWidget(lbl_opacidade)
         layout.addLayout(linha_opacidade)
 
@@ -2904,6 +2930,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                     for chave, (chk, btn) in widgets_moldes.items()
                 },
                 "estilo_linha_costura_global": str(cmb_estilo.currentData() or self.ESTILO_LINHA_COSTURA_PADRAO),
+                "usar_cores_ferramentas_global": chk_conforme.isChecked(),
+                "snap_cores_automaticas_global": chk_auto_snap.isChecked(),
+                "opacidade_imagens_global": float(slider.value()) / 100.0,
                 "mostrar_cor_tecidos_global": chk_cor_tecidos.isChecked(),
                 "mostrar_cor_tecidos_menu_global": chk_cor_tecidos_menu.isChecked(),
                 "cores_tecidos_global": dict(cores_tecidos_temp),
@@ -2921,6 +2950,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if chave in combos_pontos:
                     combos_pontos[chave].setCurrentText(str(item.get("forma", self.CORES_MOLDES_PADRAO[chave].get("forma", "Circulo preenchido"))))
             cmb_estilo.setCurrentIndex(max(0, cmb_estilo.findData(str(cfg.get("estilo_linha_costura_global", self.ESTILO_LINHA_COSTURA_PADRAO)))))
+            chk_conforme.setChecked(bool(cfg.get("usar_cores_ferramentas_global", False)))
+            chk_auto_snap.setChecked(bool(cfg.get("snap_cores_automaticas_global", True)))
+            slider.setValue(int(round(float(cfg.get("opacidade_imagens_global", 1.0)) * 100.0)))
             chk_cor_tecidos.setChecked(bool(cfg.get("mostrar_cor_tecidos_global", True)))
             chk_cor_tecidos_menu.setChecked(bool(cfg.get("mostrar_cor_tecidos_menu_global", False)))
             cores_tecidos_temp.clear()
@@ -2947,6 +2979,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                         "cores_canvas_global": dict(self.CORES_CANVAS_PADRAO),
                         "cores_moldes_global": {k: dict(v) for k, v in self.CORES_MOLDES_PADRAO.items()},
                         "estilo_linha_costura_global": self.ESTILO_LINHA_COSTURA_PADRAO,
+                        "usar_cores_ferramentas_global": False,
+                        "snap_cores_automaticas_global": True,
+                        "opacidade_imagens_global": 1.0,
                         "mostrar_cor_tecidos_global": True,
                         "mostrar_cor_tecidos_menu_global": False,
                         "cores_tecidos_global": dict(self.CORES_TECIDOS_PADRAO),
@@ -3014,6 +3049,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         if self._estilo_linha_costura_global not in {estilo_id for estilo_id, _ in LINE_STYLES}:
             self._estilo_linha_costura_global = self.ESTILO_LINHA_COSTURA_PADRAO
+        self._usar_cores_ferramentas_global = bool(cfg.get("usar_cores_ferramentas_global", False))
+        self._snap_cores_automaticas_global = bool(cfg.get("snap_cores_automaticas_global", True))
+        self._opacidade_imagens_global = max(0.0, min(float(cfg.get("opacidade_imagens_global", 1.0)), 1.0))
         self._mostrar_cor_tecidos_global = bool(cfg.get("mostrar_cor_tecidos_global", True))
         self._mostrar_cor_tecidos_menu_global = bool(cfg.get("mostrar_cor_tecidos_menu_global", False))
         self._cores_tecidos_global = self._normalizar_cores_tecidos(cfg.get("cores_tecidos_global", {}))
@@ -3026,6 +3064,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         prefs["cores_canvas_global"] = dict(self._cores_canvas_global)
         prefs["cores_moldes_global"] = {chave: dict(valor) for chave, valor in self._cores_moldes_global.items()}
         prefs["estilo_linha_costura_global"] = self._estilo_linha_costura_global
+        prefs["usar_cores_ferramentas_global"] = bool(self._usar_cores_ferramentas_global)
+        prefs["snap_cores_automaticas_global"] = bool(self._snap_cores_automaticas_global)
+        prefs["opacidade_imagens_global"] = float(self._opacidade_imagens_global)
         prefs["mostrar_cor_tecidos_global"] = bool(self._mostrar_cor_tecidos_global)
         prefs["mostrar_cor_tecidos_menu_global"] = bool(self._mostrar_cor_tecidos_menu_global)
         prefs["cores_tecidos_global"] = dict(self._cores_tecidos_global)
@@ -3116,7 +3157,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             if not isinstance(area, AreaDocumentoWidget):
                 continue
             area.canvas.set_config_cores_canvas(self._cores_canvas_global)
-            area.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+            area.canvas.set_config_cores_moldes(
+                self._cores_moldes_global,
+                self._estilo_linha_costura_global,
+                usar_cores_ferramentas=self._usar_cores_ferramentas_global,
+            )
+            area.canvas.set_snap_cores_automaticas(self._snap_cores_automaticas_global)
+            area.canvas.set_opacidade_imagens(self._opacidade_imagens_global)
             area.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
             area.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
             area.canvas._cores_tecidos = dict(self._cores_tecidos_global)
@@ -6002,7 +6049,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _cor_menu_molde(self, canvas, molde: dict) -> QColor:
         tecido = str(molde.get("tecido") or "").strip()
         cor = None
-        if tecido:
+        if tecido and bool(getattr(self, "_mostrar_cor_tecidos_menu_global", False)):
             cor = getattr(canvas, "_cores_tecidos", {}).get(tecido)
         if not cor:
             cor = molde.get("cor") or "#ffea00"
@@ -6535,7 +6582,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.canvas.set_snap_ativo(self.btn_snap.isChecked())
         area_doc.canvas.set_estilo_linha(**self._estilo_desenho_atual)
         area_doc.canvas.set_config_cores_canvas(self._cores_canvas_global)
-        area_doc.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+        area_doc.canvas.set_config_cores_moldes(
+            self._cores_moldes_global,
+            self._estilo_linha_costura_global,
+            usar_cores_ferramentas=self._usar_cores_ferramentas_global,
+        )
+        area_doc.canvas.set_snap_cores_automaticas(self._snap_cores_automaticas_global)
+        area_doc.canvas.set_opacidade_imagens(self._opacidade_imagens_global)
         area_doc.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
         area_doc.canvas.set_passo_snap_angular(self._passo_snap_angular_atual)
         area_doc.canvas.set_snap_contextual_ativo(self._snap_contextual_ativo)
@@ -6771,7 +6824,13 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas._cores_tecidos = dict(self._cores_tecidos_global)
             area_doc.canvas._mostrar_cor_tecidos = bool(self._mostrar_cor_tecidos_global)
             area_doc.canvas.set_config_cores_canvas(self._cores_canvas_global)
-            area_doc.canvas.set_config_cores_moldes(self._cores_moldes_global, self._estilo_linha_costura_global)
+            area_doc.canvas.set_config_cores_moldes(
+                self._cores_moldes_global,
+                self._estilo_linha_costura_global,
+                usar_cores_ferramentas=self._usar_cores_ferramentas_global,
+            )
+            area_doc.canvas.set_snap_cores_automaticas(self._snap_cores_automaticas_global)
+            area_doc.canvas.set_opacidade_imagens(self._opacidade_imagens_global)
             area_doc.canvas.set_grid_visivel(bool(getattr(self, "btn_grid", None) and self.btn_grid.isChecked()))
             area_doc.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
             area_doc.aplicar_config_unidade(self._unidade_medida, self._passo_unidade_medida)

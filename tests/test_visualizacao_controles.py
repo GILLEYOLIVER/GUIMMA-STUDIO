@@ -134,6 +134,60 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(cor, QColor("#ff0000").name())
 
+    def test_config_cores_moldes_respeita_mostrar_conforme_ferramentas(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.set_config_cores_moldes({"fio": {"ativo": True, "cor": "#ff0000"}}, usar_cores_ferramentas=True)
+
+        self.assertEqual(canvas._config_cor_molde("fio", "#ffffff"), "#ffffff")
+
+        canvas.set_config_cores_moldes({"fio": {"ativo": True, "cor": "#ff0000"}}, usar_cores_ferramentas=False)
+
+        self.assertEqual(canvas._config_cor_molde("fio", "#ffffff"), QColor("#ff0000").name())
+
+    def test_config_cores_moldes_preserva_forma_dos_pontos(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.set_config_cores_moldes(
+            {"ponto_controle": {"ativo": True, "cor": "#00ff00", "forma": "Quadrado preenchido"}}
+        )
+
+        cor, forma = canvas._config_ponto_molde("ponto_controle", "#000000", "Losango")
+
+        self.assertEqual(cor, QColor("#00ff00").name())
+        self.assertEqual(forma, "Quadrado preenchido")
+
+    def test_cor_graduacao_usa_config_por_lado_da_base(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.set_config_cores_moldes(
+            {
+                "tamanhos_menores": {"ativo": True, "cor": "#111111"},
+                "tamanho_base": {"ativo": True, "cor": "#222222"},
+                "tamanhos_maiores": {"ativo": True, "cor": "#333333"},
+            }
+        )
+        molde = {
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+            ]
+        }
+
+        self.assertEqual(canvas._cor_tamanho_graduacao(molde, "P", "#ffffff"), QColor("#111111").name())
+        self.assertEqual(canvas._cor_tamanho_base_graduacao(molde), QColor("#222222").name())
+        self.assertEqual(canvas._cor_tamanho_graduacao(molde, "G", "#ffffff"), QColor("#333333").name())
+
+    def test_opacidade_imagens_global_fica_limitada_entre_zero_e_um(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+
+        canvas.set_opacidade_imagens(1.7)
+        self.assertEqual(canvas._opacidade_imagens, 1.0)
+
+        canvas.set_opacidade_imagens(-0.2)
+        self.assertEqual(canvas._opacidade_imagens, 0.0)
+
+        canvas.set_opacidade_imagens(0.35)
+        self.assertEqual(canvas._opacidade_imagens, 0.35)
+
     def test_polilinha_fechada_nao_herda_brush_preenchido(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.zoom = 10.0

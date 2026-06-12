@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from canvas.cena import CenaDocumento
 from canvas.painel_coordenadas import PainelCoordenadas
-from canvas.snap import SnapManager, SnapResult, rotulo_tipo_snap, tipo_snap_movimento_fluido
+from canvas.snap import SnapManager, SnapResult, chave_tipo_snap, rotulo_tipo_snap, tipo_snap_movimento_fluido
 from core.formatacao import formatar_numero, numero_decimal_ponto
 from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
@@ -84,6 +84,9 @@ class VisualizacaoCanvas(QWidget):
         }
         self._cores_moldes: dict[str, dict] = {}
         self._estilo_linha_costura = "dash"
+        self._usar_cores_ferramentas = False
+        self._snap_cores_automaticas = True
+        self._opacidade_imagens = 1.0
         self._grid_visivel = True
         self._visualizacao_instantanea_elementos: list[dict] = []
         self._linha_estilo = "solid"
@@ -379,19 +382,42 @@ class VisualizacaoCanvas(QWidget):
         self._cores_canvas = atual
         self.update()
 
-    def set_config_cores_moldes(self, cores: dict | None, estilo_linha_costura: str | None = None):
+    def set_config_cores_moldes(
+            self,
+            cores: dict | None,
+            estilo_linha_costura: str | None = None,
+            usar_cores_ferramentas: bool | None = None,
+    ):
         """Recebe as cores de moldes/itens técnicos vindas da janela principal."""
         normalizadas: dict[str, dict] = {}
         if isinstance(cores, dict):
             for chave, valor in cores.items():
                 if isinstance(valor, dict):
-                    normalizadas[str(chave)] = {
+                    item = {
                         "ativo": bool(valor.get("ativo", False)),
                         "cor": self._cor_hex_segura(valor.get("cor"), "#efefef"),
                     }
+                    if "forma" in valor:
+                        forma = str(valor.get("forma") or "").strip()
+                        if forma in {"Circulo preenchido", "Quadrado preenchido", "Losango"}:
+                            item["forma"] = forma
+                    normalizadas[str(chave)] = item
         self._cores_moldes = normalizadas
         if estilo_linha_costura is not None:
             self._estilo_linha_costura = str(estilo_linha_costura or "dash")
+        if usar_cores_ferramentas is not None:
+            self._usar_cores_ferramentas = bool(usar_cores_ferramentas)
+        self.update()
+
+    def set_snap_cores_automaticas(self, ativo: bool):
+        self._snap_cores_automaticas = bool(ativo)
+        self.update()
+
+    def set_opacidade_imagens(self, valor: float):
+        try:
+            self._opacidade_imagens = max(0.0, min(float(valor), 1.0))
+        except (TypeError, ValueError):
+            self._opacidade_imagens = 1.0
         self.update()
 
     def set_grid_visivel(self, visivel: bool):
@@ -415,10 +441,23 @@ class VisualizacaoCanvas(QWidget):
         self.update()
 
     def _config_cor_molde(self, chave: str, padrao: str) -> str:
+        if bool(getattr(self, "_usar_cores_ferramentas", False)):
+            return str(padrao)
         cfg = getattr(self, "_cores_moldes", {}).get(chave, {})
         if isinstance(cfg, dict) and bool(cfg.get("ativo", False)):
             return self._cor_hex_segura(cfg.get("cor"), padrao)
         return str(padrao)
+
+    def _config_forma_molde(self, chave: str, padrao: str) -> str:
+        cfg = getattr(self, "_cores_moldes", {}).get(chave, {})
+        if isinstance(cfg, dict):
+            forma = str(cfg.get("forma") or "").strip()
+            if forma in {"Circulo preenchido", "Quadrado preenchido", "Losango"}:
+                return forma
+        return str(padrao)
+
+    def _config_ponto_molde(self, chave: str, cor_padrao: str, forma_padrao: str) -> tuple[str, str]:
+        return self._config_cor_molde(chave, cor_padrao), self._config_forma_molde(chave, forma_padrao)
 
     def set_modo_curva(self, modo: str):
         modo_txt = str(modo).lower().strip()
@@ -2258,7 +2297,9 @@ class VisualizacaoCanvas(QWidget):
         x = centro_tela.x() - (largura_tela / 2.0)
         y = centro_tela.y() - (altura_tela / 2.0)
         painter.save()
-        painter.setOpacity(max(0.05, min(float(elemento.get("opacidade", 0.72)), 1.0)))
+        opacidade_elemento = max(0.05, min(float(elemento.get("opacidade", 0.72)), 1.0))
+        opacidade_global = max(0.0, min(float(getattr(self, "_opacidade_imagens", 1.0)), 1.0))
+        painter.setOpacity(max(0.0, min(opacidade_elemento * opacidade_global, 1.0)))
         painter.drawPixmap(int(x), int(y), int(largura_tela), int(altura_tela), pixmap)
         painter.restore()
 
@@ -2275,6 +2316,14 @@ class VisualizacaoCanvas(QWidget):
             cor = QColor("#7df9ff")
         elif self._snap_resultado.tipo == "interseção":
             cor = QColor("#ff62b0")
+        if not bool(getattr(self, "_snap_cores_automaticas", True)):
+            tipo_snap = chave_tipo_snap(getattr(self._snap_resultado, "tipo", ""))
+            chave = (
+                "snap_referencia"
+                if tipo_snap in {"controle", "controle principal", "controle auxiliar", "intersecao"}
+                else "snap_desenho"
+            )
+            cor = QColor(getattr(self, "_cores_canvas", {}).get(chave, "#6f6f6f"))
         pen = QPen(cor, 1.6)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -2439,6 +2488,7 @@ class VisualizacaoCanvas(QWidget):
             )
 
             if el.get("mostrar_fio", True):
+                cor_fio = self._config_cor_molde("fio", "#ffffff")
                 fio_origem = el.get("fio_origem")
                 fio_fim = el.get("fio_fim")
                 if fio_origem and fio_fim:
@@ -2456,11 +2506,11 @@ class VisualizacaoCanvas(QWidget):
                 fio_visual_px = self._valor_float_molde(el, ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"), None)
                 if fio_visual_px is not None:
                     p1_tela, p2_tela = self._calcular_fio_tela_fixo(p1, p2, bbox_tela, float(fio_visual_px))
-                    self._desenhar_seta_fio_tela(painter, p1_tela, p2_tela)
+                    self._desenhar_seta_fio_tela(painter, p1_tela, p2_tela, cor=cor_fio)
                 else:
                     p1_tela = self._cena_para_tela(p1)
                     p2_tela = self._cena_para_tela(p2)
-                    self._desenhar_seta_fio(painter, p1, p2)
+                    self._desenhar_seta_fio(painter, p1, p2, cor=cor_fio)
 
                 rotulo_fio = (
                         el.get("fio_rotulo")
@@ -2477,6 +2527,7 @@ class VisualizacaoCanvas(QWidget):
                             p2_tela,
                             str(rotulo_fio),
                             tamanho=self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0),
+                            cor=cor_fio,
                         )
                     else:
                         self._desenhar_rotulo_fio(
@@ -2485,6 +2536,7 @@ class VisualizacaoCanvas(QWidget):
                             p2,
                             str(rotulo_fio),
                             tamanho=self._tamanho_visual_molde(el, ("tam_fio", "tamanho_fio", "fonte_fio"), 9.0),
+                            cor=cor_fio,
                         )
                 else:
                     ang = float(el.get("fio_angulo", 90.0))
@@ -2492,7 +2544,8 @@ class VisualizacaoCanvas(QWidget):
                     tamanho_fio_px = self._tamanho_pixel_molde(el, ("tam_fio_px", "tamanho_fio_px"), 10.0)
                     fonte_fio.setPixelSize(int(max(6, round(tamanho_fio_px))))
                     painter.setFont(fonte_fio)
-                    painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                    cor_fio = self._config_cor_molde("fio", "#ffffff")
+                    painter.setPen(QPen(QColor(cor_fio), 1.0))
                     texto_ang = f"{int(round(ang))}°"
                     metrics_fio = QFontMetrics(painter.font())
                     largura_ang = metrics_fio.horizontalAdvance(texto_ang)
@@ -2511,7 +2564,7 @@ class VisualizacaoCanvas(QWidget):
                     cy = sum(p.y() for p in cantos) / len(cantos)
                 else:
                     cx, cy = 0.0, 0.0
-                painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                painter.setPen(QPen(QColor(self._config_cor_molde("numeros", "#ffffff")), 1.0))
                 fonte_num = painter.font()
                 tamanho_num_px = self._tamanho_texto_cm_para_px(
                     self._altura_texto_config_cm(el, "numero", self.TAMANHO_NUMERO_PADRAO_CM),
@@ -2538,8 +2591,9 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_numeros_molde_canvas(painter, metrics_num, itens_numeracao, centro_numeros, afastamento)
                 if el.get("mostrar_controles", True) and self._ferramenta_manipulacao_ativa():
                     aux = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
-                    painter.setPen(QPen(QColor("#ff3b30"), 1.0))
-                    painter.setBrush(QColor("#ff3b30"))
+                    cor_aux = QColor(self._config_cor_molde("ponto_nao_graduado", "#ff3b30"))
+                    painter.setPen(QPen(cor_aux, 1.0))
+                    painter.setBrush(cor_aux)
                     for pt in aux:
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
@@ -2569,7 +2623,7 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_polilinha(
                     painter,
                     pontos,
-                    cor=cor,
+                    cor=self._cor_tamanho_graduacao(el, _nome, cor),
                     espessura=self._espessura_graduacao_molde(el),
                     estilo="solid",
                 )
@@ -2588,8 +2642,7 @@ class VisualizacaoCanvas(QWidget):
         finally:
             painter.restore()
 
-    @staticmethod
-    def _cor_tamanho_base_graduacao(el: dict) -> str | None:
+    def _cor_tamanho_base_graduacao(self, el: dict) -> str | None:
         tamanhos = el.get("graduacao_tamanhos") if isinstance(el, dict) else None
         if not isinstance(tamanhos, list) or not tamanhos:
             return None
@@ -2598,7 +2651,34 @@ class VisualizacaoCanvas(QWidget):
             return None
         base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
         cor = QColor(str(linhas[base_idx].get("cor") or ""))
-        return cor.name() if cor.isValid() else None
+        if not cor.isValid():
+            return None
+        return self._config_cor_molde("tamanho_base", cor.name())
+
+    def _cor_tamanho_graduacao(self, el: dict, nome: str, cor_padrao: str) -> str:
+        chave = self._chave_cor_tamanho_graduacao(el, nome)
+        return self._config_cor_molde(chave, cor_padrao) if chave else str(cor_padrao)
+
+    @staticmethod
+    def _chave_cor_tamanho_graduacao(el: dict, nome: str) -> str | None:
+        tamanhos = el.get("graduacao_tamanhos") if isinstance(el, dict) else None
+        if not isinstance(tamanhos, list) or not tamanhos:
+            return None
+        linhas = [linha for linha in tamanhos if isinstance(linha, dict) and linha.get("ativo", True)]
+        if not linhas:
+            return None
+        base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
+        nome_txt = str(nome or "").strip()
+        for idx, linha in enumerate(linhas):
+            atual = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if atual != nome_txt:
+                continue
+            if idx < base_idx:
+                return "tamanhos_menores"
+            if idx > base_idx:
+                return "tamanhos_maiores"
+            return "tamanho_base"
+        return None
 
     @staticmethod
     def _espessura_graduacao_molde(el: dict) -> float:
@@ -2805,10 +2885,11 @@ class VisualizacaoCanvas(QWidget):
         afastamento: float,
     ) -> None:
         layouts = self._layout_numeros_molde_canvas(metrics, itens, centro, afastamento)
+        cor_ponto, forma_ponto = self._config_ponto_molde("ponto_controle", "#000000", "Quadrado preenchido")
         for item in layouts:
             if item["marcador"]:
                 pt_tela = self._cena_para_tela(item["ponto"])
-                painter.drawRect(int(pt_tela.x() - 3), int(pt_tela.y() - 3), 6, 6)
+                self._desenhar_marcador_ponto_tela(painter, pt_tela, cor_ponto, forma_ponto, 3)
         for item in layouts:
             largura = float(item["largura"])
             altura = float(item["altura"])
@@ -3049,6 +3130,7 @@ class VisualizacaoCanvas(QWidget):
         cor_ref = str(el.get("cor") or "#8e949b")
         if not QColor(cor_ref).isValid():
             cor_ref = "#8e949b"
+        cor_ref = self._config_cor_molde("molde_dobrado", cor_ref)
         painter.save()
         pen = QPen(QColor(cor_ref), 1.0, Qt.DashLine)
         pen.setDashPattern([4.0, 3.0])
@@ -3154,10 +3236,30 @@ class VisualizacaoCanvas(QWidget):
 
         pontos_controle = [self._cena_para_tela(pt) for pt in self._pontos_controle_selecao_molde(base, el)]
 
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
-        painter.setBrush(QColor("#000000"))
+        cor_ponto, forma_ponto = self._config_ponto_molde("ponto_controle", "#000000", "Losango")
         for pt in pontos_controle:
-            d = 4
+            self._desenhar_marcador_ponto_tela(painter, pt, cor_ponto, forma_ponto, 4)
+
+    def _desenhar_marcador_ponto_tela(
+            self,
+            painter: QPainter,
+            pt: QPointF,
+            cor: str,
+            forma: str,
+            raio: int = 4,
+    ):
+        cor_qt = QColor(str(cor or "#000000"))
+        if not cor_qt.isValid():
+            cor_qt = QColor("#000000")
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(cor_qt)
+        d = max(2, int(raio))
+        forma_txt = str(forma or "").strip().lower()
+        if "quadrado" in forma_txt:
+            painter.drawRect(int(pt.x() - d), int(pt.y() - d), d * 2, d * 2)
+        elif "circulo" in forma_txt or "círculo" in forma_txt:
+            painter.drawEllipse(pt, d, d)
+        else:
             diamond = QPolygon([
                 QPoint(int(pt.x()), int(pt.y() - d)),
                 QPoint(int(pt.x() + d), int(pt.y())),
@@ -3338,7 +3440,8 @@ class VisualizacaoCanvas(QWidget):
         painter.translate(tela)
         if abs(angulo) > 1e-6:
             painter.rotate(-angulo)
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        chave_cor = "nome_molde" if chave == "nome" else chave
+        painter.setPen(QPen(QColor(self._config_cor_molde(chave_cor, "#ffffff")), 1.0))
         painter.drawText(rect, alinhamento, texto)
         painter.restore()
 
@@ -3414,7 +3517,7 @@ class VisualizacaoCanvas(QWidget):
         if not margens:
             return
         sentido = 1.0 if self._area_assinada_pontos_canvas(base) < 0.0 else -1.0
-        cor = QColor(self._cor_linha_elemento(molde, "#ffffff"))
+        cor = QColor(self._config_cor_molde("margem", self._cor_linha_elemento(molde, "#ffffff")))
         painter.save()
         pen = QPen(cor, max(1.0, float(molde.get("espessura", 1.0))))
         pen.setCapStyle(Qt.RoundCap)
@@ -3531,7 +3634,7 @@ class VisualizacaoCanvas(QWidget):
         positivos = [abs(t) for t in candidatos if t > 0]
         return min(positivos) if positivos else 8.0
 
-    def _desenhar_seta_fio_tela(self, painter: QPainter, p1_tela: QPointF, p2_tela: QPointF):
+    def _desenhar_seta_fio_tela(self, painter: QPainter, p1_tela: QPointF, p2_tela: QPointF, cor: str = "#ffffff"):
         dx = p2_tela.x() - p1_tela.x()
         dy = p2_tela.y() - p1_tela.y()
         comp = sqrt((dx * dx) + (dy * dy))
@@ -3544,16 +3647,16 @@ class VisualizacaoCanvas(QWidget):
         margem_px = min(12.0, max(5.0, comp * 0.06))
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
-        pen = QPen(QColor("#ffffff"), 1.15)
+        pen = QPen(QColor(cor), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
         tamanho_seta = min(12.0, max(6.0, comp * 0.16))
         meia_largura = tamanho_seta * 0.32
-        self._desenhar_ponta_seta_fechada(painter, p2_tela, QPointF(ux, uy), QPointF(nx, ny), tamanho_seta, meia_largura)
-        self._desenhar_ponta_seta_fechada(painter, p1_tela, QPointF(-ux, -uy), QPointF(nx, ny), tamanho_seta, meia_largura)
+        self._desenhar_ponta_seta_fechada(painter, p2_tela, QPointF(ux, uy), QPointF(nx, ny), tamanho_seta, meia_largura, cor=cor)
+        self._desenhar_ponta_seta_fechada(painter, p1_tela, QPointF(-ux, -uy), QPointF(nx, ny), tamanho_seta, meia_largura, cor=cor)
 
-    def _desenhar_rotulo_fio_tela(self, painter: QPainter, p1_tela: QPointF, p2_tela: QPointF, texto: str, tamanho: float | None = None):
+    def _desenhar_rotulo_fio_tela(self, painter: QPainter, p1_tela: QPointF, p2_tela: QPointF, texto: str, tamanho: float | None = None, cor: str = "#ffffff"):
         dx = p2_tela.x() - p1_tela.x()
         dy = p2_tela.y() - p1_tela.y()
         comp = sqrt((dx * dx) + (dy * dy))
@@ -3571,11 +3674,11 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setPen(QPen(QColor(cor), 1.0))
         painter.drawText(int(round(ancora.x() - largura / 2.0)), int(round(ancora.y() - 4.0)), int(round(largura)), int(round(altura)), Qt.AlignCenter, texto)
         painter.restore()
 
-    def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF):
+    def _desenhar_seta_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, cor: str = "#ffffff"):
         p1_tela = self._cena_para_tela(inicio)
         p2_tela = self._cena_para_tela(fim)
         dx = p2_tela.x() - p1_tela.x()
@@ -3593,7 +3696,7 @@ class VisualizacaoCanvas(QWidget):
         base_inicio = QPointF(p1_tela.x() + (ux * margem_px), p1_tela.y() + (uy * margem_px))
         base_fim = QPointF(p2_tela.x() - (ux * margem_px), p2_tela.y() - (uy * margem_px))
 
-        pen = QPen(QColor("#ffffff"), 1.15)
+        pen = QPen(QColor(cor), 1.15)
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
         painter.drawLine(base_inicio, base_fim)
@@ -3608,6 +3711,7 @@ class VisualizacaoCanvas(QWidget):
             normal=QPointF(nx, ny),
             comprimento=tamanho_seta,
             meia_largura=meia_largura,
+            cor=cor,
         )
         self._desenhar_ponta_seta_fechada(
             painter,
@@ -3616,6 +3720,7 @@ class VisualizacaoCanvas(QWidget):
             normal=QPointF(nx, ny),
             comprimento=tamanho_seta,
             meia_largura=meia_largura,
+            cor=cor,
         )
 
     def _desenhar_ponta_seta_fechada(
@@ -3626,6 +3731,7 @@ class VisualizacaoCanvas(QWidget):
             normal: QPointF,
             comprimento: float,
             meia_largura: float,
+            cor: str = "#ffffff",
     ):
         base = QPointF(
             ponta.x() - (direcao.x() * comprimento),
@@ -3646,12 +3752,12 @@ class VisualizacaoCanvas(QWidget):
         path.closeSubpath()
         painter.save()
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#ffffff"))
+        painter.setBrush(QColor(cor))
         painter.drawPath(path)
         painter.restore()
 
     def _desenhar_rotulo_fio(self, painter: QPainter, inicio: QPointF, fim: QPointF, texto: str,
-                             tamanho: float | None = None):
+                             tamanho: float | None = None, cor: str = "#ffffff"):
         meio = QPointF((inicio.x() + fim.x()) / 2.0, (inicio.y() + fim.y()) / 2.0)
         meio_tela = self._cena_para_tela(meio)
         dx = fim.x() - inicio.x()
@@ -3677,7 +3783,7 @@ class VisualizacaoCanvas(QWidget):
         metrics = QFontMetrics(painter.font())
         largura = metrics.horizontalAdvance(texto)
         altura = metrics.height()
-        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setPen(QPen(QColor(cor), 1.0))
         painter.drawText(
             int(round(ancora.x() - (largura / 2))),
             int(round(ancora.y() - 4)),
