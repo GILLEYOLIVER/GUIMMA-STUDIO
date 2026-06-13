@@ -180,8 +180,13 @@ class _FiltroMemoriaPosicao(QObject):
         self._chave = chave
 
     def eventFilter(self, obj, event):
-        if obj is self._widget and event.type() in (QEvent.Move, QEvent.Hide, QEvent.Close):
-            salvar_posicao(self._widget, self._chave)
+        widget = getattr(self, "_widget", None)
+        chave = getattr(self, "_chave", "")
+        if widget is not None and obj is widget and event.type() in (QEvent.Move, QEvent.Hide, QEvent.Close):
+            try:
+                salvar_posicao(widget, chave)
+            except RuntimeError:
+                pass
         return super().eventFilter(obj, event)
 
 

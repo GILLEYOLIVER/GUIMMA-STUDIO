@@ -80,6 +80,13 @@ class DefinirCurvaToolTestCase(unittest.TestCase):
         ferramenta._edt_pontos = QLineEdit(valor)
         return ferramenta
 
+    def assertContemPonto(self, pontos, esperado, casas=6):
+        ex, ey = esperado
+        self.assertTrue(
+            any(abs(float(x) - ex) <= 10 ** -casas and abs(float(y) - ey) <= 10 ** -casas for x, y in pontos),
+            f"{esperado} nao encontrado em {pontos}",
+        )
+
     def test_quantidade_2_transforma_trecho_em_reta(self):
         canvas = _FakeCanvas()
         ferramenta = self._ferramenta("2")
@@ -87,11 +94,13 @@ class DefinirCurvaToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta._aplicar_trecho(canvas, 0, 0, 4))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["pontos"][:2], [(0.0, 0.0), (8.0, 0.0)])
+        self.assertEqual(molde["pontos"][:3], [(0.0, 0.0), (4.0, 0.0), (8.0, 0.0)])
         self.assertNotIn((2.0, 1.0), molde["controle_auxiliares"])
         self.assertNotIn((4.0, 2.0), molde["controle_auxiliares"])
         self.assertNotIn((6.0, 1.0), molde["controle_auxiliares"])
-        self.assertEqual(molde["pontos_auxiliares"], [])
+        self.assertEqual(molde["controle_auxiliares"], [(4.0, 0.0)])
+        self.assertEqual(molde["pontos_auxiliares"], [{"x": 4.0, "y": 0.0}])
+        self.assertTrue(molde["pontos_tracado_real"])
 
     def test_quantidade_3_redistribui_auxiliares_no_tracado_original(self):
         canvas = _FakeCanvas()
@@ -104,7 +113,78 @@ class DefinirCurvaToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_auxiliares"][1], (4.0, 2.0))
         self.assertEqual(len(molde["pontos_auxiliares"]), 3)
         self.assertEqual(molde["pontos"][0], (0.0, 0.0))
-        self.assertEqual(molde["pontos"][4], (8.0, 0.0))
+        self.assertEqual(molde["pontos"][-1], molde["pontos"][0])
+        self.assertGreater(len(molde["pontos"]), 40)
+        self.assertContemPonto(molde["pontos"], (8.0, 0.0))
+        self.assertTrue(molde["pontos_tracado_real"])
+
+    def test_preview_realca_trecho_e_auxiliares_sem_alterar_molde(self):
+        canvas = _FakeCanvas()
+        ferramenta = self._ferramenta("3")
+        ferramenta._inicio = (0, 0, QPointF(0.0, 0.0))
+        ferramenta._hover = (0, 4, QPointF(8.0, 0.0))
+        pontos_antes = list(canvas.cena.elementos[0]["pontos"])
+
+        preview = ferramenta._preview_trecho(canvas)
+
+        self.assertIsNotNone(preview)
+        self.assertEqual(len(preview["auxiliares"]), 3)
+        self.assertEqual((preview["auxiliares"][1].x(), preview["auxiliares"][1].y()), (4.0, 2.0))
+        self.assertGreater(len(preview["amostras"]), 40)
+        self.assertEqual(canvas.cena.elementos[0]["pontos"], pontos_antes)
+
+    def test_mudar_quantidade_na_caixa_repinta_preview_instantaneamente(self):
+        FerramentaDefinirCurva._dlg_global = None
+        FerramentaDefinirCurva._edt_pontos_global = None
+        FerramentaDefinirCurva._canvas_preview_global = None
+        FerramentaDefinirCurva._preview_signal_conectado = False
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDefinirCurva()
+
+        try:
+            ferramenta.on_activate(canvas)
+            ferramenta._inicio = (0, 0, QPointF(0.0, 0.0))
+            ferramenta._hover = (0, 4, QPointF(8.0, 0.0))
+            canvas.atualizou = False
+
+            self.assertTrue(ferramenta._edt_pontos.keyboardTracking())
+            ferramenta._edt_pontos.setValue(4)
+
+            self.assertTrue(canvas.atualizou)
+            preview = ferramenta._preview_trecho(canvas)
+            self.assertEqual(len(preview["auxiliares"]), 4)
+        finally:
+            ferramenta.on_deactivate(canvas)
+            FerramentaDefinirCurva._dlg_global = None
+            FerramentaDefinirCurva._edt_pontos_global = None
+            FerramentaDefinirCurva._canvas_preview_global = None
+            FerramentaDefinirCurva._preview_signal_conectado = False
+
+    def test_trecho_fechado_usa_sentido_horario_visual(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "molde": True,
+            "fechado": True,
+            "pontos": [
+                (0.0, 0.0),
+                (0.0, 10.0),
+                (10.0, 10.0),
+                (10.0, 0.0),
+                (0.0, 0.0),
+            ],
+            "controle_cantos": [(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)],
+            "controle_auxiliares": [],
+            "pontos_auxiliares": [],
+        }
+        ferramenta = self._ferramenta("3")
+
+        self.assertTrue(ferramenta._aplicar_trecho(canvas, 0, 0, 2))
+
+        molde = canvas.cena.elementos[0]
+        self.assertEqual(molde["controle_auxiliares"], [(5.0, 0.0), (10.0, 0.0), (10.0, 5.0)])
+        self.assertNotIn((0.0, 5.0), molde["controle_auxiliares"])
+        self.assertNotIn((0.0, 10.0), molde["controle_auxiliares"])
 
 
 if __name__ == "__main__":

@@ -637,7 +637,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         tema = self._tema_interface()
         return (
             f"QPushButton {{ background: transparent; border: 1px solid transparent; color: {tema['texto']}; "
-            "font-weight: 400; font-size: 12px; padding: 0 8px; border-radius: 3px; }}"
+            "font-weight: 400; font-size: 12px; padding: 0 8px; border-radius: 3px; }"
             f"QPushButton:hover {{ background: {tema['hover']}; border-color: {tema['borda']}; color: {tema['primaria_escura']}; }}"
             f"QPushButton:pressed {{ background: {tema['selecionado']}; border-color: {tema['primaria']}; }}"
             f"QPushButton:disabled {{ color: {tema['texto_suave']}; background: transparent; border-color: transparent; }}"
@@ -647,7 +647,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         tema = self._tema_interface()
         return (
             f"QComboBox {{ color:{tema['texto']}; background:{tema['painel']}; border:1px solid {tema['borda']}; "
-            "padding: 2px 8px; font-weight: 400; }}"
+            "padding: 2px 8px; font-weight: 400; }"
             f"QComboBox:hover {{ border-color:{tema['primaria']}; background:{tema['hover_menu']}; }}"
             f"QComboBox QAbstractItemView {{ color:{tema['texto']}; background:{tema['painel']}; "
             f"selection-background-color:{tema['hover_menu']}; selection-color:{tema['primaria_escura']}; }}"
@@ -675,7 +675,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         tema = self._tema_interface()
         return (
             f"QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 5px; color: {tema['texto']}; "
-            "font-size: 12px; font-weight: 400; padding: 3px 6px; text-align: left; }}"
+            "font-size: 12px; font-weight: 400; padding: 3px 6px; text-align: left; }"
             f"QToolButton:hover {{ background: {tema['hover']}; border: 1px solid {tema['borda']}; color: {tema['primaria_escura']}; }}"
             f"QToolButton:pressed {{ background: {tema['selecionado']}; }}"
             f"QToolButton:checked {{ background: {tema['selecionado']}; border: 1px solid {tema['primaria']}; color: {tema['primaria_escura']}; font-weight: 600; }}"
@@ -1639,9 +1639,15 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if not area:
             return False
+        if tool_id == "copiar":
+            self._copiar_canvas_atual()
+            self.lbl_status.setText("Copiado")
+            return True
+        if tool_id == "colar":
+            self._colar_canvas_atual()
+            self.lbl_status.setText("Colado")
+            return True
         acoes = {
-            "copiar": (area.canvas.copiar, "Copiado"),
-            "colar": (area.canvas.colar, "Colado"),
             "recortar": (area.canvas.recortar, "Recortado"),
             "excluir": (area.canvas.apagar_selecionados, "Excluído"),
         }

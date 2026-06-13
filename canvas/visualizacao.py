@@ -661,16 +661,22 @@ class VisualizacaoCanvas(QWidget):
         if not self._buffer_copia:
             return
         self._selecionados.clear()
-        itens = self._buffer_copia.get("elementos", []) if self._buffer_copia.get("tipo") == "multiplos" else [
-            self._buffer_copia]
+        if isinstance(self._buffer_copia.get("elementos"), list):
+            itens = self._buffer_copia.get("elementos", [])
+        elif self._buffer_copia.get("tipo") == "multiplos":
+            itens = self._buffer_copia.get("elementos", [])
+        else:
+            itens = [self._buffer_copia]
         dx, dy = self._delta_colagem_para_centro(itens)
-        if self._buffer_copia.get("tipo") == "multiplos":
-            for item in self._buffer_copia.get("elementos", []):
+        if isinstance(self._buffer_copia.get("elementos"), list) or self._buffer_copia.get("tipo") == "multiplos":
+            for item in itens:
+                if not isinstance(item, dict):
+                    continue
                 novo = self._elemento_serializavel(item)
                 self._transladar_elemento(novo, dx, dy)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
-        else:
+        elif isinstance(self._buffer_copia, dict):
             novo = self._elemento_serializavel(self._buffer_copia)
             self._transladar_elemento(novo, dx, dy)
             self.cena.elementos.append(novo)
@@ -2047,7 +2053,7 @@ class VisualizacaoCanvas(QWidget):
         painter = QPainter(self)
         fundo = getattr(self, "_cores_canvas", {}).get("fundo", "#000000")
         painter.fillRect(self.rect(), QColor(fundo))
-        painter.setRenderHint(QPainter.Antialiasing, not self._zoom_interativo)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
         if bool(getattr(self, "_grid_visivel", True)):
             self._desenhar_grade_canvas(painter)
@@ -2065,6 +2071,8 @@ class VisualizacaoCanvas(QWidget):
         elementos_visiveis: set[int] = set()
         for idx, elemento in enumerate(self.cena.elementos):
             if not self._elemento_visivel_no_viewport(elemento):
+                continue
+            if self._elemento_oculto_por_visualizacao_molde(elemento):
                 continue
             elementos_visiveis.add(idx)
             if elemento.get("tipo") == "imagem":
@@ -2121,12 +2129,9 @@ class VisualizacaoCanvas(QWidget):
         for marca in getattr(self, "_marcacoes_temporarias", []) or []:
             self._desenhar_marca_x(painter, QPointF(marca), cor="#ff40ff", tamanho_px=6)
 
-        if self._zoom_interativo:
-            self._desenhar_graduacao_moldes_visiveis(painter, elementos_visiveis)
-        else:
-            self._desenhar_overlays_moldes(painter, elementos_visiveis)
+        self._desenhar_overlays_moldes(painter, elementos_visiveis)
 
-        if not self._zoom_interativo and self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
+        if self._runtime_tool and hasattr(self._runtime_tool, "on_paint_overlay"):
             self._runtime_tool.on_paint_overlay(self, painter)
         self._desenhar_overlay_snap_ativo(painter)
 
@@ -2206,6 +2211,30 @@ class VisualizacaoCanvas(QWidget):
                 return cor.name()
         cor = QColor(cor_base)
         return cor.name() if cor.isValid() else QColor(padrao).name()
+
+    def _molde_por_id_visualizacao(self, molde_id: str) -> dict | None:
+        alvo = str(molde_id or "").strip()
+        if not alvo:
+            return None
+        for el in getattr(self.cena, "elementos", []) or []:
+            if isinstance(el, dict) and el.get("molde") and self._molde_id_elemento(el) == alvo:
+                return el
+        return None
+
+    def _elemento_oculto_por_visualizacao_molde(self, elemento: dict) -> bool:
+        if not isinstance(elemento, dict) or elemento.get("molde"):
+            return False
+        metadados = elemento.get("metadados") if isinstance(elemento.get("metadados"), dict) else {}
+        subtipo = str(elemento.get("subtipo_audaces") or metadados.get("subtipo_audaces") or "").strip()
+        costura_id = str(elemento.get("costura_de_molde_id") or metadados.get("costura_de_molde_id") or "").strip()
+        linha_id = str(elemento.get("molde_id") or metadados.get("molde_id") or "").strip()
+        if subtipo == "costura" or costura_id:
+            molde = self._molde_por_id_visualizacao(costura_id or linha_id)
+            return bool(isinstance(molde, dict) and molde.get("mostrar_costura", True) is False)
+        if subtipo == "linha_interna" or bool(elemento.get("molde_linha_vinculada")):
+            molde = self._molde_por_id_visualizacao(linha_id)
+            return bool(isinstance(molde, dict) and molde.get("mostrar_linhas_auxiliares", True) is False)
+        return False
 
     def _desenhar_visualizacao_instantanea(self, painter: QPainter):
         elementos = getattr(self, "_visualizacao_instantanea_elementos", []) or []
@@ -2486,6 +2515,7 @@ class VisualizacaoCanvas(QWidget):
                 visivel=bool(el.get("visual_observacoes", el.get("mostrar_observacoes", False))),
                 padrao_ref="Centro topo",
             )
+            self._desenhar_metadados_molde_canvas(painter, el, base)
 
             if el.get("mostrar_fio", True):
                 cor_fio = self._config_cor_molde("fio", "#ffffff")
@@ -2619,6 +2649,8 @@ class VisualizacaoCanvas(QWidget):
             return
         painter.save()
         try:
+            if el.get("visual_caminho_grade", False):
+                self._desenhar_caminhos_graduacao_molde(painter, el, base)
             for _nome, cor, pontos in contornos:
                 self._desenhar_polilinha(
                     painter,
@@ -2641,6 +2673,19 @@ class VisualizacaoCanvas(QWidget):
                     )
         finally:
             painter.restore()
+
+    def _desenhar_caminhos_graduacao_molde(self, painter: QPainter, el: dict, base: list[QPointF]) -> None:
+        caminhos = self._caminhos_graduacao_tabela(el, base)
+        if not caminhos:
+            return
+        for nome, cor, origem, destino in caminhos:
+            self._desenhar_polilinha(
+                painter,
+                [origem, destino],
+                cor=self._cor_tamanho_graduacao(el, nome, cor),
+                espessura=max(1.0, self._espessura_graduacao_molde(el) * 0.75),
+                estilo="dash",
+            )
 
     def _cor_tamanho_base_graduacao(self, el: dict) -> str | None:
         tamanhos = el.get("graduacao_tamanhos") if isinstance(el, dict) else None
@@ -2739,6 +2784,25 @@ class VisualizacaoCanvas(QWidget):
                 pontos_tamanho.append(QPointF(pontos_tamanho[0]))
                 saida.append((nome, cor, pontos_tamanho))
         return saida
+
+    @staticmethod
+    def _caminhos_graduacao_tabela(el: dict, base: list[QPointF]) -> list[tuple[str, str, QPointF, QPointF]]:
+        if not isinstance(base, list) or len(base) < 2:
+            return []
+        contorno = [QPointF(pt) for pt in base]
+        if len(contorno) > 1 and contorno[0] == contorno[-1]:
+            contorno = contorno[:-1]
+        if len(contorno) < 2:
+            return []
+        caminhos: list[tuple[str, str, QPointF, QPointF]] = []
+        for nome, cor, pontos_tamanho in VisualizacaoCanvas._contornos_graduacao_tabela(el, contorno):
+            pontos = [QPointF(pt) for pt in pontos_tamanho]
+            if len(pontos) > 1 and pontos[0] == pontos[-1]:
+                pontos = pontos[:-1]
+            for origem, destino in zip(contorno, pontos):
+                if VisualizacaoCanvas._dist_qpoints(origem, destino) > 1e-7:
+                    caminhos.append((nome, cor, QPointF(origem), QPointF(destino)))
+        return caminhos
 
     @staticmethod
     def _deslocamentos_graduacao_tamanho(
@@ -3443,6 +3507,56 @@ class VisualizacaoCanvas(QWidget):
         chave_cor = "nome_molde" if chave == "nome" else chave
         painter.setPen(QPen(QColor(self._config_cor_molde(chave_cor, "#ffffff")), 1.0))
         painter.drawText(rect, alinhamento, texto)
+        painter.restore()
+
+    def _linhas_metadados_molde_canvas(self, el: dict, base: list[QPointF]) -> list[str]:
+        linhas: list[str] = []
+        modelo = str(el.get("modelo") or el.get("nome_modelo") or el.get("modelo_nome") or "").strip()
+        if el.get("visual_modelo", False) and modelo:
+            linhas.append(f"Modelo {modelo}")
+        grade = str(el.get("graduacao_grade_nome") or "").strip()
+        if el.get("visual_grade_tamanhos", False) and grade:
+            linhas.append(f"Grade {grade}")
+        tecido = str(el.get("tecido") or "").strip()
+        if el.get("visual_tecido", False) and tecido:
+            linhas.append(f"Tecido {tecido}")
+        if el.get("visual_quantidade", False):
+            qtd = str(el.get("qtd_modelo", 1) or 1).strip()
+            sufixo = " (Par)" if el.get("par", False) else ""
+            linhas.append(f"Quantidade {qtd}{sufixo}")
+        giro = str(el.get("giro") or "").strip()
+        if el.get("visual_giro", False) and giro:
+            linhas.append(f"Giro {giro}")
+        if el.get("visual_perimetro_molde", False) and len(base) >= 2:
+            perimetro = 0.0
+            for a, b in zip(base, base[1:] + [base[0]]):
+                perimetro += sqrt((b.x() - a.x()) ** 2 + (b.y() - a.y()) ** 2)
+            linhas.append(f"Perímetro {formatar_numero(perimetro)} {self._unidade_sigla}")
+        return linhas
+
+    def _desenhar_metadados_molde_canvas(self, painter: QPainter, el: dict, base: list[QPointF]) -> None:
+        linhas = self._linhas_metadados_molde_canvas(el, base)
+        if not linhas or not base:
+            return
+        cx = sum(p.x() for p in base) / len(base)
+        cy = sum(p.y() for p in base) / len(base)
+        pos = self._cena_para_tela(QPointF(cx, cy))
+        bbox_tela = self._bbox_tela_pontos(base)
+        painter.save()
+        fonte = painter.font()
+        fonte.setBold(False)
+        fonte.setPixelSize(int(round(self._tamanho_texto_cm_para_px(0.45, minimo_px=7.0, maximo_px=42.0))))
+        painter.setFont(fonte)
+        metrics = QFontMetrics(painter.font())
+        altura = max(10, metrics.height() + 2)
+        y = min(bbox_tela[3] - (altura * len(linhas)), pos.y() + 18.0)
+        y = max(bbox_tela[1] + 2.0, y)
+        painter.setPen(QPen(QColor(self._config_cor_molde("nome_molde", "#ffffff")), 1.0))
+        for linha in linhas:
+            largura = min(max(70, metrics.horizontalAdvance(linha) + 10), max(80, bbox_tela[2] - bbox_tela[0] - 8))
+            x = max(bbox_tela[0] + 4.0, min(pos.x() - largura / 2.0, bbox_tela[2] - largura - 4.0))
+            painter.drawText(QRectF(x, y, largura, altura), Qt.AlignCenter, linha)
+            y += altura
         painter.restore()
 
     def _area_assinada_pontos_canvas(self, pontos: list[QPointF]) -> float:
@@ -4229,6 +4343,8 @@ class VisualizacaoCanvas(QWidget):
         painter.drawLine(int(pt.x() - tamanho), int(pt.y() + tamanho), int(pt.x() + tamanho), int(pt.y() - tamanho))
 
     def _desenhar_marcacoes_piques_elemento(self, painter: QPainter, elemento: dict, cor_molde: str) -> None:
+        if elemento.get("mostrar_piques", True) is False:
+            return
         pontos_piques_detalhados = self._desenhar_piques_configurados(painter, elemento, cor_molde)
         for mx, my in elemento.get("marcacoes_no_perimetro", []) or []:
             ponto_marcacao = QPointF(float(mx), float(my))
