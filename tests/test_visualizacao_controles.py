@@ -580,6 +580,48 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(caminhos[1][2], QPointF(10.0, 0.0))
         self.assertEqual(caminhos[1][3], QPointF(10.0, -1.0))
 
+    def test_pique_da_base_aparece_nos_tamanhos_graduados(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        chamadas = []
+        canvas._desenhar_segmento = lambda _painter, a, b, **kwargs: chamadas.append((QPointF(a), QPointF(b), kwargs))
+        valores = {}
+        pontos = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+        for idx, ponto in enumerate(pontos):
+            valores[str(idx)] = {
+                "indice": idx,
+                "ponto": ponto,
+                "valores": {
+                    "P": {"dx": 0.0, "dy": -2.0},
+                    "M": {"dx": 0.0, "dy": 0.0},
+                    "G": {"dx": 0.0, "dy": 2.0},
+                },
+            }
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": pontos + [(0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False},
+                {"ativo": True, "tamanho": "M", "base": True},
+                {"ativo": True, "tamanho": "G", "base": False},
+            ],
+            "graduacao_tabela": {"pontos": valores},
+            "piques_config": [
+                {
+                    "ponto": (5.0, 0.0),
+                    "sobre_contorno": True,
+                    "segmentos": [((5.0, 0.0), (5.0, 1.0))],
+                }
+            ],
+        }
+
+        canvas._desenhar_piques_configurados(object(), molde, "#ff00ff")
+
+        segmentos = [((a.x(), a.y()), (b.x(), b.y())) for a, b, _kwargs in chamadas]
+        self.assertIn(((5.0, 0.0), (5.0, 1.0)), segmentos)
+        self.assertIn(((5.0, -2.0), (5.0, -1.0)), segmentos)
+        self.assertIn(((5.0, 2.0), (5.0, 3.0)), segmentos)
+
 
 if __name__ == "__main__":
     unittest.main()
