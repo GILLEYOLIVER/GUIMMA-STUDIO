@@ -120,6 +120,37 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(ponto["valores"]["G"], {"dx": 0.5, "dy": -0.25})
         self.assertEqual(canvas.historico, 1)
 
+    def test_selecionar_ponto_carrega_graduacao_salva_na_coordenada(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["controle_cantos"] = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)]
+        molde["graduacao_tabela"] = {
+            "pontos": {
+                "7": {
+                    "indice": 7,
+                    "numero": 8,
+                    "ponto": (5.0, 0.0),
+                    "valores": {
+                        "P": {"dx": -0.7, "dy": 0.2},
+                        "M": {"dx": 0.0, "dy": 0.0},
+                        "G": {"dx": 1.1, "dy": -0.4},
+                    },
+                }
+            }
+        }
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        ferramenta.selecionar_ponto(canvas, 1)
+
+        dialog = ferramenta._obter_dialog(canvas)
+        self.assertEqual(dialog.tbl.item(0, 1).text(), "-0.7")
+        self.assertEqual(dialog.tbl.item(0, 2).text(), "0.2")
+        self.assertEqual(dialog.tbl.item(1, 1).text(), "0")
+        self.assertEqual(dialog.tbl.item(1, 2).text(), "0")
+        self.assertEqual(dialog.tbl.item(2, 1).text(), "1.1")
+        self.assertEqual(dialog.tbl.item(2, 2).text(), "-0.4")
+
     def test_pontos_contorno_remove_fechamento_duplicado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()
@@ -798,7 +829,8 @@ class TabelaToolTestCase(unittest.TestCase):
         dialog.tbl.item(2, 2).setText("1.5")
         ferramenta.aplicar_dialog(canvas)
 
-        dialog._copiar()
+        self.assertEqual(dialog.btn_copiar_graduacao.text(), "Copiar graduação")
+        dialog.btn_copiar_graduacao.click()
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(110.0, 0.0))))
 
         destino = canvas.cena.elementos[1]["graduacao_tabela"]["pontos"]["1"]["valores"]
