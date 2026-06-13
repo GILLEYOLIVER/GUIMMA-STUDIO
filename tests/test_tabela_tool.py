@@ -151,6 +151,42 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(dialog.tbl.item(2, 1).text(), "1.1")
         self.assertEqual(dialog.tbl.item(2, 2).text(), "-0.4")
 
+    def test_ponto_sem_graduacao_salva_nao_mostra_valor_interpolado(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)],
+            "pontos_controle_curva": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False},
+                {"ativo": True, "tamanho": "M", "base": True},
+                {"ativo": True, "tamanho": "G", "base": False},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "ponto": (0.0, 0.0),
+                        "valores": {
+                            "P": {"dx": -1.0, "dy": 0.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 1.0, "dy": 0.0},
+                        },
+                    },
+                    "2": {
+                        "ponto": (10.0, 10.0),
+                        "valores": {
+                            "P": {"dx": -2.0, "dy": 1.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 2.0, "dy": -1.0},
+                        },
+                    },
+                }
+            },
+        }
+
+        self.assertEqual(ferramenta._valores_ponto(molde, 1), {})
+
     def test_pontos_contorno_remove_fechamento_duplicado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()
