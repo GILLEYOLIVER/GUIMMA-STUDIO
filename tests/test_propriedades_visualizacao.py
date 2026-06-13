@@ -13,18 +13,22 @@ if find_spec("PySide6") is None:
     FLAGS_VISUALIZACAO_MOLDE = ()
     MoldeRef = None
     NumeroLimpoDoubleSpinBox = None
+    PreviewMoldeWidget = None
     PropriedadesMoldesDialog = None
     QApplication = None
     QComboBox = None
     QLabel = None
     QLineEdit = None
+    QPointF = None
 else:
+    from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
 
     from tools.propriedades_tool import (
         FLAGS_VISUALIZACAO_MOLDE,
         MoldeRef,
         NumeroLimpoDoubleSpinBox,
+        PreviewMoldeWidget,
         PropriedadesMoldesDialog,
         _bbox_visual_molde,
         _converter_ponto_visual_entre_moldes,
@@ -252,6 +256,46 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertTrue(checks["chk_mostrar_nome"].isChecked())
         self.assertTrue(checks["chk_pique"].isChecked())
         self.assertFalse(checks["chk_modelo"].isChecked())
+
+    def test_preview_graduacao_respeita_checkbox_visualizacao(self):
+        from canvas.visualizacao import VisualizacaoCanvas
+
+        class _PainterFake:
+            def __init__(self):
+                self.paths = 0
+
+            def save(self):
+                pass
+
+            def restore(self):
+                pass
+
+            def setPen(self, _pen):
+                pass
+
+            def drawPath(self, _path):
+                self.paths += 1
+
+        original = VisualizacaoCanvas._contornos_graduacao_tabela
+        VisualizacaoCanvas._contornos_graduacao_tabela = staticmethod(
+            lambda _molde, _base: [("G", "#ffcc00", [QPointF(0.0, 0.0), QPointF(10.0, 0.0)])]
+        )
+        try:
+            preview = PreviewMoldeWidget.__new__(PreviewMoldeWidget)
+            base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0)]
+            mapear = lambda ponto: QPointF(ponto)
+
+            preview._molde = {"mostrar_graduacao": False}
+            painter = _PainterFake()
+            PreviewMoldeWidget._desenhar_graduacao(preview, painter, base, mapear)
+            self.assertEqual(painter.paths, 0)
+
+            preview._molde = {"mostrar_graduacao": True}
+            painter = _PainterFake()
+            PreviewMoldeWidget._desenhar_graduacao(preview, painter, base, mapear)
+            self.assertEqual(painter.paths, 1)
+        finally:
+            VisualizacaoCanvas._contornos_graduacao_tabela = staticmethod(original)
 
     def test_novo_tamanho_usa_proporcao_da_graduacao_existente(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)

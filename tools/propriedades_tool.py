@@ -528,6 +528,7 @@ class PreviewMoldeWidget(QWidget):
 
         painter.drawPath(path)
 
+        self._desenhar_graduacao(painter, base, mapear)
         self._desenhar_margem(painter, base, mapear, cor_desenho)
         self._desenhar_fio(painter, base, mapear)
         self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
@@ -1017,6 +1018,37 @@ class PreviewMoldeWidget(QWidget):
                 pen.setCapStyle(Qt.RoundCap)
                 painter.setPen(pen)
                 painter.drawLine(mapear(origem), mapear(destino))
+        finally:
+            painter.restore()
+
+    def _desenhar_graduacao(self, painter: QPainter, base: list[QPointF], mapear):
+        if not self._molde or self._molde.get("mostrar_graduacao", True) is False:
+            return
+        try:
+            from canvas.visualizacao import VisualizacaoCanvas
+
+            contornos = VisualizacaoCanvas._contornos_graduacao_tabela(self._molde, base)
+        except Exception:
+            return
+        if not contornos:
+            return
+        painter.save()
+        try:
+            for _nome, cor, pontos in contornos:
+                cor_linha = QColor(str(cor or "#ffcc00"))
+                if not cor_linha.isValid():
+                    cor_linha = QColor("#ffcc00")
+                pen = QPen(cor_linha, 1.0)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                pontos_tela = [mapear(QPointF(pt)) for pt in pontos]
+                if len(pontos_tela) < 2:
+                    continue
+                caminho = QPainterPath(pontos_tela[0])
+                for pt in pontos_tela[1:]:
+                    caminho.lineTo(pt)
+                painter.drawPath(caminho)
         finally:
             painter.restore()
 
