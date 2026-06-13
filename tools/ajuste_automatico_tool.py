@@ -433,7 +433,7 @@ class Ferramenta(FerramentaBase):
         ativos: list[str] = []
         if str(el.get("nome_molde") or "").strip() or el.get("mostrar_nome", True):
             ativos.append("nome")
-        if str(el.get("descricao") or "").strip() or el.get("visual_descricao", False):
+        if str(el.get("descricao") or "").strip() or el.get("visual_descricao", True):
             ativos.append("descricao")
         if str(el.get("observacoes") or el.get("observacao") or "").strip() or el.get("visual_observacoes", False):
             ativos.append("observacoes")

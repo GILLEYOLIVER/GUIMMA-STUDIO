@@ -497,6 +497,8 @@ class Ferramenta(FerramentaBase):
                 segmento_repor_auxiliares,
                 fechado,
                 evitar=[alvo],
+                regenerar_abaixo_de=2,
+                redistribuir_quando_curvo=True,
             )
             auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
         minimo = 3 if fechado else 2
@@ -555,9 +557,12 @@ class Ferramenta(FerramentaBase):
         segmento: tuple[QPointF, QPointF],
         fechado: bool,
         evitar: list[QPointF] | None = None,
+        regenerar_abaixo_de: int = 3,
+        redistribuir_quando_curvo: bool = False,
     ) -> list[tuple[float, float]]:
         auxiliares_saida = [QPointF(p) for p in auxiliares]
         evitar = [QPointF(p) for p in (evitar or [])]
+        regenerar_abaixo_de = max(0, int(regenerar_abaixo_de))
         auxiliares_no_segmento = [
             p
             for p in auxiliares_saida
@@ -569,23 +574,110 @@ class Ferramenta(FerramentaBase):
         trecho = self._trecho_contorno_entre_pontos(pontos_anteriores, segmento[0], segmento[1], fechado)
         if not self._helper._segmento_molde_eh_curvo(segmento[0], segmento[1], trecho, auxiliares_no_segmento):
             return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
-        if len(auxiliares_no_segmento) >= 3:
+        if len(auxiliares_no_segmento) >= regenerar_abaixo_de:
+            if redistribuir_quando_curvo:
+                return self._redistribuir_auxiliares_no_segmento(
+                    pontos_anteriores,
+                    cantos,
+                    auxiliares_saida,
+                    segmento,
+                    fechado,
+                    trecho,
+                    len(auxiliares_no_segmento),
+                    evitar,
+                )
             return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
 
-        candidatos = self._pontos_auxiliares_em_trecho(trecho, segmento[0], segmento[1], total=5)
-        for candidato in candidatos:
-            if len(auxiliares_no_segmento) >= 3:
-                break
-            if self._ponto_duplicado_em(candidato, evitar, 1e-5):
-                continue
-            if self._ponto_duplicado_em(candidato, cantos, 1e-5):
-                continue
-            if self._ponto_duplicado_em(candidato, auxiliares_saida, 1e-5):
-                continue
-            auxiliares_saida.append(QPointF(candidato))
-            auxiliares_no_segmento.append(QPointF(candidato))
+        return self._redistribuir_auxiliares_no_segmento(
+            pontos_anteriores,
+            cantos,
+            auxiliares_saida,
+            segmento,
+            fechado,
+            trecho,
+            3,
+            evitar,
+        )
 
-        return [(float(p.x()), float(p.y())) for p in auxiliares_saida]
+    def _redistribuir_auxiliares_no_segmento(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        segmento: tuple[QPointF, QPointF],
+        fechado: bool,
+        trecho: list[QPointF],
+        quantidade: int,
+        evitar: list[QPointF] | None = None,
+    ) -> list[tuple[float, float]]:
+        quantidade = max(0, int(quantidade))
+        evitar = [QPointF(p) for p in (evitar or [])]
+        if quantidade <= 0:
+            return [(float(p.x()), float(p.y())) for p in auxiliares]
+
+        auxiliares_fora_segmento = [
+            QPointF(p)
+            for p in auxiliares
+            if not self._mesmo_segmento_principal(
+                self._segmento_principal_do_ponto(pontos_anteriores, cantos, p, fechado),
+                segmento,
+            )
+        ]
+        novos_segmento: list[QPointF] = []
+        candidatos_alvo = self._pontos_auxiliares_em_trecho(trecho, segmento[0], segmento[1], total=quantidade)
+        total_pool = max(quantidade * 6, 12)
+        candidatos_pool = self._pontos_auxiliares_em_trecho(trecho, segmento[0], segmento[1], total=total_pool)
+
+        for idx in range(quantidade):
+            candidato = candidatos_alvo[idx] if idx < len(candidatos_alvo) else None
+            if candidato is not None and self._ponto_auxiliar_distribuido_valido(
+                candidato,
+                cantos,
+                auxiliares_fora_segmento,
+                novos_segmento,
+                evitar,
+            ):
+                novos_segmento.append(QPointF(candidato))
+                continue
+
+            alvo_fracao = (idx + 1) / float(quantidade + 1)
+            melhor = None
+            for pool_idx, pool_pt in enumerate(candidatos_pool):
+                if not self._ponto_auxiliar_distribuido_valido(
+                    pool_pt,
+                    cantos,
+                    auxiliares_fora_segmento,
+                    novos_segmento,
+                    evitar,
+                ):
+                    continue
+                pool_fracao = (pool_idx + 1) / float(total_pool + 1)
+                distancia_fracao = abs(pool_fracao - alvo_fracao)
+                if melhor is None or distancia_fracao < melhor[0]:
+                    melhor = (distancia_fracao, pool_pt)
+            if melhor is not None:
+                novos_segmento.append(QPointF(melhor[1]))
+            elif candidato is not None:
+                novos_segmento.append(QPointF(candidato))
+
+        saida = [*auxiliares_fora_segmento, *novos_segmento]
+        return [(float(p.x()), float(p.y())) for p in saida]
+
+    def _ponto_auxiliar_distribuido_valido(
+        self,
+        candidato: QPointF,
+        cantos: list[QPointF],
+        auxiliares_fora_segmento: list[QPointF],
+        novos_segmento: list[QPointF],
+        evitar: list[QPointF],
+    ) -> bool:
+        if self._ponto_duplicado_em(candidato, evitar, 1e-5):
+            return False
+        if self._ponto_duplicado_em(candidato, cantos, 1e-5):
+            return False
+        if self._ponto_duplicado_em(candidato, auxiliares_fora_segmento, 1e-5):
+            return False
+        return not self._ponto_duplicado_em(candidato, novos_segmento, 1e-5)
 
     def _realocar_canto_removido(
         self,

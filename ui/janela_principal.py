@@ -12,7 +12,7 @@ from pathlib import Path
 from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFileSystemModel,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
@@ -1647,6 +1648,23 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._colar_canvas_atual()
             self.lbl_status.setText("Colado")
             return True
+        acoes_selecao = {
+            "selecionar_tudo": (area.canvas.selecionar_tudo, "Selecionado tudo: {total} elemento(s)."),
+            "selecionar_moldes": (area.canvas.selecionar_moldes, "Selecionado(s) {total} molde(s)."),
+            "inverter_selecao": (area.canvas.inverter_selecao, "Seleção invertida: {total} elemento(s) selecionado(s)."),
+            "inverter_moldes": (
+                area.canvas.inverter_selecao_moldes,
+                "Seleção de moldes invertida: {total} molde(s) selecionado(s).",
+            ),
+        }
+        acao_selecao = acoes_selecao.get(tool_id)
+        if acao_selecao:
+            func, mensagem = acao_selecao
+            func()
+            self._ativar_ferramenta_global("selecionar")
+            total = len(getattr(area.canvas, "_selecionados", set()) or set())
+            self.lbl_status.setText(mensagem.format(total=total))
+            return True
         acoes = {
             "recortar": (area.canvas.recortar, "Recortado"),
             "excluir": (area.canvas.apagar_selecionados, "Excluído"),
@@ -3177,45 +3195,71 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.update()
 
     def _aplicar_estilo_claro_dialogo(self, dialog: QDialog):
+        tema = self._tema_interface()
         check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         dialog.setStyleSheet(
-            """
-            QDialog { background: #efefef; color: #111111; }
-            QGroupBox { border: 1px solid #c8c8c8; margin-top: 18px; background: #f5f5f5; }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; top: 1px; padding: 0 4px; background: #efefef; color: #111111; }
-            QLabel, QCheckBox { color: #111111; }
-            QCheckBox::indicator {
+            f"""
+            QDialog {{ background: {tema['janela']}; color: {tema['texto']}; }}
+            QFileDialog, QMessageBox {{ background: {tema['janela']}; color: {tema['texto']}; }}
+            QGroupBox {{
+                border: 1px solid {tema['borda']};
+                border-radius: 6px;
+                margin-top: 18px;
+                background: {tema['painel']};
+                font-weight: 600;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 8px;
+                top: 1px;
+                padding: 0 4px;
+                background: {tema['janela']};
+                color: {tema['texto']};
+            }}
+            QLabel, QCheckBox {{ color: {tema['texto']}; }}
+            QCheckBox::indicator {{
                 width: 14px;
                 height: 14px;
-                border: 1px solid #6c7480;
+                border: 1px solid {tema['borda']};
                 background: #ffffff;
-            }
-            QCheckBox::indicator:hover { border: 1px solid #0b7fb8; }
-            QCheckBox::indicator:checked {
+            }}
+            QCheckBox::indicator:hover {{ border: 1px solid {tema['primaria']}; }}
+            QCheckBox::indicator:checked {{
                 image: url(__CHECK_ICON__);
                 background: #ffffff;
-                border: 1px solid #075f8c;
-            }
-            QPushButton, QComboBox, QLineEdit {
-                background: #ffffff;
-                color: #111111;
-                border: 1px solid #b5bcc3;
-                border-radius: 3px;
-                min-height: 22px;
-                padding: 2px 6px;
-            }
-            QTableWidget {
-                background: #ffffff;
-                color: #111111;
-                border: 1px solid #b5bcc3;
-                gridline-color: #d6dbe0;
-            }
-            QHeaderView::section {
-                background: #f1f1f1;
-                color: #111111;
-                border: 1px solid #c2c8cf;
-                padding: 3px;
-            }
+                border: 1px solid {tema['primaria_escura']};
+            }}
+            QPushButton, QComboBox, QLineEdit, QTextEdit {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+                min-height: 24px;
+                padding: 3px 7px;
+            }}
+            QPushButton:hover {{ background: {tema['hover']}; border-color: {tema['primaria']}; }}
+            QPushButton:pressed {{ background: {tema['selecionado']}; }}
+            QListView, QTreeView, QListWidget {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                selection-background-color: {tema['selecionado']};
+                selection-color: {tema['texto']};
+                alternate-background-color: {tema['faixa']};
+            }}
+            QHeaderView::section {{
+                background: {tema['faixa']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                padding: 4px;
+                font-weight: 600;
+            }}
+            QTableWidget {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                gridline-color: {tema['borda']};
+            }}
             """
             .replace("__CHECK_ICON__", check_icon)
         )
@@ -3285,8 +3329,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         geo_widget.moveCenter(geo_tela.center())
         widget.move(geo_widget.topLeft())
 
-    def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog):
-        self._traduzir_rotulos_dialogo_arquivo(dialog)
+    def _forcar_dialogo_arquivo_claro(self, dialog: QFileDialog, *, texto_acao: str | None = None):
+        self._aplicar_estilo_claro_dialogo(dialog)
+        self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao=texto_acao)
         self._traduzir_textos_internos_dialogo_arquivo(dialog)
         self._melhorar_coluna_nome_dialogo_arquivo(dialog)
 
@@ -3387,9 +3432,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         modo_salvar: bool = False,
         com_preview_projeto: bool = False,
     ) -> tuple[str, str]:
-        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro)
+        filtros = [parte.strip() for parte in str(filtro or "").split(";;") if parte.strip()]
+        filtro_eh_projeto = any(f"*{EXTENSAO_PROJETO}" in parte for parte in filtros)
+        if filtro_eh_projeto:
+            filtros = [f"Projeto GUIMMA (*{EXTENSAO_PROJETO})"]
+        filtro_inicial = filtros[0] if filtros else filtro
+        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro_inicial)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        if filtros:
+            dialog.setNameFilters(filtros)
+            dialog.selectNameFilter(filtro_inicial)
+        if any(f"*{EXTENSAO_PROJETO}" in parte for parte in filtros):
+            dialog.setDefaultSuffix(EXTENSAO_PROJETO.lstrip("."))
         self._dimensionar_dialogo_para_tela(dialog, 1320, 820, 900, 620)
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
@@ -3399,7 +3454,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
             dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
             self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Abrir")
-        self._forcar_dialogo_arquivo_claro(dialog)
+        self._forcar_dialogo_arquivo_claro(dialog, texto_acao="Salvar" if modo_salvar else "Abrir")
+        if filtro_eh_projeto:
+            self._aplicar_filtro_extensao_dialogo_arquivo(dialog, filtro_inicial, [EXTENSAO_PROJETO])
+            QTimer.singleShot(
+                0,
+                lambda: self._aplicar_filtro_extensao_dialogo_arquivo(
+                    dialog, filtro_inicial, [EXTENSAO_PROJETO]
+                ),
+            )
         if com_preview_projeto and not modo_salvar:
             self._anexar_preview_dialogo_arquivo(dialog)
         self._centralizar_dialogo_na_janela(dialog)
@@ -3408,10 +3471,100 @@ class GuimmaStudioMainWindow(QMainWindow):
             return "", ""
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
+        if filtro_eh_projeto and caminho and Path(caminho).suffix.lower() != EXTENSAO_PROJETO.lower():
+            QMessageBox.warning(
+                self,
+                "Arquivo incompatível",
+                f"Selecione um projeto GUIMMA (*{EXTENSAO_PROJETO}).",
+            )
+            self._agendar_reencaixe_janela_canvas()
+            return "", ""
         if caminho:
             self._memorizar_diretorio_arquivo(Path(caminho))
         self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter()
+
+    def _aplicar_filtro_extensao_dialogo_arquivo(
+        self,
+        dialog: QFileDialog,
+        filtro_nome: str,
+        extensoes: list[str],
+    ):
+        padroes: list[str] = []
+        for ext in extensoes:
+            texto = str(ext or "").strip()
+            if not texto:
+                continue
+            if texto.startswith("*"):
+                padrao = texto
+            else:
+                if not texto.startswith("."):
+                    texto = f".{texto}"
+                padrao = f"*{texto}"
+            if padrao not in padroes:
+                padroes.append(padrao)
+        if not padroes:
+            return
+
+        try:
+            dialog.setNameFilters([filtro_nome])
+            dialog.selectNameFilter(filtro_nome)
+        except Exception:
+            pass
+
+        for combo in dialog.findChildren(QComboBox):
+            try:
+                itens = [combo.itemText(i) for i in range(combo.count())]
+            except Exception:
+                continue
+            if any(padrao in item for padrao in padroes for item in itens):
+                combo.setMinimumWidth(max(combo.minimumWidth(), 260))
+                try:
+                    combo.view().setMinimumWidth(max(combo.view().minimumWidth(), 320))
+                except Exception:
+                    pass
+
+        for modelo in self._modelos_sistema_arquivos_dialogo(dialog):
+            try:
+                modelo.setNameFilters(padroes)
+                modelo.setNameFilterDisables(False)
+            except Exception:
+                pass
+
+    def _modelos_sistema_arquivos_dialogo(self, dialog: QFileDialog) -> list[QFileSystemModel]:
+        modelos: list[QFileSystemModel] = []
+
+        def _adicionar(modelo):
+            sistema = self._modelo_sistema_arquivos(modelo)
+            if sistema is not None and not any(sistema is existente for existente in modelos):
+                modelos.append(sistema)
+
+        for modelo in dialog.findChildren(QFileSystemModel):
+            _adicionar(modelo)
+        for view in dialog.findChildren(QAbstractItemView):
+            try:
+                _adicionar(view.model())
+            except Exception:
+                pass
+        return modelos
+
+    def _modelo_sistema_arquivos(self, modelo) -> QFileSystemModel | None:
+        visitados: set[int] = set()
+        atual = modelo
+        while atual is not None:
+            identificador = id(atual)
+            if identificador in visitados:
+                return None
+            visitados.add(identificador)
+            if isinstance(atual, QFileSystemModel):
+                return atual
+            origem = getattr(atual, "sourceModel", None)
+            if not callable(origem):
+                return None
+            try:
+                atual = origem()
+            except Exception:
+                return None
 
     def _diretorio_arquivo_inicial(self) -> str:
         ultimo = self.projeto_atual.preferencias_usuario.get("ultimo_diretorio_arquivo", "")
@@ -3430,33 +3583,68 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout = dialog.layout()
         if not isinstance(layout, QGridLayout):
             return
+        tema = self._tema_interface()
         painel = QFrame(dialog)
-        painel.setFrameShape(QFrame.StyledPanel)
-        painel.setMinimumWidth(390)
+        painel.setObjectName("PreviewArquivoPanel")
+        painel.setMinimumWidth(430)
+        painel.setStyleSheet(
+            f"""
+            QFrame#PreviewArquivoPanel {{
+                background: {tema['painel']};
+                border: 1px solid {tema['borda']};
+                border-radius: 6px;
+            }}
+            QLabel#PreviewArquivoTitulo {{
+                color: {tema['primaria_escura']};
+                font-size: 13px;
+                font-weight: 700;
+            }}
+            QLabel#PreviewArquivoImagem {{
+                background: #050607;
+                color: {tema['texto_suave']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+            }}
+            QLabel#PreviewArquivoInfo {{
+                color: {tema['texto']};
+                background: {tema['faixa']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+                padding: 7px 9px;
+            }}
+            """
+        )
         box = QVBoxLayout(painel)
-        box.setContentsMargins(8, 8, 8, 8)
-        box.setSpacing(6)
+        box.setContentsMargins(10, 10, 10, 10)
+        box.setSpacing(8)
         lbl_titulo = QLabel("Pré-visualização", painel)
-        lbl_titulo.setStyleSheet("font-weight:600;")
+        lbl_titulo.setObjectName("PreviewArquivoTitulo")
         lbl_img = QLabel(f"Selecione um arquivo *{EXTENSAO_PROJETO}", painel)
+        lbl_img.setObjectName("PreviewArquivoImagem")
         lbl_img.setAlignment(Qt.AlignCenter)
-        lbl_img.setMinimumSize(360, 520)
-        lbl_img.setStyleSheet("background:#101010;color:#d8d8d8;border:1px solid #3a3a3a;")
+        lbl_img.setMinimumSize(400, 500)
+        lbl_info = QLabel("A prévia mostra contorno, fio e graduação quando existirem.", painel)
+        lbl_info.setObjectName("PreviewArquivoInfo")
+        lbl_info.setWordWrap(True)
         box.addWidget(lbl_titulo)
         box.addWidget(lbl_img, 1)
+        box.addWidget(lbl_info)
 
         row_count = max(1, layout.rowCount())
         col_count = max(1, layout.columnCount())
         layout.addWidget(painel, 0, col_count, row_count, 1)
 
         def _atualizar(caminho: str):
-            pix = self._carregar_preview_do_projeto(Path(caminho)) if caminho else None
+            caminho_path = Path(caminho) if caminho else None
+            pix = self._carregar_preview_do_projeto(caminho_path) if caminho_path else None
             if pix is None:
                 lbl_img.setText("Sem prévia")
                 lbl_img.setPixmap(QPixmap())
+                lbl_info.setText("Selecione um projeto .gs para ver detalhes do arquivo.")
                 return
             lbl_img.setText("")
             lbl_img.setPixmap(pix.scaled(lbl_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            lbl_info.setText(self._resumo_preview_do_projeto(caminho_path))
 
         dialog.currentChanged.connect(_atualizar)
         arquivos = dialog.selectedFiles()
@@ -3473,6 +3661,11 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _carregar_preview_do_projeto(self, caminho: Path) -> QPixmap | None:
         if not caminho.exists() or caminho.suffix.lower() != EXTENSAO_PROJETO.lower():
             return None
+        elementos = self._elementos_preview_do_projeto(caminho)
+        if elementos:
+            imagem = self._gerar_thumbnail_elementos(elementos, largura=960, altura=540)
+            if imagem is not None:
+                return QPixmap.fromImage(imagem)
         try:
             with ZipFile(caminho, mode="r") as pacote:
                 nomes = set(pacote.namelist())
@@ -3491,6 +3684,47 @@ class GuimmaStudioMainWindow(QMainWindow):
         if img.isNull():
             return None
         return QPixmap.fromImage(img)
+
+    def _elementos_preview_do_projeto(self, caminho: Path) -> list[dict]:
+        try:
+            with ZipFile(caminho, mode="r") as pacote:
+                dados = json.loads(pacote.read(GSProjectIO.PROJECT_FILE).decode("utf-8"))
+        except Exception:
+            return []
+        prefs = dados.get("preferencias_usuario", {}) if isinstance(dados, dict) else {}
+        docs = prefs.get("documentos_canvas", []) if isinstance(prefs, dict) else []
+        if not isinstance(docs, list):
+            return []
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            elementos = doc.get("elementos", [])
+            if isinstance(elementos, list) and elementos:
+                return [dict(el) for el in elementos if isinstance(el, dict)]
+        return []
+
+    def _resumo_preview_do_projeto(self, caminho: Path | None) -> str:
+        if caminho is None:
+            return "Selecione um projeto .gs para ver detalhes do arquivo."
+        elementos = self._elementos_preview_do_projeto(caminho)
+        if not elementos:
+            return "Projeto .gs sem elementos de canvas para pré-visualizar."
+        moldes = [el for el in elementos if bool(el.get("molde"))]
+        graduados = [
+            el for el in moldes
+            if el.get("graduacao_tamanhos") or el.get("graduacao_tabela") or el.get("graduacao_pontos")
+        ]
+        com_fio = [
+            el for el in moldes
+            if el.get("fio_origem") and el.get("fio_fim") and el.get("mostrar_fio", True) is not False
+        ]
+        linhas = [
+            f"{len(moldes)} molde(s)",
+            f"{len(elementos)} elemento(s)",
+            f"{len(graduados)} com graduação",
+            f"{len(com_fio)} com fio",
+        ]
+        return " • ".join(linhas)
 
 
     def _nome_documento_ativo_saida(self) -> str:
@@ -5458,18 +5692,28 @@ class GuimmaStudioMainWindow(QMainWindow):
             caixa.setText("Nenhum arquivo perdido encontrado.")
             caixa.setStandardButtons(QMessageBox.Ok)
             self._traduzir_botoes_padrao_message_box(caixa)
+            QTimer.singleShot(0, lambda: self._centralizar_widget_na_tela(caixa))
             caixa.exec()
             return
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Recuperar perdidos")
-        dialog.resize(520, 320)
+        dialog.resize(640, 420)
+        dialog.setMinimumSize(560, 360)
         self._aplicar_estilo_claro_dialogo(dialog)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-        layout.addWidget(QLabel("Arquivos interrompidos encontrados"))
+        layout.setContentsMargins(16, 16, 16, 14)
+        layout.setSpacing(10)
+        titulo = QLabel("Arquivos interrompidos encontrados")
+        titulo.setStyleSheet(f"color:{self._tema_interface()['primaria_escura']}; font-size:16px; font-weight:700;")
+        subtitulo = QLabel("Escolha uma sessão para recuperar as abas e moldes salvos automaticamente.")
+        subtitulo.setWordWrap(True)
+        layout.addWidget(titulo)
+        layout.addWidget(subtitulo)
         lista = QListWidget()
+        lista.setAlternatingRowColors(True)
+        lista.setSpacing(3)
+        lista.setStyleSheet(lista.styleSheet() + "QListWidget::item { padding: 8px 10px; min-height: 34px; }")
         for idx, snapshot in enumerate(snapshots):
             ts = int(snapshot.get("ts", 0) or 0)
             quando = datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M:%S") if ts else "Data desconhecida"
@@ -5477,7 +5721,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             nomes = ", ".join(str(doc.get("nome") or "(Sem nome)") for doc in docs[:3])
             if len(docs) > 3:
                 nomes += f" (+{len(docs) - 3})"
-            item = QListWidgetItem(f"{quando} - {nomes}")
+            item = QListWidgetItem(f"{quando}\n{len(docs)} aba(s) - {nomes}")
             item.setData(Qt.UserRole, idx)
             lista.addItem(item)
         lista.setCurrentRow(0)
@@ -5492,6 +5736,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         layout.addWidget(botoes)
         botoes.accepted.connect(dialog.accept)
         botoes.rejected.connect(dialog.reject)
+        QTimer.singleShot(0, lambda: self._centralizar_dialogo_na_janela(dialog))
         if dialog.exec() != QDialog.Accepted:
             return
         item = lista.currentItem()
@@ -5506,7 +5751,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         caminho, _ = self._abrir_dialogo_arquivo_claro(
             "Abrir",
-            f"Projeto GUIMMA (*{EXTENSAO_PROJETO});;Todos (*.*)",
+            f"Projeto GUIMMA (*{EXTENSAO_PROJETO})",
             com_preview_projeto=True,
         )
         if caminho:
@@ -5577,6 +5822,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         pasta_inicial = Path(self._diretorio_arquivo_inicial())
         nome_inicial = self._arquivo_atual.stem if self._arquivo_atual else "novo_projeto"
         dlg = SalvarComoDialog(self, pasta_inicial=pasta_inicial, nome_inicial=nome_inicial)
+        QTimer.singleShot(0, lambda: self._centralizar_dialogo_na_janela(dlg))
         if dlg.exec():
             destino = dlg.caminho_destino()
             self._memorizar_diretorio_arquivo(destino)
@@ -6720,7 +6966,10 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _colar_canvas_atual(self):
         area = self._area_documento_atual()
         if area:
-            if self._clipboard_elementos_global and hasattr(area.canvas, "definir_buffer_copia"):
+            buffer_canvas = area.canvas.obter_buffer_copia() if hasattr(area.canvas, "obter_buffer_copia") else None
+            if buffer_canvas:
+                self._clipboard_elementos_global = buffer_canvas
+            elif self._clipboard_elementos_global and hasattr(area.canvas, "definir_buffer_copia"):
                 area.canvas.definir_buffer_copia(self._clipboard_elementos_global)
             area.canvas.colar()
 
@@ -7596,7 +7845,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 break
         if not elementos:
             return
-        imagem = self._gerar_thumbnail_elementos(elementos, largura=320, altura=180)
+        imagem = self._gerar_thumbnail_elementos(elementos, largura=960, altura=540)
         if imagem is None:
             return
         arr = QByteArray()
@@ -7613,41 +7862,161 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.projeto_atual.preferencias_usuario["thumbnail_internal"] = "preview/thumbnail.png"
 
     def _gerar_thumbnail_elementos(self, elementos: list[dict], largura: int, altura: int) -> QImage | None:
-        pontos: list[tuple[float, float]] = []
-        for el in elementos:
-            if el.get("tipo") == "polyline":
-                pontos.extend([(float(x), float(y)) for x, y in el.get("pontos", [])])
-        if len(pontos) < 2:
+        def _xy(valor) -> tuple[float, float] | None:
+            if isinstance(valor, dict) and "x" in valor and "y" in valor:
+                try:
+                    return float(valor["x"]), float(valor["y"])
+                except Exception:
+                    return None
+            if isinstance(valor, (list, tuple)) and len(valor) >= 2:
+                try:
+                    return float(valor[0]), float(valor[1])
+                except Exception:
+                    return None
             return None
-        xs = [p[0] for p in pontos]
-        ys = [p[1] for p in pontos]
+
+        def _qpoints(valores) -> list[QPointF]:
+            pontos_saida: list[QPointF] = []
+            for item in valores or []:
+                xy = _xy(item)
+                if xy is not None:
+                    pontos_saida.append(QPointF(xy[0], xy[1]))
+            return pontos_saida
+
+        def _amostrar_bezier(el: dict) -> list[QPointF]:
+            p0 = _xy(el.get("p0"))
+            p1 = _xy(el.get("p1"))
+            p2 = _xy(el.get("p2"))
+            if p0 is None or p1 is None or p2 is None:
+                return []
+            pontos_bezier = []
+            for i in range(33):
+                t = i / 32.0
+                mt = 1.0 - t
+                x = (mt * mt * p0[0]) + (2.0 * mt * t * p1[0]) + (t * t * p2[0])
+                y = (mt * mt * p0[1]) + (2.0 * mt * t * p1[1]) + (t * t * p2[1])
+                pontos_bezier.append(QPointF(x, y))
+            return pontos_bezier
+
+        def _pontos_base(el: dict) -> list[QPointF]:
+            if el.get("tipo") == "polyline":
+                return _qpoints(el.get("pontos", []))
+            if el.get("tipo") == "bezier_quadratica":
+                return _amostrar_bezier(el)
+            return []
+
+        def _graduacao(el: dict, base: list[QPointF]):
+            if not el.get("molde") or el.get("mostrar_graduacao", True) is False or len(base) < 2:
+                return [], []
+            try:
+                from canvas.visualizacao import VisualizacaoCanvas
+
+                contornos = VisualizacaoCanvas._contornos_graduacao_tabela(el, base)
+                caminhos = VisualizacaoCanvas._caminhos_graduacao_tabela(el, base)
+                return contornos, caminhos
+            except Exception:
+                return [], []
+
+        pontos_bbox: list[QPointF] = []
+        elementos_base: list[tuple[dict, list[QPointF], list, list]] = []
+        for el in elementos:
+            if not isinstance(el, dict):
+                continue
+            base = _pontos_base(el)
+            contornos, caminhos = _graduacao(el, base)
+            elementos_base.append((el, base, contornos, caminhos))
+            pontos_bbox.extend(base)
+            for _nome, _cor, pontos_grad in contornos:
+                pontos_bbox.extend(QPointF(pt) for pt in pontos_grad)
+            for _nome, _cor, origem, destino in caminhos:
+                pontos_bbox.extend([QPointF(origem), QPointF(destino)])
+            for chave in ("fio_origem", "fio_fim"):
+                xy = _xy(el.get(chave))
+                if xy is not None:
+                    pontos_bbox.append(QPointF(xy[0], xy[1]))
+
+        if len(pontos_bbox) < 2:
+            return None
+
+        xs = [p.x() for p in pontos_bbox]
+        ys = [p.y() for p in pontos_bbox]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
         largura_geo = max(max_x - min_x, 1.0)
         altura_geo = max(max_y - min_y, 1.0)
 
-        margem = 12
+        margem = max(26, int(min(largura, altura) * 0.08))
         escala = min((largura - margem * 2) / largura_geo, (altura - margem * 2) / altura_geo)
         cx = (min_x + max_x) / 2.0
         cy = (min_y + max_y) / 2.0
 
+        def _mapear(ponto: QPointF) -> QPointF:
+            return QPointF(
+                (ponto.x() - cx) * escala + (largura / 2.0),
+                (ponto.y() - cy) * escala + (altura / 2.0),
+            )
+
+        def _desenhar_linha(painter: QPainter, pontos_linha: list[QPointF], cor: str, esp: float, estilo=Qt.SolidLine):
+            if len(pontos_linha) < 2:
+                return
+            pen = QPen(QColor(cor), esp, estilo)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            for a, b in zip(pontos_linha, pontos_linha[1:]):
+                painter.drawLine(_mapear(a), _mapear(b))
+
         img = QImage(largura, altura, QImage.Format_ARGB32)
-        img.fill(QColor("#000000"))
+        img.fill(QColor("#050607"))
         painter = QPainter(img)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#ff5a00"), 2))
-        for el in elementos:
-            if el.get("tipo") != "polyline":
+        painter.fillRect(QRectF(0, 0, largura, altura), QColor("#050607"))
+
+        for el, base, _contornos, _caminhos in elementos_base:
+            if el.get("molde"):
                 continue
-            pts = el.get("pontos", [])
-            if len(pts) < 2:
+            subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").lower()
+            if subtipo == "costura" or el.get("costura_de_molde_id"):
+                _desenhar_linha(painter, base, "#51b8ff", 1.4, Qt.DashLine)
+            elif subtipo == "linha_interna" or el.get("molde_linha_vinculada"):
+                _desenhar_linha(painter, base, "#aeb7c2", 1.15, Qt.DotLine)
+            else:
+                _desenhar_linha(painter, base, str(el.get("cor") or "#8be9ff"), 1.2)
+
+        for el, base, contornos, caminhos in elementos_base:
+            if not el.get("molde"):
                 continue
-            pontos_norm = [(float(x), float(y)) for x, y in pts]
-            for (x1, y1), (x2, y2) in zip(pontos_norm, pontos_norm[1:]):
-                sx1 = (x1 - cx) * escala + (largura / 2)
-                sy1 = (y1 - cy) * escala + (altura / 2)
-                sx2 = (x2 - cx) * escala + (largura / 2)
-                sy2 = (y2 - cy) * escala + (altura / 2)
-                painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
+            for _nome, cor, pontos_grad in contornos:
+                cor_grad = str(cor or "#f0ff00")
+                if not QColor(cor_grad).isValid():
+                    cor_grad = "#f0ff00"
+                _desenhar_linha(painter, [QPointF(pt) for pt in pontos_grad], cor_grad, 1.2)
+            if el.get("visual_caminho_grade", True):
+                for _nome, _cor, origem, destino in caminhos:
+                    _desenhar_linha(painter, [QPointF(origem), QPointF(destino)], "#3aa6ff", 1.0, Qt.DotLine)
+
+        for el, base, _contornos, _caminhos in elementos_base:
+            if not el.get("molde"):
+                continue
+            cor_molde = str(el.get("cor") or "#ff9d00")
+            if not QColor(cor_molde).isValid() or cor_molde.lower() == "#ffffff":
+                cor_molde = "#ff9d00"
+            _desenhar_linha(painter, base, cor_molde, 2.4)
+            fio_origem = _xy(el.get("fio_origem"))
+            fio_fim = _xy(el.get("fio_fim"))
+            if fio_origem is not None and fio_fim is not None and el.get("mostrar_fio", True) is not False:
+                p1 = QPointF(*fio_origem)
+                p2 = QPointF(*fio_fim)
+                _desenhar_linha(painter, [p1, p2], "#65e6c3", 1.5)
+                centro = _mapear(QPointF((p1.x() + p2.x()) / 2.0, (p1.y() + p2.y()) / 2.0))
+                painter.setPen(QPen(QColor("#65e6c3"), 1.2))
+                painter.drawEllipse(centro, 3.5, 3.5)
+
+            controles = _qpoints(el.get("controle_cantos") or el.get("pontos_controle_principais") or [])
+            painter.setPen(QPen(QColor("#d8f6ff"), 1.0))
+            painter.setBrush(QColor("#050607"))
+            for ponto in controles[:8]:
+                p = _mapear(ponto)
+                painter.drawRect(QRectF(p.x() - 2.5, p.y() - 2.5, 5.0, 5.0))
+
         painter.end()
         return img

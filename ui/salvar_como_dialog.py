@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QStandardPaths, Qt, QUrl
+from PySide6.QtCore import QModelIndex, QStandardPaths, Qt, QTimer, QUrl
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -48,58 +48,14 @@ class _DelegateTraducaoArquivo(QStyledItemDelegate):
 class SalvarComoDialog(QDialog):
     def __init__(self, parent=None, pasta_inicial: Path | None = None, nome_inicial: str = "novo_projeto"):
         super().__init__(parent)
+        self._tema = self._tema_do_parent(parent)
         self.setWindowTitle("Salvar como...")
-        self.setMinimumSize(760, 520)
+        self.setMinimumSize(860, 600)
+        self.resize(940, 650)
         self._pasta = Path(pasta_inicial or Path.home())
         self._atalhos_pastas = self._criar_atalhos_pastas()
         self.setObjectName("SalvarComoDialog")
-        self.setStyleSheet(
-            """
-            QDialog#SalvarComoDialog {
-                background: #f6f8fb;
-                color: #1b1b1b;
-            }
-            QGroupBox {
-                background: #ffffff;
-                border: 1px solid #cfd6df;
-                border-radius: 4px;
-                margin-top: 10px;
-                font-size: 13px;
-                font-weight: 600;
-                color: #1b1b1b;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
-            }
-            QLineEdit, QTextEdit, QComboBox {
-                background: #ffffff;
-                color: #1b1b1b;
-                border: 1px solid #b8c2cc;
-                border-radius: 3px;
-                padding: 4px 6px;
-                selection-background-color: #cfe7ff;
-                selection-color: #1b1b1b;
-            }
-            QLineEdit:read-only {
-                background: #f2f4f7;
-                color: #2f3b46;
-            }
-            QPushButton {
-                background: #f5f7fa;
-                color: #102030;
-                border: 1px solid #b7c1cc;
-                border-radius: 4px;
-                padding: 5px 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover { background: #e7f1fb; border-color: #8fb4d8; }
-            QPushButton:pressed { background: #dbeaf8; }
-            QCheckBox { color: #1b1b1b; }
-            QLabel { color: #1b1b1b; }
-            """
-        )
+        self.setStyleSheet(self._stylesheet())
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(12, 12, 12, 12)
@@ -118,32 +74,13 @@ class SalvarComoDialog(QDialog):
         g.addWidget(btn_escolher_pasta, 0, 1)
 
         self.lst_arquivos_existentes = QListWidget()
-        self.lst_arquivos_existentes.setMinimumHeight(110)
+        self.lst_arquivos_existentes.setMinimumHeight(160)
+        self.lst_arquivos_existentes.setAlternatingRowColors(True)
         self.lst_arquivos_existentes.itemClicked.connect(self._usar_nome_arquivo_existente)
         self.lst_locais = QListWidget()
-        self.lst_locais.setFixedWidth(150)
+        self.lst_locais.setFixedWidth(170)
         self.lst_locais.setSpacing(4)
         self.lst_locais.itemClicked.connect(self._selecionar_local_rapido)
-        self.lst_locais.setStyleSheet(
-            """
-            QListWidget {
-                background: #f7fafc;
-                border: 1px solid #cfd6df;
-                outline: none;
-            }
-            QListWidget::item {
-                min-height: 34px;
-                padding: 4px 8px;
-            }
-            QListWidget::item:selected {
-                background: #d7ecfb;
-                color: #102030;
-            }
-            QListWidget::item:disabled {
-                color: #8a939c;
-            }
-            """
-        )
         self._popular_locais_rapidos()
         area_arquivos = QHBoxLayout()
         area_arquivos.setSpacing(8)
@@ -181,12 +118,114 @@ class SalvarComoDialog(QDialog):
         botoes.addStretch(1)
         btn_cancelar = QPushButton("Cancelar")
         btn_salvar = QPushButton("Salvar")
+        btn_salvar.setObjectName("PrimaryButton")
         btn_cancelar.clicked.connect(self.reject)
         btn_salvar.clicked.connect(self.accept)
         botoes.addWidget(btn_cancelar)
         botoes.addWidget(btn_salvar)
         raiz.addLayout(botoes)
         self._atualizar_lista_arquivos_existentes()
+
+    @staticmethod
+    def _tema_do_parent(parent) -> dict[str, str]:
+        if parent is not None and hasattr(parent, "_tema_interface"):
+            try:
+                tema = parent._tema_interface()
+                if isinstance(tema, dict):
+                    return dict(tema)
+            except Exception:
+                pass
+        return {
+            "janela": "#eef2f6",
+            "painel": "#ffffff",
+            "faixa": "#f4f6f8",
+            "texto": "#111111",
+            "texto_suave": "#4a5568",
+            "borda": "#c8d1da",
+            "primaria": "#0b7fb8",
+            "primaria_escura": "#0a74aa",
+            "hover": "#d9edf9",
+            "hover_menu": "#e9f3ff",
+            "selecionado": "#c5e4f6",
+        }
+
+    def _stylesheet(self) -> str:
+        tema = self._tema
+        return f"""
+            QDialog#SalvarComoDialog {{
+                background: {tema['janela']};
+                color: {tema['texto']};
+            }}
+            QGroupBox {{
+                background: {tema['painel']};
+                border: 1px solid {tema['borda']};
+                border-radius: 6px;
+                margin-top: 14px;
+                font-size: 13px;
+                font-weight: 700;
+                color: {tema['texto']};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                background: {tema['janela']};
+                color: {tema['primaria_escura']};
+            }}
+            QLineEdit, QTextEdit, QComboBox {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+                padding: 5px 7px;
+                selection-background-color: {tema['selecionado']};
+                selection-color: {tema['texto']};
+            }}
+            QLineEdit:read-only {{
+                background: {tema['faixa']};
+                color: {tema['texto_suave']};
+            }}
+            QListWidget {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+                outline: none;
+                alternate-background-color: {tema['faixa']};
+            }}
+            QListWidget::item {{
+                min-height: 34px;
+                padding: 5px 9px;
+            }}
+            QListWidget::item:selected {{
+                background: {tema['selecionado']};
+                color: {tema['texto']};
+            }}
+            QListWidget::item:disabled {{
+                color: {tema['texto_suave']};
+            }}
+            QPushButton {{
+                background: {tema['painel']};
+                color: {tema['texto']};
+                border: 1px solid {tema['borda']};
+                border-radius: 4px;
+                padding: 6px 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {tema['hover']}; border-color: {tema['primaria']}; }}
+            QPushButton:pressed {{ background: {tema['selecionado']}; }}
+            QPushButton#PrimaryButton {{
+                background: {tema['primaria']};
+                color: #ffffff;
+                border-color: {tema['primaria_escura']};
+            }}
+            QPushButton#PrimaryButton:hover {{
+                background: {tema['primaria_escura']};
+            }}
+            QCheckBox, QLabel {{
+                color: {tema['texto']};
+            }}
+        """
 
     def _selecionar_pasta(self):
         dialog = QFileDialog(self, "Selecionar pasta", str(self._pasta))
@@ -196,6 +235,7 @@ class SalvarComoDialog(QDialog):
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         dialog.resize(1180, 760)
         dialog.setMinimumSize(1040, 680)
+        dialog.setStyleSheet(self._stylesheet())
         dialog.setLabelText(QFileDialog.DialogLabel.LookIn, "Examinar:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileName, "Diretório:")
         dialog.setLabelText(QFileDialog.DialogLabel.FileType, "Tipo:")
@@ -206,6 +246,9 @@ class SalvarComoDialog(QDialog):
         except Exception:
             pass
         self._traduzir_textos_internos_dialogo_arquivo(dialog)
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "_centralizar_dialogo_na_janela"):
+            QTimer.singleShot(0, lambda: parent._centralizar_dialogo_na_janela(dialog))
         for arvore in dialog.findChildren(QTreeView):
             try:
                 arvore.setColumnWidth(0, 420)

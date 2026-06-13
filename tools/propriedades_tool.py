@@ -57,17 +57,17 @@ QLocale.setDefault(QLocale.c())
 
 FLAGS_VISUALIZACAO_MOLDE = (
     ("chk_mostrar_nome", "mostrar_nome", True),
-    ("chk_visual_descricao", "visual_descricao", False),
+    ("chk_visual_descricao", "visual_descricao", True),
     ("chk_modelo", "visual_modelo", False),
     ("chk_preencher", "visual_preencher", False),
-    ("chk_linhas_aux", "mostrar_linhas_auxiliares", True),
+    ("chk_linhas_aux", "mostrar_linhas_auxiliares", False),
     ("chk_grade_tam", "visual_grade_tamanhos", False),
     ("chk_mostrar_fio", "mostrar_fio", True),
     ("chk_costura", "mostrar_costura", True),
     ("chk_tecido_visual", "visual_tecido", False),
     ("chk_mostrar_numeros", "mostrar_numeros", True),
-    ("chk_caminho_grade", "visual_caminho_grade", False),
-    ("chk_quantidade_visual", "visual_quantidade", False),
+    ("chk_caminho_grade", "visual_caminho_grade", True),
+    ("chk_quantidade_visual", "visual_quantidade", True),
     ("chk_graduacao", "mostrar_graduacao", True),
     ("chk_perimetro_molde", "visual_perimetro_molde", False),
     ("chk_giro_visual", "visual_giro", False),
@@ -76,6 +76,7 @@ FLAGS_VISUALIZACAO_MOLDE = (
 )
 
 CHAVES_FLAGS_VISUALIZACAO_MOLDE = tuple(chave for _attr, chave, _padrao in FLAGS_VISUALIZACAO_MOLDE)
+CHAVE_VISUALIZACAO_CUSTOMIZADA = "visualizacao_flags_customizadas"
 
 
 def _eh_elemento_numeros(valor) -> bool:
@@ -889,10 +890,10 @@ class PreviewMoldeWidget(QWidget):
             return
         texto_ativo = self._chave_texto_modo()
         self._desenhar_texto_configurado(painter, base, mapear, "nome", self._molde.get("mostrar_nome", True), texto_ativo == "nome")
-        self._desenhar_texto_configurado(painter, base, mapear, "descricao", self._molde.get("visual_descricao", False), texto_ativo == "descricao")
+        self._desenhar_texto_configurado(painter, base, mapear, "descricao", self._molde.get("visual_descricao", True), texto_ativo == "descricao")
         self._desenhar_texto_configurado(painter, base, mapear, "observacoes", self._molde.get("visual_observacoes", False), texto_ativo == "observacoes")
 
-        if self._molde.get("visual_quantidade", False):
+        if self._molde.get("visual_quantidade", True):
             cx = sum(p.x() for p in base) / len(base)
             cy = sum(p.y() for p in base) / len(base)
             qtd = str(self._molde.get("qtd_modelo", 1) or 1)
@@ -996,7 +997,7 @@ class PreviewMoldeWidget(QWidget):
     def _desenhar_caminho_grade(self, painter: QPainter, base: list[QPointF], mapear):
         if (
             not self._molde
-            or not self._molde.get("visual_caminho_grade", False)
+            or not self._molde.get("visual_caminho_grade", True)
             or self._molde.get("mostrar_graduacao", True) is False
         ):
             return
@@ -2662,12 +2663,14 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_giro_visual = QCheckBox("Giro")
 
         self.chk_mostrar_nome.setChecked(True)
+        self.chk_visual_descricao.setChecked(True)
         self.chk_mostrar_fio.setChecked(True)
         self.chk_mostrar_numeros.setChecked(True)
-        self.chk_pique.setChecked(True)
-        self.chk_linhas_aux.setChecked(True)
+        self.chk_costura.setChecked(True)
+        self.chk_caminho_grade.setChecked(True)
         self.chk_quantidade_visual.setChecked(True)
-        self.chk_margem_visual.setChecked(True)
+        self.chk_graduacao.setChecked(True)
+        self.chk_pique.setChecked(True)
 
         gvis.addWidget(self.chk_mostrar_nome, 0, 0)
         gvis.addWidget(self.chk_visual_descricao, 0, 2)
@@ -2889,6 +2892,13 @@ class PropriedadesMoldesDialog(QDialog):
             for _attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE
         }
 
+    @staticmethod
+    def _garantir_defaults_visualizacao_molde(molde: dict | None):
+        if not isinstance(molde, dict) or bool(molde.get(CHAVE_VISUALIZACAO_CUSTOMIZADA, False)):
+            return
+        for _attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE:
+            molde[chave] = bool(padrao)
+
     def _ler_flags_visualizacao_formulario(self) -> dict[str, bool]:
         flags: dict[str, bool] = {}
         for attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE:
@@ -2897,6 +2907,7 @@ class PropriedadesMoldesDialog(QDialog):
         return flags
 
     def _preencher_flags_visualizacao(self, molde: dict | None):
+        self._garantir_defaults_visualizacao_molde(molde)
         flags = self._flags_visualizacao_do_molde(molde)
         for attr, chave, _padrao in FLAGS_VISUALIZACAO_MOLDE:
             widget = getattr(self, attr, None)
@@ -2905,9 +2916,13 @@ class PropriedadesMoldesDialog(QDialog):
 
     @staticmethod
     def _aplicar_flags_visualizacao_molde(molde: dict, flags: dict):
+        aplicou = False
         for chave in CHAVES_FLAGS_VISUALIZACAO_MOLDE:
             if chave in flags:
                 molde[chave] = bool(flags[chave])
+                aplicou = True
+        if aplicou:
+            molde[CHAVE_VISUALIZACAO_CUSTOMIZADA] = True
 
     def _salvar_config_visual_molde(self, molde: dict):
         if not hasattr(self, "cmb_elementos_molde"):
@@ -2953,12 +2968,14 @@ class PropriedadesMoldesDialog(QDialog):
         for chave in chaves:
             if chave in dados_preview:
                 molde[chave] = deepcopy(dados_preview[chave])
+        if any(chave in dados_preview for chave in CHAVES_FLAGS_VISUALIZACAO_MOLDE):
+            molde[CHAVE_VISUALIZACAO_CUSTOMIZADA] = True
         self._suspender_auto_aplicar = True
         try:
             self.chk_mostrar_nome.setChecked(bool(molde.get("mostrar_nome", True)))
             self.chk_mostrar_fio.setChecked(bool(molde.get("mostrar_fio", True)))
             self.chk_mostrar_numeros.setChecked(bool(molde.get("mostrar_numeros", True)))
-            self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", False)))
+            self.chk_visual_descricao.setChecked(bool(molde.get("visual_descricao", True)))
             chave_visual = self._chave_visual_atual()
             if chave_visual and hasattr(self, "ed_referencia"):
                 referencia = str(molde.get(f"referencia_texto_{chave_visual}") or "Centro centro")
@@ -3395,10 +3412,16 @@ class PropriedadesMoldesDialog(QDialog):
         for i in range(raiz.childCount()):
             raiz.child(i).setExpanded(True)
 
+        indices_preferenciais: list[int] = []
+        preferido_canvas = self._indice_molde_preferencial()
+        for idx in (preferido_canvas, atual_idx):
+            if isinstance(idx, int) and idx not in indices_preferenciais:
+                indices_preferenciais.append(idx)
+
         escolhido = None
-        for item in self._iter_items(raiz):
-            idx = item.data(0, Qt.UserRole)
-            if idx is not None and idx == atual_idx:
+        for idx in indices_preferenciais:
+            item = self._itens_molde_por_indice.get(int(idx))
+            if item is not None:
                 escolhido = item
                 break
         if escolhido is None:
@@ -3408,13 +3431,15 @@ class PropriedadesMoldesDialog(QDialog):
                     break
         self._suspender_combo_tecido_arvore = False
         if escolhido:
-            self.arvore.setCurrentItem(escolhido)
-            selecionados_canvas = getattr(self.canvas, "_selecionados", set())
-            if isinstance(selecionados_canvas, (set, list, tuple)):
-                with QSignalBlocker(self.arvore):
+            with QSignalBlocker(self.arvore):
+                self.arvore.setCurrentItem(escolhido)
+                selecionados_canvas = getattr(self.canvas, "_selecionados", set())
+                if isinstance(selecionados_canvas, (set, list, tuple)) and selecionados_canvas:
                     for item in self._iter_items(raiz):
                         idx_sel = item.data(0, Qt.UserRole)
                         item.setSelected(idx_sel in selecionados_canvas if idx_sel is not None else False)
+                else:
+                    escolhido.setSelected(True)
             self._indice_atual = int(escolhido.data(0, Qt.UserRole))
             self._atualizar_combo_moldes()
             _log_propriedades_debug(f"recarregar_lista(): item escolhido indice={self._indice_atual}")
@@ -3652,6 +3677,7 @@ class PropriedadesMoldesDialog(QDialog):
         elif elemento == "Descrição":
             molde["descricao"] = valor
             molde["visual_descricao"] = True
+            molde[CHAVE_VISUALIZACAO_CUSTOMIZADA] = True
             if hasattr(self, "ed_descricao"):
                 with QSignalBlocker(self.ed_descricao):
                     self.ed_descricao.setPlainText(valor)
@@ -3753,14 +3779,29 @@ class PropriedadesMoldesDialog(QDialog):
         return refs
 
     def _indice_molde_preferencial(self) -> int | None:
-        selecionados = getattr(self.canvas, "_selecionados", set())
-        if not isinstance(selecionados, (set, list, tuple)):
-            return None
         elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return None
+
+        preferido_forcado = getattr(self.canvas, "_indice_propriedades_preferido", None)
+        try:
+            idx_forcado = int(preferido_forcado)
+        except (TypeError, ValueError):
+            idx_forcado = None
+        if idx_forcado is not None and 0 <= idx_forcado < len(elementos):
+            el = elementos[idx_forcado]
+            if isinstance(el, dict) and el.get("molde"):
+                return idx_forcado
+
+        selecionados = getattr(self.canvas, "_selecionados", set())
+        if not isinstance(selecionados, (set, list, tuple)):
+            return None
+        indices_validos = []
         for idx in selecionados:
-            if isinstance(idx, int) and 0 <= idx < len(elementos):
+            if isinstance(idx, int):
+                indices_validos.append(idx)
+        for idx in sorted(indices_validos):
+            if 0 <= idx < len(elementos):
                 el = elementos[idx]
                 if isinstance(el, dict) and el.get("molde"):
                     return idx
@@ -3855,6 +3896,7 @@ class PropriedadesMoldesDialog(QDialog):
             getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})),
             bool(getattr(self, "_mostrar_cor_tecidos_rascunho", getattr(self.canvas, "_mostrar_cor_tecidos", False))),
         )
+        self._garantir_defaults_visualizacao_molde(molde)
         self.preview.set_molde(molde)
         if molde is None:
             with QSignalBlocker(self.cmb_molde):
@@ -4940,6 +4982,8 @@ class Ferramenta(FerramentaBase):
             dialog._iniciar_sessao_edicao()
             dialog._indice_atual = dialog._indice_molde_preferencial()
             dialog.recarregar_lista()
+            if hasattr(canvas, "_indice_propriedades_preferido"):
+                canvas._indice_propriedades_preferido = None
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
             if dialog._indice_atual is None:
                 try:

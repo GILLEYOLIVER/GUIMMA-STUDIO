@@ -82,12 +82,8 @@ class Ferramenta(FerramentaBase):
 
     def _indices_para_mover(self, canvas) -> list[int]:
         indices = set(int(idx) for idx in getattr(canvas, "_selecionados", set()))
-        if hasattr(canvas, "_indices_costuras_vinculadas"):
-            for idx in list(indices):
-                if 0 <= idx < len(canvas.cena.elementos):
-                    el = canvas.cena.elementos[idx]
-                    if el.get("molde"):
-                        indices.update(canvas._indices_costuras_vinculadas(idx))
+        if hasattr(canvas, "_indices_transformacao_com_vinculados"):
+            return list(canvas._indices_transformacao_com_vinculados(indices))
         return sorted(indices)
 
     def on_mouse_release(self, canvas, event) -> bool:

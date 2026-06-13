@@ -196,7 +196,7 @@ class Ferramenta(FerramentaBase):
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
     def _aplicar(self, canvas) -> None:
-        indices = [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
+        indices = self._indices_selecionados(canvas)
         if not indices:
             self._status(canvas, "Girar: selecione ao menos um elemento.")
             return
@@ -315,7 +315,10 @@ class Ferramenta(FerramentaBase):
         return self._destino_polar(origem, comprimento, angulo)
 
     def _indices_selecionados(self, canvas) -> list[int]:
-        return [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
+        indices = [int(i) for i in sorted(getattr(canvas, "_selecionados", set()) or []) if 0 <= int(i) < len(canvas.cena.elementos)]
+        if hasattr(canvas, "_indices_transformacao_com_vinculados"):
+            return list(canvas._indices_transformacao_com_vinculados(indices))
+        return indices
 
     def _modo_alterado(self, canvas) -> None:
         self._restaurar_snapshot_2p(canvas)

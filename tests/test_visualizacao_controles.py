@@ -175,7 +175,56 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
         self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[3]))
 
-    def test_linhas_vinculadas_ficam_visiveis_quando_flag_nao_existe(self):
+    def test_costura_de_graduacao_some_quando_graduacao_do_molde_esta_oculta(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "molde_id": "m1",
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
+                "mostrar_costura": True,
+                "mostrar_graduacao": False,
+            },
+            {"tipo": "polyline", "subtipo_audaces": "costura", "costura_de_molde_id": "m1", "pontos": []},
+            {
+                "tipo": "polyline",
+                "subtipo_audaces": "costura",
+                "costura_de_molde_id": "m1",
+                "costura_graduacao": True,
+                "graduacao_tamanho": "G",
+                "pontos": [],
+            },
+        ]
+
+        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[1]))
+        self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
+
+    def test_clique_em_costura_vinculada_seleciona_molde_dono(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "molde_id": "m1",
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)],
+            },
+            {
+                "tipo": "polyline",
+                "subtipo_audaces": "costura",
+                "costura_de_molde_id": "m1",
+                "molde_id": "m1",
+                "pontos": [(0.0, -1.0), (10.0, -1.0)],
+            },
+        ]
+
+        indices = canvas._indices_elementos_em_ponto(QPointF(5.0, -1.0))
+
+        self.assertEqual(indices, [0])
+        self.assertEqual(canvas._indices_transformacao_com_vinculados({1}), [0, 1])
+
+    def test_linhas_auxiliares_vinculadas_ficam_ocultas_quando_flag_nao_existe(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.cena.elementos = [
             {"tipo": "polyline", "molde": True, "molde_id": "m1", "pontos": []},
@@ -184,7 +233,7 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         ]
 
         self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[1]))
-        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
+        self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
 
     def test_colar_buffer_de_outro_arquivo_preserva_grade_diferente(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -231,6 +280,41 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         colado = canvas.cena.elementos[1]
         self.assertEqual(colado["graduacao_grade_nome"], "36-44(40)")
         self.assertEqual([linha["tamanho"] for linha in colado["graduacao_tamanhos"]], ["36", "40", "44"])
+
+    def test_copiar_em_um_canvas_e_colar_em_outro_preserva_configuracoes(self):
+        VisualizacaoCanvas._buffer_copia_compartilhado = None
+        origem = VisualizacaoCanvas(CenaDocumento())
+        destino = VisualizacaoCanvas(CenaDocumento())
+        destino.resize(400, 300)
+        destino.zoom = 10.0
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "nome_molde": "K2",
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "fio_origem": [1.0, 0.0],
+            "fio_fim": [9.0, 0.0],
+            "graduacao_grade_nome": "36-44(40)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "36", "base": False},
+                {"ativo": True, "tamanho": "40", "base": True},
+                {"ativo": True, "tamanho": "44", "base": False},
+            ],
+        }
+        origem.cena.elementos.append(molde)
+        origem._selecionados = {0}
+
+        origem.copiar()
+        destino.colar()
+
+        self.assertEqual(len(destino.cena.elementos), 1)
+        colado = destino.cena.elementos[0]
+        self.assertEqual(colado["nome_molde"], "K2")
+        self.assertEqual(colado["graduacao_grade_nome"], "36-44(40)")
+        self.assertEqual([linha["tamanho"] for linha in colado["graduacao_tamanhos"]], ["36", "40", "44"])
+        self.assertIn("fio_origem", colado)
+        self.assertIn("fio_fim", colado)
+        self.assertEqual(destino._selecionados, {0})
 
     def test_cor_graduacao_usa_config_por_lado_da_base(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -579,6 +663,98 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(caminhos[1][0], "G")
         self.assertEqual(caminhos[1][2], QPointF(10.0, 0.0))
         self.assertEqual(caminhos[1][3], QPointF(10.0, -1.0))
+
+    def test_caminho_grade_usa_apenas_pontos_principais_em_curva_amostrada(self):
+        base = [
+            QPointF(0.0, 0.0),
+            QPointF(2.0, 0.4),
+            QPointF(4.0, 0.8),
+            QPointF(6.0, 0.4),
+            QPointF(8.0, 0.0),
+        ]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 4.0, "y": 0.8},
+                {"x": 8.0, "y": 0.0},
+            ],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {"ponto": (0.0, 0.0), "valores": {"G": {"dx": 0.0, "dy": 1.0}}},
+                    "2": {"ponto": (8.0, 0.0), "valores": {"G": {"dx": 0.0, "dy": -1.0}}},
+                }
+            },
+        }
+
+        caminhos = VisualizacaoCanvas._caminhos_graduacao_tabela(molde, base)
+
+        origens = [(origem.x(), origem.y()) for _nome, _cor, origem, _destino in caminhos]
+        self.assertEqual(origens, [(0.0, 0.0), (8.0, 0.0)])
+
+    def test_snap_gruda_no_ponto_do_tamanho_graduado(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 100.0
+        canvas.resize(800, 600)
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                    {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+                ],
+                "graduacao_tabela": {
+                    "pontos": {
+                        "1": {
+                            "ponto": (10.0, 0.0),
+                            "valores": {"G": {"dx": 0.0, "dy": 8.0}},
+                        }
+                    }
+                },
+            }
+        ]
+
+        ponto = canvas._ponto_com_snap(QPointF(1002.0, 801.0))
+
+        self.assertEqual(canvas._snap_resultado.tipo, "graduação")
+        self.assertEqual(ponto, QPointF(10.0, 8.0))
+
+    def test_snap_gruda_na_borda_do_tamanho_graduado(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 100.0
+        canvas.resize(800, 600)
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                    {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+                ],
+                "graduacao_tabela": {
+                    "pontos": {
+                        "1": {
+                            "ponto": (10.0, 0.0),
+                            "valores": {"G": {"dx": 0.0, "dy": 8.0}},
+                        }
+                    }
+                },
+            }
+        ]
+
+        ponto = canvas._ponto_com_snap(QPointF(500.0, 400.0))
+
+        self.assertEqual(canvas._snap_resultado.tipo, "borda graduação")
+        self.assertAlmostEqual(ponto.x(), 5.0, places=3)
+        self.assertAlmostEqual(ponto.y(), 4.0, places=3)
 
     def test_pique_da_base_aparece_nos_tamanhos_graduados(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
