@@ -128,6 +128,18 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         self.assertGreater(max(y for _x, y in pontos), 0.0)
         self.assertAlmostEqual(max(y for _x, y in pontos), 1.0)
 
+    def test_aplicar_pique_reativa_visualizacao_de_piques(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0]["mostrar_piques"] = False
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 0.0)))
+
+        molde = canvas.cena.elementos[0]
+        self.assertTrue(molde["mostrar_piques"])
+        self.assertEqual(len(molde["piques_config"]), 1)
+
     def test_primeiro_clique_seleciona_segundo_insere_e_direito_finaliza(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPique()

@@ -469,6 +469,7 @@ class Ferramenta(FerramentaBase):
         configs = [cfg for cfg in (el.get("piques_config", []) or []) if isinstance(cfg, dict)]
         configs.append(config)
         el["piques_config"] = configs
+        el["mostrar_piques"] = True
 
         if self._dialog.chk_ponto_controle.isChecked() and el.get("molde"):
             if sobre_contorno and info_segmento is not None:

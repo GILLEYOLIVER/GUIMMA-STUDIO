@@ -12,11 +12,23 @@ if find_spec("PySide6") is None:
     _converter_ponto_visual_entre_moldes = None
     FLAGS_VISUALIZACAO_MOLDE = ()
     MoldeRef = None
+    NumeroLimpoDoubleSpinBox = None
+    PreviewMoldeWidget = None
     PropriedadesMoldesDialog = None
+    QApplication = None
+    QComboBox = None
+    QLabel = None
+    QLineEdit = None
+    QPointF = None
 else:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
+
     from tools.propriedades_tool import (
         FLAGS_VISUALIZACAO_MOLDE,
         MoldeRef,
+        NumeroLimpoDoubleSpinBox,
+        PreviewMoldeWidget,
         PropriedadesMoldesDialog,
         _bbox_visual_molde,
         _converter_ponto_visual_entre_moldes,
@@ -25,6 +37,10 @@ else:
 
 @unittest.skipIf(_bbox_visual_molde is None, "PySide6 não disponível neste ambiente")
 class PropriedadesVisualizacaoTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._app = QApplication.instance() or QApplication([])
+
     class _CheckFake:
         def __init__(self, marcado: bool = False):
             self._marcado = bool(marcado)
@@ -88,6 +104,131 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
 
         self.assertEqual(molde["numero_altura_cm"], 1.35)
 
+    def test_config_visual_texto_e_fio_nao_forcam_checkbox_ligada(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.ed_altura_texto = SimpleNamespace(value=lambda: 2.4)
+        dialog.ed_angulo_texto = SimpleNamespace(value=lambda: 15.0)
+        dialog.ed_espaco_linhas = SimpleNamespace(value=lambda: 0.5)
+        dialog.ed_referencia = SimpleNamespace(currentText=lambda: "Livre")
+        dialog.ed_alinhamento = SimpleNamespace(currentText=lambda: "Direita")
+        dialog.cmb_elementos_molde = SimpleNamespace(currentText=lambda: "Nome")
+        molde = {"mostrar_nome": False}
+
+        PropriedadesMoldesDialog._salvar_config_visual_molde(dialog, molde)
+
+        self.assertFalse(molde["mostrar_nome"])
+        self.assertEqual(molde["texto_nome_altura_cm"], 2.4)
+        self.assertEqual(molde["texto_nome_angulo"], 15.0)
+        self.assertEqual(molde["alinhamento_texto_nome"], "Direita")
+
+        dialog.cmb_elementos_molde = SimpleNamespace(currentText=lambda: "Fio")
+        molde_fio = {"mostrar_fio": False}
+
+        PropriedadesMoldesDialog._salvar_config_visual_molde(dialog, molde_fio)
+
+        self.assertFalse(molde_fio["mostrar_fio"])
+
+    def test_aplicar_visualizacao_em_lote_nao_forca_texto_ou_fio_visivel(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog._salvar_margens_no_molde = lambda *args, **kwargs: None
+        molde = {"mostrar_nome": False, "mostrar_fio": False}
+        dados = {
+            "bbox_origem": None,
+            "cor": "#ffffff",
+            "margens": {},
+            "textos": {},
+            "fio": {},
+            "numeros": {},
+            "visual_observacoes": False,
+            "mostrar_nome": False,
+            "mostrar_fio": False,
+            "chave_visual": "nome",
+            "texto_altura_cm": 3.2,
+            "texto_angulo": 5.0,
+            "espaco_linhas": 0.33,
+            "referencia_texto": "Livre",
+            "alinhamento_texto": "Centro",
+        }
+
+        PropriedadesMoldesDialog._aplicar_visualizacao_em_molde(dialog, molde, dados)
+
+        self.assertFalse(molde["mostrar_nome"])
+        self.assertFalse(molde["mostrar_fio"])
+        self.assertEqual(molde["texto_nome_altura_cm"], 3.2)
+
+    def test_carregar_elemento_visual_preenche_campos_do_elemento_correto(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.cmb_elementos_molde = QComboBox()
+        dialog.cmb_elementos_molde.addItems(["Nenhum", "Nome", "Descrição", "Observações", "Fio", "Números"])
+        dialog.ed_referencia = QComboBox()
+        dialog.ed_referencia.addItems(["Livre", "Centro centro", "Abaixo direita"])
+        dialog.ed_alinhamento = QComboBox()
+        dialog.ed_alinhamento.addItems(["Esquerda", "Centro", "Direita"])
+        dialog.ed_angulo_texto = NumeroLimpoDoubleSpinBox()
+        dialog.ed_altura_texto = NumeroLimpoDoubleSpinBox()
+        dialog.ed_espaco_linhas = NumeroLimpoDoubleSpinBox()
+        dialog.ed_nome_visualizacao = QLineEdit()
+        dialog.lbl_nome_visualizacao = QLabel()
+        molde = {
+            "nome_molde": "K2",
+            "descricao": "DESC",
+            "texto_nome_altura_cm": 9.0,
+            "texto_descricao_altura_cm": 1.25,
+            "texto_descricao_angulo": 12.0,
+            "espaco_linhas_texto_descricao": 0.75,
+            "referencia_texto_descricao": "Abaixo direita",
+            "alinhamento_texto_descricao": "Direita",
+        }
+
+        PropriedadesMoldesDialog._carregar_controles_visual_elemento(dialog, molde, "Descrição")
+
+        self.assertEqual(dialog.ed_nome_visualizacao.text(), "DESC")
+        self.assertEqual(dialog.ed_referencia.currentText(), "Abaixo direita")
+        self.assertEqual(dialog.ed_alinhamento.currentText(), "Direita")
+        self.assertEqual(dialog.ed_altura_texto.value(), 1.25)
+        self.assertEqual(dialog.ed_angulo_texto.value(), 12.0)
+        self.assertEqual(dialog.ed_espaco_linhas.value(), 0.75)
+
+    def test_sincronizar_graduacao_propriedades_fica_no_rascunho(self):
+        class _SignalFake:
+            def __init__(self):
+                self.emissoes = 0
+
+            def emit(self):
+                self.emissoes += 1
+
+        class _CanvasFake:
+            def __init__(self):
+                self.elementos_alterados = _SignalFake()
+                self.updates = 0
+
+            def update(self):
+                self.updates += 1
+
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog._suspender_auto_aplicar = False
+        dialog.canvas = _CanvasFake()
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItem("P-G(M)")
+        dialog._graduacao_linhas = [
+            {"ativo": True, "tamanho": "P", "base": False},
+            {"ativo": True, "tamanho": "M", "base": True},
+            {"ativo": True, "tamanho": "G", "base": False},
+        ]
+        rascunho = {}
+        real = {}
+        dialog._moldes_alvo_graduacao = lambda: [rascunho]
+        dialog._moldes_reais_alvo_graduacao = lambda: [real]
+        dialog._sincronizar_valores_graduacao_tamanhos = lambda *args, **kwargs: None
+
+        PropriedadesMoldesDialog._sincronizar_gradacao_no_molde(dialog)
+
+        self.assertEqual(rascunho["graduacao_grade_nome"], "P-G(M)")
+        self.assertIn("graduacao_tamanhos", rascunho)
+        self.assertNotIn("graduacao_grade_nome", real)
+        self.assertEqual(dialog.canvas.elementos_alterados.emissoes, 0)
+        self.assertEqual(dialog.canvas.updates, 0)
+
     def test_flags_visualizacao_sao_lidos_e_aplicados_no_molde(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         for attr, _chave, padrao in FLAGS_VISUALIZACAO_MOLDE:
@@ -115,6 +256,46 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertTrue(checks["chk_mostrar_nome"].isChecked())
         self.assertTrue(checks["chk_pique"].isChecked())
         self.assertFalse(checks["chk_modelo"].isChecked())
+
+    def test_preview_graduacao_respeita_checkbox_visualizacao(self):
+        from canvas.visualizacao import VisualizacaoCanvas
+
+        class _PainterFake:
+            def __init__(self):
+                self.paths = 0
+
+            def save(self):
+                pass
+
+            def restore(self):
+                pass
+
+            def setPen(self, _pen):
+                pass
+
+            def drawPath(self, _path):
+                self.paths += 1
+
+        original = VisualizacaoCanvas._contornos_graduacao_tabela
+        VisualizacaoCanvas._contornos_graduacao_tabela = staticmethod(
+            lambda _molde, _base: [("G", "#ffcc00", [QPointF(0.0, 0.0), QPointF(10.0, 0.0)])]
+        )
+        try:
+            preview = PreviewMoldeWidget.__new__(PreviewMoldeWidget)
+            base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0)]
+            mapear = lambda ponto: QPointF(ponto)
+
+            preview._molde = {"mostrar_graduacao": False}
+            painter = _PainterFake()
+            PreviewMoldeWidget._desenhar_graduacao(preview, painter, base, mapear)
+            self.assertEqual(painter.paths, 0)
+
+            preview._molde = {"mostrar_graduacao": True}
+            painter = _PainterFake()
+            PreviewMoldeWidget._desenhar_graduacao(preview, painter, base, mapear)
+            self.assertEqual(painter.paths, 1)
+        finally:
+            VisualizacaoCanvas._contornos_graduacao_tabela = staticmethod(original)
 
     def test_novo_tamanho_usa_proporcao_da_graduacao_existente(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
