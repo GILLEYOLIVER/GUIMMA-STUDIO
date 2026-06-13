@@ -140,6 +140,53 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         self.assertTrue(molde["mostrar_piques"])
         self.assertEqual(len(molde["piques_config"]), 1)
 
+    def test_pique_no_contorno_interpola_graduacao_do_ponto_inserido(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["controle_cantos"] = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+        molde["pontos_controle_principais"] = [
+            {"x": 0.0, "y": 0.0},
+            {"x": 10.0, "y": 0.0},
+            {"x": 10.0, "y": 5.0},
+            {"x": 0.0, "y": 5.0},
+        ]
+        molde["graduacao_tamanhos"] = [
+            {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+            {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+            {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+        ]
+        valores = {}
+        for idx, ponto in enumerate(molde["controle_cantos"]):
+            valores[str(idx)] = {
+                "indice": idx,
+                "numero": idx + 1,
+                "ponto": ponto,
+                "valores": {
+                    "P": {"dx": 0.0, "dy": -float(idx + 1)},
+                    "M": {"dx": 0.0, "dy": 0.0},
+                    "G": {"dx": 0.0, "dy": float(idx + 1)},
+                },
+            }
+        molde["graduacao_tabela"] = {"modo": "dx_dy", "pontos": valores}
+        molde["graduacao_pontos"] = valores.copy()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 0.0)))
+
+        pontos_cfg = molde["graduacao_tabela"]["pontos"]
+        self.assertEqual(molde["pontos"][1], (5.0, 0.0))
+        self.assertEqual(pontos_cfg["1"]["ponto"], (5.0, 0.0))
+        self.assertEqual(pontos_cfg["1"]["valores"]["P"], {"dx": 0.0, "dy": -1.5})
+        self.assertEqual(pontos_cfg["1"]["valores"]["M"], {"dx": 0.0, "dy": 0.0})
+        self.assertEqual(pontos_cfg["1"]["valores"]["G"], {"dx": 0.0, "dy": 1.5})
+        self.assertEqual(pontos_cfg["2"]["ponto"], (10.0, 0.0))
+
+        base = [QPointF(x, y) for x, y in molde["pontos"][:-1]]
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        contorno_g = next(pontos for nome, _cor, pontos in contornos if nome == "G")
+        self.assertEqual(contorno_g[1], QPointF(5.0, 1.5))
+
     def test_primeiro_clique_seleciona_segundo_insere_e_direito_finaliza(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaInserirPique()
