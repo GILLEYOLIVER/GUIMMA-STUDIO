@@ -2315,19 +2315,6 @@ class PropriedadesMoldesDialog(QDialog):
             molde["graduacao_grade_nome"] = grade_nome
             molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
             molde["graduacao_tamanhos_ativos"] = list(ativos)
-        for molde in self._moldes_reais_alvo_graduacao():
-            linhas_antigas = molde.get("graduacao_tamanhos")
-            self._sincronizar_valores_graduacao_tamanhos(molde, linhas, linhas_antigas=linhas_antigas)
-            molde["graduacao_grade_nome"] = grade_nome
-            molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
-            molde["graduacao_tamanhos_ativos"] = list(ativos)
-        runtime = getattr(self.canvas, "_runtime_tool", None)
-        if getattr(runtime, "id_ferramenta", "") == "tabela" and hasattr(runtime, "_atualizar_dialog"):
-            runtime._atualizar_dialog(self.canvas)
-        if hasattr(self.canvas, "elementos_alterados"):
-            self.canvas.elementos_alterados.emit()
-        if hasattr(self.canvas, "update"):
-            self.canvas.update()
 
     def _sincronizar_valores_graduacao_tamanhos(
         self,
@@ -2606,8 +2593,12 @@ class PropriedadesMoldesDialog(QDialog):
                 border:1px solid #6c7480;
             }
             QCheckBox::indicator:checked {
-                image:url(__CHECK_ICON__);
-                background:#ffffff;
+                image:none;
+                background:#075f8c;
+                border:1px solid #075f8c;
+            }
+            QCheckBox::indicator:checked:hover {
+                background:#0a7eb8;
                 border:1px solid #075f8c;
             }
             """
@@ -2743,24 +2734,10 @@ class PropriedadesMoldesDialog(QDialog):
         eh_numero = _eh_elemento_numeros(elemento)
         eh_fio = elemento == "Fio"
 
-        self._atualizar_entry_visualizacao_por_elemento()
         if self.sender() is self.cmb_elementos_molde:
-            molde = self._molde_atual()
-            if isinstance(molde, dict):
-                if eh_nome:
-                    valor = self._float_campo(molde.get("texto_nome_altura_cm"), TAMANHO_NOME_PADRAO_CM)
-                elif eh_texto:
-                    chave = self._chave_visual_atual()
-                    valor = self._float_campo(
-                        molde.get(f"texto_{chave}_altura_cm") if chave else None,
-                        TAMANHO_TEXTO_PADRAO_CM,
-                    )
-                elif eh_numero:
-                    valor = self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
-                else:
-                    valor = TAMANHO_TEXTO_PADRAO_CM
-                with QSignalBlocker(self.ed_altura_texto):
-                    self.ed_altura_texto.setValue(valor)
+            self._carregar_controles_visual_elemento(self._molde_atual(), elemento)
+        else:
+            self._atualizar_entry_visualizacao_por_elemento()
 
         # Números usam apenas altura e ponto inicial; referência/alinhamento não se aplicam.
         elemento_manipulavel = elemento in {"Nome", "Descrição", "Observações", "Fio"}
@@ -2798,7 +2775,11 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _chave_visual_atual(self) -> str | None:
         elemento = self.cmb_elementos_molde.currentText().strip() if hasattr(self, "cmb_elementos_molde") else ""
-        return {"Nome": "nome", "Descrição": "descricao", "Observações": "observacoes"}.get(elemento)
+        return self._chave_visual_elemento(elemento)
+
+    @staticmethod
+    def _chave_visual_elemento(elemento: str) -> str | None:
+        return {"Nome": "nome", "Descrição": "descricao", "Observações": "observacoes"}.get(str(elemento or "").strip())
 
     def _texto_entry_visualizacao(self, molde: dict | None, elemento: str) -> str:
         if not molde:
@@ -2815,6 +2796,9 @@ class PropriedadesMoldesDialog(QDialog):
         if not hasattr(self, "ed_nome_visualizacao") or not hasattr(self, "cmb_elementos_molde"):
             return
         elemento = self.cmb_elementos_molde.currentText().strip()
+        self._preencher_entry_visualizacao(self._molde_atual(), elemento)
+
+    def _preencher_entry_visualizacao(self, molde: dict | None, elemento: str):
         rotulos = {
             "Nome": "Nome do molde",
             "Descrição": "Descrição",
@@ -2825,7 +2809,45 @@ class PropriedadesMoldesDialog(QDialog):
             self.lbl_nome_visualizacao.setText(texto_rotulo)
         self.ed_nome_visualizacao.setPlaceholderText(texto_rotulo)
         with QSignalBlocker(self.ed_nome_visualizacao):
-            self.ed_nome_visualizacao.setText(self._texto_entry_visualizacao(self._molde_atual(), elemento))
+            self.ed_nome_visualizacao.setText(self._texto_entry_visualizacao(molde, elemento))
+
+    def _carregar_controles_visual_elemento(self, molde: dict | None, elemento: str | None = None):
+        if not hasattr(self, "cmb_elementos_molde"):
+            return
+        elemento = str(elemento if elemento is not None else self.cmb_elementos_molde.currentText()).strip()
+        self._preencher_entry_visualizacao(molde, elemento)
+        chave = self._chave_visual_elemento(elemento)
+        if chave and isinstance(molde, dict):
+            referencia = str(molde.get(f"referencia_texto_{chave}") or "Centro centro")
+            alinhamento = str(molde.get(f"alinhamento_texto_{chave}") or "Centro")
+            angulo = self._float_campo(molde.get(f"texto_{chave}_angulo"), 0.0)
+            altura = self._float_campo(
+                molde.get(f"texto_{chave}_altura_cm"),
+                TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
+            )
+            espaco = self._float_campo(molde.get(f"espaco_linhas_texto_{chave}"), 0.33)
+        elif _eh_elemento_numeros(elemento) and isinstance(molde, dict):
+            referencia = "Centro centro"
+            alinhamento = "Centro"
+            angulo = 0.0
+            altura = self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
+            espaco = 0.33
+        else:
+            referencia = "Livre" if elemento == "Fio" else "Centro centro"
+            alinhamento = "Centro"
+            angulo = 0.0
+            altura = TAMANHO_TEXTO_PADRAO_CM
+            espaco = 0.33
+        with QSignalBlocker(self.ed_referencia):
+            self.ed_referencia.setCurrentText(referencia)
+        with QSignalBlocker(self.ed_alinhamento):
+            self.ed_alinhamento.setCurrentText(alinhamento)
+        with QSignalBlocker(self.ed_angulo_texto):
+            self.ed_angulo_texto.setValue(angulo)
+        with QSignalBlocker(self.ed_altura_texto):
+            self.ed_altura_texto.setValue(altura)
+        with QSignalBlocker(self.ed_espaco_linhas):
+            self.ed_espaco_linhas.setValue(espaco)
 
     @staticmethod
     def _flags_visualizacao_do_molde(molde: dict | None) -> dict[str, bool]:
@@ -2879,16 +2901,8 @@ class PropriedadesMoldesDialog(QDialog):
                         molde[f"ponto_texto_{chave}"] = [ponto_ref.x(), ponto_ref.y()]
                         if chave == "nome":
                             molde["ponto_texto"] = [ponto_ref.x(), ponto_ref.y()]
-            if chave == "nome":
-                molde["mostrar_nome"] = True
-            elif chave == "descricao":
-                molde["visual_descricao"] = True
-            elif chave == "observacoes":
-                molde["visual_observacoes"] = True
         elif _eh_elemento_numeros(elemento):
             molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
-        elif elemento == "Fio":
-            molde["mostrar_fio"] = True
 
     def _quando_preview_manipulado(self, dados_preview: dict):
         molde = self._molde_atual()
@@ -3836,11 +3850,7 @@ class PropriedadesMoldesDialog(QDialog):
                 self.ed_nome_visualizacao.clear()
             if hasattr(self, "cmb_elementos_molde"):
                 self.cmb_elementos_molde.setCurrentText("Nenhum")
-                self.ed_referencia.setCurrentText("Centro centro")
-                self.ed_alinhamento.setCurrentText("Centro")
-                self.ed_angulo_texto.setValue(0.0)
-                self.ed_altura_texto.setValue(TAMANHO_TEXTO_PADRAO_CM)
-                self.ed_espaco_linhas.setValue(0.33)
+                self._carregar_controles_visual_elemento(None, "Nenhum")
                 self._atualizar_estado_manipulacao_visual()
             self._atualizar_estado_faixa_giro()
             self._suspender_auto_aplicar = False
@@ -3883,22 +3893,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
         if hasattr(self, "cmb_elementos_molde"):
             elemento = self.cmb_elementos_molde.currentText().strip() or "Nenhum"
-            chave = {"Nome": "nome", "Descrição": "descricao", "Observações": "observacoes"}.get(elemento)
-            if chave:
-                self.ed_referencia.setCurrentText(str(molde.get(f"referencia_texto_{chave}") or "Centro centro"))
-                self.ed_alinhamento.setCurrentText(str(molde.get(f"alinhamento_texto_{chave}") or "Centro"))
-                self.ed_angulo_texto.setValue(self._float_campo(molde.get(f"texto_{chave}_angulo"), 0.0))
-                self.ed_altura_texto.setValue(
-                    self._float_campo(
-                        molde.get(f"texto_{chave}_altura_cm"),
-                        TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
-                    )
-                )
-                self.ed_espaco_linhas.setValue(self._float_campo(molde.get(f"espaco_linhas_texto_{chave}"), 0.33))
-            elif _eh_elemento_numeros(elemento):
-                self.ed_altura_texto.setValue(
-                    self._float_campo(molde.get("numero_altura_cm"), TAMANHO_NUMERO_PADRAO_CM)
-                )
+            self._carregar_controles_visual_elemento(molde, elemento)
             self._atualizar_estado_manipulacao_visual()
         grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
         if grade_nome:
@@ -4071,17 +4066,10 @@ class PropriedadesMoldesDialog(QDialog):
                     molde[f"ponto_texto_{chave}"] = [ponto_ref.x(), ponto_ref.y()]
                     if chave == "nome":
                         molde["ponto_texto"] = [ponto_ref.x(), ponto_ref.y()]
-            if chave == "nome":
-                molde["mostrar_nome"] = True
-            elif chave == "descricao":
-                molde["visual_descricao"] = True
-            elif chave == "observacoes":
-                molde["visual_observacoes"] = True
         elif _eh_elemento_numeros(dados.get("elemento_visual")):
             molde["numero_altura_cm"] = dados["numero_altura_cm"]
             molde["numero_ponto_inicio"] = int(dados.get("numero_ponto_inicio", 0) or 0)
         elif dados.get("elemento_visual") == "Fio":
-            molde["mostrar_fio"] = True
             for chave_fio in ("fio_tamanho_px", "tam_fio_px", "tamanho_fio_px"):
                 if chave_fio in dados:
                     molde[chave_fio] = dados[chave_fio]
@@ -4208,6 +4196,8 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._cor_visual = cor.name()
         self.btn_cor_preenchimento.setStyleSheet(f"background:{self._cor_visual}; border:1px solid #8a939c; padding:0;")
+        if hasattr(self, "chk_preencher"):
+            self.chk_preencher.setChecked(True)
         self._aplicar_imediato_formulario()
 
     def _selecionar_cor_clara(self, cor_inicial: QColor, titulo: str) -> QColor:
@@ -4435,7 +4425,6 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _conectar_auto_aplicacao(self):
         sinais = [
-            self.cmb_molde.currentTextChanged,
             self.ed_descricao.textChanged,
             self.cmb_tipo_corte.currentTextChanged,
             self.cmb_espelhar.currentTextChanged,
@@ -4468,7 +4457,6 @@ class PropriedadesMoldesDialog(QDialog):
             self.chk_giro_visual.toggled,
             self.chk_pique.toggled,
             self.chk_mostrar_cor_tecidos.toggled,
-            self.cmb_elementos_molde.currentTextChanged,
             self.ed_referencia.currentTextChanged,
             self.ed_alinhamento.currentTextChanged,
             self.ed_angulo_texto.valueChanged,
