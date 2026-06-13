@@ -223,9 +223,13 @@ class GraduarTabelaDialog(QDialog):
         raiz.addLayout(grade_setas)
 
         botoes_copia = QGridLayout()
+        self.btn_copiar_graduacao = QPushButton("Copiar graduação")
+        self.btn_copiar_graduacao.clicked.connect(self._copiar)
+        self.btn_colar_graduacao = QPushButton("Colar graduação")
+        self.btn_colar_graduacao.clicked.connect(self._colar)
+        botoes_copia.addWidget(self.btn_copiar_graduacao, 0, 0)
+        botoes_copia.addWidget(self.btn_colar_graduacao, 1, 0)
         for texto, slot, linha, col in (
-            ("Copiar", self._copiar, 0, 0),
-            ("Colar", self._colar, 1, 0),
             ("Inverte DX", lambda: self._inverter_coluna(1), 0, 1),
             ("Inverte DY", lambda: self._inverter_coluna(2), 0, 2),
             ("Colar DX", lambda: self._colar_coluna(1), 1, 1),
@@ -763,6 +767,7 @@ class Ferramenta(FerramentaBase):
         valores = dialog.valores()
         for ponto_idx in alvo_indices:
             chave = str(ponto_idx)
+            self._remover_graduacao_mesmo_ponto(pontos_cfg, pontos[ponto_idx], chave)
             pontos_cfg[chave] = {
                 "indice": int(ponto_idx),
                 "numero": int(ponto_idx) + 1,
@@ -1344,19 +1349,114 @@ class Ferramenta(FerramentaBase):
     def _valores_ponto(self, molde: dict | None, ponto_idx: int | None) -> dict[str, dict]:
         if not isinstance(molde, dict) or ponto_idx is None:
             return {}
-        tabela = molde.get("graduacao_tabela")
-        if isinstance(tabela, dict):
-            pontos = tabela.get("pontos")
-            if isinstance(pontos, dict):
-                dados = pontos.get(str(int(ponto_idx)))
-                if isinstance(dados, dict) and isinstance(dados.get("valores"), dict):
-                    return deepcopy(dados["valores"])
-        legado = molde.get("graduacao_pontos")
-        if isinstance(legado, dict):
-            dados = legado.get(str(int(ponto_idx)))
-            if isinstance(dados, dict) and isinstance(dados.get("valores"), dict):
-                return deepcopy(dados["valores"])
+        ponto = self._ponto_contorno_por_indice(molde, ponto_idx)
+        for pontos_cfg in self._fontes_pontos_graduacao(molde):
+            dados = self._dados_graduacao_por_ponto(pontos_cfg, ponto)
+            valores = self._valores_dados_graduacao(dados)
+            if valores:
+                return valores
+            dados = pontos_cfg.get(str(int(ponto_idx)))
+            if isinstance(dados, dict):
+                ponto_dados = self._ponto_qt(dados.get("ponto"))
+                if ponto is None or ponto_dados is None or self._dist(ponto, ponto_dados) <= 1e-5:
+                    valores = self._valores_dados_graduacao(dados)
+                    if valores:
+                        return valores
+        valores = self._valores_ponto_interpolados(molde, ponto)
+        if valores:
+            return valores
         return {}
+
+    def _ponto_contorno_por_indice(self, molde: dict, ponto_idx: int | None) -> QPointF | None:
+        if ponto_idx is None:
+            return None
+        pontos = self._pontos_contorno(molde)
+        idx = int(ponto_idx)
+        return QPointF(pontos[idx]) if 0 <= idx < len(pontos) else None
+
+    def _fontes_pontos_graduacao(self, molde: dict) -> list[dict]:
+        fontes: list[dict] = []
+        tabela = molde.get("graduacao_tabela")
+        if isinstance(tabela, dict) and isinstance(tabela.get("pontos"), dict):
+            fontes.append(tabela.get("pontos") or {})
+        legado = molde.get("graduacao_pontos")
+        if isinstance(legado, dict) and legado not in fontes:
+            fontes.append(legado)
+        return fontes
+
+    def _dados_graduacao_por_ponto(self, pontos_cfg: dict, ponto: QPointF | None) -> dict | None:
+        if ponto is None or not isinstance(pontos_cfg, dict):
+            return None
+        melhor: tuple[float, dict] | None = None
+        for dados in pontos_cfg.values():
+            if not isinstance(dados, dict):
+                continue
+            ponto_dados = self._ponto_qt(dados.get("ponto"))
+            if ponto_dados is None:
+                continue
+            dist = self._dist(ponto, ponto_dados)
+            if dist <= 1e-5 and (melhor is None or dist < melhor[0]):
+                melhor = (dist, dados)
+        return melhor[1] if melhor else None
+
+    @staticmethod
+    def _valores_dados_graduacao(dados: dict | None) -> dict[str, dict]:
+        if isinstance(dados, dict) and isinstance(dados.get("valores"), dict):
+            return deepcopy(dados["valores"])
+        return {}
+
+    def _valores_ponto_interpolados(self, molde: dict, ponto: QPointF | None) -> dict[str, dict]:
+        if ponto is None:
+            return {}
+        fontes = self._fontes_pontos_graduacao(molde)
+        pontos_cfg = fontes[0] if fontes else {}
+        if not pontos_cfg:
+            return {}
+        try:
+            from canvas.visualizacao import VisualizacaoCanvas
+        except Exception:
+            return {}
+        base = VisualizacaoCanvas._base_contorno_graduacao(molde)
+        if len(base) < 2:
+            base = self._pontos_contorno(molde)
+        if len(base) < 2:
+            return {}
+        referencias = VisualizacaoCanvas._pontos_referencia_graduacao(molde)
+        valores: dict[str, dict] = {}
+        for linha in self._tamanhos_molde(molde):
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not nome:
+                continue
+            if bool(linha.get("base", False)):
+                valores[nome] = {"dx": 0.0, "dy": 0.0}
+                continue
+            deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+                pontos_cfg,
+                nome,
+                len(base),
+                contorno=base,
+                referencias=referencias,
+            )
+            deslocamento = (
+                VisualizacaoCanvas._deslocamento_graduacao_no_ponto(base, deslocamentos, ponto)
+                if deslocamentos
+                else None
+            )
+            valores[nome] = {
+                "dx": float(deslocamento.x()) if deslocamento is not None else 0.0,
+                "dy": float(deslocamento.y()) if deslocamento is not None else 0.0,
+            }
+        return valores if any(abs(v.get("dx", 0.0)) > 1e-9 or abs(v.get("dy", 0.0)) > 1e-9 for v in valores.values()) else {}
+
+    def _remover_graduacao_mesmo_ponto(self, pontos_cfg: dict, ponto: QPointF, chave_atual: str) -> None:
+        if not isinstance(pontos_cfg, dict):
+            return
+        for chave, dados in list(pontos_cfg.items()):
+            if str(chave) == str(chave_atual) or not isinstance(dados, dict):
+                continue
+            ponto_dados = self._ponto_qt(dados.get("ponto"))
+            if ponto_dados is not None and self._dist(ponto, ponto_dados) <= 1e-5:
+                pontos_cfg.pop(chave, None)
 
     def _fechar(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
