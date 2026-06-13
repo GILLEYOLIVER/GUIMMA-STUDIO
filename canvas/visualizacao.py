@@ -4354,7 +4354,8 @@ class VisualizacaoCanvas(QWidget):
 
     def _desenhar_piques_configurados(self, painter: QPainter, elemento: dict, cor_molde: str) -> list[QPointF]:
         pontos_desenhados: list[QPointF] = []
-        for cfg in elemento.get("piques_config", []) or []:
+        configs = [cfg for cfg in elemento.get("piques_config", []) or [] if isinstance(cfg, dict)]
+        for cfg in configs:
             if not isinstance(cfg, dict):
                 continue
             cor = self._cor_piques_elemento(elemento, cor_molde, interno=not bool(cfg.get("sobre_contorno", True)))
@@ -4372,7 +4373,129 @@ class VisualizacaoCanvas(QWidget):
                 desenhou = True
             if not desenhou and ponto is not None:
                 self._desenhar_marca_x(painter, ponto, cor=cor, tamanho_px=7)
+        self._desenhar_piques_graduados_configurados(painter, elemento, cor_molde, configs)
         return pontos_desenhados
+
+    def _desenhar_piques_graduados_configurados(self, painter: QPainter, elemento: dict, cor_molde: str, configs: list[dict]) -> None:
+        if elemento.get("mostrar_graduacao", True) is False:
+            return
+        linhas = self._linhas_graduacao_nao_base(elemento)
+        if not linhas:
+            return
+        base = self._base_contorno_graduacao(elemento)
+        if len(base) < 2:
+            return
+        pontos_cfg = self._pontos_cfg_graduacao_elemento(elemento)
+        if not pontos_cfg:
+            return
+        referencias = self._pontos_referencia_graduacao(elemento)
+        deslocamentos_por_tamanho: dict[str, list[tuple[float, float]]] = {}
+        for linha in linhas:
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not nome:
+                continue
+            deslocamentos = self._deslocamentos_graduacao_tamanho(
+                pontos_cfg,
+                nome,
+                len(base),
+                contorno=base,
+                referencias=referencias,
+            )
+            if deslocamentos:
+                deslocamentos_por_tamanho[nome] = deslocamentos
+        if not deslocamentos_por_tamanho:
+            return
+        for cfg in configs:
+            if not bool(cfg.get("sobre_contorno", True)):
+                continue
+            ponto = self._ponto_cfg_pique(cfg)
+            if ponto is None:
+                continue
+            segmentos = [self._segmento_cfg_pique(segmento) for segmento in (cfg.get("segmentos") or [])]
+            segmentos = [segmento for segmento in segmentos if segmento is not None]
+            cor = self._cor_piques_elemento(elemento, cor_molde, interno=False)
+            for _nome, deslocamentos in deslocamentos_por_tamanho.items():
+                deslocamento = self._deslocamento_graduacao_no_ponto(base, deslocamentos, ponto)
+                if deslocamento is None:
+                    continue
+                if segmentos:
+                    for a, b in segmentos:
+                        self._desenhar_segmento(
+                            painter,
+                            QPointF(a.x() + deslocamento.x(), a.y() + deslocamento.y()),
+                            QPointF(b.x() + deslocamento.x(), b.y() + deslocamento.y()),
+                            cor=cor,
+                            espessura=2.0,
+                        )
+                else:
+                    self._desenhar_marca_x(
+                        painter,
+                        QPointF(ponto.x() + deslocamento.x(), ponto.y() + deslocamento.y()),
+                        cor=cor,
+                        tamanho_px=7,
+                    )
+
+    @staticmethod
+    def _pontos_cfg_graduacao_elemento(elemento: dict) -> dict:
+        tabela = elemento.get("graduacao_tabela") if isinstance(elemento.get("graduacao_tabela"), dict) else {}
+        pontos_cfg = tabela.get("pontos") if isinstance(tabela, dict) else None
+        if isinstance(pontos_cfg, dict):
+            return pontos_cfg
+        legado = elemento.get("graduacao_pontos")
+        return legado if isinstance(legado, dict) else {}
+
+    @staticmethod
+    def _linhas_graduacao_nao_base(elemento: dict) -> list[dict]:
+        tamanhos = elemento.get("graduacao_tamanhos") if isinstance(elemento, dict) else None
+        if not isinstance(tamanhos, list) or not tamanhos:
+            return []
+        linhas = [linha for linha in tamanhos if isinstance(linha, dict) and linha.get("ativo", True)]
+        if not linhas:
+            return []
+        base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
+        return [linha for idx, linha in enumerate(linhas) if idx != base_idx]
+
+    @staticmethod
+    def _base_contorno_graduacao(elemento: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for item in elemento.get("pontos", []) or []:
+            ponto = VisualizacaoCanvas._qpoint_graduacao_cfg(item)
+            if ponto is not None:
+                pontos.append(ponto)
+        if len(pontos) > 1 and VisualizacaoCanvas._dist_qpoints(pontos[0], pontos[-1]) <= 1e-7:
+            pontos.pop()
+        return pontos
+
+    @staticmethod
+    def _deslocamento_graduacao_no_ponto(
+        base: list[QPointF],
+        deslocamentos: list[tuple[float, float]],
+        ponto: QPointF,
+    ) -> QPointF | None:
+        if len(base) < 2 or len(deslocamentos) != len(base):
+            return None
+        melhor: tuple[float, int, float] | None = None
+        pares = list(zip(base, base[1:] + [base[0]]))
+        for idx, (a, b) in enumerate(pares):
+            vx = b.x() - a.x()
+            vy = b.y() - a.y()
+            denom = (vx * vx) + (vy * vy)
+            if denom <= 1e-12:
+                t = 0.0
+                proj = QPointF(a)
+            else:
+                t = max(0.0, min(1.0, (((ponto.x() - a.x()) * vx) + ((ponto.y() - a.y()) * vy)) / denom))
+                proj = QPointF(a.x() + (vx * t), a.y() + (vy * t))
+            dist = VisualizacaoCanvas._dist_qpoints(proj, ponto)
+            if melhor is None or dist < melhor[0]:
+                melhor = (dist, idx, t)
+        if melhor is None:
+            return None
+        _dist, idx, t = melhor
+        prox_idx = (idx + 1) % len(base)
+        dx_a, dy_a = deslocamentos[idx]
+        dx_b, dy_b = deslocamentos[prox_idx]
+        return QPointF(dx_a + ((dx_b - dx_a) * t), dy_a + ((dy_b - dy_a) * t))
 
     def _cor_piques_elemento(self, elemento: dict, cor_molde: str, interno: bool = False) -> str:
         cor_base = self._cor_linha_elemento(elemento, str(cor_molde or "#ffffff"))
