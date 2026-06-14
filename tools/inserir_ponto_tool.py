@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 
@@ -69,6 +71,19 @@ class Ferramenta(FerramentaBase):
         else:
             pontos = list(el.get("pontos", []))
             inserir_em = seg_idx + 1
+            pontos_antes = [self._tupla_ponto(item) for item in pontos]
+            pontos_antes = [item for item in pontos_antes if item is not None]
+            pontos_depois = list(pontos_antes)
+            if 0 <= inserir_em <= len(pontos_depois):
+                pontos_depois.insert(inserir_em, (float(ponto_contorno.x()), float(ponto_contorno.y())))
+                self._inserir_ponto_graduacao_no_contorno(
+                    el,
+                    pontos_antes,
+                    pontos_depois,
+                    inserir_em,
+                    (float(ponto_contorno.x()), float(ponto_contorno.y())),
+                    fechado=self._fechado_por_pontos(canvas, pontos_antes),
+                )
             pontos.insert(inserir_em, (ponto_contorno.x(), ponto_contorno.y()))
             el["pontos"] = pontos
             self._sincronizar_controles_apos_insercao(el, ponto_contorno)
@@ -292,9 +307,25 @@ class Ferramenta(FerramentaBase):
 
         cantos = list(el.get("controle_cantos", []) or [])
         inserir_em = self._indice_insercao_canto(canvas, el, seg_idx)
+        inseriu_canto = False
         if not any(self._dist_tuple(self._tupla_ponto(item), novo) <= 1e-6 for item in cantos):
             cantos.insert(inserir_em, novo)
+            inseriu_canto = True
         el["controle_cantos"] = cantos
+        cantos_depois = []
+        for item in cantos:
+            pt = self._tupla_ponto(item)
+            if pt is not None:
+                cantos_depois.append(pt)
+        if inseriu_canto:
+            self._inserir_ponto_graduacao_no_contorno(
+                el,
+                [(float(p.x()), float(p.y())) for p in cantos_originais],
+                cantos_depois,
+                inserir_em,
+                novo,
+                fechado=fechado,
+            )
         auxiliares = []
         for item in el.get("controle_auxiliares", []) or []:
             aux = self._tupla_ponto(item)
@@ -565,15 +596,192 @@ class Ferramenta(FerramentaBase):
 
     def _adicionar_controle_curva(self, canvas, el: dict, ponto: QPointF, seg_idx: int) -> bool:
         self._garantir_dist_canvas(canvas)
-        controles = self._controles_curva(el)
-        inserir_em = self._indice_insercao_controle(canvas, el, controles, seg_idx)
+        controles_antes = self._controles_curva(el)
+        controles = list(controles_antes)
+        inserir_em = self._indice_insercao_controle(canvas, el, controles_antes, seg_idx)
         controles.insert(inserir_em, QPointF(ponto))
         fechado = self._fechado_por_pontos(canvas, el.get("pontos", []) or [])
         tipo_curva = str(el.get("tipo_curva") or "spline_catmull_rom")
         el["pontos"] = self._helper._gerar_tracado_curva_real(controles, fechado=fechado, tipo_curva=tipo_curva)
         self._helper._salvar_controles_curva_real(el, controles)
         el["fechado"] = fechado
+        self._inserir_ponto_graduacao_no_contorno(
+            el,
+            [(float(p.x()), float(p.y())) for p in controles_antes],
+            [(float(p.x()), float(p.y())) for p in controles],
+            inserir_em,
+            (float(ponto.x()), float(ponto.y())),
+            fechado=fechado,
+        )
         return len(el.get("pontos", []) or []) >= 2
+
+    def _inserir_ponto_graduacao_no_contorno(
+        self,
+        el: dict,
+        pontos_antes: list[tuple[float, float]],
+        pontos_depois: list[tuple[float, float]],
+        novo_idx: int,
+        novo: tuple[float, float],
+        *,
+        fechado: bool,
+    ) -> None:
+        pontos_cfg = self._pontos_config_graduacao(el)
+        if not pontos_cfg:
+            return
+        base_antes = self._contorno_sem_fechamento(pontos_antes)
+        base_depois = self._contorno_sem_fechamento(pontos_depois)
+        if len(base_antes) < 2 or not (0 <= int(novo_idx) < len(base_depois)):
+            return
+        try:
+            from canvas.visualizacao import VisualizacaoCanvas
+        except Exception:
+            return
+
+        origem_idx = (int(novo_idx) - 1) % len(base_antes) if fechado else max(0, min(int(novo_idx) - 1, len(base_antes) - 1))
+        destino_idx = int(novo_idx) % len(base_antes) if fechado else max(0, min(int(novo_idx), len(base_antes) - 1))
+        origem = QPointF(*base_antes[origem_idx])
+        destino = QPointF(*base_antes[destino_idx])
+        fator = self._fracao_no_segmento(QPointF(float(novo[0]), float(novo[1])), origem, destino)
+        referencias_antes = [QPointF(x, y) for x, y in base_antes]
+        contorno_antes = [QPointF(x, y) for x, y in base_antes]
+
+        nomes_tamanhos = self._nomes_tamanhos_graduacao(el, pontos_cfg)
+        if not nomes_tamanhos:
+            return
+
+        valores_novo: dict[str, dict[str, float]] = {}
+        for nome in nomes_tamanhos:
+            deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+                pontos_cfg,
+                nome,
+                len(contorno_antes),
+                contorno=contorno_antes,
+                referencias=referencias_antes,
+            )
+            if deslocamentos and len(deslocamentos) == len(contorno_antes):
+                dx_a, dy_a = deslocamentos[origem_idx]
+                dx_b, dy_b = deslocamentos[destino_idx]
+            else:
+                dx_a = dy_a = dx_b = dy_b = 0.0
+            valores_novo[str(nome)] = {
+                "dx": float(dx_a + ((dx_b - dx_a) * fator)),
+                "dy": float(dy_a + ((dy_b - dy_a) * fator)),
+            }
+
+        pontos_remapeados = self._remapear_graduacao_apos_insercao(
+            pontos_cfg,
+            base_antes,
+            base_depois,
+            int(novo_idx),
+        )
+        pontos_remapeados[str(int(novo_idx))] = {
+            "indice": int(novo_idx),
+            "numero": int(novo_idx) + 1,
+            "ponto": (float(novo[0]), float(novo[1])),
+            "valores": valores_novo,
+        }
+        pontos_ordenados = self._ordenar_pontos_graduacao(pontos_remapeados)
+        tabela = el.setdefault("graduacao_tabela", {})
+        if isinstance(tabela, dict):
+            tabela["modo"] = "dx_dy"
+            tabela["pontos"] = pontos_ordenados
+        el["graduacao_pontos"] = deepcopy(pontos_ordenados)
+
+    def _pontos_config_graduacao(self, el: dict) -> dict:
+        tabela = el.get("graduacao_tabela") if isinstance(el.get("graduacao_tabela"), dict) else None
+        if isinstance(tabela, dict) and isinstance(tabela.get("pontos"), dict):
+            return tabela.get("pontos") or {}
+        legado = el.get("graduacao_pontos")
+        return legado if isinstance(legado, dict) else {}
+
+    def _nomes_tamanhos_graduacao(self, el: dict, pontos_cfg: dict) -> list[str]:
+        nomes: list[str] = []
+        for linha in el.get("graduacao_tamanhos", []) or []:
+            if not isinstance(linha, dict) or not linha.get("ativo", True):
+                continue
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if nome and nome not in nomes:
+                nomes.append(nome)
+        for cfg in pontos_cfg.values():
+            valores = cfg.get("valores") if isinstance(cfg, dict) else None
+            if not isinstance(valores, dict):
+                continue
+            for nome in valores:
+                texto = str(nome or "").strip()
+                if texto and texto not in nomes:
+                    nomes.append(texto)
+        return nomes
+
+    def _remapear_graduacao_apos_insercao(
+        self,
+        pontos_cfg: dict,
+        base_antes: list[tuple[float, float]],
+        base_depois: list[tuple[float, float]],
+        novo_idx: int,
+    ) -> dict:
+        saida: dict[str, dict] = {}
+        for chave, cfg in pontos_cfg.items():
+            if not isinstance(cfg, dict):
+                continue
+            antigo_idx = self._indice_graduacao_cfg(cfg, chave, base_antes)
+            if antigo_idx is None or not (0 <= antigo_idx < len(base_antes)):
+                continue
+            indice = antigo_idx + 1 if antigo_idx >= int(novo_idx) else antigo_idx
+            if not (0 <= indice < len(base_depois)):
+                continue
+            novo_cfg = deepcopy(cfg)
+            novo_cfg["indice"] = int(indice)
+            novo_cfg["numero"] = int(indice) + 1
+            novo_cfg["ponto"] = (float(base_depois[indice][0]), float(base_depois[indice][1]))
+            saida[str(indice)] = novo_cfg
+        return saida
+
+    def _indice_graduacao_cfg(self, cfg: dict, chave: str, base: list[tuple[float, float]]) -> int | None:
+        ponto_cfg = self._tupla_ponto(cfg.get("ponto")) if isinstance(cfg, dict) else None
+        if ponto_cfg is not None:
+            return self._indice_tupla_mais_proximo(base, ponto_cfg)
+        try:
+            return int(cfg.get("indice", chave))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ordenar_pontos_graduacao(pontos_cfg: dict) -> dict:
+        def chave_ordem(item) -> int:
+            try:
+                return int(item[0])
+            except Exception:
+                return 0
+
+        return {str(chave): valor for chave, valor in sorted(pontos_cfg.items(), key=chave_ordem)}
+
+    def _contorno_sem_fechamento(self, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        contorno = list(pontos)
+        if len(contorno) > 1 and self._dist_tuple(contorno[0], contorno[-1]) <= 1e-6:
+            contorno = contorno[:-1]
+        return contorno
+
+    @staticmethod
+    def _fracao_no_segmento(ponto: QPointF, origem: QPointF, destino: QPointF) -> float:
+        vx = destino.x() - origem.x()
+        vy = destino.y() - origem.y()
+        denom = (vx * vx) + (vy * vy)
+        if denom <= 1e-12:
+            return 0.0
+        t = ((ponto.x() - origem.x()) * vx + (ponto.y() - origem.y()) * vy) / denom
+        return max(0.0, min(1.0, float(t)))
+
+    def _indice_tupla_mais_proximo(self, pontos: list[tuple[float, float]], alvo: tuple[float, float]) -> int | None:
+        if not pontos:
+            return None
+        melhor_idx = 0
+        melhor_dist = float("inf")
+        for idx, ponto in enumerate(pontos):
+            dist = self._dist_tuple(ponto, alvo)
+            if dist < melhor_dist:
+                melhor_idx = idx
+                melhor_dist = dist
+        return melhor_idx
 
     def _indice_insercao_canto(self, canvas, el: dict, seg_idx: int) -> int:
         cantos = [self._ponto_qt(p) for p in el.get("controle_cantos", []) or []]

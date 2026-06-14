@@ -67,14 +67,12 @@ class Ferramenta(FerramentaBase):
         return False
 
     def _estimar_cantos(self, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        xs = [x for x, _ in pontos]
-        ys = [y for _, y in pontos]
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        candidatos = [
-            QPointF(min_x, min_y),
-            QPointF(max_x, min_y),
-            QPointF(max_x, max_y),
-            QPointF(min_x, max_y),
-        ]
-        return [(p.x(), p.y()) for p in candidatos]
+        cantos: list[tuple[float, float]] = []
+        for x, y in pontos:
+            ponto = (float(x), float(y))
+            if cantos and abs(cantos[-1][0] - ponto[0]) <= 1e-7 and abs(cantos[-1][1] - ponto[1]) <= 1e-7:
+                continue
+            cantos.append(ponto)
+        if len(cantos) > 1 and abs(cantos[0][0] - cantos[-1][0]) <= 1e-7 and abs(cantos[0][1] - cantos[-1][1]) <= 1e-7:
+            cantos.pop()
+        return cantos

@@ -9,7 +9,7 @@ from pathlib import Path
 from random import randint
 
 from PySide6.QtCore import QEvent, QLocale, QMimeData, QPoint, QPointF, QRectF, Qt, QTimer, Signal, QSignalBlocker
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -43,8 +43,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.formatacao import formatar_numero, numero_decimal_ponto
-from core.graduacao import grade_graduacao_padrao
+from core.graduacao import grade_graduacao_padrao, grade_graduacao_referencia_canvas
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_cena_para_unidade, valor_unidade_para_cena
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 TAMANHO_TEXTO_PADRAO_CM = 0.7
@@ -66,7 +67,7 @@ FLAGS_VISUALIZACAO_MOLDE = (
     ("chk_costura", "mostrar_costura", True),
     ("chk_tecido_visual", "visual_tecido", False),
     ("chk_mostrar_numeros", "mostrar_numeros", True),
-    ("chk_caminho_grade", "visual_caminho_grade", True),
+    ("chk_caminho_grade", "visual_caminho_grade", False),
     ("chk_quantidade_visual", "visual_quantidade", True),
     ("chk_graduacao", "mostrar_graduacao", True),
     ("chk_perimetro_molde", "visual_perimetro_molde", False),
@@ -77,11 +78,49 @@ FLAGS_VISUALIZACAO_MOLDE = (
 
 CHAVES_FLAGS_VISUALIZACAO_MOLDE = tuple(chave for _attr, chave, _padrao in FLAGS_VISUALIZACAO_MOLDE)
 CHAVE_VISUALIZACAO_CUSTOMIZADA = "visualizacao_flags_customizadas"
+_IGNORAR_VALOR = object()
+_CHAVES_QT_RUNTIME = {"pixmap", "qimage", "qpixmap", "imagem_qt", "_pixmap_cache"}
+_TIPOS_QT_RUNTIME = (QPainterPath, QPixmap, QImage, QIcon)
 
 
 def _eh_elemento_numeros(valor) -> bool:
     texto = str(valor or "").strip().lower()
     return texto in {"números", "numeros"}
+
+
+def _valor_limpo_para_edicao(valor):
+    if isinstance(valor, _TIPOS_QT_RUNTIME):
+        return _IGNORAR_VALOR
+    if isinstance(valor, dict):
+        limpo = {}
+        for chave, item in valor.items():
+            nome_chave = str(chave)
+            if nome_chave.startswith("_runtime_") or nome_chave in _CHAVES_QT_RUNTIME:
+                continue
+            item_limpo = _valor_limpo_para_edicao(item)
+            if item_limpo is not _IGNORAR_VALOR:
+                limpo[chave] = item_limpo
+        return limpo
+    if isinstance(valor, list):
+        return [
+            item_limpo
+            for item in valor
+            if (item_limpo := _valor_limpo_para_edicao(item)) is not _IGNORAR_VALOR
+        ]
+    if isinstance(valor, tuple):
+        itens = [_valor_limpo_para_edicao(item) for item in valor]
+        if any(item is _IGNORAR_VALOR for item in itens):
+            return _IGNORAR_VALOR
+        return tuple(itens)
+    try:
+        return deepcopy(valor)
+    except Exception:
+        return _IGNORAR_VALOR
+
+
+def _elemento_limpo_para_edicao(elemento: dict) -> dict:
+    limpo = _valor_limpo_para_edicao(elemento)
+    return limpo if isinstance(limpo, dict) else {}
 
 
 class NumeroLimpoDoubleSpinBox(QDoubleSpinBox):
@@ -535,7 +574,7 @@ class PreviewMoldeWidget(QWidget):
         self._desenhar_textos(painter, base, mapear, info["min_y"], info["max_y"])
         self._desenhar_metadados_visual(painter, base, mapear)
         self._desenhar_caminho_grade(painter, base, mapear)
-        self._desenhar_piques(painter, mapear)
+        self._desenhar_piques(painter, mapear, cor_desenho)
         self._desenhar_controles(painter, mapear)
 
     def _dados_transformacao(self) -> dict | None:
@@ -997,7 +1036,7 @@ class PreviewMoldeWidget(QWidget):
     def _desenhar_caminho_grade(self, painter: QPainter, base: list[QPointF], mapear):
         if (
             not self._molde
-            or not self._molde.get("visual_caminho_grade", True)
+            or not self._molde.get("visual_caminho_grade", False)
             or self._molde.get("mostrar_graduacao", True) is False
         ):
             return
@@ -1053,29 +1092,68 @@ class PreviewMoldeWidget(QWidget):
         finally:
             painter.restore()
 
-    def _desenhar_piques(self, painter: QPainter, mapear):
+    def _desenhar_piques(self, painter: QPainter, mapear, cor_base: QColor | str = "#ffffff"):
         if not self._molde or self._molde.get("mostrar_piques", True) is False:
             return
-        pontos: list[QPointF] = []
-        for item in self._molde.get("marcacoes_no_perimetro", []) or []:
-            ponto = self._ponto_xy(item)
-            if ponto is not None:
-                pontos.append(ponto)
+        cor = QColor(cor_base) if not isinstance(cor_base, QColor) else QColor(cor_base)
+        if not cor.isValid():
+            cor = QColor("#ffffff")
+        painter.save()
+        pen = QPen(cor, 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        pontos_detalhados: list[QPointF] = []
         for cfg in self._molde.get("piques_config", []) or []:
             if not isinstance(cfg, dict):
                 continue
             ponto = self._ponto_xy(cfg.get("ponto"))
             if ponto is not None:
-                pontos.append(ponto)
-        if not pontos:
-            return
-        painter.save()
-        painter.setPen(QPen(QColor("#ff5a00"), 1.0))
-        for ponto in pontos:
-            tela = mapear(ponto)
-            painter.drawLine(int(tela.x() - 5), int(tela.y() - 5), int(tela.x() + 5), int(tela.y() + 5))
-            painter.drawLine(int(tela.x() - 5), int(tela.y() + 5), int(tela.x() + 5), int(tela.y() - 5))
+                pontos_detalhados.append(ponto)
+            desenhou_segmento = False
+            for segmento in cfg.get("segmentos") or []:
+                pts = self._segmento_pique(segmento)
+                if pts is None:
+                    continue
+                a, b = pts
+                painter.drawLine(mapear(a), mapear(b))
+                desenhou_segmento = True
+            if not desenhou_segmento and ponto is not None:
+                self._desenhar_x_tela(painter, mapear(ponto), cor)
+        for item in self._molde.get("marcacoes_no_perimetro", []) or []:
+            ponto = self._ponto_xy(item)
+            if ponto is None:
+                continue
+            if any(self._distancia_pontos_preview(ponto, ponto_cfg) <= 1e-6 for ponto_cfg in pontos_detalhados):
+                continue
+            self._desenhar_x_tela(painter, mapear(ponto), cor)
         painter.restore()
+
+    def _desenhar_x_tela(self, painter: QPainter, tela: QPointF, cor: QColor, tamanho: int = 5):
+        painter.setPen(QPen(cor, 1.0))
+        painter.drawLine(int(tela.x() - tamanho), int(tela.y() - tamanho), int(tela.x() + tamanho), int(tela.y() + tamanho))
+        painter.drawLine(int(tela.x() - tamanho), int(tela.y() + tamanho), int(tela.x() + tamanho), int(tela.y() - tamanho))
+
+    @staticmethod
+    def _distancia_pontos_preview(a: QPointF, b: QPointF) -> float:
+        return sqrt(((a.x() - b.x()) ** 2) + ((a.y() - b.y()) ** 2))
+
+    def _segmento_pique(self, segmento) -> tuple[QPointF, QPointF] | None:
+        try:
+            if isinstance(segmento, dict):
+                inicio = segmento.get("a") or segmento.get("inicio")
+                fim = segmento.get("b") or segmento.get("fim")
+            elif isinstance(segmento, (list, tuple)) and len(segmento) >= 2:
+                inicio, fim = segmento[0], segmento[1]
+            else:
+                return None
+            a = self._ponto_xy(inicio)
+            b = self._ponto_xy(fim)
+            if a is None or b is None:
+                return None
+            return a, b
+        except Exception:
+            return None
 
     @staticmethod
     def _float_seguro(valor, padrao: float = 0.0) -> float:
@@ -1146,6 +1224,11 @@ class PreviewMoldeWidget(QWidget):
         return pontos
 
     def _ponto_xy(self, valor) -> QPointF | None:
+        if isinstance(valor, dict):
+            try:
+                return QPointF(float(valor["x"]), float(valor["y"]))
+            except (KeyError, TypeError, ValueError):
+                return None
         if not isinstance(valor, (list, tuple)) or len(valor) < 2:
             return None
         try:
@@ -1489,11 +1572,12 @@ class PropriedadesMoldesDialog(QDialog):
         self.setWindowTitle("Propriedades dos moldes")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.resize(1060, 780)
-        self.setMinimumSize(1020, 740)
+        self.resize(1060, 830)
+        self.setMinimumSize(1020, 790)
         self.setObjectName("PropriedadesMoldesDialog")
         self.setStyleSheet(self._stylesheet())
         self._construir_ui()
+        self._atualizar_rotulos_unidade()
         self._conectar_auto_aplicacao()
         if hasattr(self.canvas, "elementos_alterados"):
             try:
@@ -1590,6 +1674,14 @@ class PropriedadesMoldesDialog(QDialog):
         }
         QTreeWidget::item { height: 21px; }
         QTreeWidget::item:selected { background: #b9cfe1; color: #111111; }
+        QLabel#GradeMismatchWarning {
+            background: #fff4d8;
+            border: 1px solid #d59b35;
+            border-radius: 4px;
+            color: #7a3d00;
+            font-weight: 600;
+            padding: 6px;
+        }
         QTabWidget::pane {
             border: 1px solid #cfd4da;
             background: #ececec;
@@ -1762,6 +1854,12 @@ class PropriedadesMoldesDialog(QDialog):
         self.arvore.molde_solto_em_tecido.connect(self._alterar_tecido_molde_por_arraste)
         lay_esq.addWidget(self.arvore, 1)
 
+        self.lbl_alerta_grade = QLabel("")
+        self.lbl_alerta_grade.setObjectName("GradeMismatchWarning")
+        self.lbl_alerta_grade.setWordWrap(True)
+        self.lbl_alerta_grade.setHidden(True)
+        lay_esq.addWidget(self.lbl_alerta_grade)
+
         self.btn_excluir_molde = QPushButton("🗑 Excluir molde")
         self.btn_excluir_molde.clicked.connect(self._excluir_molde_atual)
         self.btn_excluir_molde.setFixedHeight(48)
@@ -1778,6 +1876,7 @@ class PropriedadesMoldesDialog(QDialog):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(False)
+        self.tabs.setMinimumHeight(470)
         self.tabs.addTab(self._criar_tab_propriedades(), "Propriedades")
         self.tabs.addTab(self._criar_tab_graduacao(), "Graduação")
         self.tabs.addTab(self._criar_tab_visualizacao(), "Visualização")
@@ -2151,9 +2250,8 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _popular_tabela_graduacao(self):
         if not self._graduacao_linhas:
-            grade_inicial = self.cmb_grade_tamanhos.currentText() if hasattr(self, "cmb_grade_tamanhos") else "P-G(M)"
-            self._aplicar_grade_tamanhos(grade_inicial)
-            return
+            _grade_nome, linhas = grade_graduacao_padrao()
+            self._graduacao_linhas = [dict(linha) for linha in linhas]
         self._renderizar_tabela_graduacao()
 
     def _renderizar_tabela_graduacao(self):
@@ -2219,12 +2317,18 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _extrair_tamanhos_grade(self, grade_texto: str) -> tuple[list[str], str | None]:
         texto = str(grade_texto or "").strip()
-        if not texto or "-" not in texto:
+        if not texto:
             return ["P", "M", "G"], "M"
         base = None
         if "(" in texto and ")" in texto:
             base = texto[texto.find("(") + 1:texto.find(")")].strip()
             texto = texto[:texto.find("(")].strip()
+        if "/" in texto:
+            tamanhos = [parte.strip() for parte in texto.split("/") if parte.strip()]
+            if tamanhos:
+                return tamanhos, base
+        if "-" not in texto:
+            return ["P", "M", "G"], "M"
         inicio, fim = [p.strip() for p in texto.split("-", 1)]
 
         if inicio.isdigit() and fim.isdigit():
@@ -2243,6 +2347,146 @@ class PropriedadesMoldesDialog(QDialog):
                 trecho = escala[min(a, b):max(a, b) + 1]
                 return trecho, base
         return [inicio, "M", fim], base
+
+    @staticmethod
+    def _normalizar_linhas_graduacao(linhas) -> list[dict]:
+        if not isinstance(linhas, list):
+            return []
+        normalizadas: list[dict] = []
+        for linha in linhas:
+            if not isinstance(linha, dict):
+                continue
+            tamanho = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not tamanho:
+                continue
+            normalizada = dict(linha)
+            normalizada["tamanho"] = tamanho
+            normalizada["ativo"] = bool(normalizada.get("ativo", True))
+            normalizada["cor"] = str(normalizada.get("cor") or "#ffffff")
+            normalizada["base"] = bool(normalizada.get("base", False))
+            normalizadas.append(normalizada)
+        if normalizadas and not any(linha.get("base") for linha in normalizadas):
+            normalizadas[len(normalizadas) // 2]["base"] = True
+        return normalizadas
+
+    def _nome_grade_compativel_com_linhas(self, grade_nome: str, linhas: list[dict]) -> str:
+        nomes = [str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas]
+        nomes = [nome for nome in nomes if nome]
+        if not nomes:
+            return str(grade_nome or "").strip()
+        base = next(
+            (str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas if linha.get("base")),
+            nomes[len(nomes) // 2],
+        )
+
+        def _combina(texto: str) -> bool:
+            tamanhos, base_grade = self._extrair_tamanhos_grade(texto)
+            return tamanhos == nomes and (not base_grade or str(base_grade) == str(base))
+
+        preferida = str(grade_nome or "").strip()
+        if preferida and _combina(preferida):
+            return preferida
+
+        combo = getattr(self, "cmb_grade_tamanhos", None)
+        if isinstance(combo, QComboBox):
+            for idx in range(combo.count()):
+                texto = combo.itemText(idx).strip()
+                if texto and _combina(texto):
+                    return texto
+
+        return f"{'/'.join(nomes)}({base})"
+
+    def _definir_combo_grade_sem_aplicar(self, grade_nome: str) -> None:
+        combo = getattr(self, "cmb_grade_tamanhos", None)
+        if not isinstance(combo, QComboBox):
+            return
+        texto = str(grade_nome or "").strip()
+        if not texto:
+            return
+        with QSignalBlocker(combo):
+            idx = combo.findText(texto)
+            if idx < 0:
+                combo.addItem(texto)
+                idx = combo.findText(texto)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+    def _referencia_graduacao_dos_elementos(self, ignorar_molde: dict | None = None) -> tuple[str, list[dict], list[str]] | None:
+        if not self.isVisible():
+            referencia_canvas = grade_graduacao_referencia_canvas(self.canvas, ignorar_molde=ignorar_molde)
+            if referencia_canvas is not None:
+                grade_nome, linhas_canvas, ativos_canvas = referencia_canvas
+                linhas_normalizadas = self._normalizar_linhas_graduacao(linhas_canvas)
+                if linhas_normalizadas:
+                    return (
+                        self._nome_grade_compativel_com_linhas(str(grade_nome or "").strip(), linhas_normalizadas),
+                        [dict(linha) for linha in linhas_normalizadas],
+                        [str(ativo) for ativo in ativos_canvas],
+                    )
+        elementos = self._elementos_edicao()
+        if not isinstance(elementos, list):
+            return None
+        grupos: dict[tuple[str, tuple[str, ...]], dict] = {}
+        for ordem, elemento in enumerate(elementos):
+            if not isinstance(elemento, dict) or not elemento.get("molde"):
+                continue
+            if ignorar_molde is not None and elemento is ignorar_molde:
+                continue
+            linhas = self._normalizar_linhas_graduacao(elemento.get("graduacao_tamanhos"))
+            if not linhas:
+                continue
+            grade_nome = self._nome_grade_compativel_com_linhas(
+                str(elemento.get("graduacao_grade_nome") or "").strip(),
+                linhas,
+            )
+            ativos = elemento.get("graduacao_tamanhos_ativos")
+            if not isinstance(ativos, list):
+                ativos = [linha["tamanho"] for linha in linhas if linha.get("ativo", True)]
+            chave = (grade_nome, tuple(str(linha.get("tamanho") or "") for linha in linhas))
+            grupo = grupos.get(chave)
+            if grupo is None:
+                grupos[chave] = {
+                    "quantidade": 1,
+                    "ordem": ordem,
+                    "grade_nome": grade_nome,
+                    "linhas": [dict(linha) for linha in linhas],
+                    "ativos": [str(ativo) for ativo in ativos],
+                }
+            else:
+                grupo["quantidade"] += 1
+        if not grupos:
+            return None
+        escolhido = max(grupos.values(), key=lambda grupo: (int(grupo["quantidade"]), -int(grupo["ordem"])))
+        return (
+            str(escolhido["grade_nome"]),
+            [dict(linha) for linha in escolhido["linhas"]],
+            list(escolhido["ativos"]),
+        )
+
+    def _carregar_graduacao_do_molde(self, molde: dict | None) -> None:
+        grade_nome = ""
+        linhas: list[dict] = []
+        if isinstance(molde, dict):
+            linhas = self._normalizar_linhas_graduacao(molde.get("graduacao_tamanhos"))
+            grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
+
+        if not linhas:
+            referencia = self._referencia_graduacao_dos_elementos(ignorar_molde=molde if isinstance(molde, dict) else None)
+            if referencia is not None:
+                grade_nome, linhas, _ativos = referencia
+
+        if not linhas:
+            grade_nome, linhas_padrao = grade_graduacao_padrao()
+            linhas = [dict(linha) for linha in linhas_padrao]
+
+        grade_nome = self._nome_grade_compativel_com_linhas(grade_nome, linhas)
+        self._graduacao_linhas = [dict(linha) for linha in linhas]
+        self._linha_gradacao_atual = next(
+            (idx for idx, linha in enumerate(self._graduacao_linhas) if linha.get("base")),
+            0,
+        )
+        self._definir_combo_grade_sem_aplicar(grade_nome)
+        self._renderizar_tabela_graduacao()
 
     def _on_tabela_graduacao_clicada(self, linha: int, coluna: int):
         if not (0 <= linha < len(self._graduacao_linhas)):
@@ -2330,7 +2574,7 @@ class PropriedadesMoldesDialog(QDialog):
     def _gerar_cor_aleatoria(self) -> str:
         return f"#{randint(40, 240):02x}{randint(40, 240):02x}{randint(40, 240):02x}"
 
-    def _sincronizar_gradacao_no_molde(self):
+    def _sincronizar_gradacao_no_molde(self, publicar: bool = True):
         if self._suspender_auto_aplicar:
             return
         moldes_alvo = self._moldes_alvo_graduacao()
@@ -2348,6 +2592,44 @@ class PropriedadesMoldesDialog(QDialog):
             molde["graduacao_grade_nome"] = grade_nome
             molde["graduacao_tamanhos"] = [dict(l) for l in linhas]
             molde["graduacao_tamanhos_ativos"] = list(ativos)
+        if publicar:
+            self._publicar_rascunho_visualizacao()
+
+    def _elementos_rascunho_visualizacao(self) -> list[dict]:
+        elementos = []
+        for el in self._elementos_edicao():
+            if not isinstance(el, dict):
+                continue
+            item = _elemento_limpo_para_edicao(el)
+            item["_opacidade_visualizacao_temporaria"] = 0.92
+            elementos.append(item)
+        return elementos
+
+    def _publicar_rascunho_visualizacao(self, molde: dict | None = None) -> None:
+        if isinstance(molde, dict):
+            molde_atual = molde
+        else:
+            try:
+                molde_atual = self._molde_atual()
+            except Exception:
+                molde_atual = None
+        if hasattr(self, "preview"):
+            try:
+                self.preview.set_config_cores_tecidos(
+                    getattr(self, "_cores_tecidos_rascunho", dict(getattr(self.canvas, "_cores_tecidos", {}) or {})),
+                    bool(getattr(self, "_mostrar_cor_tecidos_rascunho", getattr(self.canvas, "_mostrar_cor_tecidos", False))),
+                )
+                self.preview.set_molde(dict(molde_atual) if isinstance(molde_atual, dict) else None)
+            except Exception:
+                pass
+        setter = getattr(self.canvas, "set_visualizacao_rascunho", None)
+        if callable(setter):
+            setter(self._elementos_rascunho_visualizacao())
+
+    def _limpar_rascunho_visualizacao_canvas(self) -> None:
+        setter = getattr(self.canvas, "set_visualizacao_rascunho", None)
+        if callable(setter):
+            setter(None)
 
     def _sincronizar_valores_graduacao_tamanhos(
         self,
@@ -2372,6 +2654,11 @@ class PropriedadesMoldesDialog(QDialog):
             for l in (linhas_antigas or [])
             if isinstance(l, dict) and l.get("ativo", True)
         ]
+        nomes_anteriores = {
+            str(l.get("tamanho") or l.get("nome") or "").strip()
+            for l in linhas_anteriores
+            if isinstance(l, dict)
+        }
         for pontos_cfg in mapas_pontos:
             for cfg in pontos_cfg.values():
                 if not isinstance(cfg, dict):
@@ -2379,11 +2666,13 @@ class PropriedadesMoldesDialog(QDialog):
                 valores = cfg.setdefault("valores", {})
                 if not isinstance(valores, dict):
                     continue
-                anchors = self._anchors_graduacao_tamanho(linhas, valores, base_idx)
-                anchors.extend(self._anchors_graduacao_tamanho_antigo(linhas_anteriores, valores, linhas, base_idx))
+                anchors = self._anchors_graduacao_tamanho_antigo(linhas_anteriores, valores, linhas, base_idx)
+                anchors.extend(self._anchors_graduacao_tamanho(linhas, valores, base_idx))
                 anchors = self._normalizar_anchors_graduacao(anchors)
                 for idx, nome in enumerate(nomes):
-                    if not nome or nome in valores:
+                    if not nome:
+                        continue
+                    if nome in valores and nome in nomes_anteriores:
                         continue
                     dx, dy = self._interpolar_graduacao_por_indice(idx, anchors)
                     valores[nome] = {"dx": dx, "dy": dy}
@@ -2427,9 +2716,16 @@ class PropriedadesMoldesDialog(QDialog):
         velho_acima = max(1, (len(linhas_antigas) - 1) - velho_base_idx)
         novo_abaixo = max(1, int(novo_base_idx))
         novo_acima = max(1, (len(novas_linhas) - 1) - int(novo_base_idx))
+        nomes_novos = {
+            str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            for linha in novas_linhas
+            if isinstance(linha, dict)
+        }
         anchors: list[tuple[float, float, float]] = []
         for idx, linha in enumerate(linhas_antigas):
             nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if nome in nomes_novos:
+                continue
             item = valores.get(nome)
             if not isinstance(item, dict):
                 continue
@@ -2608,12 +2904,15 @@ class PropriedadesMoldesDialog(QDialog):
         grid.addWidget(self.ed_nome_visualizacao, 3, 1, 1, 4)
 
         box_vis = QGroupBox("Visualização")
+        box_vis.setObjectName("VisualizacaoOptionsGroup")
+        box_vis.setMinimumHeight(205)
+        box_vis.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         box_vis.setStyleSheet(
             """
             QGroupBox { color:#111111; border:1px solid #c7cdd3; margin-top:8px; }
             QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 3px; }
-            QCheckBox { color:#111111; spacing:6px; }
+            QCheckBox { color:#111111; spacing:6px; min-height:24px; }
             QCheckBox::indicator {
                 width:13px;
                 height:13px;
@@ -2638,9 +2937,9 @@ class PropriedadesMoldesDialog(QDialog):
             .replace("__CHECK_ICON__", check_icon)
         )
         gvis = QGridLayout(box_vis)
-        gvis.setContentsMargins(10, 14, 10, 8)
-        gvis.setHorizontalSpacing(24)
-        gvis.setVerticalSpacing(10)
+        gvis.setContentsMargins(12, 18, 12, 12)
+        gvis.setHorizontalSpacing(28)
+        gvis.setVerticalSpacing(4)
 
         self.chk_mostrar_nome = QCheckBox("Nome")
         self.chk_preencher = QCheckBox("Preencher")
@@ -2667,38 +2966,72 @@ class PropriedadesMoldesDialog(QDialog):
         self.chk_mostrar_fio.setChecked(True)
         self.chk_mostrar_numeros.setChecked(True)
         self.chk_costura.setChecked(True)
-        self.chk_caminho_grade.setChecked(True)
         self.chk_quantidade_visual.setChecked(True)
         self.chk_graduacao.setChecked(True)
         self.chk_pique.setChecked(True)
 
-        gvis.addWidget(self.chk_mostrar_nome, 0, 0)
-        gvis.addWidget(self.chk_visual_descricao, 0, 2)
-        gvis.addWidget(self.chk_modelo, 0, 4)
-        gvis.addWidget(self.chk_preencher, 1, 0)
-        gvis.addWidget(QLabel("-  Cor"), 1, 1)
+        checkboxes_visuais = (
+            self.chk_mostrar_nome,
+            self.chk_preencher,
+            self.chk_mostrar_fio,
+            self.chk_mostrar_numeros,
+            self.chk_graduacao,
+            self.chk_pique,
+            self.chk_visual_descricao,
+            self.chk_linhas_aux,
+            self.chk_costura,
+            self.chk_caminho_grade,
+            self.chk_perimetro_molde,
+            self.chk_margem_visual,
+            self.chk_modelo,
+            self.chk_grade_tam,
+            self.chk_tecido_visual,
+            self.chk_quantidade_visual,
+            self.chk_giro_visual,
+        )
+        for checkbox in checkboxes_visuais:
+            checkbox.setMinimumHeight(24)
+            checkbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.lbl_cor_preenchimento = QLabel("Cor")
+        self.lbl_cor_preenchimento.setMinimumHeight(24)
         self.btn_cor_preenchimento = QPushButton("")
-        self.btn_cor_preenchimento.setFixedSize(20, 20)
+        self.btn_cor_preenchimento.setFixedSize(22, 22)
         self.btn_cor_preenchimento.setCursor(Qt.PointingHandCursor)
         self.btn_cor_preenchimento.setToolTip("Escolher cor de preenchimento do molde")
         self.btn_cor_preenchimento.clicked.connect(self._escolher_cor)
         self.btn_cor_preenchimento.setStyleSheet("background:#58dfe3; border:1px solid #8a939c; padding:0;")
-        gvis.addWidget(self.btn_cor_preenchimento, 1, 2, alignment=Qt.AlignLeft)
-        gvis.addWidget(self.chk_linhas_aux, 1, 3)
-        gvis.addWidget(self.chk_grade_tam, 1, 5)
+        linha_preencher = QWidget()
+        linha_preencher_layout = QHBoxLayout(linha_preencher)
+        linha_preencher_layout.setContentsMargins(0, 0, 0, 0)
+        linha_preencher_layout.setSpacing(8)
+        linha_preencher_layout.addWidget(self.chk_preencher)
+        linha_preencher_layout.addWidget(self.lbl_cor_preenchimento)
+        linha_preencher_layout.addWidget(self.btn_cor_preenchimento)
+        linha_preencher_layout.addStretch(1)
+
+        gvis.addWidget(self.chk_mostrar_nome, 0, 0)
+        gvis.addWidget(self.chk_visual_descricao, 0, 1)
+        gvis.addWidget(self.chk_modelo, 0, 2)
+        gvis.addWidget(linha_preencher, 1, 0)
+        gvis.addWidget(self.chk_linhas_aux, 1, 1)
+        gvis.addWidget(self.chk_grade_tam, 1, 2)
         gvis.addWidget(self.chk_mostrar_fio, 2, 0)
-        gvis.addWidget(self.chk_costura, 2, 3)
-        gvis.addWidget(self.chk_tecido_visual, 2, 5)
+        gvis.addWidget(self.chk_costura, 2, 1)
+        gvis.addWidget(self.chk_tecido_visual, 2, 2)
         gvis.addWidget(self.chk_mostrar_numeros, 3, 0)
-        gvis.addWidget(self.chk_caminho_grade, 3, 3)
-        gvis.addWidget(self.chk_quantidade_visual, 3, 5)
+        gvis.addWidget(self.chk_caminho_grade, 3, 1)
+        gvis.addWidget(self.chk_quantidade_visual, 3, 2)
         gvis.addWidget(self.chk_graduacao, 4, 0)
-        gvis.addWidget(self.chk_perimetro_molde, 4, 3)
-        gvis.addWidget(self.chk_giro_visual, 4, 5)
+        gvis.addWidget(self.chk_perimetro_molde, 4, 1)
+        gvis.addWidget(self.chk_giro_visual, 4, 2)
         gvis.addWidget(self.chk_pique, 5, 0)
-        gvis.addWidget(self.chk_margem_visual, 5, 3)
+        gvis.addWidget(self.chk_margem_visual, 5, 1)
         for linha in range(6):
-            gvis.setRowMinimumHeight(linha, 30)
+            gvis.setRowMinimumHeight(linha, 25)
+        for coluna in range(3):
+            gvis.setColumnMinimumWidth(coluna, 185)
+            gvis.setColumnStretch(coluna, 1)
 
         self.lbl_status_visual = QLabel("Indique posição")
         self.lbl_status_visual.setStyleSheet("color:#111111;")
@@ -2739,8 +3072,40 @@ class PropriedadesMoldesDialog(QDialog):
             return float(widget.value())
         return numero_decimal_ponto(widget.text(), padrao)
 
+    def _valor_spin_medida_visual(self, widget, padrao_cena: float = 0.0) -> float:
+        canvas = getattr(self, "canvas", None)
+        padrao_unidade = valor_cena_para_unidade(canvas, padrao_cena)
+        if hasattr(widget, "value"):
+            return valor_unidade_para_cena(canvas, float(widget.value()))
+        return valor_unidade_para_cena(
+            canvas,
+            numero_decimal_ponto(widget.text(), padrao_unidade, SUFIXOS_MEDIDA),
+        )
+
+    def _set_spin_medida_visual(self, widget, valor_cena: float) -> None:
+        canvas = getattr(self, "canvas", None)
+        if hasattr(widget, "setValue"):
+            widget.setValue(valor_cena_para_unidade(canvas, valor_cena))
+
     def _float_campo(self, valor, padrao: float = 0.0) -> float:
         return numero_decimal_ponto(valor, padrao)
+
+    def _formatar_medida_visual(self, valor_cena: float, casas: int = 3) -> str:
+        return formatar_numero(valor_cena_para_unidade(getattr(self, "canvas", None), valor_cena), casas)
+
+    def _atualizar_rotulos_unidade(self) -> None:
+        sigla, _fator = unidade_canvas(self.canvas)
+        if hasattr(self, "lbl_altura_texto"):
+            self.lbl_altura_texto.setText(f"Altura do texto ({sigla})")
+        if hasattr(self, "lbl_espaco_linhas"):
+            self.lbl_espaco_linhas.setText(f"Espaço entre linhas ({sigla})")
+        if hasattr(self, "tbl_margem"):
+            self.tbl_margem.setHorizontalHeaderLabels(["Elemento", f"Margem({sigla})"])
+
+    def atualizar_unidade_medida(self) -> None:
+        self._atualizar_rotulos_unidade()
+        self._carregar_controles_visual_elemento(self._molde_atual(), self.cmb_elementos_molde.currentText() if hasattr(self, "cmb_elementos_molde") else None)
+        self._preencher_tabela_margem(self._molde_atual())
 
     def _texto_combo_visual(self, widget, padrao: str = "") -> str:
         if hasattr(widget, "currentText"):
@@ -2802,9 +3167,9 @@ class PropriedadesMoldesDialog(QDialog):
             elemento=elemento,
             referencia=self._texto_combo_visual(self.ed_referencia, "Centro centro"),
             alinhamento=self._texto_combo_visual(self.ed_alinhamento, "Centro"),
-            altura_cm=self._valor_spin_visual(self.ed_altura_texto, TAMANHO_TEXTO_PADRAO_CM),
+            altura_cm=self._valor_spin_medida_visual(self.ed_altura_texto, TAMANHO_TEXTO_PADRAO_CM),
             angulo=self._valor_spin_visual(self.ed_angulo_texto, 0.0),
-            espaco_linhas=self._valor_spin_visual(self.ed_espaco_linhas, 0.33),
+            espaco_linhas=self._valor_spin_medida_visual(self.ed_espaco_linhas, 0.33),
         )
         self._aplicar_imediato_formulario()
 
@@ -2880,9 +3245,9 @@ class PropriedadesMoldesDialog(QDialog):
         with QSignalBlocker(self.ed_angulo_texto):
             self.ed_angulo_texto.setValue(angulo)
         with QSignalBlocker(self.ed_altura_texto):
-            self.ed_altura_texto.setValue(altura)
+            self._set_spin_medida_visual(self.ed_altura_texto, altura)
         with QSignalBlocker(self.ed_espaco_linhas):
-            self.ed_espaco_linhas.setValue(espaco)
+            self._set_spin_medida_visual(self.ed_espaco_linhas, espaco)
 
     @staticmethod
     def _flags_visualizacao_do_molde(molde: dict | None) -> dict[str, bool]:
@@ -2930,12 +3295,12 @@ class PropriedadesMoldesDialog(QDialog):
         elemento = self.cmb_elementos_molde.currentText().strip()
         chave = self._chave_visual_atual()
         if chave:
-            molde[f"texto_{chave}_altura_cm"] = self._valor_spin_visual(
+            molde[f"texto_{chave}_altura_cm"] = self._valor_spin_medida_visual(
                 self.ed_altura_texto,
                 TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
             )
             molde[f"texto_{chave}_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
-            molde[f"espaco_linhas_texto_{chave}"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
+            molde[f"espaco_linhas_texto_{chave}"] = self._valor_spin_medida_visual(self.ed_espaco_linhas, 0.33)
             referencia = self._texto_combo_visual(self.ed_referencia, "Centro centro")
             molde[f"referencia_texto_{chave}"] = referencia
             molde[f"alinhamento_texto_{chave}"] = self._texto_combo_visual(self.ed_alinhamento, "Centro")
@@ -2949,7 +3314,7 @@ class PropriedadesMoldesDialog(QDialog):
                         if chave == "nome":
                             molde["ponto_texto"] = [ponto_ref.x(), ponto_ref.y()]
         elif _eh_elemento_numeros(elemento):
-            molde["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
+            molde["numero_altura_cm"] = self._valor_spin_medida_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
 
     def _quando_preview_manipulado(self, dados_preview: dict):
         molde = self._molde_atual()
@@ -3076,7 +3441,7 @@ class PropriedadesMoldesDialog(QDialog):
                 item_elemento.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 self.tbl_margem.setItem(row, 0, item_elemento)
 
-                item_valor = QTableWidgetItem(str(valores_salvos.get(elemento, "0")))
+                item_valor = QTableWidgetItem(self._formatar_medida_visual(numero_decimal_ponto(valores_salvos.get(elemento, "0"), 0.0, SUFIXOS_MEDIDA)))
                 item_valor.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
                 self.tbl_margem.setItem(row, 1, item_valor)
 
@@ -3135,7 +3500,8 @@ class PropriedadesMoldesDialog(QDialog):
             elemento = (item_elemento.text() if item_elemento else "").strip()
             if not elemento:
                 continue
-            valor = numero_decimal_ponto(item_margem.text() if item_margem else "0", 0.0, ("cm",))
+            valor_u = numero_decimal_ponto(item_margem.text() if item_margem else "0", 0.0, SUFIXOS_MEDIDA)
+            valor = valor_unidade_para_cena(self.canvas, valor_u)
             margens[elemento] = max(0.0, valor)
         return margens
 
@@ -3405,6 +3771,9 @@ class PropriedadesMoldesDialog(QDialog):
                 item.setData(0, Qt.UserRole, ref.indice)
                 item.setFlags((item.flags() | Qt.ItemIsEditable | Qt.ItemIsDragEnabled) & ~Qt.ItemIsDropEnabled)
                 item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
+                tooltip_grade = self._tooltip_grade_molde(ref, referencia_global)
+                if tooltip_grade:
+                    item.setToolTip(0, tooltip_grade)
                 pai.addChild(item)
                 self._itens_molde_por_indice[int(ref.indice)] = item
 
@@ -3635,16 +4004,11 @@ class PropriedadesMoldesDialog(QDialog):
         self.recarregar_lista()
 
     def _quando_canvas_elementos_alterados(self):
-        if self._confirmado_ok:
+        if self._confirmado_ok and self.isVisible():
             return
-        self._snapshot_moldes = self._criar_snapshot_moldes()
-        self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
-        self._snapshot_cores_tecidos = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
-        self._elementos_rascunho = self._criar_rascunho_elementos()
-        self._mostrar_cor_tecidos_rascunho = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
-        self._cores_tecidos_rascunho = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
-        self._indice_atual = self._indice_molde_preferencial()
-        self.recarregar_lista()
+        self._sincronizar_rascunho_com_canvas(preservar_indice=self.isVisible())
+        if self.isVisible():
+            self.recarregar_lista()
 
     def _renomear_molde_atual_instantaneo(self, texto: str):
         if self._suspender_auto_aplicar:
@@ -3737,17 +4101,60 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _atualizar_conflitos_grade_modelo(self) -> None:
         referencia = self._assinatura_grade_referencia_global()
+        assinaturas_unicas: list[str] = []
         for ref in self._refs:
             dados = ref.dados if isinstance(ref.dados, dict) else None
             if not isinstance(dados, dict):
                 continue
             assinatura = self._assinatura_grade(dados)
+            if assinatura and assinatura not in assinaturas_unicas:
+                assinaturas_unicas.append(assinatura)
             conflito = bool(referencia and assinatura and assinatura != referencia)
             dados["conflito_grade_modelo"] = conflito
             if conflito:
                 dados["grade_modelo_referencia"] = referencia
             else:
                 dados.pop("grade_modelo_referencia", None)
+        self._atualizar_alerta_grade_lateral(assinaturas_unicas)
+
+    def _atualizar_alerta_grade_lateral(self, assinaturas: list[str]) -> None:
+        if not hasattr(self, "lbl_alerta_grade"):
+            return
+        if len(assinaturas) <= 1:
+            self.lbl_alerta_grade.setText("")
+            self.lbl_alerta_grade.setHidden(True)
+            return
+        rotulos = [self._rotulo_assinatura_grade(assinatura) for assinatura in assinaturas[:3]]
+        restante = len(assinaturas) - len(rotulos)
+        texto_rotulos = ", ".join(rotulos)
+        if restante > 0:
+            texto_rotulos = f"{texto_rotulos} e mais {restante}"
+        self.lbl_alerta_grade.setText(f"Erro de grade: moldes com grades diferentes ({texto_rotulos}).")
+        self.lbl_alerta_grade.setHidden(False)
+
+    @staticmethod
+    def _rotulo_assinatura_grade(assinatura: str) -> str:
+        texto = str(assinatura or "").strip()
+        if not texto:
+            return "sem grade"
+        nome, sep, tamanhos = texto.partition("|")
+        nome = nome.strip()
+        tags = [tag for tag in tamanhos.split("/") if tag]
+        if sep and tags:
+            return f"{nome or 'sem nome'} ({', '.join(tags)})"
+        return nome or "sem grade"
+
+    def _tooltip_grade_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> str:
+        dados = ref.dados if isinstance(ref.dados, dict) else {}
+        assinatura = self._assinatura_grade(dados)
+        referencia = referencia_grade or str(dados.get("grade_modelo_referencia") or "")
+        if not assinatura or not referencia or assinatura == referencia:
+            return ""
+        return (
+            "Grade diferente do modelo.\n"
+            f"Molde: {self._rotulo_assinatura_grade(assinatura)}\n"
+            f"Referência: {self._rotulo_assinatura_grade(referencia)}"
+        )
 
     def _icone_status_molde(self, ref: MoldeRef, referencia_grade: str | None = None) -> QIcon:
         dados = ref.dados if isinstance(ref.dados, dict) else {}
@@ -3926,6 +4333,7 @@ class PropriedadesMoldesDialog(QDialog):
                 self.cmb_elementos_molde.setCurrentText("Nenhum")
                 self._carregar_controles_visual_elemento(None, "Nenhum")
                 self._atualizar_estado_manipulacao_visual()
+            self._carregar_graduacao_do_molde(None)
             self._atualizar_estado_faixa_giro()
             self._suspender_auto_aplicar = False
             return
@@ -3969,19 +4377,7 @@ class PropriedadesMoldesDialog(QDialog):
             elemento = self.cmb_elementos_molde.currentText().strip() or "Nenhum"
             self._carregar_controles_visual_elemento(molde, elemento)
             self._atualizar_estado_manipulacao_visual()
-        grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
-        if grade_nome:
-            i_grade = self.cmb_grade_tamanhos.findText(grade_nome)
-            if i_grade >= 0:
-                self.cmb_grade_tamanhos.blockSignals(True)
-                self.cmb_grade_tamanhos.setCurrentIndex(i_grade)
-                self.cmb_grade_tamanhos.blockSignals(False)
-        linhas = molde.get("graduacao_tamanhos")
-        if isinstance(linhas, list) and linhas:
-            self._graduacao_linhas = [dict(l) for l in linhas]
-            self._renderizar_tabela_graduacao()
-        else:
-            self._aplicar_grade_tamanhos(self.cmb_grade_tamanhos.currentText())
+        self._carregar_graduacao_do_molde(molde)
         self.preview.set_molde(dict(molde))
         self._suspender_auto_aplicar = False
 
@@ -4063,12 +4459,12 @@ class PropriedadesMoldesDialog(QDialog):
         if chave:
             dados["elemento_visual"] = elemento
             dados["chave_visual"] = chave
-            dados["texto_altura_cm"] = self._valor_spin_visual(
+            dados["texto_altura_cm"] = self._valor_spin_medida_visual(
                 self.ed_altura_texto,
                 TAMANHO_NOME_PADRAO_CM if chave == "nome" else TAMANHO_TEXTO_PADRAO_CM,
             )
             dados["texto_angulo"] = self._valor_spin_visual(self.ed_angulo_texto, 0.0)
-            dados["espaco_linhas"] = self._valor_spin_visual(self.ed_espaco_linhas, 0.33)
+            dados["espaco_linhas"] = self._valor_spin_medida_visual(self.ed_espaco_linhas, 0.33)
             dados["referencia_texto"] = self._texto_combo_visual(self.ed_referencia, "Centro centro")
             dados["alinhamento_texto"] = self._texto_combo_visual(self.ed_alinhamento, "Centro")
             dados["textos"].setdefault(chave, {})
@@ -4079,7 +4475,7 @@ class PropriedadesMoldesDialog(QDialog):
             dados["textos"][chave][f"alinhamento_texto_{chave}"] = dados["alinhamento_texto"]
         elif _eh_elemento_numeros(elemento):
             dados["elemento_visual"] = elemento
-            dados["numero_altura_cm"] = self._valor_spin_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
+            dados["numero_altura_cm"] = self._valor_spin_medida_visual(self.ed_altura_texto, TAMANHO_NUMERO_PADRAO_CM)
             dados["numeros"]["numero_altura_cm"] = dados["numero_altura_cm"]
             if isinstance(molde_atual, dict):
                 dados["numero_ponto_inicio"] = int(molde_atual.get("numero_ponto_inicio", 0) or 0)
@@ -4217,13 +4613,14 @@ class PropriedadesMoldesDialog(QDialog):
             return False
 
         self._aplicar_formulario_no_molde(molde)
-        self._sincronizar_gradacao_no_molde()
+        self._sincronizar_gradacao_no_molde(publicar=False)
         self._mostrar_cor_tecidos_rascunho = self.chk_mostrar_cor_tecidos.isChecked()
         if hasattr(self, "tbl_margem"):
             margens = self._coletar_margens_tabela()
             self._salvar_margens_no_molde(molde, margens, mostrar_margem=self.chk_margem_visual.isChecked())
 
         self._aplicar_rascunho_no_canvas()
+        self._limpar_rascunho_visualizacao_canvas()
         if hasattr(self.canvas, "_registrar_historico"):
             self.canvas._registrar_historico()
         if hasattr(self.canvas, "update"):
@@ -4309,15 +4706,10 @@ class PropriedadesMoldesDialog(QDialog):
         return elementos if isinstance(elementos, list) else []
 
     def _criar_rascunho_elementos(self) -> list:
-        return deepcopy(self._elementos_canvas_reais())
+        return [_elemento_limpo_para_edicao(el) for el in self._elementos_canvas_reais() if isinstance(el, dict)]
 
-    def _iniciar_sessao_edicao(self):
-        """Reabre Propriedades sempre partindo do estado real do canvas.
-
-        Isso impede que alterações descartadas por Cancelar/X fiquem presas
-        no rascunho interno e reapareçam quando a janela for aberta novamente.
-        """
-        self._confirmado_ok = False
+    def _sincronizar_rascunho_com_canvas(self, *, preservar_indice: bool = False) -> None:
+        indice_anterior = self._indice_atual if preservar_indice else None
         self._snapshot_moldes = self._criar_snapshot_moldes()
         self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
         self._snapshot_cores_tecidos = dict(getattr(self.canvas, "_cores_tecidos", {}) or {})
@@ -4327,7 +4719,29 @@ class PropriedadesMoldesDialog(QDialog):
         self._refs = []
         self._itens_molde_por_indice = {}
         self._combos_tecido_por_item = {}
-        self._indice_atual = self._indice_molde_preferencial()
+        if (
+            preservar_indice
+            and isinstance(indice_anterior, int)
+            and 0 <= indice_anterior < len(self._elementos_rascunho)
+            and isinstance(self._elementos_rascunho[indice_anterior], dict)
+            and self._elementos_rascunho[indice_anterior].get("molde")
+        ):
+            self._indice_atual = indice_anterior
+        else:
+            self._indice_atual = self._indice_molde_preferencial()
+
+    def sincronizar_silenciosamente_com_canvas(self) -> None:
+        self._limpar_rascunho_visualizacao_canvas()
+        self._sincronizar_rascunho_com_canvas(preservar_indice=True)
+
+    def _iniciar_sessao_edicao(self):
+        """Reabre Propriedades sempre partindo do estado real do canvas.
+
+        Isso impede que alterações descartadas por Cancelar/X fiquem presas
+        no rascunho interno e reapareçam quando a janela for aberta novamente.
+        """
+        self._confirmado_ok = False
+        self.sincronizar_silenciosamente_com_canvas()
         self._alerta_piscando = False
         self._alerta_passos_restantes = 0
         self._alerta_tremendo = False
@@ -4335,18 +4749,28 @@ class PropriedadesMoldesDialog(QDialog):
         self._alerta_pos_original = None
 
     def centralizar_na_tela(self):
-        tela = self.screen()
-        if tela is None and self.parentWidget() is not None:
-            janela = self.parentWidget().windowHandle()
-            tela = janela.screen() if janela is not None else None
+        parent = self.parentWidget()
+        tela = None
+        centro = None
+        if parent is not None:
+            janela = parent.window()
+            try:
+                if janela is not None and janela.isVisible():
+                    centro = janela.frameGeometry().center()
+            except Exception:
+                centro = None
+            handle = janela.windowHandle() if janela is not None else None
+            tela = handle.screen() if handle is not None else None
         if tela is None:
-            tela = QApplication.primaryScreen()
+            tela = self.screen() or QApplication.primaryScreen()
         if tela is None:
             return
         geo = tela.availableGeometry()
         frame = self.frameGeometry()
-        frame.moveCenter(geo.center())
-        self.move(frame.topLeft())
+        frame.moveCenter(centro if centro is not None else geo.center())
+        x = max(geo.left(), min(frame.left(), geo.right() - frame.width() + 1))
+        y = max(geo.top(), min(frame.top(), geo.bottom() - frame.height() + 1))
+        self.move(QPoint(int(x), int(y)))
 
     def _limpar_preview_temporario(self):
         try:
@@ -4373,6 +4797,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._suspender_item_changed = False
         self._suspender_combo_tecido_arvore = False
         self._limpar_preview_temporario()
+        self._limpar_rascunho_visualizacao_canvas()
         try:
             self.arvore.clear()
         except Exception:
@@ -4389,7 +4814,11 @@ class PropriedadesMoldesDialog(QDialog):
     def _aplicar_rascunho_no_canvas(self):
         elementos_reais = self._elementos_canvas_reais()
         if isinstance(elementos_reais, list):
-            elementos_reais[:] = deepcopy(self._elementos_edicao())
+            elementos_reais[:] = [
+                _elemento_limpo_para_edicao(el)
+                for el in self._elementos_edicao()
+                if isinstance(el, dict)
+            ]
         try:
             self.canvas._mostrar_cor_tecidos = bool(getattr(self, "_mostrar_cor_tecidos_rascunho", False))
         except Exception:
@@ -4413,7 +4842,7 @@ class PropriedadesMoldesDialog(QDialog):
             return snapshot
         for idx, el in enumerate(elementos):
             if isinstance(el, dict) and el.get("molde"):
-                snapshot[idx] = deepcopy(el)
+                snapshot[idx] = _elemento_limpo_para_edicao(el)
         return snapshot
 
     def _restaurar_snapshot_moldes(self):
@@ -4427,7 +4856,7 @@ class PropriedadesMoldesDialog(QDialog):
         ]
         for idx, el in self._snapshot_moldes.items():
             if 0 <= idx < len(elementos):
-                elementos[idx] = deepcopy(el)
+                elementos[idx] = _elemento_limpo_para_edicao(el)
         if hasattr(self.canvas, "_margens_visuais_forcadas"):
             try:
                 self.canvas._margens_visuais_forcadas = {}
@@ -4486,7 +4915,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
         self._aplicar_formulario_no_molde(molde)
         self._sincronizar_nome_molde_atual_sem_recarregar(str(molde.get("nome_molde") or ""))
-        self._sincronizar_gradacao_no_molde()
+        self._sincronizar_gradacao_no_molde(publicar=False)
         self._mostrar_cor_tecidos_rascunho = self.chk_mostrar_cor_tecidos.isChecked()
         if hasattr(self, "tbl_margem"):
             margens = self._coletar_margens_tabela()
@@ -4496,6 +4925,7 @@ class PropriedadesMoldesDialog(QDialog):
             bool(getattr(self, "_mostrar_cor_tecidos_rascunho", False)),
         )
         self.preview.set_molde(dict(molde))
+        self._publicar_rascunho_visualizacao(molde)
 
     def _conectar_auto_aplicacao(self):
         sinais = [
@@ -4992,8 +5422,9 @@ class Ferramenta(FerramentaBase):
                     pass
                 self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
                 return
-            dialog.centralizar_na_tela()
             dialog.show()
+            dialog.centralizar_na_tela()
+            QTimer.singleShot(0, dialog.centralizar_na_tela)
             dialog.raise_()
             dialog.activateWindow()
             _log_propriedades_debug(f"Dialog visível_depois={dialog.isVisible()}; geometria={dialog.geometry().getRect()}")
@@ -5012,6 +5443,11 @@ class Ferramenta(FerramentaBase):
 
     def ativar(self):
         return "Use on_activate(canvas) para abrir a janela de propriedades."
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None and hasattr(dialog, "atualizar_unidade_medida"):
+            dialog.atualizar_unidade_medida()
 
     def _obter_dialog(self, canvas) -> PropriedadesMoldesDialog:
         chave = id(canvas)
@@ -5064,6 +5500,9 @@ class Ferramenta(FerramentaBase):
 
         if not precisa_recriar and dialog is not None:
             dialog.set_exibir_tab_ferramentas(exibir_tab_ferramentas)
+            if not dialog.isVisible():
+                dialog.sincronizar_silenciosamente_com_canvas()
+            dialog.atualizar_unidade_medida()
             try:
                 if dialog.parentWidget() is None and parent is not None:
                     dialog.setParent(parent)

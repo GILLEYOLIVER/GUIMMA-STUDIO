@@ -153,6 +153,43 @@ class RemoverPiqueToolTestCase(unittest.TestCase):
         self.assertEqual(molde["marcacoes_no_perimetro"], [(8.0, 0.0)])
         self.assertEqual(canvas.historico, 1)
 
+    def test_remover_todos_do_contorno_preserva_piques_internos(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["piques_config"].append(
+            {
+                "ponto": (5.0, 2.5),
+                "ponto_controle": (5.0, 2.5),
+                "sobre_contorno": False,
+                "adicionar_ponto_controle": True,
+                "segmentos": [((5.0, 2.5), (6.0, 2.5))],
+            }
+        )
+        molde["controle_auxiliares"] = [(5.0, 2.5)]
+        molde["pontos_auxiliares"] = [{"x": 5.0, "y": 2.5}]
+        ferramenta = FerramentaRemoverPique()
+
+        removidos = ferramenta._remover_piques_do_molde(canvas, 0, "contorno")
+
+        self.assertEqual(removidos, 1)
+        self.assertEqual(len(molde["piques_config"]), 1)
+        self.assertFalse(molde["piques_config"][0]["sobre_contorno"])
+        self.assertEqual(molde["controle_auxiliares"], [(5.0, 2.5)])
+        self.assertNotIn("marcacoes_no_perimetro", molde)
+
+    def test_dialogo_remove_por_caixas_exclusivas(self):
+        from tools.remover_pique_tool import RemoverPiqueDialog
+
+        dialog = RemoverPiqueDialog()
+        dialog.chk_contorno.setChecked(True)
+        dialog._marcar_exclusivo(dialog.chk_contorno)
+        dialog.chk_internos.setChecked(True)
+        dialog._marcar_exclusivo(dialog.chk_internos)
+
+        self.assertFalse(dialog.chk_contorno.isChecked())
+        self.assertTrue(dialog.chk_internos.isChecked())
+        self.assertEqual(dialog.modo(), "internos")
+
     def test_botao_direito_finaliza(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRemoverPique()

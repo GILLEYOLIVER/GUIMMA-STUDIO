@@ -11,7 +11,12 @@ from canvas.cena import CenaDocumento
 try:
     import guimma_geometry_cpp as _guimma_cpp
 except Exception:  # pragma: no cover - o fallback Python deve continuar funcionando
-    _guimma_cpp = None
+    try:
+        from core.geometry_cpp_bridge import modulo_cpp as _modulo_cpp
+
+        _guimma_cpp = _modulo_cpp()
+    except Exception:
+        _guimma_cpp = None
 
 
 @dataclass(slots=True)
@@ -75,6 +80,12 @@ class SnapManager:
         self._cpp_engine = None
         self._cpp_assinatura = None
         self._cpp_erro = False
+        self._cpp_cache_valido = False
+
+    def invalidar_cache(self) -> None:
+        self._cpp_engine = None
+        self._cpp_assinatura = None
+        self._cpp_cache_valido = False
 
     def calcular(self, cena: CenaDocumento, cursor: QPointF, zoom: float, tolerancia_px: float | None = None) -> SnapResult | None:
         candidatos_validos = self.calcular_candidatos(cena, cursor, zoom, tolerancia_px=tolerancia_px)
@@ -210,8 +221,8 @@ class SnapManager:
         return tuple(assinatura), self.snap_grade, self.passo_grade, self.tolerancia_px
 
     def _obter_engine_cpp(self, cena: CenaDocumento):
-        assinatura = self._assinatura_cpp(cena)
-        if self._cpp_engine is not None and self._cpp_assinatura == assinatura:
+        assinatura = (id(cena.elementos), len(cena.elementos), bool(self.snap_grade), float(self.passo_grade), float(self.tolerancia_px))
+        if self._cpp_cache_valido and self._cpp_engine is not None and self._cpp_assinatura == assinatura:
             return self._cpp_engine
         engine = _guimma_cpp.SnapEngine()
         engine.set_tolerance_px(float(self.tolerancia_px))
@@ -233,6 +244,7 @@ class SnapManager:
                 engine.add_polyline(poly)
         self._cpp_engine = engine
         self._cpp_assinatura = assinatura
+        self._cpp_cache_valido = True
         return engine
 
     def _qpoints_para_cpp(self, pontos: list[QPointF]):

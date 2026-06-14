@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -47,6 +48,8 @@ class InserirPiqueDialog(QDialog):
         self.setWindowFlags(Qt.Tool)
         self.setFixedWidth(242)
         self._sincronizando_medidas = False
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(6, 6, 6, 6)
@@ -67,11 +70,13 @@ class InserirPiqueDialog(QDialog):
         self.cmb_tipo.setMinimumWidth(138)
         self.cmb_tipo.setMaxVisibleItems(12)
 
-        topo.addWidget(QLabel("Largura (cm)"), 0, 0)
+        self.lbl_largura = QLabel("Largura (cm)")
+        self.lbl_altura = QLabel("Altura (cm)")
+        topo.addWidget(self.lbl_largura, 0, 0)
         topo.addWidget(QLabel("Pique"), 0, 1)
         topo.addWidget(self.edt_largura, 1, 0)
         topo.addWidget(self.cmb_tipo, 1, 1)
-        topo.addWidget(QLabel("Altura (cm)"), 2, 0)
+        topo.addWidget(self.lbl_altura, 2, 0)
         topo.addWidget(self.edt_altura, 3, 0)
         topo.addWidget(QLabel("Ângulo"), 4, 0)
 
@@ -154,19 +159,19 @@ class InserirPiqueDialog(QDialog):
         )
 
     def largura(self) -> float:
-        return self._float(self.edt_largura.text(), 0.3)
+        return self._medida_cena(self.edt_largura.text(), 0.3)
 
     def altura(self) -> float:
-        return self._float(self.edt_altura.text(), 0.3)
+        return self._medida_cena(self.edt_altura.text(), 0.3)
 
     def angulo(self) -> float:
         return self._float(self.edt_angulo.text(), 0.0)
 
     def dx(self) -> float:
-        return self._float(self.edt_dx.text(), 0.0) if self.chk_dx.isChecked() else 0.0
+        return self._medida_cena(self.edt_dx.text(), 0.0) if self.chk_dx.isChecked() else 0.0
 
     def dy(self) -> float:
-        return self._float(self.edt_dy.text(), 0.0) if self.chk_dy.isChecked() else 0.0
+        return self._medida_cena(self.edt_dy.text(), 0.0) if self.chk_dy.isChecked() else 0.0
 
     def _largura_alterada(self, texto: str) -> None:
         if not self._sincronizando_medidas and self.chk_manter_distancia.isChecked():
@@ -193,6 +198,30 @@ class InserirPiqueDialog(QDialog):
     @staticmethod
     def _float(texto: str, padrao: float) -> float:
         return numero_decimal_ponto(texto, padrao)
+
+    def _medida_cena(self, texto: str, padrao_cena: float) -> float:
+        padrao_unidade = float(padrao_cena) / self._unidade_fator
+        valor_unidade = numero_decimal_ponto(texto, padrao_unidade, SUFIXOS_MEDIDA)
+        return valor_unidade * self._unidade_fator
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        edits = (self.edt_largura, self.edt_altura, self.edt_dx, self.edt_dy)
+        valores_cena = [
+            numero_decimal_ponto(edt.text(), 0.0, SUFIXOS_MEDIDA) * fator_antigo
+            for edt in edits
+        ]
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.lbl_largura.setText(f"Largura ({self._unidade_sigla})")
+        self.lbl_altura.setText(f"Altura ({self._unidade_sigla})")
+        self.chk_dx.setText(f"Dx ({self._unidade_sigla})")
+        self.chk_dy.setText(f"Dy ({self._unidade_sigla})")
+        for edt, valor_cena in zip(edits, valores_cena):
+            texto = f"{valor_cena / self._unidade_fator:.3f}".rstrip("0").rstrip(".")
+            edt.setText("0" if texto in {"", "-0"} else texto)
+            edt.setPlaceholderText(self._unidade_sigla)
+        self.preview.set_medidas(self.largura(), self.altura())
 
 
 class _PiquePreview(QFrame):
@@ -414,7 +443,12 @@ class Ferramenta(FerramentaBase):
             self._dialog.setParent(canvas)
         if not self._dialog.isVisible():
             self._dialog.show()
+        self._dialog.set_unidade(*unidade_canvas(canvas))
         self._reposicionar_dialogo(canvas)
+
+    def on_unidade_medida_alterada(self, canvas):
+        if self._dialog is not None:
+            self._dialog.set_unidade(*unidade_canvas(canvas))
 
     def _reposicionar_dialogo(self, canvas) -> None:
         if not self._dialog:
@@ -475,7 +509,10 @@ class Ferramenta(FerramentaBase):
         if self._dialog.chk_ponto_controle.isChecked() and el.get("molde"):
             if sobre_contorno and info_segmento is not None:
                 self._inserir_ponto_no_contorno(el, ponto_controle, info_segmento[0])
-                self._adicionar_ponto_controle_principal(el, ponto_controle, info_segmento[0])
+                indice_insercao = self._adicionar_ponto_controle_principal(el, ponto_controle, info_segmento[0])
+                if indice_insercao is not None:
+                    self._marcar_ponto_controle_pique(el, ponto_controle)
+                    self._sincronizar_costuras_vinculadas(canvas)
             else:
                 self._adicionar_ponto_controle_auxiliar(el, ponto_controle)
         self.set_status(f"Pique inserido: {config['tipo']}.")
@@ -684,13 +721,39 @@ class Ferramenta(FerramentaBase):
         pontos = [p for p in pontos if p is not None]
         if len(pontos) < 3:
             return normal
-        cx = sum(x for x, _y in pontos) / len(pontos)
-        cy = sum(y for _x, y in pontos) / len(pontos)
+        normal_unit = self._normalizar_vetor(normal) or normal
+        base = list(pontos)
+        if len(base) >= 2 and self._dist_tuple(base[0], base[-1]) <= 1e-6:
+            base = base[:-1]
+        if len(base) < 3:
+            return normal_unit
+        xs = [x for x, _y in base]
+        ys = [y for _x, y in base]
+        diagonal = sqrt(((max(xs) - min(xs)) ** 2) + ((max(ys) - min(ys)) ** 2)) if xs and ys else 0.0
+        passo_base = max(1e-4, min(0.2, diagonal * 0.01 if diagonal > 0.0 else 0.05))
+        for multiplicador in (1.0, 2.5, 5.0, 10.0):
+            passo = passo_base * multiplicador
+            candidato = (
+                float(ponto.x() + (normal_unit.x() * passo)),
+                float(ponto.y() + (normal_unit.y() * passo)),
+            )
+            oposto = (
+                float(ponto.x() - (normal_unit.x() * passo)),
+                float(ponto.y() - (normal_unit.y() * passo)),
+            )
+            candidato_dentro = self._ponto_dentro_ou_na_borda(candidato, base)
+            oposto_dentro = self._ponto_dentro_ou_na_borda(oposto, base)
+            if candidato_dentro and not oposto_dentro:
+                return QPointF(-normal_unit.x(), -normal_unit.y())
+            if oposto_dentro and not candidato_dentro:
+                return normal_unit
+        cx = sum(x for x, _y in base) / len(base)
+        cy = sum(y for _x, y in base) / len(base)
         vx = ponto.x() - cx
         vy = ponto.y() - cy
-        if (normal.x() * vx + normal.y() * vy) < 0.0:
-            return QPointF(-normal.x(), -normal.y())
-        return normal
+        if (normal_unit.x() * vx + normal_unit.y() * vy) < 0.0:
+            return QPointF(-normal_unit.x(), -normal_unit.y())
+        return normal_unit
 
     @staticmethod
     def _rotacionar_base(normal: QPointF, tangente: QPointF, angulo_graus: float) -> tuple[QPointF, QPointF]:
@@ -713,7 +776,7 @@ class Ferramenta(FerramentaBase):
         el["controle_auxiliares"] = auxiliares
         el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
 
-    def _adicionar_ponto_controle_principal(self, el: dict, ponto: QPointF, seg_idx: int) -> None:
+    def _adicionar_ponto_controle_principal(self, el: dict, ponto: QPointF, seg_idx: int) -> int | None:
         novo = (float(ponto.x()), float(ponto.y()))
         cantos = [pt for pt in (self._tupla_ponto(item) for item in el.get("controle_cantos", []) or []) if pt is not None]
         if not cantos:
@@ -721,11 +784,146 @@ class Ferramenta(FerramentaBase):
             if len(pontos) >= 2 and self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6:
                 pontos = pontos[:-1]
             cantos = [pt for pt in pontos if self._dist_tuple(pt, novo) > 1e-6]
+        indice_insercao = None
         if not any(self._dist_tuple(novo, item) <= 1e-6 for item in cantos):
             inserir_em = self._indice_insercao_canto(el, novo, seg_idx, cantos)
             cantos.insert(inserir_em, novo)
+            indice_insercao = inserir_em
         el["controle_cantos"] = cantos
         el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
+        return indice_insercao
+
+    def _marcar_ponto_controle_pique(self, el: dict, ponto: QPointF) -> None:
+        novo = (float(ponto.x()), float(ponto.y()))
+        marcados = [pt for pt in (self._tupla_ponto(item) for item in el.get("pontos_controle_pique", []) or []) if pt is not None]
+        if not any(self._dist_tuple(novo, item) <= 1e-6 for item in marcados):
+            marcados.append(novo)
+        el["pontos_controle_pique"] = marcados
+
+        principais = []
+        for item in el.get("pontos_controle_principais", []) or []:
+            pt = self._tupla_ponto(item)
+            if pt is None:
+                continue
+            if self._dist_tuple(novo, pt) <= 1e-6:
+                dado = dict(item) if isinstance(item, dict) else {"x": float(pt[0]), "y": float(pt[1])}
+                dado["origem"] = "pique"
+                dado["divide_costura"] = False
+                principais.append(dado)
+            else:
+                principais.append(item)
+        if principais:
+            el["pontos_controle_principais"] = principais
+
+    def _remapear_costuras_apos_inserir_ponto_principal(
+        self,
+        canvas,
+        molde: dict,
+        total_antes: int,
+        indice_insercao: int | None,
+    ) -> None:
+        if indice_insercao is None or total_antes < 2:
+            return
+        molde_id = str(molde.get("molde_id") or molde.get("id") or "").strip()
+        if not molde_id:
+            return
+        alterou = False
+        for costura in list(getattr(canvas.cena, "elementos", []) or []):
+            if not self._costura_do_molde(costura, molde_id):
+                continue
+            segmentos = self._segmentos_costura(costura)
+            if not segmentos:
+                continue
+            novos = self._remapear_segmentos_costura_pique(segmentos, total_antes, int(indice_insercao))
+            if novos == segmentos:
+                continue
+            costura["costura_segmentos"] = novos
+            if isinstance(costura.get("metadados"), dict):
+                costura["metadados"]["costura_segmentos"] = list(novos)
+            alterou = True
+        if alterou:
+            self._sincronizar_costuras_vinculadas(canvas)
+
+    @staticmethod
+    def _costura_do_molde(costura: dict, molde_id: str) -> bool:
+        if not isinstance(costura, dict) or costura.get("molde"):
+            return False
+        metadados = costura.get("metadados") if isinstance(costura.get("metadados"), dict) else {}
+        subtipo = str(costura.get("subtipo_audaces") or metadados.get("subtipo_audaces") or "").strip()
+        costura_id = str(costura.get("costura_de_molde_id") or metadados.get("costura_de_molde_id") or "").strip()
+        return bool(costura_id == str(molde_id or "").strip() and (subtipo == "costura" or costura_id))
+
+    @staticmethod
+    def _segmentos_costura(costura: dict) -> list[int]:
+        origem = costura.get("costura_segmentos")
+        if origem is None and isinstance(costura.get("metadados"), dict):
+            origem = costura["metadados"].get("costura_segmentos")
+        if not isinstance(origem, list):
+            return []
+        saida: list[int] = []
+        for item in origem:
+            try:
+                valor = int(item)
+            except Exception:
+                continue
+            if valor not in saida:
+                saida.append(valor)
+        return saida
+
+    @staticmethod
+    def _remapear_segmentos_costura_pique(segmentos: list[int], total_antes: int, indice_insercao: int) -> list[int]:
+        total = int(total_antes)
+        if total <= 0:
+            return list(segmentos)
+        k = max(0, min(int(indice_insercao), total))
+        novos: list[int] = []
+
+        def adicionar(valor: int) -> None:
+            if valor not in novos:
+                novos.append(valor)
+
+        for segmento in segmentos:
+            s = int(segmento) % total
+            if k == 0:
+                if s == total - 1:
+                    adicionar(0)
+                    adicionar(total)
+                else:
+                    adicionar(s + 1)
+            elif k == total:
+                if s == total - 1:
+                    adicionar(total - 1)
+                    adicionar(total)
+                else:
+                    adicionar(s)
+            elif s == k - 1:
+                adicionar(k - 1)
+                adicionar(k)
+            elif s >= k:
+                adicionar(s + 1)
+            else:
+                adicionar(s)
+        return novos
+
+    @staticmethod
+    def _sincronizar_costuras_vinculadas(canvas) -> None:
+        try:
+            from tools.costura_tool import Ferramenta as FerramentaCostura
+        except Exception:
+            return
+        try:
+            FerramentaCostura().sincronizar_costuras_vinculadas(canvas)
+        except Exception:
+            return
+
+    def _controles_principais_molde(self, el: dict) -> list[tuple[float, float]]:
+        cantos = [pt for pt in (self._tupla_ponto(item) for item in el.get("controle_cantos", []) or []) if pt is not None]
+        if cantos:
+            return cantos
+        pontos = [pt for pt in (self._tupla_ponto(item) for item in el.get("pontos", []) or []) if pt is not None]
+        if len(pontos) >= 2 and self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6:
+            pontos = pontos[:-1]
+        return pontos
 
     def _indice_insercao_canto(self, el: dict, novo: tuple[float, float], seg_idx: int, cantos: list[tuple[float, float]]) -> int:
         pontos = [pt for pt in (self._tupla_ponto(item) for item in el.get("pontos", []) or []) if pt is not None]

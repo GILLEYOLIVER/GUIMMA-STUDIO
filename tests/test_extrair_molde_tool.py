@@ -308,8 +308,51 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
 
         self.assertIn((5.0, 0.0), encontros)
-        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])
+        self.assertEqual(
+            molde["controle_cantos"],
+            [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+        )
         self.assertIn((2.5, 0.0), molde["controle_auxiliares"])
+
+    def test_vertices_reais_da_polyline_origem_viram_pontos_principais(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [
+            (0.0, 0.0),
+            (1.2, -2.1),
+            (4.8, -1.0),
+            (7.0, -2.6),
+            (12.0, -1.7),
+            (13.0, 0.0),
+            (0.0, 0.0),
+        ]
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [{"tipo": "polyline", "pontos": contorno}]
+
+        ok = ferramenta._criar_molde_de_contorno_extraido(canvas, contorno)
+
+        self.assertTrue(ok)
+        novo = canvas.cena.elementos[-1]
+        for ponto in contorno[:-1]:
+            self.assertTrue(
+                any(ferramenta._dist_tuple(ponto, controle) <= 1e-4 for controle in novo["controle_cantos"]),
+                f"quina real ausente: {ponto}",
+            )
+        self.assertGreaterEqual(len(novo["controle_cantos"]), len(contorno) - 1)
+
+    def test_curva_fechada_amostrada_nao_vira_um_controle_por_amostra(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (cos((2.0 * pi * i) / 48.0) * 5.0, sin((2.0 * pi * i) / 48.0) * 3.0)
+            for i in range(48)
+        ]
+        contorno = [*pontos, pontos[0]]
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [{"tipo": "polyline", "pontos": contorno}]
+
+        refs = ferramenta._coletar_interseccoes_no_contorno(canvas, contorno)
+
+        self.assertEqual(len(refs), 1)
+        self.assertTrue(ferramenta._dist_tuple(refs[0], pontos[0]) <= 1e-4)
 
     def test_controles_da_curva_de_origem_nao_viram_principais_na_extracao(self):
         ferramenta = FerramentaExtrairMolde()
@@ -463,6 +506,51 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertEqual(len(canvas.cena.elementos), 1)
         self.assertEqual(canvas._selecionados, set())
         self.assertEqual(ferramenta._selecoes_manuais, {0})
+
+    def test_molde_extraido_mantem_grade_do_modelo_em_vez_de_grade_isolada(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(30.0, 0.0), (40.0, 0.0), (40.0, 5.0), (30.0, 0.0)],
+                "graduacao_grade_nome": "P-G(M)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                    {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                    {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                ],
+                "graduacao_tamanhos_ativos": ["P", "M", "G"],
+            },
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(50.0, 0.0), (60.0, 0.0), (60.0, 5.0), (50.0, 0.0)],
+                "graduacao_grade_nome": "36-46(40)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "36", "cor": "#9678bd", "base": False},
+                    {"ativo": True, "tamanho": "38", "cor": "#c1d336", "base": False},
+                    {"ativo": True, "tamanho": "40", "cor": "#4f8a68", "base": True},
+                    {"ativo": True, "tamanho": "42", "cor": "#b58de8", "base": False},
+                    {"ativo": True, "tamanho": "44", "cor": "#c4b07c", "base": False},
+                    {"ativo": True, "tamanho": "46", "cor": "#b7d7a8", "base": False},
+                ],
+                "graduacao_tamanhos_ativos": ["36", "38", "40", "42", "44", "46"],
+                "graduacao_tabela": {"pontos": {"0": {"valores": {"46": {"dx": 1.0, "dy": 0.0}}}}},
+            },
+        ]
+        ferramenta = FerramentaExtrairMolde()
+
+        ok = ferramenta._criar_molde_de_contorno_extraido(
+            canvas,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+        )
+
+        self.assertTrue(ok)
+        novo = canvas.cena.elementos[-1]
+        self.assertEqual(novo["graduacao_grade_nome"], "P-G(M)")
+        self.assertEqual([linha["tamanho"] for linha in novo["graduacao_tamanhos"]], ["P", "M", "G"])
+        self.assertEqual(novo["graduacao_tamanhos_ativos"], ["P", "M", "G"])
 
     def test_molde_composto_nasce_sem_selecao_no_canvas(self):
         canvas = _FakeCanvasCriacaoMolde()

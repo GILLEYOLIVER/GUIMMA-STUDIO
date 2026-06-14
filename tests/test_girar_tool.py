@@ -12,8 +12,15 @@ if find_spec("PySide6") is None:
     FerramentaGirar = None
     QApplication = None
     QPointF = None
-    Qt = None
-    QWidget = None
+
+    class _QtIndisponivel:
+        LeftButton = 1
+        RightButton = 2
+
+    class QWidget:
+        pass
+
+    Qt = _QtIndisponivel()
 else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget

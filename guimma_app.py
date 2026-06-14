@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QScrollArea, QSizePolicy, QWidget
 
 from config import APP_NOME
+from ui.fonte_padrao import aplicar_fonte_padrao, argv_com_fonte_padrao
 from ui.hover_style import aplicar_hover_global, aplicar_hover_menu
 from ui.janela_principal import GuimmaStudioMainWindow
 
@@ -112,9 +113,10 @@ class _ScrollLinhaUsuario(QScrollArea):
 
 class GuimmaStudioApp:
     def __init__(self, argv: Sequence[str] | None = None):
-        self._argv = list(argv or sys.argv)
+        self._argv = argv_com_fonte_padrao(list(argv or sys.argv))
         self.qt_app = QApplication(self._argv)
         self.qt_app.setApplicationName(APP_NOME)
+        aplicar_fonte_padrao(self.qt_app)
         self._aplicar_traducao_qt_ptbr()
         self._aplicar_tema_claro_global()
         aplicar_hover_global(self.qt_app)

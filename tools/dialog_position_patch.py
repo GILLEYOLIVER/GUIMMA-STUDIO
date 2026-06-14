@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog
 
-from tools.dialog_position import posicionar_dialogo_abaixo_coordenadas
-from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+from tools.dialog_position import centralizar_dialogo_na_tela
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_estado
 
 
 _CLASSES_IGNORADAS = {
@@ -37,15 +36,10 @@ def _chave_dialogo(dialogo: QDialog) -> str:
 def _deve_gerenciar(dialogo: QDialog) -> bool:
     if getattr(dialogo, "_guimma_ignorar_patch_posicao", False):
         return False
-    if dialogo.parent() is None and dialogo.parentWidget() is None:
-        return False
     classe = _classe_dialogo(dialogo)
     if classe in _CLASSES_IGNORADAS:
         return False
-    try:
-        return bool(dialogo.windowFlags() & Qt.Tool) or not dialogo.isModal()
-    except Exception:
-        return True
+    return True
 
 
 def aplicar_patch_posicao_dialogos() -> None:
@@ -62,10 +56,10 @@ def aplicar_patch_posicao_dialogos() -> None:
                 return
             chave = _chave_dialogo(dialogo)
             instalar_memoria_posicao(dialogo, chave)
-            restaurou = restaurar_posicao(dialogo, chave)
+            restaurar_estado(dialogo, chave)
             parent = dialogo.parentWidget() or dialogo.parent()
-            if parent is not None and not restaurou:
-                posicionar_dialogo_abaixo_coordenadas(dialogo, parent)
+            centralizar_dialogo_na_tela(dialogo, parent)
+            dialogo._guimma_posicao_inicial_aplicada_auto = True  # type: ignore[attr-defined]
         except Exception:
             pass
 

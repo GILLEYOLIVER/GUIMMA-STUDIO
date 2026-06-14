@@ -3274,10 +3274,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             if dialog.width() > largura_max or dialog.height() > altura_max:
                 dialog.resize(min(dialog.width(), largura_max), min(dialog.height(), altura_max))
 
-        geo_janela = self.frameGeometry()
-        centro_janela = geo_janela.center()
         geo_dialogo = dialog.frameGeometry()
-        geo_dialogo.moveCenter(centro_janela)
+        if area_disponivel is not None:
+            geo_dialogo.moveCenter(area_disponivel.center())
+        else:
+            geo_dialogo.moveCenter(self.frameGeometry().center())
         if area_disponivel is not None:
             if geo_dialogo.left() < area_disponivel.left():
                 geo_dialogo.moveLeft(area_disponivel.left())
@@ -5671,8 +5672,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if not area:
                 continue
             area.canvas.cena.elementos = [dict(el) for el in doc.get("elementos", [])]
-            if "painel_coordenadas_visivel" in doc:
-                area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            self._garantir_coordenadas_abertas(area)
             self._restaurar_viewport_documento_canvas(area, doc)
             self._marcar_area_como_salva(area)
             area.canvas.update()
@@ -5787,8 +5787,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             doc = docs[0]
             area.canvas.cena.elementos = [dict(el) for el in doc.get("elementos", [])]
             area.canvas.set_painel_auxiliar_posicao(self._painel_coordenadas_pos_global)
-            if "painel_coordenadas_visivel" in doc:
-                area.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            self._garantir_coordenadas_abertas(area)
             qtd_moldes_organizados = self._organizar_moldes_no_canvas(area.canvas, variacao=0, registrar_historico=False)
             area.canvas._registrar_historico()
             if qtd_moldes_organizados:
@@ -5849,6 +5848,46 @@ class GuimmaStudioMainWindow(QMainWindow):
                 continue
             novo_nome = nome_arquivo if total == 1 else f"{nome_arquivo} -{i + 1}"
             self.abas_documentos.setTabText(i, novo_nome)
+
+    @staticmethod
+    def _indice_nome_aba_sem_nome(nome: str | None) -> int | None:
+        texto = str(nome or "").strip()
+        base = "(Sem nome)"
+        if texto == base:
+            return 1
+        if not texto.startswith(base):
+            return None
+        sufixo = texto[len(base):].strip()
+        if sufixo.startswith("-"):
+            sufixo = sufixo[1:].strip()
+        if not sufixo.isdigit():
+            return None
+        return max(1, int(sufixo))
+
+    @staticmethod
+    def _formatar_nome_aba_sem_nome(indice: int) -> str:
+        indice = max(1, int(indice))
+        return "(Sem nome)" if indice == 1 else f"(Sem nome)-{indice}"
+
+    def _proximo_nome_aba_sem_nome(self) -> str:
+        usados: set[int] = set()
+        for i in range(self.abas_documentos.count()):
+            indice = self._indice_nome_aba_sem_nome(self.abas_documentos.tabText(i))
+            if indice is not None:
+                usados.add(indice)
+        indice = 1
+        while indice in usados:
+            indice += 1
+        return self._formatar_nome_aba_sem_nome(indice)
+
+    def _renumerar_abas_sem_nome(self) -> None:
+        indices_abas = [
+            i
+            for i in range(self.abas_documentos.count())
+            if self._indice_nome_aba_sem_nome(self.abas_documentos.tabText(i)) is not None
+        ]
+        for ordem, indice_aba in enumerate(indices_abas, start=1):
+            self.abas_documentos.setTabText(indice_aba, self._formatar_nome_aba_sem_nome(ordem))
 
     def _atualizar_titulo(self):
         self.setWindowTitle("GUIMMA STUDIO")
@@ -6819,8 +6858,13 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _adicionar_aba_documento(self, nome: str | None = None, caminho_origem: str | None = None):
         if nome is None:
-            self._contador_sem_nome += 1
-            nome = "(Sem nome)" if self._contador_sem_nome == 1 else f"(Sem nome) -{self._contador_sem_nome}"
+            nome = self._proximo_nome_aba_sem_nome()
+        else:
+            nome = str(nome or "").strip()
+            if self._indice_nome_aba_sem_nome(nome) is not None:
+                nome = self._proximo_nome_aba_sem_nome()
+            elif not nome:
+                nome = self._proximo_nome_aba_sem_nome()
         area_doc = AreaDocumentoWidget(CenaDocumento())
         area_doc.setMinimumSize(0, 0)
         area_doc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -6853,6 +6897,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         area_doc.aplicar_tema(self._tema_interface())
         area_doc.canvas.installEventFilter(self)
         area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
+        self._garantir_coordenadas_abertas(area_doc)
         self._marcar_area_como_salva(area_doc)
         area_doc.setProperty("arquivo_origem", caminho_origem)
         index = self.abas_documentos.addTab(area_doc, nome)
@@ -6880,6 +6925,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.abas_documentos.removeTab(index)
         if widget:
             widget.deleteLater()
+        self._renumerar_abas_sem_nome()
         self._reconfigurar_botoes_fechar_abas()
         self._on_aba_documento_alterada(self.abas_documentos.currentIndex())
 
@@ -7093,8 +7139,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.canvas.set_precisao_medida(self._precisao_medida)
             area_doc.aplicar_tema(self._tema_interface())
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
-            if "painel_coordenadas_visivel" in doc:
-                area_doc.canvas.definir_painel_coordenadas_visivel(bool(doc.get("painel_coordenadas_visivel")))
+            self._garantir_coordenadas_abertas(area_doc)
             self._marcar_area_como_salva(area_doc)
             nome = doc.get("nome") or "(Sem nome)"
             if str(nome).strip().startswith("(Sem nome)"):
@@ -7423,11 +7468,35 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.lbl_status.setText("Grid ativado" if ativo else "Grid desativado")
 
     def _alternar_graduacao_canvas(self, ativo: bool):
+        area = self._area_documento_atual()
+        if not isinstance(area, AreaDocumentoWidget):
+            self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
+            return
+        canvas = area.canvas
+        elementos = getattr(canvas.cena, "elementos", []) or []
+        moldes_selecionados = [
+            int(idx)
+            for idx in getattr(canvas, "_selecionados", set()) or set()
+            if 0 <= int(idx) < len(elementos)
+            and isinstance(elementos[int(idx)], dict)
+            and elementos[int(idx)].get("molde")
+        ]
+        apenas_selecionados = bool(moldes_selecionados)
+        canvas.set_graduacao_visivel(bool(ativo), apenas_selecionados=apenas_selecionados)
+        if apenas_selecionados:
+            total = len(moldes_selecionados)
+            alvo = "molde selecionado" if total == 1 else f"{total} moldes selecionados"
+            estado = "visível" if ativo else "oculta"
+            self.lbl_status.setText(f"Graduação {estado} no {alvo}")
+        else:
+            self.lbl_status.setText("Graduação visível em todos os moldes" if ativo else "Graduação oculta em todos os moldes")
+
+    def _alternar_costura_canvas(self, ativo: bool):
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget):
-                area.canvas.set_graduacao_visivel(bool(ativo))
-        self.lbl_status.setText("Graduação visível" if ativo else "Graduação oculta")
+                area.canvas.set_costura_visivel(bool(ativo))
+        self.lbl_status.setText("Costura visível" if ativo else "Costura oculta")
 
     def _on_snap_changed(self, ativo: bool):
         self._snap_ativo_global = bool(ativo)
@@ -7477,6 +7546,16 @@ class GuimmaStudioMainWindow(QMainWindow):
             painter.drawLine(17, 5, 5, 17)
             painter.end()
         return QIcon(pix)
+
+    def _garantir_coordenadas_abertas(self, area: AreaDocumentoWidget | None = None):
+        area = area or self._area_documento_atual()
+        if not area:
+            return
+        area.canvas.definir_painel_coordenadas_visivel(True)
+        if hasattr(self, "action_coordenadas"):
+            self.action_coordenadas.blockSignals(True)
+            self.action_coordenadas.setChecked(True)
+            self.action_coordenadas.blockSignals(False)
 
     def _alternar_coordenadas_canvas_atual(self, visivel: bool):
         area = self._area_documento_atual()
@@ -7660,6 +7739,18 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_graduacao.toggled.connect(self._alternar_graduacao_canvas)
         row.addWidget(self.btn_graduacao)
 
+        self.btn_costura = _BotaoRodapeHover("C", "Mostra ou esconde costura")
+        self.btn_costura.setCheckable(True)
+        self.btn_costura.setChecked(True)
+        self.btn_costura.setFixedHeight(20)
+        self.btn_costura.setStyleSheet(estilo_botao_icone)
+        icone_costura = ICONS_DIR / "costura.svg"
+        if icone_costura.exists():
+            self.btn_costura.setIcon(QIcon(str(icone_costura)))
+            self.btn_costura.setText("")
+        self.btn_costura.toggled.connect(self._alternar_costura_canvas)
+        row.addWidget(self.btn_costura)
+
         self.btn_organizar_moldes = _BotaoRodapeHover("⇵", "Organiza todos os moldes")
         self.btn_organizar_moldes.setFixedHeight(20)
         self.btn_organizar_moldes.setToolTip("Reorganiza todos os moldes com variações de layout")
@@ -7715,6 +7806,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.btn_desfazer_visao,
             self.btn_grid,
             self.btn_graduacao,
+            self.btn_costura,
             self.btn_organizar_moldes,
             self.btn_proximo_molde,
             self.btn_visualizacao_instantanea,
@@ -7990,7 +8082,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if not QColor(cor_grad).isValid():
                     cor_grad = "#f0ff00"
                 _desenhar_linha(painter, [QPointF(pt) for pt in pontos_grad], cor_grad, 1.2)
-            if el.get("visual_caminho_grade", True):
+            if el.get("visual_caminho_grade", False):
                 for _nome, _cor, origem, destino in caminhos:
                     _desenhar_linha(painter, [QPointF(origem), QPointF(destino)], "#3aa6ff", 1.0, Qt.DotLine)
 

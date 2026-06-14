@@ -20,11 +20,14 @@ from PySide6.QtWidgets import (
 from core.formatacao import formatar_numero
 from tools.medicao_utils import mensagem_status
 from tools.tool_base import FerramentaBase
+from tools.unidades import formatar_rotulo_unidade, unidade_canvas
 
 
 class CompararDistanciaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
         self.setWindowTitle("Distancia entre pontos (cm)")
         self.resize(830, 420)
         self.setMinimumSize(720, 360)
@@ -33,6 +36,13 @@ class CompararDistanciaDialog(QDialog):
         self._selecoes_mais: list[list[dict]] = []
         self._selecoes_menos: list[list[dict]] = []
         self._construir_ui()
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.setWindowTitle(f"Distancia entre pontos ({self._unidade_sigla})")
+        self._renderizar_distancias()
+        self._renderizar_detalhes()
 
     def _construir_ui(self):
         layout = QVBoxLayout(self)
@@ -136,7 +146,7 @@ class CompararDistanciaDialog(QDialog):
         tabs = QTabWidget()
         tabela = self._criar_tabela()
         tamanhos = self._tamanhos or self._tamanhos_padrao()
-        headers = ["Medida (cm)"] + [str(t.get("nome") or "") for t in tamanhos] + ["Formula"]
+        headers = [formatar_rotulo_unidade("Medida", sigla=self._unidade_sigla)] + [str(t.get("nome") or "") for t in tamanhos] + ["Formula"]
         tabela.setColumnCount(len(headers))
         tabela.setHorizontalHeaderLabels(headers)
         tabela.setRowCount(1)
@@ -172,7 +182,7 @@ class CompararDistanciaDialog(QDialog):
             fonte.setPointSize(14)
             fonte.setBold(True)
             painter.setFont(fonte)
-            titulo = "Distancia entre pontos (cm)"
+            titulo = f"Distancia entre pontos ({self._unidade_sigla})"
             fm = QFontMetrics(fonte)
             painter.drawText(int(x + ((largura - fm.horizontalAdvance(titulo)) / 2)), int(y + 30), titulo)
             y += 90
@@ -203,7 +213,17 @@ class CompararDistanciaDialog(QDialog):
                 painter.drawText(rect, Qt.AlignCenter, str(valor))
 
     def _renderizar_detalhes(self):
-        headers = ["Tamanho", "Distancia", "DX", "DY", "Dif. Dist.", "Dif. DX", "Dif. DY", "Angulo"]
+        unidade = self._unidade_sigla
+        headers = [
+            "Tamanho",
+            f"Distancia ({unidade})",
+            f"DX ({unidade})",
+            f"DY ({unidade})",
+            f"Dif. Dist. ({unidade})",
+            f"Dif. DX ({unidade})",
+            f"Dif. DY ({unidade})",
+            "Angulo",
+        ]
         self.tbl_detalhes.setColumnCount(len(headers))
         self.tbl_detalhes.setHorizontalHeaderLabels(headers)
         linhas = self._medida_atual
@@ -212,12 +232,12 @@ class CompararDistanciaDialog(QDialog):
         for row, medida in enumerate(linhas):
             valores = [
                 medida["nome"],
-                self._fmt(medida["distancia"]),
-                self._fmt(medida["dx"]),
-                self._fmt(medida["dy"]),
-                self._fmt(medida["distancia"] - base.get("distancia", medida["distancia"])),
-                self._fmt(medida["dx"] - base.get("dx", medida["dx"])),
-                self._fmt(medida["dy"] - base.get("dy", medida["dy"])),
+                self._fmt_medida(medida["distancia"]),
+                self._fmt_medida(medida["dx"]),
+                self._fmt_medida(medida["dy"]),
+                self._fmt_medida(medida["distancia"] - base.get("distancia", medida["distancia"])),
+                self._fmt_medida(medida["dx"] - base.get("dx", medida["dx"])),
+                self._fmt_medida(medida["dy"] - base.get("dy", medida["dy"])),
                 self._fmt(medida["angulo"]),
             ]
             self._popular_linha(self.tbl_detalhes, row, valores, medida.get("cor"))
@@ -248,11 +268,11 @@ class CompararDistanciaDialog(QDialog):
             total_mais = sum(mais)
             total_menos = sum(menos)
             linha = [nome]
-            linha.extend(self._fmt(v) for v in mais)
-            linha.append(self._fmt(total_mais))
-            linha.extend(self._fmt(v) for v in menos)
-            linha.append(self._fmt(total_menos))
-            linha.append(self._fmt(total_mais - total_menos))
+            linha.extend(self._fmt_medida(v) for v in mais)
+            linha.append(self._fmt_medida(total_mais))
+            linha.extend(self._fmt_medida(v) for v in menos)
+            linha.append(self._fmt_medida(total_menos))
+            linha.append(self._fmt_medida(total_mais - total_menos))
             linhas.append(linha)
         return headers, linhas
 
@@ -302,6 +322,9 @@ class CompararDistanciaDialog(QDialog):
     @staticmethod
     def _fmt(valor: float) -> str:
         return formatar_numero(valor, 2)
+
+    def _fmt_medida(self, valor_cena: float) -> str:
+        return formatar_numero(float(valor_cena) / self._unidade_fator, 2)
 
     @staticmethod
     def _tamanhos_padrao() -> list[dict]:
@@ -454,7 +477,13 @@ class Ferramenta(FerramentaBase):
             dialog = CompararDistanciaDialog(parent)
             dialog.destroyed.connect(lambda *_: self._dialog_por_canvas.pop(chave, None))
             self._dialog_por_canvas[chave] = dialog
+        dialog.set_unidade(*unidade_canvas(canvas))
         return dialog
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.set_unidade(*unidade_canvas(canvas))
 
     def _registrar_medida_dialog(self, canvas, inicio: QPointF, fim: QPointF):
         if self._dialog is None:

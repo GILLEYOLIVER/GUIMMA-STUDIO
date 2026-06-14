@@ -11,7 +11,26 @@ if find_spec("PySide6") is None:
     FerramentaTabela = None
     QApplication = None
     QPointF = None
-    QWidget = None
+
+    class _QtIndisponivel:
+        NoModifier = 0
+        LeftButton = 1
+        ControlModifier = 2
+
+    class QWidget:
+        pass
+
+    class _SignalIndisponivel:
+        def connect(self, *_args, **_kwargs):
+            return None
+
+        def emit(self, *_args, **_kwargs):
+            return None
+
+    def Signal(*_args, **_kwargs):
+        return _SignalIndisponivel()
+
+    Qt = _QtIndisponivel()
 else:
     from PySide6.QtCore import QPointF, Qt, Signal
     from PySide6.QtWidgets import QApplication, QWidget
@@ -118,7 +137,26 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(ponto["valores"]["P"], {"dx": -0.5, "dy": 0.25})
         self.assertEqual(ponto["valores"]["M"], {"dx": 0.0, "dy": 0.0})
         self.assertEqual(ponto["valores"]["G"], {"dx": 0.5, "dy": -0.25})
+        self.assertTrue(molde["mostrar_graduacao"])
+        self.assertTrue(canvas.atualizou)
         self.assertEqual(canvas.historico, 1)
+
+    def test_aplicar_tabela_reativa_graduacao_oculta_no_canvas(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["mostrar_graduacao"] = False
+        canvas.atualizou = False
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        ferramenta.selecionar_ponto(canvas, 1)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.tbl.item(2, 2).setText("-1")
+        canvas.atualizou = False
+
+        ferramenta.aplicar_dialog(canvas)
+
+        self.assertTrue(molde["mostrar_graduacao"])
+        self.assertTrue(canvas.atualizou)
 
     def test_selecionar_ponto_carrega_graduacao_salva_na_coordenada(self):
         canvas = _FakeCanvas()
@@ -187,6 +225,25 @@ class TabelaToolTestCase(unittest.TestCase):
 
         self.assertEqual(ferramenta._valores_ponto(molde, 1), {})
 
+    def test_overlay_usa_config_de_ponto_graduado_e_nao_graduado(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "ponto": (0.0, 0.0),
+                        "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 1.0, "dy": 0.0}},
+                    }
+                }
+            },
+        }
+
+        self.assertEqual(ferramenta._chave_config_ponto_overlay(molde, 0), "ponto_controle")
+        self.assertEqual(ferramenta._chave_config_ponto_overlay(molde, 1), "ponto_nao_graduado")
+
     def test_pontos_contorno_remove_fechamento_duplicado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()
@@ -240,6 +297,56 @@ class TabelaToolTestCase(unittest.TestCase):
         pontos = ferramenta._pontos_contorno(molde)
 
         self.assertEqual(pontos, [QPointF(0.0, 0.0), QPointF(8.0, 0.0)])
+
+    def test_pontos_contorno_ignora_controles_desalinhados_do_molde_movido(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(20.0, 10.0), (30.0, 10.0), (30.0, 15.0), (20.0, 10.0)],
+            "pontos_graduacao": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {"G": {"dx": 1.0, "dy": -0.5}},
+                    }
+                }
+            },
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+        valores = ferramenta._valores_ponto(molde, 1)
+
+        self.assertEqual(pontos, [QPointF(20.0, 10.0), QPointF(30.0, 10.0), QPointF(30.0, 15.0)])
+        self.assertEqual(valores["G"], {"dx": 1.0, "dy": -0.5})
+
+    def test_pontos_contorno_ignora_controle_parcialmente_fora_do_molde(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+            "pontos_graduacao": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+            ],
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(pontos, [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)])
 
     def test_pontos_contorno_ignora_desenho_livre_sem_molde(self):
         ferramenta = FerramentaTabela()
@@ -339,37 +446,40 @@ class TabelaToolTestCase(unittest.TestCase):
         dialog.btn_cima.click()
 
         valores = dialog.valores()
-        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 1.0})
+        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 2.0})
         self.assertEqual(valores["M"], {"dx": 0.0, "dy": 1.0})
         self.assertEqual(valores["G"], {"dx": 0.0, "dy": 0.0})
 
-    def test_incremental_aplica_mesmo_valor_para_todos_os_tamanhos_do_mesmo_lado_da_base(self):
+    def test_incremental_aplica_degrau_por_distancia_da_base(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
         dialog.definir_tamanhos(
             [
-                {"ativo": True, "tamanho": "PP", "cor": "#00ffcc", "base": False},
-                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": True},
-                {"ativo": True, "tamanho": "M", "cor": "#0000ff", "base": False},
-                {"ativo": True, "tamanho": "G", "cor": "#00a9ff", "base": False},
-                {"ativo": True, "tamanho": "GG", "cor": "#12a5d9", "base": False},
-                {"ativo": True, "tamanho": "G1", "cor": "#008000", "base": False},
-                {"ativo": True, "tamanho": "G2", "cor": "#80ff00", "base": False},
+                {"ativo": True, "tamanho": "NOVO_SUP_2", "cor": "#4f8a68", "base": False},
+                {"ativo": True, "tamanho": "NOVO_SUP_1", "cor": "#b58de8", "base": False},
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                {"ativo": True, "tamanho": "NOVO_INF_3", "cor": "#4f8a68", "base": False},
+                {"ativo": True, "tamanho": "NOVO_INF_4", "cor": "#80ff00", "base": False},
             ],
             {},
         )
-        dialog.sp_incremento.lineEdit().setText("2")
+        dialog.sp_incremento.lineEdit().setText("1")
 
         dialog.btn_dir.click()
         dialog.btn_baixo.click()
 
         valores = dialog.valores()
-        self.assertEqual(valores["PP"], {"dx": -2.0, "dy": -2.0})
-        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 0.0})
-        for tamanho in ("M", "G", "GG", "G1", "G2"):
-            self.assertEqual(valores[tamanho], {"dx": 2.0, "dy": 2.0})
+        self.assertEqual(valores["NOVO_SUP_2"], {"dx": -3.0, "dy": -3.0})
+        self.assertEqual(valores["NOVO_SUP_1"], {"dx": -2.0, "dy": -2.0})
+        self.assertEqual(valores["P"], {"dx": -1.0, "dy": -1.0})
+        self.assertEqual(valores["M"], {"dx": 0.0, "dy": 0.0})
+        self.assertEqual(valores["G"], {"dx": 1.0, "dy": 1.0})
+        self.assertEqual(valores["NOVO_INF_3"], {"dx": 2.0, "dy": 2.0})
+        self.assertEqual(valores["NOVO_INF_4"], {"dx": 3.0, "dy": 3.0})
 
     def test_aba_distancia_angulo_reflete_dx_dy_da_tabela(self):
         canvas = _FakeCanvas()
@@ -508,6 +618,33 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "M", "G"])
         self.assertTrue(molde["graduacao_tamanhos"][1]["base"])
 
+    def test_tabela_sincroniza_grade_de_molde_extraido_sem_valores(self):
+        canvas = _FakeCanvas()
+        referencia = canvas.cena.elementos[0]
+        referencia["graduacao_grade_nome"] = "P-G(M)"
+        extraido = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem_extracao": "contorno",
+            "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0), (20.0, 0.0)],
+            "controle_cantos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0)],
+            "graduacao_grade_nome": "36-46(40)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "36", "cor": "#9678bd", "base": False},
+                {"ativo": True, "tamanho": "40", "cor": "#4f8a68", "base": True},
+                {"ativo": True, "tamanho": "46", "cor": "#b7d7a8", "base": False},
+            ],
+            "graduacao_tamanhos_ativos": ["36", "40", "46"],
+        }
+        canvas.cena.elementos.append(extraido)
+        ferramenta = FerramentaTabela()
+
+        self.assertTrue(ferramenta._preparar_molde_para_tabela(canvas, 1))
+
+        self.assertEqual(extraido["graduacao_grade_nome"], "P-G(M)")
+        self.assertEqual([linha["tamanho"] for linha in extraido["graduacao_tamanhos"]], ["P", "M", "G"])
+        self.assertEqual(extraido["graduacao_tamanhos_ativos"], ["P", "M", "G"])
+
     def test_molde_separado_sem_grade_pergunta_e_define_tamanho_extraido_como_base(self):
         canvas = _FakeCanvas()
         molde = canvas.cena.elementos[0]
@@ -536,7 +673,7 @@ class TabelaToolTestCase(unittest.TestCase):
         ferramenta.aplicar_dialog(canvas)
 
         valores = molde["graduacao_tabela"]["pontos"]["1"]["valores"]
-        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 1.0})
+        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 2.0})
         self.assertEqual(valores["M"], {"dx": 0.0, "dy": 1.0})
         self.assertEqual(valores["G"], {"dx": 0.0, "dy": 0.0})
         self.assertEqual(canvas.historico, 1)

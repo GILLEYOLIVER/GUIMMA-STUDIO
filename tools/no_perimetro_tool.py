@@ -3,11 +3,12 @@ from __future__ import annotations
 from math import sqrt
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from core.formatacao import formatar_numero, numero_decimal_ponto
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas
 
 
 class PontosNoPerimetroDialog(QDialog):
@@ -17,6 +18,8 @@ class PontosNoPerimetroDialog(QDialog):
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
         self.setFixedWidth(270)
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -26,8 +29,10 @@ class PontosNoPerimetroDialog(QDialog):
         self.cmb_modo = QComboBox()
         self.cmb_modo.addItems(["Perímetro"])
         self.ed_passo = QLineEdit("2")  # Distância (cm)
+        self.lbl_passo = QLabel("Passo (cm)")
         grid.addWidget(self.cmb_modo, 0, 0)
-        grid.addWidget(self.ed_passo, 0, 1)
+        grid.addWidget(self.lbl_passo, 0, 1)
+        grid.addWidget(self.ed_passo, 0, 2)
         lay.addLayout(grid)
 
         self.chk_dividir = QCheckBox("Dividir elemento")
@@ -46,7 +51,20 @@ class PontosNoPerimetroDialog(QDialog):
         lay.addWidget(self.btn_remover_marcacoes)
 
     def passo_unidade(self) -> float:
-        return max(0.001, numero_decimal_ponto(self.ed_passo.text(), 2.0))
+        return max(0.001, numero_decimal_ponto(self.ed_passo.text(), 2.0, SUFIXOS_MEDIDA))
+
+    def set_unidade(self, sigla: str, fator: float = 1.0) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        valor_cena = numero_decimal_ponto(self.ed_passo.text(), 2.0, SUFIXOS_MEDIDA) * fator_antigo
+        unidade = str(sigla or "cm")
+        self._unidade_sigla = unidade
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.lbl_passo.setText(f"Passo ({unidade})")
+        self.ed_passo.setPlaceholderText(unidade)
+        self.ed_passo.setToolTip(f"Distância entre pontos em {unidade}.")
+        if abs(valor_cena) > 1e-12:
+            texto = f"{valor_cena / self._unidade_fator:.3f}".rstrip("0").rstrip(".")
+            self.ed_passo.setText("0" if texto in {"", "-0"} else texto)
 
 
 class Ferramenta(FerramentaBase):
@@ -76,7 +94,13 @@ class Ferramenta(FerramentaBase):
             dialog = PontosNoPerimetroDialog(parent)
             dialog.btn_remover_marcacoes.clicked.connect(lambda: self._remover_marcacoes(canvas))
             Ferramenta._dialog_global = dialog
+        dialog.set_unidade(*unidade_canvas(canvas))
         return dialog
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = Ferramenta._dialog_global
+        if dialog is not None:
+            dialog.set_unidade(*unidade_canvas(canvas))
 
     def _remover_marcacoes(self, canvas):
         idxs = sorted(getattr(canvas, "_selecionados", set()) or [])

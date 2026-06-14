@@ -11,13 +11,21 @@ if find_spec("PySide6") is None:
     FerramentaMover = None
     QApplication = None
     QPointF = None
-    Qt = None
-    QWidget = None
+
+    class _QtIndisponivel:
+        LeftButton = 1
+
+    class QWidget:
+        pass
+
+    Qt = _QtIndisponivel()
 else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.mover_tool import Ferramenta as FerramentaMover
+
+from tools.movimento_utils import mover_elemento_por_delta, rotacionar_elemento_por_funcao
 
 
 class _FakeEvent:
@@ -80,6 +88,74 @@ class _FakeCanvas(QWidget):
 
     def update(self):
         self.atualizou = True
+
+
+class MovimentoUtilsTestCase(unittest.TestCase):
+    def test_mover_molde_desloca_pontos_de_graduacao_e_tabela(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "pontos_graduacao": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "indice": 0,
+                        "ponto": (0.0, 0.0),
+                        "valores": {"G": {"dx": 0.0, "dy": 1.0}},
+                    }
+                }
+            },
+        }
+
+        mover_elemento_por_delta(molde, 5.0, -2.0)
+
+        self.assertEqual(molde["pontos"], [(5.0, -2.0), (15.0, -2.0)])
+        self.assertEqual(molde["pontos_graduacao"], [{"x": 5.0, "y": -2.0}, {"x": 15.0, "y": -2.0}])
+        self.assertEqual(molde["graduacao_tabela"]["pontos"]["0"]["ponto"], (5.0, -2.0))
+        self.assertEqual(molde["graduacao_tabela"]["pontos"]["0"]["valores"]["G"], {"dx": 0.0, "dy": 1.0})
+
+    def test_rotacionar_molde_gira_pontos_e_vetores_de_graduacao(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(10.0, 0.0), (10.0, 5.0)],
+            "pontos_graduacao": [{"x": 10.0, "y": 0.0}],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "indice": 0,
+                        "ponto": (10.0, 0.0),
+                        "valores": {
+                            "P": {"dx": 0.0, "dy": -2.0},
+                            "G": {"dx": 0.0, "dy": 2.0},
+                        },
+                    }
+                }
+            },
+            "graduacao_pontos": {
+                "0": {
+                    "indice": 0,
+                    "ponto": (10.0, 0.0),
+                    "valores": {"G": {"dx": 0.0, "dy": 2.0}},
+                }
+            },
+        }
+
+        def rotacionar_90(p):
+            x, y = float(p[0]), float(p[1])
+            return -y, x
+
+        rotacionar_elemento_por_funcao(molde, rotacionar_90)
+
+        self.assertEqual(molde["pontos"], [(0.0, 10.0), (-5.0, 10.0)])
+        self.assertEqual(molde["pontos_graduacao"], [{"x": 0.0, "y": 10.0}])
+        ponto = molde["graduacao_tabela"]["pontos"]["0"]
+        self.assertEqual(ponto["ponto"], (0.0, 10.0))
+        self.assertEqual(ponto["valores"]["P"], {"dx": 2.0, "dy": 0.0})
+        self.assertEqual(ponto["valores"]["G"], {"dx": -2.0, "dy": 0.0})
+        self.assertEqual(molde["graduacao_pontos"]["0"]["ponto"], (0.0, 10.0))
+        self.assertEqual(molde["graduacao_pontos"]["0"]["valores"]["G"], {"dx": -2.0, "dy": 0.0})
 
 
 @unittest.skipIf(FerramentaMover is None, "PySide6 nao disponivel neste ambiente")

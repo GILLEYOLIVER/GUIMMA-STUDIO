@@ -4,6 +4,7 @@
 #include "contour_engine.h"
 #include "curve_engine.h"
 #include "guimma_engine.h"
+#include "seam_engine.h"
 #include "snap_engine.h"
 #include "spatial_index.h"
 
@@ -144,6 +145,10 @@ PYBIND11_MODULE(guimma_geometry_cpp, m) {
     m.def("normalize_closed_polyline", [](const std::vector<PointTuple>& polyline, bool clockwise, double tolerance) {
         return to_tuples(guimma::normalize_closed_polyline(to_points(polyline), clockwise, tolerance));
     }, py::arg("polyline"), py::arg("clockwise") = true, py::arg("tolerance") = 1e-9);
+
+    m.def("seam_offset_closed", [](const std::vector<PointTuple>& polyline, double margin) {
+        return to_tuples(guimma::seam_offset_closed(to_points(polyline), margin));
+    }, py::arg("polyline"), py::arg("margin"));
 
     m.def("point_in_polygon", [](double x, double y, const std::vector<PointTuple>& polygon) {
         return guimma::point_in_polygon({x, y}, to_points(polygon));

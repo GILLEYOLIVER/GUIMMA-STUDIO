@@ -23,6 +23,7 @@ from core.formatacao import formatar_numero, normalizar_decimal_ponto, numero_de
 from tools.medicao_utils import mensagem_status
 from tools.texto_config import ALTURA_TEXTO_PADRAO_CM, ESPACO_LINHAS_PADRAO_CM, configurar_texto_canvas
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_cena_para_unidade, valor_unidade_para_cena
 
 
 FONTES_TEXTO = [
@@ -60,11 +61,11 @@ class NumeroLimpoSpinBox(QDoubleSpinBox):
         return f"{texto}{self._sufixo_limpo}" if self._sufixo_limpo else texto
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
-        return numero_decimal_ponto(str(text or "").lower(), float(self.value()), ("cm", "°", "º"))
+        return numero_decimal_ponto(str(text or "").lower(), float(self.value()), SUFIXOS_MEDIDA + ("°", "º"))
 
     def validate(self, text: str, pos: int):  # noqa: N802
         try:
-            texto = normalizar_decimal_ponto(str(text or "").lower(), ("cm", "°", "º"))
+            texto = normalizar_decimal_ponto(str(text or "").lower(), SUFIXOS_MEDIDA + ("°", "º"))
         except Exception:
             return QValidator.Invalid, text, pos
         if texto in {"", "+", "-", "0.", "+0.", "-0."}:
@@ -80,6 +81,10 @@ class MedidaCmSpinBox(NumeroLimpoSpinBox):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent, " cm")
 
+    def set_unidade(self, sigla: str) -> None:
+        self._sufixo_limpo = f" {str(sigla or 'cm')}"
+        self.lineEdit().setPlaceholderText(str(sigla or "cm"))
+
 
 class AnguloSpinBox(NumeroLimpoSpinBox):
     def __init__(self, parent: QWidget | None = None):
@@ -92,6 +97,7 @@ class TextoDialog(QDialog):
         super().__init__(parent)
         self.canvas = canvas
         self.ferramenta = ferramenta
+        self._unidade_sigla, self._unidade_fator = unidade_canvas(canvas)
         self._fechando_por_codigo = False
         self._atualizando_estilo_caixa = False
         self._fonte_previa_combo = "Arial"
@@ -119,11 +125,13 @@ class TextoDialog(QDialog):
 
         self.spin_altura = MedidaCmSpinBox(self)
         self.spin_altura.setRange(0.2, 200.0)
-        self.spin_altura.setValue(float(getattr(canvas, "_texto_altura_cm", ALTURA_TEXTO_PADRAO_CM)))
+        self.spin_altura.set_unidade(self._unidade_sigla)
+        self.spin_altura.setValue(valor_cena_para_unidade(canvas, float(getattr(canvas, "_texto_altura_cm", ALTURA_TEXTO_PADRAO_CM))))
 
         self.spin_espaco = MedidaCmSpinBox(self)
         self.spin_espaco.setRange(0.2, 200.0)
-        self.spin_espaco.setValue(float(getattr(canvas, "_texto_espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM)))
+        self.spin_espaco.set_unidade(self._unidade_sigla)
+        self.spin_espaco.setValue(valor_cena_para_unidade(canvas, float(getattr(canvas, "_texto_espaco_linhas_cm", ESPACO_LINHAS_PADRAO_CM))))
 
         self.combo_referencia = QComboBox(self)
         self.combo_referencia.addItems([
@@ -145,11 +153,13 @@ class TextoDialog(QDialog):
         layout.addWidget(self.txt_texto, 0, 0, 1, 6)
         layout.addWidget(QLabel("Fonte"), 1, 0)
         layout.addWidget(QLabel("Ângulo"), 1, 2)
-        layout.addWidget(QLabel("Altura (cm)"), 1, 4)
+        self.lbl_altura = QLabel(f"Altura ({self._unidade_sigla})")
+        self.lbl_espaco = QLabel(f"Espaço entre linhas ({self._unidade_sigla})")
+        layout.addWidget(self.lbl_altura, 1, 4)
         layout.addWidget(self.combo_fonte, 2, 0, 1, 2)
         layout.addWidget(self.spin_angulo, 2, 2, 1, 2)
         layout.addWidget(self.spin_altura, 2, 4, 1, 2)
-        layout.addWidget(QLabel("Espaço entre linhas (cm)"), 3, 0)
+        layout.addWidget(self.lbl_espaco, 3, 0)
         layout.addWidget(QLabel("Referência"), 3, 2)
         layout.addWidget(QLabel("Justificação"), 3, 4)
         layout.addWidget(self.spin_espaco, 4, 0, 1, 2)
@@ -183,11 +193,30 @@ class TextoDialog(QDialog):
             "texto": self.txt_texto.toPlainText(),
             "fonte_texto": self._fonte_em_uso(),
             "angulo": float(self.spin_angulo.value()),
-            "altura_cm": float(self.spin_altura.value()),
-            "espaco_linhas_cm": float(self.spin_espaco.value()),
+            "altura_cm": valor_unidade_para_cena(self.canvas, float(self.spin_altura.value())),
+            "espaco_linhas_cm": valor_unidade_para_cena(self.canvas, float(self.spin_espaco.value())),
             "referencia": self.combo_referencia.currentText(),
             "justificacao": self.combo_justificacao.currentText(),
         }
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        altura_cena = float(self.spin_altura.value()) * fator_antigo
+        espaco_cena = float(self.spin_espaco.value()) * fator_antigo
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.spin_altura.set_unidade(self._unidade_sigla)
+        self.spin_espaco.set_unidade(self._unidade_sigla)
+        self.lbl_altura.setText(f"Altura ({self._unidade_sigla})")
+        self.lbl_espaco.setText(f"Espaço entre linhas ({self._unidade_sigla})")
+        self.spin_altura.blockSignals(True)
+        self.spin_espaco.blockSignals(True)
+        try:
+            self.spin_altura.setValue(float(altura_cena) / self._unidade_fator)
+            self.spin_espaco.setValue(float(espaco_cena) / self._unidade_fator)
+        finally:
+            self.spin_altura.blockSignals(False)
+            self.spin_espaco.blockSignals(False)
 
     def _fonte_alterada(self, fonte: str | None = None):
         self._fonte_previa_combo = str(fonte or self.combo_fonte.currentText() or "Arial")
@@ -304,6 +333,12 @@ class Ferramenta(FerramentaBase):
         mensagem_status(canvas, msg)
         canvas.update()
 
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialogo(canvas)
+        if dialog is not None:
+            dialog.set_unidade(*unidade_canvas(canvas))
+            self._dialogo_alterado(canvas)
+
         # Impede o canvas de receber foco
         canvas.setFocusPolicy(Qt.NoFocus)
 
@@ -390,6 +425,7 @@ class Ferramenta(FerramentaBase):
             dialog = TextoDialog(canvas, self, parent)
             self._dialog_por_canvas[chave] = dialog
             self._ultima_abertura_por_canvas[chave] = monotonic()
+        dialog.set_unidade(*unidade_canvas(canvas))
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()

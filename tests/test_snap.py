@@ -78,6 +78,18 @@ class SnapRotuloTestCase(unittest.TestCase):
 
         self.assertEqual(manager.indices_segmentos, [0])
 
+    def test_canvas_invalida_cache_cpp_do_snap_quando_elementos_mudam(self):
+        canvas = VisualizacaoCanvas(CenaDocumento(elementos=[]))
+        canvas._snap_manager._cpp_engine = object()
+        canvas._snap_manager._cpp_assinatura = ("cache",)
+        canvas._snap_manager._cpp_cache_valido = True
+
+        canvas._emitir_elementos_alterados()
+
+        self.assertIsNone(canvas._snap_manager._cpp_engine)
+        self.assertIsNone(canvas._snap_manager._cpp_assinatura)
+        self.assertFalse(canvas._snap_manager._cpp_cache_valido)
+
 
 if __name__ == "__main__":
     unittest.main()

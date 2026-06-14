@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QComboBox, QLineEdit, QRadioButton, QSlider, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QComboBox, QDialog, QLineEdit, QRadioButton, QSlider, QWidget
 
 
 def _settings() -> QSettings:
@@ -149,8 +149,15 @@ def salvar_posicao(widget: QWidget, chave: str) -> None:
 
 def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:
     parent = widget.parentWidget()
-    if parent is not None and not widget.isWindow():
-        area = parent.rect().adjusted(margem, margem, -margem, -margem)
+    if parent is not None:
+        if widget.isWindow():
+            janela = parent.window() if parent.window() is not None else parent
+            area = janela.frameGeometry().adjusted(margem, margem, -margem, -margem)
+            if not area.isValid() or area.width() <= 0 or area.height() <= 0:
+                canto = parent.mapToGlobal(parent.rect().topLeft())
+                area = QRect(canto, parent.rect().size()).adjusted(margem, margem, -margem, -margem)
+        else:
+            area = parent.rect().adjusted(margem, margem, -margem, -margem)
     else:
         tela = widget.screen() or QGuiApplication.primaryScreen()
         area = tela.availableGeometry() if tela is not None else QRect(pos.x(), pos.y(), widget.width(), widget.height())
@@ -162,14 +169,97 @@ def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:
     return QPoint(int(x), int(y))
 
 
-def restaurar_posicao(widget: QWidget, chave: str, fallback: QPoint | None = None) -> bool:
+def _tela_para_widget(widget: QWidget, fallback: QPoint | None = None):
+    try:
+        if widget.windowHandle() is not None:
+            tela = widget.windowHandle().screen()
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    try:
+        tela = widget.screen()
+        if tela is not None:
+            return tela
+    except Exception:
+        pass
+    try:
+        parent = widget.parentWidget()
+        if parent is not None and hasattr(parent, "mapToGlobal"):
+            centro = parent.mapToGlobal(parent.rect().center())
+            tela = QGuiApplication.screenAt(centro)
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    if fallback is not None:
+        try:
+            tela = QGuiApplication.screenAt(fallback)
+            if tela is not None:
+                return tela
+        except Exception:
+            pass
+    return QGuiApplication.primaryScreen()
+
+
+def centralizar_widget_na_tela(widget: QWidget, fallback: QPoint | None = None, margem: int = 16) -> None:
+    if widget is None:
+        return
+    try:
+        widget.adjustSize()
+    except Exception:
+        pass
+    tela = _tela_para_widget(widget, fallback)
+    if tela is None:
+        return
+    area = tela.availableGeometry()
+    margem = max(0, int(margem))
+    largura_max = max(120, area.width() - margem * 2)
+    altura_max = max(90, area.height() - margem * 2)
+    if widget.width() > largura_max or widget.height() > altura_max:
+        widget.resize(min(widget.width(), largura_max), min(widget.height(), altura_max))
+    geo = widget.frameGeometry()
+    if not geo.isValid() or geo.width() <= 0 or geo.height() <= 0:
+        geo = QRect(0, 0, max(1, widget.width()), max(1, widget.height()))
+    geo.moveCenter(area.center())
+    if geo.left() < area.left() + margem:
+        geo.moveLeft(area.left() + margem)
+    if geo.top() < area.top() + margem:
+        geo.moveTop(area.top() + margem)
+    if geo.right() > area.right() - margem:
+        geo.moveRight(area.right() - margem)
+    if geo.bottom() > area.bottom() - margem:
+        geo.moveBottom(area.bottom() - margem)
+    widget.move(geo.topLeft())
+
+
+def restaurar_posicao(
+    widget: QWidget,
+    chave: str,
+    fallback: QPoint | None = None,
+    preferir_fallback_inicial: bool = True,
+) -> bool:
     restaurar_estado(widget, chave)
+    if isinstance(widget, QDialog):
+        centralizar_widget_na_tela(widget, fallback)
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        return False
+    if (
+        fallback is not None
+        and preferir_fallback_inicial
+        and not getattr(widget, "_guimma_posicao_inicial_aplicada", False)
+    ):
+        widget.move(ajustar_para_area(widget, fallback))
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        return False
     pos = posicao_salva(chave)
     if pos is not None:
         widget.move(ajustar_para_area(widget, pos))
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
         return True
     if fallback is not None:
         widget.move(ajustar_para_area(widget, fallback))
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
     return False
 
 

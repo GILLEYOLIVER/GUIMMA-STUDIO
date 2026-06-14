@@ -57,7 +57,8 @@ def grade_graduacao_referencia_canvas(canvas, ignorar_molde: dict | None = None)
     elementos = getattr(cena, "elementos", None)
     if not isinstance(elementos, list):
         return None
-    for elemento in elementos:
+    grupos: dict[tuple[str, tuple[str, ...]], dict] = {}
+    for ordem, elemento in enumerate(elementos):
         if not isinstance(elemento, dict) or not elemento.get("molde"):
             continue
         if ignorar_molde is not None and elemento is ignorar_molde:
@@ -75,8 +76,29 @@ def grade_graduacao_referencia_canvas(canvas, ignorar_molde: dict | None = None)
                 for linha in linhas_ref
                 if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
             ]
-        return str(elemento.get("graduacao_grade_nome") or "").strip(), linhas_ref, [str(a) for a in ativos]
-    return None
+        grade_nome = str(elemento.get("graduacao_grade_nome") or "").strip()
+        chave = _assinatura_grade_referencia(grade_nome, linhas_ref)
+        grupo = grupos.get(chave)
+        if grupo is None:
+            grupos[chave] = {
+                "quantidade": 1,
+                "ordem": ordem,
+                "grade_nome": grade_nome,
+                "linhas": linhas_ref,
+                "ativos": [str(a) for a in ativos],
+            }
+        else:
+            grupo["quantidade"] += 1
+    if not grupos:
+        return None
+    escolhido = max(grupos.values(), key=lambda grupo: (int(grupo["quantidade"]), -int(grupo["ordem"])))
+    return str(escolhido["grade_nome"]), deepcopy(escolhido["linhas"]), list(escolhido["ativos"])
+
+
+def _assinatura_grade_referencia(grade_nome: str, linhas: list[dict]) -> tuple[str, tuple[str, ...]]:
+    nomes = [str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas]
+    nomes = [nome for nome in nomes if nome]
+    return str(grade_nome or "").strip(), tuple(nomes)
 
 
 def aplicar_grade_graduacao_referencia_canvas(

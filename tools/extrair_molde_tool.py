@@ -856,7 +856,7 @@ class Ferramenta(FerramentaBase):
                 "pontos_emenda_referencia": emendas_origem,
             }
         )
-        self._enriquecer_metadados_molde(novo)
+        self._enriquecer_metadados_molde(novo, canvas)
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
@@ -888,7 +888,7 @@ class Ferramenta(FerramentaBase):
             "pontos_controle_referencia": self._coletar_pontos_controle_existentes(canvas, payload["pontos"]),
             "pontos_interseccao_referencia": self._coletar_interseccoes_no_contorno(canvas, payload["pontos"]),
         }
-        self._enriquecer_metadados_molde(novo)
+        self._enriquecer_metadados_molde(novo, canvas)
         canvas.cena.elementos.append(novo)
         self._idx_selecionado = len(canvas.cena.elementos) - 1
         self._selecoes_manuais = {self._idx_selecionado}
@@ -957,7 +957,7 @@ class Ferramenta(FerramentaBase):
         self._contornos_preparados[idx] = [(p.x(), p.y()) for p in pontos]
         self._molde_criado = False
 
-    def _enriquecer_metadados_molde(self, molde: dict):
+    def _enriquecer_metadados_molde(self, molde: dict, canvas=None):
         pontos = self._normalizar_pontos_contorno(molde.get("pontos", []))
         if len(pontos) < 4:
             return
@@ -976,7 +976,7 @@ class Ferramenta(FerramentaBase):
         molde.setdefault("mostrar_controles", True)
         molde.setdefault("molde_pronto", True)
         molde.setdefault("permitir_alteracoes_encaixe", True)
-        aplicar_grade_graduacao_referencia_canvas(molde, self._canvas, sobrescrever=True)
+        aplicar_grade_graduacao_referencia_canvas(molde, canvas or self._canvas, sobrescrever=True)
 
         refs_emenda = self._referencias_emenda_molde(molde, pontos)
         refs_controle = list(molde.get("pontos_controle_referencia", []) or [])
@@ -1429,7 +1429,8 @@ class Ferramenta(FerramentaBase):
                     continue
                 segmentos.append((a, b, el_idx))
 
-        inters: list[tuple[float, float]] = self._coletar_encontros_linhas_no_contorno(segmentos, contorno)
+        inters: list[tuple[float, float]] = self._coletar_vertices_origem_no_contorno(canvas, contorno)
+        inters.extend(self._coletar_encontros_linhas_no_contorno(segmentos, contorno))
 
         for i in range(len(segmentos)):
             a, b, origem_a = segmentos[i]
@@ -1443,6 +1444,99 @@ class Ferramenta(FerramentaBase):
                 if self._ponto_no_contorno(pt, contorno, tol=0.08):
                     inters.append(pt)
         return self._deduplicar_pontos(inters, tol=1e-4)
+
+    def _coletar_vertices_origem_no_contorno(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        if len(contorno) < 2 or not hasattr(canvas, "cena"):
+            return []
+        vertices: list[tuple[float, float]] = []
+        for el in getattr(canvas.cena, "elementos", []) or []:
+            if not isinstance(el, dict) or el.get("molde"):
+                continue
+            pontos = self._vertices_reais_elemento(el)
+            if not pontos:
+                continue
+            for idx, ponto in enumerate(pontos):
+                if not self._ponto_no_contorno(ponto, contorno, tol=0.08):
+                    continue
+                if self._vertice_origem_e_canto_real(el, pontos, idx):
+                    vertices.append(ponto)
+        return self._deduplicar_pontos(vertices, tol=1e-4)
+
+    def _vertices_reais_elemento(self, elemento: dict) -> list[tuple[float, float]]:
+        tipo = str(elemento.get("tipo") or "").strip()
+        if tipo == "bezier_quadratica":
+            pontos: list[tuple[float, float]] = []
+            for chave in ("p0", "p2"):
+                valor = elemento.get(chave)
+                if isinstance(valor, (list, tuple)) and len(valor) >= 2:
+                    try:
+                        pontos.append((float(valor[0]), float(valor[1])))
+                    except (TypeError, ValueError):
+                        pass
+            return pontos
+        return self._pontos_elemento_como_tuplas(elemento.get("pontos", []) or [])
+
+    def _vertice_origem_e_canto_real(self, elemento: dict, pontos: list[tuple[float, float]], idx: int) -> bool:
+        if not (0 <= int(idx) < len(pontos)):
+            return False
+        if len(pontos) <= 2:
+            return True
+        fechado = self._dist_tuple(pontos[0], pontos[-1]) <= max(0.001, self.TOLERANCIA_FECHAMENTO_CM)
+        ultimo_real = len(pontos) - 2 if fechado else len(pontos) - 1
+        idx = int(idx)
+        if idx == 0:
+            return True
+        if not fechado and idx == ultimo_real:
+            return True
+        if idx > ultimo_real:
+            return False
+        if self._elemento_origem_curva_suave(elemento) or self._sequencia_origem_parece_curva_suave(pontos):
+            return False
+        anterior = pontos[idx - 1]
+        atual = pontos[idx]
+        proximo = pontos[idx + 1]
+        if self._dist_tuple(anterior, atual) <= 1e-7 or self._dist_tuple(atual, proximo) <= 1e-7:
+            return False
+        return self._desvio_angular_vertice(anterior, atual, proximo) >= 10.0
+
+    @staticmethod
+    def _elemento_origem_curva_suave(elemento: dict) -> bool:
+        return (
+            bool(elemento.get("curva_suave"))
+            or bool(elemento.get("pontos_tracado_real"))
+            or str(elemento.get("renderizacao") or "").strip().lower() == "curva_suave"
+        )
+
+    def _sequencia_origem_parece_curva_suave(self, pontos: list[tuple[float, float]]) -> bool:
+        if len(pontos) < 12:
+            return False
+        fechado = self._dist_tuple(pontos[0], pontos[-1]) <= max(0.001, self.TOLERANCIA_FECHAMENTO_CM)
+        base = pontos[:-1] if fechado else pontos
+        if len(base) < 12:
+            return False
+        desvios: list[float] = []
+        inicio = 0 if fechado else 1
+        fim = len(base) if fechado else len(base) - 1
+        for idx in range(inicio, fim):
+            anterior = base[idx - 1]
+            atual = base[idx]
+            proximo = base[(idx + 1) % len(base)]
+            if self._dist_tuple(anterior, atual) <= 1e-7 or self._dist_tuple(atual, proximo) <= 1e-7:
+                continue
+            desvios.append(self._desvio_angular_vertice(anterior, atual, proximo))
+        if len(desvios) < 8:
+            return False
+        suaves = sum(1 for desvio in desvios if desvio <= 14.0)
+        return (suaves / float(len(desvios))) >= 0.85 and max(desvios) <= 28.0
+
+    def _desvio_angular_vertice(
+        self,
+        anterior: tuple[float, float],
+        atual: tuple[float, float],
+        proximo: tuple[float, float],
+    ) -> float:
+        angulo = self._angulo_interno(QPointF(*anterior), QPointF(*atual), QPointF(*proximo))
+        return abs(180.0 - float(angulo))
 
     def _coletar_encontros_linhas_no_contorno(
         self,

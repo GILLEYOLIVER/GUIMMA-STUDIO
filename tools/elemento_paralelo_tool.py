@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QDialog, QDoubleSpinB
 
 from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
+from tools.unidades import unidade_canvas
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -44,6 +45,8 @@ class ElementoParaleloDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._chave_posicao = "dialog:elemento_paralelo"
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
         self.setWindowTitle("Elemento paralelo")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -76,12 +79,28 @@ class ElementoParaleloDialog(QDialog):
         self.sp_distancia_2.setEnabled(False)
         self.sp_distancia_2.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.chk_linha_auxiliar = QCheckBox("Inserir elemento como linha auxiliar")
-        form.addRow("Distância paralela (cm)", self.sp_distancia)
+        self.lbl_distancia = QLabel("Distância paralela (cm)")
+        form.addRow(self.lbl_distancia, self.sp_distancia)
         self.chk_linha_auxiliar.setObjectName("linha_auxiliar")
         form.addRow(self.chk_distancia_2, self.sp_distancia_2)
         raiz.addLayout(form)
         raiz.addWidget(self.chk_linha_auxiliar)
         self.chk_distancia_2.toggled.connect(self.sp_distancia_2.setEnabled)
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        valores_cena = [
+            float(self.sp_distancia.value()) * fator_antigo,
+            float(self.sp_distancia_2.value()) * fator_antigo,
+        ]
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.lbl_distancia.setText(f"Distância paralela ({self._unidade_sigla})")
+        self.chk_distancia_2.setText(f"Distância paralela 2 ({self._unidade_sigla})")
+        for spin, valor_cena in zip((self.sp_distancia, self.sp_distancia_2), valores_cena):
+            spin.blockSignals(True)
+            spin.setValue(valor_cena / self._unidade_fator)
+            spin.blockSignals(False)
 
 
 class Ferramenta(FerramentaBase):
@@ -203,12 +222,18 @@ class Ferramenta(FerramentaBase):
             dialog = ElementoParaleloDialog(parent)
             self._dialog_por_canvas[chave] = dialog
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
+        dialog.set_unidade(*unidade_canvas(canvas))
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.sp_distancia.valueChanged.connect(lambda _v: self._redesenhar(canvas))
             dialog.sp_distancia_2.valueChanged.connect(lambda _v: self._redesenhar(canvas))
             dialog.chk_distancia_2.toggled.connect(lambda _ativo: self._redesenhar(canvas))
         return dialog
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.set_unidade(*unidade_canvas(canvas))
 
     def _restaurar_dialog(self, canvas, dialog: ElementoParaleloDialog) -> None:
         fallback = None

@@ -20,6 +20,7 @@ else:
     from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
     from canvas.visualizacao import VisualizacaoCanvas
+    from tools.pique_texto_tool import PiqueTextoDialog
     from tools.pique_texto_tool import Ferramenta as FerramentaPiqueTexto
 
 
@@ -119,20 +120,20 @@ class PiqueTextoToolTestCase(unittest.TestCase):
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
 
-        cfg = canvas.cena.elementos[0]["piques_config"][0]
+        cfg = canvas.cena.elementos[0]["piques_config"][-1]
         self.assertEqual(cfg["texto_pique"], "Centro")
         self.assertEqual(cfg["texto_altura_cm"], 0.6)
         self.assertEqual(cfg["texto_dx_cm"], 0.8)
         self.assertEqual(cfg["texto_dy_cm"], -0.4)
         self.assertEqual(cfg["texto_cor"], "#00ff66")
+        self.assertEqual(cfg["ponto"], (5.0, 0.0))
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(canvas._selecionados, {0})
-        self.assertIn("atualizado", canvas.lbl_status.texto)
-        self.assertIs(dialog.carregado[0], cfg)
+        self.assertIn("posicionado", canvas.lbl_status.texto)
+        self.assertIsNone(dialog.carregado)
 
     def test_remover_apaga_campos_de_texto_do_pique(self):
-        canvas = _FakeCanvas()
-        cfg = canvas.cena.elementos[0]["piques_config"][0]
+        cfg = {}
         cfg.update(
             {
                 "texto_pique": "Antigo",
@@ -143,15 +144,69 @@ class PiqueTextoToolTestCase(unittest.TestCase):
             }
         )
         ferramenta = FerramentaPiqueTexto()
-        ferramenta._dialogo = lambda _canvas: _FakeDialog({"texto": "", "remover": True})
-        ferramenta._reposicionar_dialogo = lambda *_args: None
 
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.4))))
+        self.assertTrue(ferramenta._remover_texto_config(cfg))
 
         self.assertNotIn("texto_pique", cfg)
         self.assertNotIn("texto_altura_cm", cfg)
         self.assertNotIn("texto_cor", cfg)
+
+    def test_dialogo_nao_mostra_botao_aplicar(self):
+        dialog = PiqueTextoDialog()
+
+        self.assertTrue(dialog.btn_aplicar.isHidden())
+        self.assertTrue(dialog.btn_cancelar.isHidden())
+        self.assertEqual(dialog.btn_remover.text(), "Limpar")
+
+    def test_clique_dentro_do_molde_cria_pique_texto_interno_sem_marca(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaPiqueTexto()
+        ferramenta._dialogo = lambda _canvas: _FakeDialog(
+            {
+                "texto": "FRENTE",
+                "altura_cm": 0.5,
+                "dx_cm": 0.0,
+                "dy_cm": 0.0,
+                "cor": "#ffffff",
+                "remover": False,
+            }
+        )
+        ferramenta._reposicionar_dialogo = lambda *_args: None
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.5))))
+
+        cfg = canvas.cena.elementos[0]["piques_config"][-1]
+        self.assertEqual(cfg["tipo"], "Texto")
+        self.assertFalse(cfg["sobre_contorno"])
+        self.assertTrue(cfg["texto_sem_marca"])
+        self.assertEqual(cfg["segmentos"], [])
+        self.assertEqual(cfg["texto_pique"], "FRENTE")
+        self.assertEqual(canvas.cena.elementos[0]["controle_auxiliares"], [(5.0, 2.5)])
         self.assertEqual(canvas.historico, 1)
+
+    def test_pique_texto_interno_ignora_snap_para_borda(self):
+        canvas = _FakeCanvas()
+        canvas._ponto_com_snap = lambda _pos: QPointF(5.0, 0.0)
+        canvas._tela_para_cena = lambda pos: QPointF(pos)
+        ferramenta = FerramentaPiqueTexto()
+        ferramenta._dialogo = lambda _canvas: _FakeDialog(
+            {
+                "texto": "SOLTO",
+                "altura_cm": 0.5,
+                "dx_cm": 0.0,
+                "dy_cm": 0.0,
+                "cor": "#ffffff",
+                "remover": False,
+            }
+        )
+        ferramenta._reposicionar_dialogo = lambda *_args: None
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.5))))
+
+        cfg = canvas.cena.elementos[0]["piques_config"][-1]
+        self.assertEqual(cfg["ponto"], (5.0, 2.5))
+        self.assertEqual(cfg["ponto_controle"], (5.0, 2.5))
+        self.assertEqual(cfg["texto_pique"], "SOLTO")
 
     def test_helpers_visuais_leem_texto_posicao_e_cor(self):
         cfg = {
@@ -165,6 +220,7 @@ class PiqueTextoToolTestCase(unittest.TestCase):
         pos = VisualizacaoCanvas._posicao_texto_cfg_pique(cfg, QPointF(5.0, 2.0))
         self.assertEqual(pos, QPointF(6.25, 1.25))
         self.assertEqual(VisualizacaoCanvas._cor_cfg_pique_texto(cfg, "#ffffff"), "#abcdef")
+        self.assertTrue(VisualizacaoCanvas._cfg_pique_texto_sem_marca({"texto_pique": "A", "texto_sem_marca": True}))
 
     def test_botao_direito_finaliza(self):
         canvas = _FakeCanvas()

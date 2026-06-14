@@ -13,6 +13,7 @@ else:
     from PySide6.QtCore import QPointF
     from PySide6.QtWidgets import QApplication
 
+    import tools.costura_tool as costura_tool_module
     from tools.costura_tool import CosturaDialog, Ferramenta as FerramentaCostura
 
 
@@ -329,6 +330,68 @@ class CosturaToolTestCase(unittest.TestCase):
 
         costura = next(el for el in canvas.cena.elementos if el.get("subtipo_audaces") == "costura")
         self.assertEqual(costura["pontos"], [(-1.0, -1.0), (21.0, -1.0), (21.0, 11.0), (-1.0, 11.0), (-1.0, -1.0)])
+
+    def test_gerar_costura_usa_acelerador_cpp_quando_disponivel(self):
+        ferramenta = self._preparar_ferramenta_sem_dialog()
+        original = costura_tool_module.seam_offset_closed_cpp
+        costura_tool_module.seam_offset_closed_cpp = lambda _pontos, _margem: [(1.0, 2.0), (3.0, 4.0)]
+        self.addCleanup(setattr, costura_tool_module, "seam_offset_closed_cpp", original)
+
+        pontos = ferramenta._gerar_costura(self._elemento_quadrado()["pontos"], 1.0)
+
+        self.assertEqual(pontos, [(1.0, 2.0), (3.0, 4.0)])
+
+    def test_gerar_costura_mantem_fallback_python_sem_cpp(self):
+        ferramenta = self._preparar_ferramenta_sem_dialog()
+        original = costura_tool_module.seam_offset_closed_cpp
+        costura_tool_module.seam_offset_closed_cpp = lambda _pontos, _margem: None
+        self.addCleanup(setattr, costura_tool_module, "seam_offset_closed_cpp", original)
+
+        pontos = ferramenta._gerar_costura(self._elemento_quadrado()["pontos"], 1.0)
+
+        self.assertEqual(pontos, [(-1.0, -1.0), (11.0, -1.0), (11.0, 11.0), (-1.0, 11.0), (-1.0, -1.0)])
+
+    def test_gerar_costura_cpp_real_bate_com_fallback_python_quando_disponivel(self):
+        ferramenta = self._preparar_ferramenta_sem_dialog()
+        original = costura_tool_module.seam_offset_closed_cpp
+        pontos = [(0.0, 0.0), (8.0, 0.0), (10.0, 5.0), (4.0, 9.0), (-2.0, 4.0), (0.0, 0.0)]
+        costura_cpp = original(pontos, 1.0)
+        if costura_cpp is None:
+            self.skipTest("Modulo C++ de costura nao disponivel neste ambiente")
+        costura_tool_module.seam_offset_closed_cpp = lambda _pontos, _margem: None
+        self.addCleanup(setattr, costura_tool_module, "seam_offset_closed_cpp", original)
+
+        costura_python = ferramenta._gerar_costura(pontos, 1.0)
+
+        self.assertEqual(costura_cpp, costura_python)
+
+    def test_costura_sincronizada_reaproveita_cache_ate_molde_mudar(self):
+        ferramenta = self._preparar_ferramenta_sem_dialog()
+        canvas = self._CanvasFake([self._elemento_quadrado()])
+        self.assertTrue(ferramenta._aplicar_em_indices(canvas, [0]))
+        original = ferramenta._gerar_costura_atual
+        chamadas = []
+
+        def contar(*args, **kwargs):
+            chamadas.append(1)
+            return original(*args, **kwargs)
+
+        ferramenta._gerar_costura_atual = contar
+
+        self.assertFalse(ferramenta.sincronizar_costuras_vinculadas(canvas))
+        self.assertFalse(ferramenta.sincronizar_costuras_vinculadas(canvas))
+        self.assertEqual(len(chamadas), 1)
+
+        canvas.cena.elementos[0]["pontos"] = [
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (20.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]
+
+        self.assertTrue(ferramenta.sincronizar_costuras_vinculadas(canvas))
+        self.assertEqual(len(chamadas), 2)
 
     def test_costura_por_trecho_recalcula_quando_perimetro_do_molde_muda(self):
         ferramenta = self._preparar_ferramenta_sem_dialog()

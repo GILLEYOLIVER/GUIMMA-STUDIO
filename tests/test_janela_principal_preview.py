@@ -89,6 +89,45 @@ class JanelaPrincipalPreviewTestCase(unittest.TestCase):
                 self.assertEqual(modelo.nameFilters(), [f"*{EXTENSAO_PROJETO}"])
                 self.assertFalse(modelo.nameFilterDisables())
 
+    def test_abas_sem_nome_sao_renumeradas_quando_sobra_uma(self):
+        class _AbasFake:
+            def __init__(self, nomes):
+                self.nomes = list(nomes)
+
+            def count(self):
+                return len(self.nomes)
+
+            def tabText(self, indice):
+                return self.nomes[indice]
+
+            def setTabText(self, indice, nome):
+                self.nomes[indice] = nome
+
+        janela = GuimmaStudioMainWindow.__new__(GuimmaStudioMainWindow)
+        janela.abas_documentos = _AbasFake(["(Sem nome)-2"])
+
+        GuimmaStudioMainWindow._renumerar_abas_sem_nome(janela)
+
+        self.assertEqual(janela.abas_documentos.nomes, ["(Sem nome)"])
+
+    def test_proximo_nome_sem_nome_reusa_primeiro_indice_livre(self):
+        class _AbasFake:
+            def __init__(self, nomes):
+                self.nomes = list(nomes)
+
+            def count(self):
+                return len(self.nomes)
+
+            def tabText(self, indice):
+                return self.nomes[indice]
+
+        janela = GuimmaStudioMainWindow.__new__(GuimmaStudioMainWindow)
+        janela.abas_documentos = _AbasFake(["Modelo", "(Sem nome)-2"])
+
+        nome = GuimmaStudioMainWindow._proximo_nome_aba_sem_nome(janela)
+
+        self.assertEqual(nome, "(Sem nome)")
+
 
 if __name__ == "__main__":
     unittest.main()
