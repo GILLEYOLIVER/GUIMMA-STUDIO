@@ -51,7 +51,7 @@ class Ferramenta(FerramentaBase):
         elementos = [deepcopy(canvas.cena.elementos[i]) for i in indices]
         bbox = self._bbox_elementos(elementos)
 
-        canvas._buffer_copia = {
+        buffer = {
             "versao": 2,
             "origem": "GUIMMA_STUDIO",
             "ferramenta": self.id_ferramenta,
@@ -59,6 +59,10 @@ class Ferramenta(FerramentaBase):
             "bbox": bbox,
             "elementos": elementos,
         }
+        if hasattr(canvas, "definir_buffer_copia"):
+            canvas.definir_buffer_copia(buffer)
+        else:
+            canvas._buffer_copia = buffer
         canvas._offset_colagem = 0
         return len(elementos)
 

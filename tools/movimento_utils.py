@@ -33,6 +33,25 @@ CHAVES_PONTOS_SOLTOS = (
     "seta_fim",
 )
 
+CHAVES_ESTRUTURAS_COM_PONTOS = (
+    "piques_config",
+    "graduacao_tabela",
+    "graduacao_pontos",
+)
+
+CHAVES_SEM_COORDENADAS = {
+    "valores",
+    "valor",
+    "dx",
+    "dy",
+    "largura",
+    "altura",
+    "largura_cm",
+    "altura_cm",
+    "texto_dx_cm",
+    "texto_dy_cm",
+}
+
 
 def mover_elemento_por_delta(elemento: dict, dx: float, dy: float) -> None:
     """Move o desenho e todos os pontos visuais anexados ao elemento."""
@@ -44,6 +63,9 @@ def mover_elemento_por_delta(elemento: dict, dx: float, dy: float) -> None:
     for chave in CHAVES_PONTOS_SOLTOS:
         if chave in elemento:
             elemento[chave] = mover_ponto_por_delta(elemento.get(chave), dx, dy)
+    for chave in CHAVES_ESTRUTURAS_COM_PONTOS:
+        if chave in elemento:
+            elemento[chave] = mover_valor_estruturado_por_delta(elemento.get(chave), dx, dy)
 
 
 def _mover_lista_ou_mapa_pontos(valor, dx: float, dy: float):
@@ -73,3 +95,76 @@ def mover_ponto_por_delta(ponto, dx: float, dy: float):
             return [*movido, *ponto[2:]]
         return (*movido, *ponto[2:])
     return ponto
+
+
+def mover_valor_estruturado_por_delta(valor, dx: float, dy: float):
+    """Move pontos dentro de estruturas aninhadas sem alterar deltas de graduação.
+
+    Campos como ``piques_config`` e ``graduacao_tabela`` guardam pontos dentro de
+    listas e dicionários, mas também guardam medidas como dx/dy, altura e largura.
+    Esta função percorre a estrutura e só desloca pares que representam
+    coordenadas ou dicionários com ``x``/``y``.
+    """
+    return _mover_estrutura(valor, dx, dy, recursao_livre=True)
+
+
+def _mover_estrutura(valor, dx: float, dy: float, *, recursao_livre: bool):
+    if isinstance(valor, dict):
+        if "x" in valor and "y" in valor:
+            return mover_ponto_por_delta(valor, dx, dy)
+        movido = dict(valor)
+        for chave, item in list(movido.items()):
+            chave_txt = str(chave or "").lower()
+            if chave_txt in CHAVES_SEM_COORDENADAS:
+                continue
+            if _chave_com_pontos(chave_txt) or (recursao_livre and isinstance(item, (dict, list, tuple))):
+                movido[chave] = _mover_estrutura(item, dx, dy, recursao_livre=_chave_com_pontos(chave_txt) or recursao_livre)
+        return movido
+
+    if isinstance(valor, list):
+        if _eh_par_numerico(valor):
+            return mover_ponto_por_delta(valor, dx, dy)
+        return [_mover_estrutura(item, dx, dy, recursao_livre=recursao_livre) for item in valor]
+
+    if isinstance(valor, tuple):
+        if _eh_par_numerico(valor):
+            return mover_ponto_por_delta(valor, dx, dy)
+        return tuple(_mover_estrutura(item, dx, dy, recursao_livre=recursao_livre) for item in valor)
+
+    return valor
+
+
+def _chave_com_pontos(chave: str) -> bool:
+    return any(
+        termo in chave
+        for termo in (
+            "ponto",
+            "pontos",
+            "contorno",
+            "controle",
+            "marcacao",
+            "marcação",
+            "segmento",
+            "segmentos",
+            "pique",
+            "piques",
+            "origem",
+            "fim",
+            "posicao",
+            "posição",
+            "seta",
+            "fio",
+            "eixo",
+        )
+    )
+
+
+def _eh_par_numerico(valor) -> bool:
+    if not isinstance(valor, (list, tuple)) or len(valor) < 2:
+        return False
+    try:
+        float(valor[0])
+        float(valor[1])
+        return True
+    except Exception:
+        return False

@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
+from tools.costura_tool import Ferramenta as FerramentaCostura
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
@@ -88,6 +89,7 @@ class Ferramenta(FerramentaBase):
         self._alvo_pendente: dict | None = None
         self._realce_polylines: list[list[QPointF]] = []
         self._realce_segmentos: list[tuple[QPointF, QPointF]] = []
+        self._costura_helper = FerramentaCostura()
 
     def on_activate(self, canvas):
         dialog = self._obter_dialog(canvas)
@@ -216,14 +218,35 @@ class Ferramenta(FerramentaBase):
         for idx, el in enumerate(canvas.cena.elementos):
             if not self._eh_costura(el):
                 continue
-            pontos = self._pontos_qt(el)
-            for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
-                dist = self._distancia_ponto_segmento(a, b, pos)
+            if self._eh_costura_graduacao(el):
+                continue
+            molde_id = self._molde_id_costura(el)
+            molde = self._molde_por_id(canvas, molde_id)
+            if not isinstance(molde, dict):
+                continue
+            alvo_geom = self._costura_helper._alvo_geometrico_costura_sincronizada(molde, el)
+            if not isinstance(alvo_geom, dict):
+                continue
+            total = self._costura_helper._total_segmentos_elemento(alvo_geom)
+            for seg_idx in self._segmentos_ativos_costura(el, total):
+                pontos = self._pontos_costura_segmento(canvas, molde, el, seg_idx)
+                dist = self._distancia_ponto_polyline(pos, pontos)
                 if dist <= tolerancia and (melhor is None or dist < melhor["dist"]):
-                    melhor = {"tipo": "segmento", "indice": idx, "segmento": seg_idx, "dist": dist}
+                    melhor = {
+                        "tipo": "segmento",
+                        "indice": idx,
+                        "segmento": seg_idx,
+                        "dist": dist,
+                        "molde_id": molde_id,
+                    }
         if melhor is None:
             return None
-        return {"tipo": "segmento", "indice": melhor["indice"], "segmento": melhor["segmento"]}
+        return {
+            "tipo": "segmento",
+            "indice": melhor["indice"],
+            "segmento": melhor["segmento"],
+            "molde_id": melhor.get("molde_id", ""),
+        }
 
     def _indice_costura_proxima(self, canvas, pos: QPointF) -> int | None:
         alvo = self._detectar_alvo_segmento(canvas, pos)
@@ -243,7 +266,15 @@ class Ferramenta(FerramentaBase):
             return
         idx = int(alvo["indice"])
         seg_idx = int(alvo["segmento"])
-        if 0 <= idx < len(canvas.cena.elementos):
+        molde_id = str(alvo.get("molde_id") or "")
+        molde = self._molde_por_id(canvas, molde_id)
+        if isinstance(molde, dict) and 0 <= idx < len(canvas.cena.elementos):
+            costura = canvas.cena.elementos[idx]
+            if self._eh_costura(costura) and not self._eh_costura_graduacao(costura):
+                pontos = self._pontos_costura_segmento(canvas, molde, costura, seg_idx)
+                if len(pontos) >= 2:
+                    self._realce_polylines.append(pontos)
+        if not self._realce_polylines and 0 <= idx < len(canvas.cena.elementos):
             pontos = self._pontos_qt(canvas.cena.elementos[idx])
             if 0 <= seg_idx < len(pontos) - 1:
                 self._realce_segmentos.append((pontos[seg_idx], pontos[seg_idx + 1]))
@@ -259,7 +290,8 @@ class Ferramenta(FerramentaBase):
                     del canvas.cena.elementos[idx]
             removidos = len(indices)
         else:
-            removidos = 1 if self._remover_segmento(canvas, int(alvo["indice"]), int(alvo["segmento"])) else 0
+            molde_id = str(alvo.get("molde_id") or "")
+            removidos = self._remover_segmento_costura_molde(canvas, molde_id, int(alvo["indice"]), int(alvo["segmento"]))
         if removidos:
             canvas._registrar_historico()
             self._limpar_realce(canvas, atualizar=False)
@@ -268,7 +300,60 @@ class Ferramenta(FerramentaBase):
         else:
             self.set_status("Nao foi possivel remover essa costura.")
 
-    def _remover_segmento(self, canvas, idx: int, seg_idx: int) -> bool:
+    def _remover_segmento_costura_molde(self, canvas, molde_id: str, idx_fallback: int, seg_idx: int) -> int:
+        if not molde_id:
+            return 1 if self._remover_segmento_legado(canvas, idx_fallback, seg_idx) else 0
+        alterados = 0
+        remover_indices: list[int] = []
+        molde = self._molde_por_id(canvas, molde_id)
+        if not isinstance(molde, dict):
+            return 0
+
+        costuras_base = [
+            (idx, el)
+            for idx, el in self._costuras_do_molde(canvas, molde_id)
+            if not self._eh_costura_graduacao(el)
+        ]
+        if 0 <= idx_fallback < len(canvas.cena.elementos):
+            costuras_fallback = [(idx, el) for idx, el in costuras_base if idx == idx_fallback]
+            if costuras_fallback:
+                costuras_base = costuras_fallback
+
+        for idx, el in costuras_base:
+            alvo_geom = self._costura_helper._alvo_geometrico_costura_sincronizada(molde, el)
+            if not isinstance(alvo_geom, dict):
+                continue
+            total = self._costura_helper._total_segmentos_elemento(alvo_geom)
+            if total <= 0:
+                continue
+            ativos = set(self._segmentos_ativos_costura(el, total))
+            seg = int(seg_idx) % total
+            if seg not in ativos:
+                continue
+            ativos.remove(seg)
+            if not ativos:
+                remover_indices.append(idx)
+                alterados += 1
+                continue
+            base = self._costura_helper._base_interativa_elemento(alvo_geom)
+            ordem = self._costura_helper._ordenar_segmentos_contiguos(base, ativos) or self._costura_helper._ordenar_segmentos_horario(base, ativos)
+            el["costura_segmentos"] = [int(s) for s in ordem]
+            el["costura_parcial"] = len(ativos) < total
+            metadados = el.get("metadados")
+            if isinstance(metadados, dict):
+                metadados["costura_segmentos"] = [int(s) for s in ordem]
+                metadados["costura_parcial"] = bool(el["costura_parcial"])
+            alterados += 1
+
+        for idx in sorted(set(remover_indices), reverse=True):
+            if 0 <= idx < len(canvas.cena.elementos):
+                del canvas.cena.elementos[idx]
+        if alterados:
+            self._costura_helper.sincronizar_costuras_graduacao_do_molde(canvas, molde_id)
+            self._costura_helper.sincronizar_costuras_vinculadas(canvas)
+        return alterados
+
+    def _remover_segmento_legado(self, canvas, idx: int, seg_idx: int) -> bool:
         if not (0 <= idx < len(canvas.cena.elementos)):
             return False
         el = canvas.cena.elementos[idx]
@@ -292,6 +377,68 @@ class Ferramenta(FerramentaBase):
         el["pontos"] = pontos
         return True
 
+    def _costuras_do_molde(self, canvas, molde_id: str) -> list[tuple[int, dict]]:
+        alvo = str(molde_id or "").strip()
+        if not alvo:
+            return []
+        return [
+            (idx, el)
+            for idx, el in enumerate(canvas.cena.elementos)
+            if self._eh_costura(el) and self._molde_id_costura(el) == alvo
+        ]
+
+    def _molde_por_id(self, canvas, molde_id: str) -> dict | None:
+        alvo = str(molde_id or "").strip()
+        if not alvo:
+            return None
+        for el in canvas.cena.elementos:
+            if isinstance(el, dict) and el.get("molde"):
+                atual = str(el.get("molde_id") or el.get("id") or "").strip()
+                if atual == alvo:
+                    return el
+        return None
+
+    def _molde_id_costura(self, costura: dict) -> str:
+        metadados = costura.get("metadados") if isinstance(costura.get("metadados"), dict) else {}
+        return str(
+            costura.get("costura_de_molde_id")
+            or metadados.get("costura_de_molde_id")
+            or costura.get("molde_id")
+            or metadados.get("molde_id")
+            or ""
+        ).strip()
+
+    def _segmentos_ativos_costura(self, costura: dict, total: int) -> list[int]:
+        if total <= 0:
+            return []
+        segmentos = costura.get("costura_segmentos")
+        ativos: list[int] = []
+        if isinstance(segmentos, list) and segmentos:
+            for item in segmentos:
+                try:
+                    seg = int(item) % total
+                except Exception:
+                    continue
+                if seg not in ativos:
+                    ativos.append(seg)
+        if ativos:
+            return ativos
+        if costura.get("costura_parcial"):
+            return []
+        return list(range(total))
+
+    def _pontos_costura_segmento(self, canvas, molde: dict, costura: dict, seg_idx: int) -> list[QPointF]:
+        temporaria = dict(costura)
+        temporaria["costura_segmentos"] = [int(seg_idx)]
+        temporaria["costura_parcial"] = True
+        pontos = self._costura_helper._gerar_pontos_costura_sincronizada(canvas, molde, temporaria)
+        return [QPointF(float(x), float(y)) for x, y in pontos]
+
+    def _distancia_ponto_polyline(self, pos: QPointF, pontos: list[QPointF]) -> float:
+        if len(pontos) < 2:
+            return float("inf")
+        return min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
+
     def _limpar_realce(self, canvas, atualizar: bool = True) -> None:
         self._alvo_pendente = None
         self._realce_polylines = []
@@ -309,6 +456,15 @@ class Ferramenta(FerramentaBase):
     def _eh_costura(self, el: dict) -> bool:
         subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "")
         return el.get("tipo") == "polyline" and (subtipo == "costura" or bool(el.get("costura_de_molde_id")))
+
+    def _eh_costura_graduacao(self, el: dict) -> bool:
+        metadados = el.get("metadados") if isinstance(el.get("metadados"), dict) else {}
+        return bool(
+            el.get("costura_graduacao")
+            or metadados.get("costura_graduacao")
+            or el.get("graduacao_tamanho")
+            or metadados.get("graduacao_tamanho")
+        )
 
     def _pontos_qt(self, el: dict) -> list[QPointF]:
         return [QPointF(float(x), float(y)) for x, y in el.get("pontos", [])]

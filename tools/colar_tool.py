@@ -11,9 +11,10 @@ except Exception:  # pragma: no cover - fallback apenas para ambientes sem Qt
 from tools.tool_base import FerramentaBase
 
 try:
-    from tools.movimento_utils import mover_elemento_por_delta
+    from tools.movimento_utils import mover_elemento_por_delta, mover_valor_estruturado_por_delta
 except Exception:  # pragma: no cover
     mover_elemento_por_delta = None
+    mover_valor_estruturado_por_delta = None
 
 
 class Ferramenta(FerramentaBase):
@@ -67,10 +68,7 @@ class Ferramenta(FerramentaBase):
         inicio = len(canvas.cena.elementos)
         canvas.cena.elementos.extend(novos)
         indices_novos = list(range(inicio, inicio + len(novos)))
-        canvas._selecionados = {
-            idx for idx in indices_novos
-            if 0 <= idx < len(canvas.cena.elementos) and not canvas.cena.elementos[idx].get("molde")
-        }
+        canvas._selecionados = set(indices_novos)
 
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
@@ -84,7 +82,10 @@ class Ferramenta(FerramentaBase):
         return len(novos)
 
     def _ler_buffer(self, canvas) -> list[dict]:
-        buffer = getattr(canvas, "_buffer_copia", None)
+        if hasattr(canvas, "obter_buffer_copia"):
+            buffer = canvas.obter_buffer_copia()
+        else:
+            buffer = getattr(canvas, "_buffer_copia", None)
         if not buffer:
             return []
 
@@ -177,9 +178,19 @@ class Ferramenta(FerramentaBase):
             "marcacoes_perimetro",
             "pontos_controle_principais",
             "pontos_auxiliares",
+            "piques_config",
+            "graduacao_tabela",
+            "graduacao_pontos",
         ):
             if chave in elemento:
-                elemento[chave] = self._mover_valor_recursivo(elemento.get(chave), dx, dy)
+                if mover_valor_estruturado_por_delta is not None and chave in {
+                    "piques_config",
+                    "graduacao_tabela",
+                    "graduacao_pontos",
+                }:
+                    elemento[chave] = mover_valor_estruturado_por_delta(elemento.get(chave), dx, dy)
+                else:
+                    elemento[chave] = self._mover_valor_recursivo(elemento.get(chave), dx, dy)
 
         for chave in (
             "p0",
@@ -238,6 +249,10 @@ class Ferramenta(FerramentaBase):
                 "marcação",
                 "dobra",
                 "eixo",
+                "segmento",
+                "segmentos",
+                "pique",
+                "piques",
                 "origem",
                 "fim",
                 "posicao",

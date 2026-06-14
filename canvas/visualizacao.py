@@ -19,6 +19,7 @@ from core.geometry.engine import quadratic_bezier_control_for_point
 from core.line_styles import dash_pattern_for_line, is_geometric_line_style, pen_style_for_line
 from ui.hover_style import aplicar_hover_menu
 from ui.posicao_janelas import salvar_posicao
+from tools.movimento_utils import mover_valor_estruturado_por_delta
 
 
 class VisualizacaoCanvas(QWidget):
@@ -26,6 +27,7 @@ class VisualizacaoCanvas(QWidget):
     TAMANHO_NOME_PADRAO_CM = 3.0
     TAMANHO_NUMERO_PADRAO_CM = 0.7
     DISTANCIA_NUMERO_PADRAO_CM = 0.4
+    _buffer_copia_compartilhado: dict | None = None
 
     zoom_changed = Signal(float)
     ferramenta_padrao_solicitada = Signal(str)
@@ -629,14 +631,14 @@ class VisualizacaoCanvas(QWidget):
 
     def copiar(self):
         if self._selecionados:
-            self._buffer_copia = {
+            self.definir_buffer_copia({
                 "tipo": "multiplos",
                 "elementos": [self._elemento_serializavel(self.cena.elementos[idx]) for idx in
                               sorted(self._selecionados)],
-            }
+            })
             return
         if self._pontos_reta and len(self._pontos_reta) >= 2:
-            self._buffer_copia = {
+            self.definir_buffer_copia({
                 "tipo": "polyline",
                 "pontos": [(p.x(), p.y()) for p in self._pontos_reta],
                 "cor": self._linha_cor,
@@ -644,31 +646,40 @@ class VisualizacaoCanvas(QWidget):
                 "estilo": self._linha_estilo,
                 "amplitude": self._linha_amplitude,
                 "fase_inicio": 0.0,
-            }
+            })
             return
         if self.cena.elementos:
-            self._buffer_copia = self._elemento_serializavel(self.cena.elementos[-1])
+            self.definir_buffer_copia(self.cena.elementos[-1])
 
     def obter_buffer_copia(self) -> dict | None:
-        if not self._buffer_copia:
+        buffer = type(self)._buffer_copia_compartilhado or self._buffer_copia
+        if not buffer:
             return None
-        return self._elemento_serializavel(self._buffer_copia)
+        return self._elemento_serializavel(buffer)
 
     def definir_buffer_copia(self, buffer_copia: dict | None):
-        self._buffer_copia = self._elemento_serializavel(buffer_copia) if isinstance(buffer_copia, dict) else None
+        if not isinstance(buffer_copia, dict):
+            self._buffer_copia = None
+            type(self)._buffer_copia_compartilhado = None
+            return
+        normalizado = self._elemento_serializavel(buffer_copia)
+        self._buffer_copia = normalizado
+        type(self)._buffer_copia_compartilhado = self._elemento_serializavel(normalizado)
 
     def colar(self):
-        if not self._buffer_copia:
+        buffer = self.obter_buffer_copia()
+        if not buffer:
             return
+        self._buffer_copia = buffer
         self._selecionados.clear()
-        if isinstance(self._buffer_copia.get("elementos"), list):
-            itens = self._buffer_copia.get("elementos", [])
-        elif self._buffer_copia.get("tipo") == "multiplos":
-            itens = self._buffer_copia.get("elementos", [])
+        if isinstance(buffer.get("elementos"), list):
+            itens = buffer.get("elementos", [])
+        elif buffer.get("tipo") == "multiplos":
+            itens = buffer.get("elementos", [])
         else:
-            itens = [self._buffer_copia]
+            itens = [buffer]
         dx, dy = self._delta_colagem_para_centro(itens)
-        if isinstance(self._buffer_copia.get("elementos"), list) or self._buffer_copia.get("tipo") == "multiplos":
+        if isinstance(buffer.get("elementos"), list) or buffer.get("tipo") == "multiplos":
             for item in itens:
                 if not isinstance(item, dict):
                     continue
@@ -676,8 +687,8 @@ class VisualizacaoCanvas(QWidget):
                 self._transladar_elemento(novo, dx, dy)
                 self.cena.elementos.append(novo)
                 self._selecionados.add(len(self.cena.elementos) - 1)
-        elif isinstance(self._buffer_copia, dict):
-            novo = self._elemento_serializavel(self._buffer_copia)
+        elif isinstance(buffer, dict):
+            novo = self._elemento_serializavel(buffer)
             self._transladar_elemento(novo, dx, dy)
             self.cena.elementos.append(novo)
             self._selecionados.add(len(self.cena.elementos) - 1)
@@ -715,10 +726,14 @@ class VisualizacaoCanvas(QWidget):
 
         for chave in ("controle_cantos", "controle_auxiliares", "fio_origem", "fio_fim"):
             valor = elemento.get(chave)
+            if isinstance(valor, (tuple, list)) and len(valor) == 2:
+                try:
+                    elemento[chave] = (float(valor[0]) + dx, float(valor[1]) + dy)
+                    continue
+                except (TypeError, ValueError):
+                    pass
             if isinstance(valor, list):
                 elemento[chave] = [(float(x) + dx, float(y) + dy) for x, y in valor]
-            elif isinstance(valor, (tuple, list)) and len(valor) == 2:
-                elemento[chave] = (float(valor[0]) + dx, float(valor[1]) + dy)
 
         for chave in ("pontos_controle_principais", "pontos_auxiliares"):
             valor = elemento.get(chave)
@@ -733,6 +748,10 @@ class VisualizacaoCanvas(QWidget):
         # acompanhar o mesmo deslocamento. Sem isso, a linha pontilhada fica
         # parada no canvas como se fosse um objeto solto.
         self._transladar_dados_dobra_elemento(elemento, dx, dy)
+
+        for chave in ("piques_config", "graduacao_tabela", "graduacao_pontos"):
+            if chave in elemento:
+                elemento[chave] = mover_valor_estruturado_por_delta(elemento.get(chave), dx, dy)
 
     def _transladar_ponto_serializado(self, valor, dx: float, dy: float):
         if isinstance(valor, (tuple, list)) and len(valor) >= 2:
@@ -940,6 +959,7 @@ class VisualizacaoCanvas(QWidget):
         if escolhido is a_props:
             if molde_no_cursor is not None:
                 self._selecionados = {molde_no_cursor}
+                self._indice_propriedades_preferido = int(molde_no_cursor)
                 self.update()
             self._ativar_ferramenta_janela_principal("propriedades")
         elif escolhido is a_vars:
@@ -1021,6 +1041,7 @@ class VisualizacaoCanvas(QWidget):
 
     def _registrar_historico(self):
         self._aplicar_padrao_grade_primeiro_molde()
+        self._sincronizar_costuras_dependentes()
         self._limpar_cache_runtime_elementos()
         snapshot = self._elementos_serializaveis()
         if self._indice_historico < len(self._historico_elementos) - 1:
@@ -1036,6 +1057,7 @@ class VisualizacaoCanvas(QWidget):
         self._emitir_elementos_alterados()
 
     def _garantir_estado_atual_no_historico(self) -> None:
+        self._sincronizar_costuras_dependentes()
         snapshot = self._elementos_serializaveis()
         if not self._historico_elementos:
             self._historico_elementos = [snapshot]
@@ -1321,9 +1343,11 @@ class VisualizacaoCanvas(QWidget):
             "controle principal": 0,
             "controle auxiliar": 1,
             "controle": 1,
+            "graduação": 1,
             "interseção": 2,
             "centro": 3,
             "borda": 4,
+            "borda graduação": 4,
             "ponto médio": 5,
             "coord": 6,
             "fio": 7,
@@ -1370,6 +1394,47 @@ class VisualizacaoCanvas(QWidget):
 
         return candidatos
 
+    def _candidatos_snap_graduacao_elemento(
+            self,
+            idx: int,
+            el: dict,
+            pos_cena: QPointF,
+            tol_cena: float,
+    ) -> list[SnapResult]:
+        if not isinstance(el, dict) or not el.get("molde") or el.get("mostrar_graduacao", True) is False:
+            return []
+        base = self._base_graduacao_elemento(el)
+        if len(base) < 2:
+            return []
+        contornos = self._contornos_graduacao_tabela(el, base)
+        if not contornos:
+            return []
+
+        todos_pontos = [QPointF(pt) for _nome, _cor, contorno in contornos for pt in contorno]
+        if todos_pontos:
+            margem = tol_cena * 2.5
+            min_x = min(pt.x() for pt in todos_pontos) - margem
+            max_x = max(pt.x() for pt in todos_pontos) + margem
+            min_y = min(pt.y() for pt in todos_pontos) - margem
+            max_y = max(pt.y() for pt in todos_pontos) + margem
+            if not (min_x <= pos_cena.x() <= max_x and min_y <= pos_cena.y() <= max_y):
+                return []
+
+        candidatos: list[SnapResult] = []
+        for _nome, _cor, _origem, destino in self._caminhos_graduacao_tabela(el, base):
+            self._adicionar_candidato_snap(candidatos, pos_cena, destino, "graduação", idx, tol_cena)
+
+        for _nome, _cor, contorno in contornos:
+            pontos = [QPointF(pt) for pt in contorno]
+            if len(pontos) < 2:
+                continue
+            for inicio, fim in zip(pontos, pontos[1:]):
+                if self._distancia_ponto_segmento(inicio, fim, pos_cena) > tol_cena:
+                    continue
+                proj = self._projecao_no_segmento(pos_cena, inicio, fim)
+                self._adicionar_candidato_snap(candidatos, pos_cena, proj, "borda graduação", idx, tol_cena)
+        return candidatos
+
     def _ponto_com_snap(self, pos_tela: QPointF) -> QPointF:
         pos_cena = self._tela_para_cena(pos_tela)
         if not self._snap_ativo:
@@ -1386,7 +1451,8 @@ class VisualizacaoCanvas(QWidget):
         )
 
         for idx, el in enumerate(self.cena.elementos):
-            if not self._elemento_proximo_ponto_cena(el, pos_cena, tol_cena * 2.5):
+            candidatos_graduacao = self._candidatos_snap_graduacao_elemento(idx, el, pos_cena, tol_cena)
+            if not self._elemento_proximo_ponto_cena(el, pos_cena, tol_cena * 2.5) and not candidatos_graduacao:
                 continue
             if el.get("tipo") == "bezier_quadratica":
                 p0 = QPointF(*el["p0"])
@@ -1444,6 +1510,7 @@ class VisualizacaoCanvas(QWidget):
                             cy = sum(p.y() for p in base) / len(base)
                             p_nome = QPointF(cx, cy)
                             self._adicionar_candidato_snap(candidatos, pos_cena, p_nome, "nome", idx, tol_cena * 1.5)
+            candidatos.extend(candidatos_graduacao)
 
         candidatos.extend(self._candidatos_snap_temporarios(pos_cena, tol_cena))
 
@@ -1566,7 +1633,9 @@ class VisualizacaoCanvas(QWidget):
         if liberar_angular:
             return destino
         if travar_snap_exato and self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro",
-                                                                                        "borda", "coord", "interseção"}:
+                                                                                        "borda", "borda graduação",
+                                                                                        "coord", "interseção",
+                                                                                        "graduação"}:
             return destino
         dx = destino.x() - origem.x()
         dy = destino.y() - origem.y()
@@ -1612,7 +1681,8 @@ class VisualizacaoCanvas(QWidget):
         self._guia_fechamento = None
         if len(self._pontos_reta) < 2 or not self._snap_resultado:
             return destino
-        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "coord", "interseção"}:
+        if self._snap_resultado.tipo not in {"nó", "ponto médio", "centro", "borda", "borda graduação", "coord",
+                                             "interseção", "graduação"}:
             return destino
         ponto_final = self._snap_resultado.ponto
         ponto_anterior = self._pontos_reta[-2]
@@ -1644,8 +1714,9 @@ class VisualizacaoCanvas(QWidget):
         self._guias_alinhamento = []
         if not self._snap_ativo:
             return destino
-        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda", "coord",
-                                                                  "interseção"}:
+        if self._snap_resultado and self._snap_resultado.tipo in {"nó", "ponto médio", "centro", "borda",
+                                                                  "borda graduação", "coord", "interseção",
+                                                                  "graduação"}:
             return destino
         candidatos: list[QPointF] = []
         candidatos.extend(self._pontos_reta[:-1])
@@ -2035,6 +2106,7 @@ class VisualizacaoCanvas(QWidget):
             if molde_alvo is not None:
                 self._sequencia_clique_direito = 0
                 self._selecionados = {molde_alvo}
+                self._indice_propriedades_preferido = int(molde_alvo)
                 self.update()
                 self._ativar_ferramenta_janela_principal("propriedades")
                 event.accept()
@@ -2230,10 +2302,20 @@ class VisualizacaoCanvas(QWidget):
         linha_id = str(elemento.get("molde_id") or metadados.get("molde_id") or "").strip()
         if subtipo == "costura" or costura_id:
             molde = self._molde_por_id_visualizacao(costura_id or linha_id)
-            return bool(isinstance(molde, dict) and molde.get("mostrar_costura", True) is False)
+            if not isinstance(molde, dict):
+                return False
+            if molde.get("mostrar_costura", True) is False:
+                return True
+            costura_graduacao = bool(
+                elemento.get("costura_graduacao")
+                or metadados.get("costura_graduacao")
+                or elemento.get("graduacao_tamanho")
+                or metadados.get("graduacao_tamanho")
+            )
+            return bool(costura_graduacao and molde.get("mostrar_graduacao", True) is False)
         if subtipo == "linha_interna" or bool(elemento.get("molde_linha_vinculada")):
             molde = self._molde_por_id_visualizacao(linha_id)
-            return bool(isinstance(molde, dict) and molde.get("mostrar_linhas_auxiliares", True) is False)
+            return bool(isinstance(molde, dict) and molde.get("mostrar_linhas_auxiliares", False) is False)
         return False
 
     def _desenhar_visualizacao_instantanea(self, painter: QPainter):
@@ -2385,7 +2467,17 @@ class VisualizacaoCanvas(QWidget):
         if resultado is None:
             return False
         tipo = str(getattr(resultado, "tipo", "") or "").strip().lower()
-        if tipo not in {"borda", "nó", "no", "controle", "controle principal", "controle auxiliar", "ponto médio"}:
+        if tipo not in {
+            "borda",
+            "borda graduação",
+            "nó",
+            "no",
+            "controle",
+            "controle principal",
+            "controle auxiliar",
+            "graduação",
+            "ponto médio",
+        }:
             return False
         ponto = getattr(resultado, "ponto", None)
         if not isinstance(ponto, QPointF):
@@ -2469,6 +2561,7 @@ class VisualizacaoCanvas(QWidget):
             base = pontos[:-1] if pontos and pontos[0] == pontos[-1] else pontos
             if not base:
                 continue
+            self._redesenhar_contorno_molde_superior(painter, el, base)
             # A referência pontilhada acompanha o lado dobrado do papel.
             # Ela NÃO representa mais o molde aberto antigo; representa onde o lado ficou após dobrar.
             # O eixo azul continua sendo apenas guia operacional de Dobrar/Desdobrar.
@@ -2503,7 +2596,7 @@ class VisualizacaoCanvas(QWidget):
                 base,
                 chave="descricao",
                 texto=str(el.get("descricao") or ""),
-                visivel=bool(el.get("visual_descricao", el.get("mostrar_descricao", False))),
+                visivel=bool(el.get("visual_descricao", el.get("mostrar_descricao", True))),
                 padrao_ref="Centro abaixo",
             )
             self._desenhar_texto_config_molde_canvas(
@@ -2628,6 +2721,15 @@ class VisualizacaoCanvas(QWidget):
                         pt_tela = self._cena_para_tela(pt)
                         painter.drawRect(int(pt_tela.x() - 2), int(pt_tela.y() - 2), 4, 4)
 
+    def _redesenhar_contorno_molde_superior(self, painter: QPainter, el: dict, base: list[QPointF]) -> None:
+        if len(base) < 2:
+            return
+        pontos = list(base)
+        if pontos and pontos[0] != pontos[-1]:
+            pontos.append(QPointF(pontos[0]))
+        cor = self._cor_linha_elemento(el, "#ffffff")
+        self._desenhar_polilinha(painter, pontos, cor=cor, espessura=1.35, estilo="solid")
+
     def _desenhar_graduacao_moldes_visiveis(self, painter: QPainter, elementos_visiveis: set[int] | None = None):
         for idx, el in enumerate(self.cena.elementos):
             if not isinstance(el, dict) or not el.get("molde"):
@@ -2649,7 +2751,7 @@ class VisualizacaoCanvas(QWidget):
             return
         painter.save()
         try:
-            if el.get("visual_caminho_grade", False):
+            if el.get("visual_caminho_grade", True):
                 self._desenhar_caminhos_graduacao_molde(painter, el, base)
             for _nome, cor, pontos in contornos:
                 self._desenhar_polilinha(
@@ -2737,10 +2839,7 @@ class VisualizacaoCanvas(QWidget):
     def _contornos_graduacao_tabela(el: dict, base: list[QPointF]) -> list[tuple[str, str, list[QPointF]]]:
         if not isinstance(el, dict) or not isinstance(base, list) or len(base) < 2:
             return []
-        tabela = el.get("graduacao_tabela") if isinstance(el.get("graduacao_tabela"), dict) else {}
-        pontos_cfg = tabela.get("pontos") if isinstance(tabela, dict) else None
-        if not isinstance(pontos_cfg, dict):
-            pontos_cfg = el.get("graduacao_pontos")
+        pontos_cfg = VisualizacaoCanvas._pontos_cfg_graduacao(el)
         if not isinstance(pontos_cfg, dict) or not pontos_cfg:
             return []
 
@@ -2789,20 +2888,64 @@ class VisualizacaoCanvas(QWidget):
     def _caminhos_graduacao_tabela(el: dict, base: list[QPointF]) -> list[tuple[str, str, QPointF, QPointF]]:
         if not isinstance(base, list) or len(base) < 2:
             return []
+        pontos_cfg = VisualizacaoCanvas._pontos_cfg_graduacao(el)
+        if not isinstance(pontos_cfg, dict) or not pontos_cfg:
+            return []
+        tamanhos = el.get("graduacao_tamanhos") if isinstance(el, dict) else None
+        if not isinstance(tamanhos, list) or not tamanhos:
+            return []
+        linhas = [dict(linha) for linha in tamanhos if isinstance(linha, dict) and linha.get("ativo", True)]
+        if not linhas:
+            return []
+        base_idx = next((idx for idx, linha in enumerate(linhas) if linha.get("base")), len(linhas) // 2)
+        base_nome = str(linhas[base_idx].get("tamanho") or linhas[base_idx].get("nome") or "").strip()
         contorno = [QPointF(pt) for pt in base]
         if len(contorno) > 1 and contorno[0] == contorno[-1]:
             contorno = contorno[:-1]
         if len(contorno) < 2:
             return []
+        referencias = VisualizacaoCanvas._pontos_referencia_graduacao(el)
+        indices_referencia = {
+            idx
+            for ponto in referencias
+            for idx in [VisualizacaoCanvas._indice_mais_proximo_no_contorno(contorno, ponto)]
+            if idx is not None
+        }
         caminhos: list[tuple[str, str, QPointF, QPointF]] = []
-        for nome, cor, pontos_tamanho in VisualizacaoCanvas._contornos_graduacao_tabela(el, contorno):
-            pontos = [QPointF(pt) for pt in pontos_tamanho]
-            if len(pontos) > 1 and pontos[0] == pontos[-1]:
-                pontos = pontos[:-1]
-            for origem, destino in zip(contorno, pontos):
+        for linha in linhas:
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not nome or nome == base_nome:
+                continue
+            cor = str(linha.get("cor") or "#ffcc00")
+            if not QColor(cor).isValid():
+                cor = "#ffcc00"
+            ancoras = VisualizacaoCanvas._ancoras_deslocamentos_graduacao_tamanho(
+                pontos_cfg,
+                nome,
+                len(contorno),
+                contorno=contorno,
+                referencias=referencias,
+            )
+            for idx, (dx, dy) in sorted(ancoras.items()):
+                if indices_referencia and idx not in indices_referencia:
+                    continue
+                if not (0 <= int(idx) < len(contorno)):
+                    continue
+                origem = QPointF(contorno[int(idx)])
+                destino = QPointF(origem.x() + dx, origem.y() + dy)
                 if VisualizacaoCanvas._dist_qpoints(origem, destino) > 1e-7:
-                    caminhos.append((nome, cor, QPointF(origem), QPointF(destino)))
+                    caminhos.append((nome, cor, origem, destino))
         return caminhos
+
+    @staticmethod
+    def _pontos_cfg_graduacao(el: dict) -> dict | None:
+        if not isinstance(el, dict):
+            return None
+        tabela = el.get("graduacao_tabela") if isinstance(el.get("graduacao_tabela"), dict) else {}
+        pontos_cfg = tabela.get("pontos") if isinstance(tabela, dict) else None
+        if not isinstance(pontos_cfg, dict):
+            pontos_cfg = el.get("graduacao_pontos")
+        return pontos_cfg if isinstance(pontos_cfg, dict) else None
 
     @staticmethod
     def _deslocamentos_graduacao_tamanho(
@@ -2815,7 +2958,36 @@ class VisualizacaoCanvas(QWidget):
     ) -> list[tuple[float, float]]:
         if quantidade <= 0:
             return []
+        contorno_valido = contorno if isinstance(contorno, list) and len(contorno) == quantidade else None
+        ancoras = VisualizacaoCanvas._ancoras_deslocamentos_graduacao_tamanho(
+            pontos_cfg,
+            tamanho,
+            quantidade,
+            contorno=contorno_valido,
+            referencias=referencias,
+        )
+        if not ancoras or not any(abs(dx) > 1e-9 or abs(dy) > 1e-9 for dx, dy in ancoras.values()):
+            return []
+        if contorno_valido:
+            return VisualizacaoCanvas._interpolar_deslocamentos_ancorados(quantidade, ancoras)
+        saida = [(0.0, 0.0) for _ in range(quantidade)]
+        for idx, deslocamento in ancoras.items():
+            if 0 <= idx < quantidade:
+                saida[idx] = deslocamento
+        return saida
+
+    @staticmethod
+    def _ancoras_deslocamentos_graduacao_tamanho(
+        pontos_cfg: dict,
+        tamanho: str,
+        quantidade: int,
+        *,
+        contorno: list[QPointF] | None = None,
+        referencias: list[QPointF] | None = None,
+    ) -> dict[int, tuple[float, float]]:
         ancoras: dict[int, tuple[float, float]] = {}
+        if quantidade <= 0:
+            return ancoras
         contorno_valido = contorno if isinstance(contorno, list) and len(contorno) == quantidade else None
         referencias_validas = [ponto for ponto in referencias or [] if isinstance(ponto, QPointF)]
         if contorno_valido:
@@ -2850,15 +3022,7 @@ class VisualizacaoCanvas(QWidget):
                 idx = idx_cfg
             if idx is not None and 0 <= int(idx) < quantidade:
                 ancoras[int(idx)] = (dx, dy)
-        if not ancoras or not any(abs(dx) > 1e-9 or abs(dy) > 1e-9 for dx, dy in ancoras.values()):
-            return []
-        if contorno_valido:
-            return VisualizacaoCanvas._interpolar_deslocamentos_ancorados(quantidade, ancoras)
-        saida = [(0.0, 0.0) for _ in range(quantidade)]
-        for idx, deslocamento in ancoras.items():
-            if 0 <= idx < quantidade:
-                saida[idx] = deslocamento
-        return saida
+        return ancoras
 
     @staticmethod
     def _iter_pontos_graduacao_cfg(pontos_cfg: dict):
@@ -2886,6 +3050,22 @@ class VisualizacaoCanvas(QWidget):
             if pontos:
                 return pontos
         return []
+
+    @staticmethod
+    def _base_graduacao_elemento(el: dict) -> list[QPointF]:
+        if not isinstance(el, dict):
+            return []
+        pontos: list[QPointF] = []
+        origem = el.get("pontos")
+        if not isinstance(origem, list):
+            return pontos
+        for item in origem:
+            ponto = VisualizacaoCanvas._qpoint_graduacao_cfg(item)
+            if ponto is not None:
+                pontos.append(ponto)
+        if len(pontos) > 1 and VisualizacaoCanvas._dist_qpoints(pontos[0], pontos[-1]) <= 1e-7:
+            pontos.pop()
+        return pontos
 
     @staticmethod
     def _qpoint_graduacao_cfg(valor) -> QPointF | None:
@@ -3520,7 +3700,7 @@ class VisualizacaoCanvas(QWidget):
         tecido = str(el.get("tecido") or "").strip()
         if el.get("visual_tecido", False) and tecido:
             linhas.append(f"Tecido {tecido}")
-        if el.get("visual_quantidade", False):
+        if el.get("visual_quantidade", True):
             qtd = str(el.get("qtd_modelo", 1) or 1).strip()
             sufixo = " (Par)" if el.get("par", False) else ""
             linhas.append(f"Quantidade {qtd}{sufixo}")
@@ -4374,7 +4554,75 @@ class VisualizacaoCanvas(QWidget):
             if not desenhou and ponto is not None:
                 self._desenhar_marca_x(painter, ponto, cor=cor, tamanho_px=7)
         self._desenhar_piques_graduados_configurados(painter, elemento, cor_molde, configs)
+        self._desenhar_textos_piques_configurados(painter, elemento, cor_molde, configs)
         return pontos_desenhados
+
+    def _desenhar_textos_piques_configurados(self, painter: QPainter, elemento: dict, cor_molde: str, configs: list[dict]) -> None:
+        for cfg in configs:
+            texto = self._texto_cfg_pique(cfg)
+            if not texto:
+                continue
+            ponto = self._ponto_cfg_pique(cfg) or self._ponto_cfg_pique({"ponto": cfg.get("ponto_controle")})
+            if ponto is None:
+                continue
+            pos_texto = self._posicao_texto_cfg_pique(cfg, ponto)
+            tela = self._cena_para_tela(pos_texto)
+            altura_cm = self._float_cfg_pique(cfg, ("texto_altura_cm", "altura_texto_cm"), 0.45)
+            cor_padrao = self._cor_piques_elemento(elemento, cor_molde, interno=not bool(cfg.get("sobre_contorno", True)))
+            cor = QColor(self._cor_cfg_pique_texto(cfg, cor_padrao))
+
+            painter.save()
+            fonte = painter.font()
+            fonte.setBold(False)
+            fonte.setPixelSize(int(round(self._tamanho_texto_cm_para_px(altura_cm, minimo_px=7.0, maximo_px=96.0))))
+            painter.setFont(fonte)
+            metrics = QFontMetrics(painter.font())
+            linhas = texto.splitlines() or [texto]
+            largura = max(metrics.horizontalAdvance(linha) for linha in linhas) + 10
+            altura = (metrics.height() * len(linhas)) + 4
+            rect = QRectF(tela.x() - largura / 2.0, tela.y() - altura / 2.0, largura, altura)
+            halo = QColor("#000000" if cor.lightness() > 140 else "#ffffff")
+            halo.setAlpha(165)
+            painter.setPen(QPen(halo, 1.0))
+            for dx, dy in ((-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)):
+                painter.drawText(rect.translated(dx, dy), Qt.AlignCenter, texto)
+            painter.setPen(QPen(cor, 1.0))
+            painter.drawText(rect, Qt.AlignCenter, texto)
+            painter.restore()
+
+    @staticmethod
+    def _texto_cfg_pique(cfg: dict) -> str:
+        if not isinstance(cfg, dict):
+            return ""
+        for chave in ("texto_pique", "pique_texto", "texto"):
+            texto = str(cfg.get(chave) or "").strip()
+            if texto:
+                return texto
+        return ""
+
+    @staticmethod
+    def _float_cfg_pique(cfg: dict, chaves: tuple[str, ...], padrao: float) -> float:
+        if not isinstance(cfg, dict):
+            return float(padrao)
+        for chave in chaves:
+            try:
+                valor = cfg.get(chave)
+                if valor is not None:
+                    return float(valor)
+            except Exception:
+                continue
+        return float(padrao)
+
+    @staticmethod
+    def _posicao_texto_cfg_pique(cfg: dict, ponto: QPointF) -> QPointF:
+        dx = VisualizacaoCanvas._float_cfg_pique(cfg, ("texto_dx_cm", "texto_offset_x_cm"), 0.35)
+        dy = VisualizacaoCanvas._float_cfg_pique(cfg, ("texto_dy_cm", "texto_offset_y_cm"), -0.35)
+        return QPointF(float(ponto.x()) + dx, float(ponto.y()) + dy)
+
+    @staticmethod
+    def _cor_cfg_pique_texto(cfg: dict, padrao: str) -> str:
+        cor = QColor(str(cfg.get("texto_cor") or "")) if isinstance(cfg, dict) else QColor()
+        return cor.name() if cor.isValid() else str(padrao or "#ffffff")
 
     def _desenhar_piques_graduados_configurados(self, painter: QPainter, elemento: dict, cor_molde: str, configs: list[dict]) -> None:
         if elemento.get("mostrar_graduacao", True) is False:
@@ -4563,6 +4811,7 @@ class VisualizacaoCanvas(QWidget):
         candidatos: dict[int, float] = {}
 
         def adicionar_candidato(idx: int, distancia: float) -> None:
+            idx = self._indice_molde_dono_costura(idx)
             atual = candidatos.get(idx)
             if atual is None or distancia < atual:
                 candidatos[idx] = distancia
@@ -4690,6 +4939,46 @@ class VisualizacaoCanvas(QWidget):
     def _molde_id_elemento(self, elemento: dict) -> str:
         return str(elemento.get("molde_id") or elemento.get("id") or "").strip()
 
+    def _indice_molde_dono_costura(self, elemento_ou_idx) -> int:
+        if isinstance(elemento_ou_idx, int):
+            idx_original = int(elemento_ou_idx)
+            if not (0 <= idx_original < len(self.cena.elementos)):
+                return idx_original
+            elemento = self.cena.elementos[idx_original]
+        else:
+            idx_original = -1
+            elemento = elemento_ou_idx
+        if not isinstance(elemento, dict) or elemento.get("molde"):
+            return idx_original
+        metadados = elemento.get("metadados") if isinstance(elemento.get("metadados"), dict) else {}
+        subtipo = str(elemento.get("subtipo_audaces") or metadados.get("subtipo_audaces") or "").strip()
+        if subtipo != "costura" and not elemento.get("costura_de_molde_id") and not metadados.get("costura_de_molde_id"):
+            return idx_original
+        molde_id = str(elemento.get("costura_de_molde_id") or metadados.get("costura_de_molde_id") or "").strip()
+        if not molde_id:
+            return idx_original
+        for idx, el in enumerate(self.cena.elementos):
+            if isinstance(el, dict) and el.get("molde") and self._molde_id_elemento(el) == molde_id:
+                return idx
+        return idx_original
+
+    def _indices_transformacao_com_vinculados(self, indices) -> list[int]:
+        normalizados: set[int] = set()
+        for idx_raw in indices or []:
+            try:
+                idx = int(idx_raw)
+            except Exception:
+                continue
+            if not (0 <= idx < len(self.cena.elementos)):
+                continue
+            dono = self._indice_molde_dono_costura(idx)
+            normalizados.add(dono if 0 <= dono < len(self.cena.elementos) else idx)
+
+        for idx in list(normalizados):
+            if 0 <= idx < len(self.cena.elementos) and self.cena.elementos[idx].get("molde"):
+                normalizados.update(self._indices_costuras_vinculadas(idx))
+        return sorted(i for i in normalizados if 0 <= i < len(self.cena.elementos))
+
     def _indices_costuras_vinculadas(self, elemento_ou_idx) -> list[int]:
         if isinstance(elemento_ou_idx, int):
             if not (0 <= elemento_ou_idx < len(self.cena.elementos)):
@@ -4707,6 +4996,16 @@ class VisualizacaoCanvas(QWidget):
             if costura_vinculada or linha_vinculada:
                 indices.append(idx)
         return indices
+
+    def _sincronizar_costuras_dependentes(self) -> bool:
+        try:
+            from tools.costura_tool import Ferramenta as FerramentaCostura
+        except Exception:
+            return False
+        try:
+            return bool(FerramentaCostura().sincronizar_costuras_vinculadas(self))
+        except Exception:
+            return False
 
     def _pontos_costuras_vinculadas(self, elemento: dict) -> list[QPointF]:
         pontos: list[QPointF] = []

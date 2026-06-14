@@ -17,14 +17,18 @@ if find_spec("PySide6") is None:
     PropriedadesMoldesDialog = None
     QApplication = None
     QComboBox = None
+    QIcon = None
     QLabel = None
     QLineEdit = None
     QPointF = None
+    QTreeWidget = None
 else:
     from PySide6.QtCore import QPointF
-    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
+    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QTreeWidget
 
     from tools.propriedades_tool import (
+        CHAVE_VISUALIZACAO_CUSTOMIZADA,
         FLAGS_VISUALIZACAO_MOLDE,
         MoldeRef,
         NumeroLimpoDoubleSpinBox,
@@ -241,21 +245,101 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         for _attr, chave, padrao in FLAGS_VISUALIZACAO_MOLDE:
             self.assertEqual(flags[chave], not padrao)
             self.assertEqual(molde[chave], not padrao)
+        self.assertTrue(molde[CHAVE_VISUALIZACAO_CUSTOMIZADA])
 
-    def test_preencher_flags_visualizacao_respeita_defaults_antigos(self):
+    def test_preencher_flags_visualizacao_normaliza_molde_legado_para_novo_padrao(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         checks = {}
         for attr, _chave, _padrao in FLAGS_VISUALIZACAO_MOLDE:
             checks[attr] = self._CheckFake(False)
             setattr(dialog, attr, checks[attr])
 
-        PropriedadesMoldesDialog._preencher_flags_visualizacao(dialog, {"mostrar_graduacao": False, "visual_tecido": True})
+        molde = {"mostrar_graduacao": False, "visual_tecido": True}
+        PropriedadesMoldesDialog._preencher_flags_visualizacao(dialog, molde)
+
+        self.assertTrue(checks["chk_graduacao"].isChecked())
+        self.assertFalse(checks["chk_tecido_visual"].isChecked())
+        self.assertTrue(checks["chk_mostrar_nome"].isChecked())
+        self.assertTrue(checks["chk_visual_descricao"].isChecked())
+        self.assertTrue(checks["chk_mostrar_fio"].isChecked())
+        self.assertTrue(checks["chk_costura"].isChecked())
+        self.assertTrue(checks["chk_mostrar_numeros"].isChecked())
+        self.assertTrue(checks["chk_caminho_grade"].isChecked())
+        self.assertTrue(checks["chk_quantidade_visual"].isChecked())
+        self.assertTrue(checks["chk_pique"].isChecked())
+        self.assertFalse(checks["chk_modelo"].isChecked())
+        self.assertFalse(checks["chk_preencher"].isChecked())
+        self.assertFalse(checks["chk_linhas_aux"].isChecked())
+        self.assertFalse(checks["chk_grade_tam"].isChecked())
+        self.assertFalse(checks["chk_perimetro_molde"].isChecked())
+        self.assertFalse(checks["chk_margem_visual"].isChecked())
+        self.assertFalse(checks["chk_giro_visual"].isChecked())
+        self.assertTrue(molde["mostrar_graduacao"])
+        self.assertFalse(molde["visual_tecido"])
+        self.assertNotIn(CHAVE_VISUALIZACAO_CUSTOMIZADA, molde)
+
+    def test_preencher_flags_visualizacao_preserva_molde_customizado(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        checks = {}
+        for attr, _chave, _padrao in FLAGS_VISUALIZACAO_MOLDE:
+            checks[attr] = self._CheckFake(False)
+            setattr(dialog, attr, checks[attr])
+
+        PropriedadesMoldesDialog._preencher_flags_visualizacao(
+            dialog,
+            {
+                CHAVE_VISUALIZACAO_CUSTOMIZADA: True,
+                "mostrar_graduacao": False,
+                "visual_tecido": True,
+            },
+        )
 
         self.assertFalse(checks["chk_graduacao"].isChecked())
         self.assertTrue(checks["chk_tecido_visual"].isChecked())
-        self.assertTrue(checks["chk_mostrar_nome"].isChecked())
-        self.assertTrue(checks["chk_pique"].isChecked())
-        self.assertFalse(checks["chk_modelo"].isChecked())
+
+    def test_indice_molde_preferencial_usa_indice_forcado_do_duplo_clique(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        elementos = [
+            {"molde": True, "nome_molde": "K1"},
+            {"molde": True, "nome_molde": "K2"},
+            {"molde": True, "nome_molde": "K3"},
+        ]
+        dialog.canvas = SimpleNamespace(_selecionados={0}, _indice_propriedades_preferido=2)
+        dialog._elementos_edicao = lambda: elementos
+
+        self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 2)
+
+    def test_recarregar_lista_prioriza_molde_selecionado_no_canvas(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        elementos = [
+            {"molde": True, "nome_molde": "K1", "tecido": "1"},
+            {"molde": True, "nome_molde": "K2", "tecido": "1"},
+            {"molde": True, "nome_molde": "K3", "tecido": "1"},
+        ]
+        preenchidos = []
+        dialog.canvas = SimpleNamespace(_selecionados={2})
+        dialog.arvore = QTreeWidget()
+        dialog._indice_atual = 0
+        dialog._refs = []
+        dialog._itens_molde_por_indice = {}
+        dialog._combos_tecido_por_item = {}
+        dialog._suspender_item_changed = False
+        dialog._suspender_combo_tecido_arvore = False
+        dialog._elementos_edicao = lambda: elementos
+        dialog._atualizar_conflitos_grade_modelo = lambda: None
+        dialog._tecidos_disponiveis = lambda: []
+        dialog._assinatura_grade_referencia_global = lambda: None
+        dialog._icone_status_molde = lambda *_args, **_kwargs: QIcon()
+        dialog._instalar_combo_tecido_item = lambda *_args, **_kwargs: None
+        dialog._atualizar_combo_moldes = lambda: None
+        dialog._preencher_campos = lambda molde: preenchidos.append(
+            molde.get("nome_molde") if isinstance(molde, dict) else None
+        )
+
+        PropriedadesMoldesDialog.recarregar_lista(dialog)
+
+        self.assertEqual(dialog._indice_atual, 2)
+        self.assertEqual(preenchidos[-1], "K3")
 
     def test_preview_graduacao_respeita_checkbox_visualizacao(self):
         from canvas.visualizacao import VisualizacaoCanvas

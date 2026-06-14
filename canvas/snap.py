@@ -29,7 +29,9 @@ def rotulo_tipo_snap(tipo: str | None) -> str:
         "controle": "Nó",
         "controle principal": "Nó principal",
         "controle auxiliar": "Nó auxiliar",
+        "graduacao": "Graduação",
         "borda": "Borda",
+        "borda graduacao": "Borda graduação",
         "ponto medio": "Ponto mediano",
         "centro": "Centro",
         "intersecao": "Interseção",
@@ -56,7 +58,9 @@ def tipo_snap_movimento_fluido(tipo: str | None) -> bool:
         "controle",
         "controle principal",
         "controle auxiliar",
+        "graduacao",
         "borda",
+        "borda graduacao",
         "ponto medio",
     }
 

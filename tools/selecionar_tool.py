@@ -193,6 +193,9 @@ class Ferramenta(FerramentaBase):
     def _pontos_elemento_para_selecao(self, canvas, el: dict) -> list[QPointF]:
         if not isinstance(el, dict):
             return []
+        subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").strip()
+        if subtipo == "costura" or el.get("costura_de_molde_id"):
+            return []
         if el.get("tipo") == "polyline":
             pontos_base = self._pontos_polyline(el)
             if self._elemento_curva_suave(canvas, el) and len(pontos_base) >= 3:
@@ -468,12 +471,8 @@ class Ferramenta(FerramentaBase):
 
     def _indices_para_mover(self, canvas) -> list[int]:
         indices = set(int(idx) for idx in getattr(canvas, "_selecionados", set()))
-        if hasattr(canvas, "_indices_costuras_vinculadas"):
-            for idx in list(indices):
-                if 0 <= idx < len(canvas.cena.elementos):
-                    el = canvas.cena.elementos[idx]
-                    if el.get("molde"):
-                        indices.update(canvas._indices_costuras_vinculadas(idx))
+        if hasattr(canvas, "_indices_transformacao_com_vinculados"):
+            return list(canvas._indices_transformacao_com_vinculados(indices))
         return sorted(indices)
 
     def _capturar_originais(self, canvas, indices: list[int]) -> dict[int, dict]:

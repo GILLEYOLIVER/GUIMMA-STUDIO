@@ -1362,9 +1362,6 @@ class Ferramenta(FerramentaBase):
                     valores = self._valores_dados_graduacao(dados)
                     if valores:
                         return valores
-        valores = self._valores_ponto_interpolados(molde, ponto)
-        if valores:
-            return valores
         return {}
 
     def _ponto_contorno_por_indice(self, molde: dict, ponto_idx: int | None) -> QPointF | None:
@@ -1404,49 +1401,6 @@ class Ferramenta(FerramentaBase):
         if isinstance(dados, dict) and isinstance(dados.get("valores"), dict):
             return deepcopy(dados["valores"])
         return {}
-
-    def _valores_ponto_interpolados(self, molde: dict, ponto: QPointF | None) -> dict[str, dict]:
-        if ponto is None:
-            return {}
-        fontes = self._fontes_pontos_graduacao(molde)
-        pontos_cfg = fontes[0] if fontes else {}
-        if not pontos_cfg:
-            return {}
-        try:
-            from canvas.visualizacao import VisualizacaoCanvas
-        except Exception:
-            return {}
-        base = VisualizacaoCanvas._base_contorno_graduacao(molde)
-        if len(base) < 2:
-            base = self._pontos_contorno(molde)
-        if len(base) < 2:
-            return {}
-        referencias = VisualizacaoCanvas._pontos_referencia_graduacao(molde)
-        valores: dict[str, dict] = {}
-        for linha in self._tamanhos_molde(molde):
-            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
-            if not nome:
-                continue
-            if bool(linha.get("base", False)):
-                valores[nome] = {"dx": 0.0, "dy": 0.0}
-                continue
-            deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
-                pontos_cfg,
-                nome,
-                len(base),
-                contorno=base,
-                referencias=referencias,
-            )
-            deslocamento = (
-                VisualizacaoCanvas._deslocamento_graduacao_no_ponto(base, deslocamentos, ponto)
-                if deslocamentos
-                else None
-            )
-            valores[nome] = {
-                "dx": float(deslocamento.x()) if deslocamento is not None else 0.0,
-                "dy": float(deslocamento.y()) if deslocamento is not None else 0.0,
-            }
-        return valores if any(abs(v.get("dx", 0.0)) > 1e-9 or abs(v.get("dy", 0.0)) > 1e-9 for v in valores.values()) else {}
 
     def _remover_graduacao_mesmo_ponto(self, pontos_cfg: dict, ponto: QPointF, chave_atual: str) -> None:
         if not isinstance(pontos_cfg, dict):
