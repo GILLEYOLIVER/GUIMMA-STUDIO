@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.formatacao import formatar_numero, normalizar_decimal_ponto, numero_decimal_ponto
+from core.geometry_cpp_bridge import seam_offset_closed_cpp
 from tools.tool_base import FerramentaBase
+from tools.unidades import unidade_canvas
 from ui.posicao_janelas import restaurar_posicao, salvar_posicao
 
 
@@ -71,6 +73,8 @@ class CosturaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._chave_posicao = "dialog:costura"
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
         self.setWindowTitle("Costura")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
@@ -131,7 +135,8 @@ class CosturaDialog(QDialog):
         topo.addWidget(self.cmb_tipo, 0, 0, 1, 2)
         topo.addWidget(QLabel("Posição"), 0, 2)
         topo.addWidget(self.cmb_posicao, 0, 3)
-        topo.addWidget(QLabel("Costura (cm)"), 1, 0)
+        self.lbl_costura = QLabel("Costura (cm)")
+        topo.addWidget(self.lbl_costura, 1, 0)
         topo.addWidget(self.sp_costura, 1, 1)
         topo.addWidget(self.chk_pique, 1, 2)
         topo.addWidget(self.cmb_pique, 1, 3)
@@ -173,6 +178,40 @@ class CosturaDialog(QDialog):
         self._atualizar_tooltip_acabamento(self.cmb_acab_ini)
         self._atualizar_tooltip_acabamento(self.cmb_acab_fim)
         self._alternar_largura_fim(False)
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        largura_inicio = float(self.sp_costura.value()) * fator_antigo
+        largura_fim = float(self.sp_costura_fim.value()) * fator_antigo
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.lbl_costura.setText(f"Costura ({self._unidade_sigla})")
+        self.chk_costura_fim.setText(f"Largura do fim da costura ({self._unidade_sigla})")
+        self.tabela.setHorizontalHeaderLabels(["Pos.", f"Costura ({self._unidade_sigla})", "Acabamento"])
+        self.set_margem_cena(largura_inicio)
+        if self.chk_costura_fim.isChecked():
+            self.set_margem_fim_cena(largura_fim)
+
+    def _para_unidade(self, valor_cena: float) -> float:
+        return float(valor_cena) / self._unidade_fator
+
+    def _para_cena(self, valor_unidade: float) -> float:
+        return float(valor_unidade) * self._unidade_fator
+
+    def _fmt_medida(self, valor_cena: float) -> str:
+        return Ferramenta._fmt(self._para_unidade(valor_cena))
+
+    def set_margem_cena(self, valor_cena: float) -> None:
+        self.sp_costura.blockSignals(True)
+        self.sp_costura.setValue(self._para_unidade(valor_cena))
+        self.sp_costura.blockSignals(False)
+        if not self.chk_costura_fim.isChecked():
+            self.set_margem_fim_cena(valor_cena)
+
+    def set_margem_fim_cena(self, valor_cena: float) -> None:
+        self.sp_costura_fim.blockSignals(True)
+        self.sp_costura_fim.setValue(self._para_unidade(valor_cena))
+        self.sp_costura_fim.blockSignals(False)
 
     def _configurar_combo_acabamento(self, combo: QComboBox) -> None:
         combo.setIconSize(QSize(42, 28))
@@ -301,10 +340,10 @@ class CosturaDialog(QDialog):
         self.sp_costura_fim.blockSignals(False)
 
     def margem(self) -> float:
-        return float(self.sp_costura.value())
+        return self._para_cena(float(self.sp_costura.value()))
 
     def margem_final(self) -> float:
-        return float(self.sp_costura_fim.value()) if self.chk_costura_fim.isChecked() else self.margem()
+        return self._para_cena(float(self.sp_costura_fim.value())) if self.chk_costura_fim.isChecked() else self.margem()
 
     def usa_largura_final(self) -> bool:
         return bool(self.chk_costura_fim.isChecked())
@@ -317,10 +356,13 @@ class CosturaDialog(QDialog):
             if self.usa_largura_final():
                 self.atualizar_status(
                     "Preview de costura: início "
-                    f"{Ferramenta._fmt(self.margem())} cm → fim {Ferramenta._fmt(self.margem_final())} cm."
+                    f"{self._fmt_medida(self.margem())} {self._unidade_sigla} → fim "
+                    f"{self._fmt_medida(self.margem_final())} {self._unidade_sigla}."
                 )
             else:
-                self.atualizar_status(f"Preview de costura com largura de {Ferramenta._fmt(self.margem())} cm.")
+                self.atualizar_status(
+                    f"Preview de costura com largura de {self._fmt_medida(self.margem())} {self._unidade_sigla}."
+                )
 
     def atualizar_tabela_segmentos(
         self,
@@ -351,9 +393,9 @@ class CosturaDialog(QDialog):
                     pos = posicoes[i]
                     ini = largura_inicio + ((largura_fim - largura_inicio) * (pos / qtd))
                     fim = largura_inicio + ((largura_fim - largura_inicio) * ((pos + 1) / qtd))
-                    largura_txt = f"{Ferramenta._fmt(ini)}→{Ferramenta._fmt(fim)}"
+                    largura_txt = f"{self._fmt_medida(ini)}→{self._fmt_medida(fim)}"
                 else:
-                    largura_txt = Ferramenta._fmt(largura_inicio)
+                    largura_txt = self._fmt_medida(largura_inicio)
                 acabamento_txt = self.cmb_acab_ini.currentText()
             else:
                 largura_txt = "0"
@@ -421,7 +463,7 @@ class Ferramenta(FerramentaBase):
         dialog.raise_()
         dialog.activateWindow()
         self._direito_confirma_fechamento = False
-        dialog.atualizar_status(self._mensagem_pronta())
+        dialog.atualizar_status(self._mensagem_pronta(canvas))
 
     def on_deactivate(self, canvas):
         self._limpar_estado()
@@ -506,7 +548,10 @@ class Ferramenta(FerramentaBase):
             canvas._selecionados = {idx}
             self._costura_finalizada = True
             self._direito_confirma_fechamento = False
-            self.set_status(f"Costura criada com margem de {self._fmt(self._margem_cm)} cm. Clique esquerdo continua; direito fecha.")
+            self.set_status(
+                f"Costura criada com margem de {self._fmt_medida_canvas(canvas, self._margem_cm)}. "
+                "Clique esquerdo continua; direito fecha."
+            )
         else:
             self.set_status("Nao foi possivel gerar costura para esse contorno.")
         event.accept()
@@ -536,7 +581,7 @@ class Ferramenta(FerramentaBase):
         if tecla == Qt.Key_Escape:
             self._limpar_estado()
             canvas.update()
-            self.set_status(self._mensagem_pronta())
+            self.set_status(self._mensagem_pronta(canvas))
             return True
         return False
 
@@ -594,11 +639,9 @@ class Ferramenta(FerramentaBase):
     def _ajustar_margem(self, canvas, delta: float) -> None:
         self._margem_cm = max(0.0, round(self._margem_cm + delta, 2))
         dialog = self._obter_dialog(canvas)
-        dialog.sp_costura.blockSignals(True)
-        dialog.sp_costura.setValue(self._margem_cm)
-        dialog.sp_costura.blockSignals(False)
+        dialog.set_margem_cena(self._margem_cm)
         self._recalcular_preview(canvas)
-        self.set_status(self._mensagem_pronta())
+        self.set_status(self._mensagem_pronta(canvas))
 
     def _obter_dialog(self, canvas) -> CosturaDialog:
         chave = id(canvas)
@@ -607,6 +650,7 @@ class Ferramenta(FerramentaBase):
         if dialog is None or dialog.parentWidget() is not parent:
             dialog = CosturaDialog(parent)
             self._dialog_por_canvas[chave] = dialog
+        dialog.set_unidade(*unidade_canvas(canvas))
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.sp_costura.valueChanged.connect(lambda valor: self._definir_margem(canvas, float(valor)))
@@ -619,13 +663,20 @@ class Ferramenta(FerramentaBase):
             dialog.cmb_pique.currentTextChanged.connect(lambda _txt: self._atualizar_dialog_com_preview(canvas))
         return dialog
 
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.set_unidade(*unidade_canvas(canvas))
+            self._atualizar_dialog_com_preview(canvas)
+            self._recalcular_preview(canvas)
+
     def _definir_margem(self, canvas, valor: float) -> None:
-        self._margem_cm = max(0.0, round(float(valor), 2))
         dialog = self._obter_dialog(canvas)
+        self._margem_cm = max(0.0, round(float(dialog.margem()), 3))
         if not dialog.chk_costura_fim.isChecked():
             dialog._sincronizar_largura_fim_desabilitada()
         self._recalcular_preview(canvas)
-        self.set_status(self._mensagem_pronta())
+        self.set_status(self._mensagem_pronta(canvas))
 
     def _recalcular_preview(self, canvas) -> None:
         if self._modo(canvas) == "Selecionar":
@@ -1093,8 +1144,8 @@ class Ferramenta(FerramentaBase):
             pique = dialog.cmb_pique.currentText() if dialog.chk_pique.isChecked() else ""
             acabamento_inicial = dialog.acabamento_inicial()
             acabamento_final = dialog.acabamento_final()
-            largura_inicio = float(dialog.sp_costura.value())
-            largura_fim = float(dialog.sp_costura_fim.value()) if dialog.chk_costura_fim.isChecked() else largura_inicio
+            largura_inicio = float(dialog.margem())
+            largura_fim = float(dialog.margem_final()) if dialog.chk_costura_fim.isChecked() else largura_inicio
             usar_largura_fim = bool(dialog.chk_costura_fim.isChecked())
         return {
             "tipo": "polyline",
@@ -1185,10 +1236,7 @@ class Ferramenta(FerramentaBase):
             from canvas.visualizacao import VisualizacaoCanvas
         except Exception:
             return []
-        pontos = self._pontos_fechados(alvo)
-        base = [QPointF(float(x), float(y)) for x, y in pontos]
-        if len(base) > 1 and base[0] == base[-1]:
-            base = base[:-1]
+        base = VisualizacaoCanvas._base_graduacao_elemento(alvo)
         if len(base) < 2:
             return []
         try:
@@ -1390,17 +1438,77 @@ class Ferramenta(FerramentaBase):
             ordem = self._ordenar_segmentos_contiguos(base_interativa, segmentos) or ordem
         pontos = self._pontos_fechados(alvo)
 
+        assinatura_cache = self._assinatura_costura_sincronizada(
+            alvo,
+            costura,
+            total,
+            segmentos,
+            ordem,
+            margem_inicio,
+            margem_fim,
+            usar_largura_fim,
+            acabamento_inicial,
+            acabamento_final,
+        )
+        cache = costura.get("_runtime_costura_sincronizada_cache") if isinstance(costura, dict) else None
+        if isinstance(cache, dict) and cache.get("assinatura") == assinatura_cache:
+            pontos_cache = cache.get("pontos")
+            if isinstance(pontos_cache, tuple):
+                return [tuple(ponto) for ponto in pontos_cache]
+
         original_larguras = self._larguras_atuais
         original_acabamentos = self._acabamentos_atuais
         self._larguras_atuais = lambda _canvas: (margem_inicio, margem_fim, usar_largura_fim)  # type: ignore[method-assign]
         self._acabamentos_atuais = lambda _canvas: (acabamento_inicial, acabamento_final)  # type: ignore[method-assign]
         try:
             if parcial:
-                return self._gerar_costura_segmentos_atual(canvas, pontos, segmentos, ordem, alvo)
-            return self._gerar_costura_atual(canvas, pontos, alvo)
+                gerados = self._gerar_costura_segmentos_atual(canvas, pontos, segmentos, ordem, alvo)
+            else:
+                gerados = self._gerar_costura_atual(canvas, pontos, alvo)
         finally:
             self._larguras_atuais = original_larguras  # type: ignore[method-assign]
             self._acabamentos_atuais = original_acabamentos  # type: ignore[method-assign]
+        costura["_runtime_costura_sincronizada_cache"] = {
+            "assinatura": assinatura_cache,
+            "pontos": tuple((float(x), float(y)) for x, y in gerados),
+        }
+        return gerados
+
+    def _assinatura_costura_sincronizada(
+        self,
+        alvo: dict,
+        costura: dict,
+        total: int,
+        segmentos: set[int],
+        ordem: list[int],
+        margem_inicio: float,
+        margem_fim: float,
+        usar_largura_fim: bool,
+        acabamento_inicial: str,
+        acabamento_final: str,
+    ) -> tuple:
+        metadados = costura.get("metadados") if isinstance(costura.get("metadados"), dict) else {}
+        return (
+            self._assinatura_geometria_costura(alvo),
+            int(total),
+            tuple(sorted(int(s) for s in segmentos)),
+            tuple(int(s) for s in ordem),
+            round(float(margem_inicio), 6),
+            round(float(margem_fim), 6),
+            bool(usar_largura_fim),
+            str(acabamento_inicial),
+            str(acabamento_final),
+            bool(costura.get("costura_parcial")),
+            str(costura.get("graduacao_tamanho") or metadados.get("graduacao_tamanho") or ""),
+        )
+
+    def _assinatura_geometria_costura(self, elemento: dict) -> tuple:
+        return (
+            tuple(self._lista_pontos_tupla(elemento.get("pontos", []) or [])),
+            tuple(self._lista_pontos_tupla(elemento.get("controle_cantos", []) or [])),
+            tuple(self._lista_pontos_tupla(elemento.get("pontos_controle_principais", []) or [])),
+            tuple(self._lista_pontos_tupla(elemento.get("pontos_principais", []) or [])),
+        )
 
     def _alvo_geometrico_costura_sincronizada(self, molde: dict, costura: dict) -> dict | None:
         metadados = costura.get("metadados") if isinstance(costura.get("metadados"), dict) else {}
@@ -1717,6 +1825,7 @@ class Ferramenta(FerramentaBase):
         return pontos
 
     def _controles_principais_elemento(self, elemento: dict) -> list[tuple[float, float]]:
+        nao_dividem_costura = self._controles_que_nao_dividem_costura(elemento)
         for chave in ("controle_cantos", "pontos_controle_principais", "pontos_principais", "pontos_controle"):
             controles = self._lista_pontos_tupla(elemento.get(chave, []) or [])
             if len(controles) >= 3:
@@ -1726,9 +1835,34 @@ class Ferramenta(FerramentaBase):
                         saida.append(ponto)
                 if len(saida) >= 2 and self._dist(saida[0], saida[-1]) <= 1e-6:
                     saida = saida[:-1]
+                filtrada = [
+                    ponto for ponto in saida
+                    if not any(self._dist(ponto, ignorar) <= 1e-6 for ignorar in nao_dividem_costura)
+                ]
+                if len(filtrada) >= 3:
+                    saida = filtrada
                 if len(saida) >= 3:
                     return saida
         return []
+
+    def _controles_que_nao_dividem_costura(self, elemento: dict) -> list[tuple[float, float]]:
+        saida: list[tuple[float, float]] = []
+
+        def adicionar(ponto: tuple[float, float] | None) -> None:
+            if ponto is None:
+                return
+            if not any(self._dist(ponto, existente) <= 1e-6 for existente in saida):
+                saida.append(ponto)
+
+        for item in elemento.get("pontos_controle_pique", []) or []:
+            adicionar(self._ponto_tupla(item))
+        for item in elemento.get("pontos_controle_principais", []) or []:
+            if not isinstance(item, dict):
+                continue
+            origem = str(item.get("origem") or "").strip().lower()
+            if item.get("divide_costura") is False or origem == "pique":
+                adicionar(self._ponto_tupla(item))
+        return saida
 
     def _indice_ponto_mais_proximo(
         self,
@@ -2721,6 +2855,9 @@ class Ferramenta(FerramentaBase):
         base = pontos[:-1] if pontos and self._dist(pontos[0], pontos[-1]) <= 1e-6 else list(pontos)
         if len(base) < 3:
             return []
+        cpp = seam_offset_closed_cpp(base + [base[0]], margem)
+        if cpp:
+            return cpp
         sentido = 1.0 if self._area_assinada(base) < 0.0 else -1.0
         linhas = []
         total = len(base)
@@ -2779,9 +2916,14 @@ class Ferramenta(FerramentaBase):
     def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
         return sqrt(((a[0] - b[0]) ** 2) + ((a[1] - b[1]) ** 2))
 
-    def _mensagem_pronta(self) -> str:
+    def _fmt_medida_canvas(self, canvas, valor_cena: float) -> str:
+        sigla, fator = unidade_canvas(canvas)
+        return f"{self._fmt(float(valor_cena) / max(1e-9, fator))} {sigla}"
+
+    def _mensagem_pronta(self, canvas=None) -> str:
+        largura = self._fmt_medida_canvas(canvas, self._margem_cm) if canvas is not None else f"{self._fmt(self._margem_cm)} cm"
         return (
-            f"Costura pronta: largura inicial {self._fmt(self._margem_cm)} cm. "
+            f"Costura pronta: largura inicial {largura}. "
             "Passe o mouse para prever, clique aplica. +/- ajusta, Enter aplica na seleção."
         )
 

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from core.formatacao import numero_decimal_ponto
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -64,6 +65,7 @@ class ManipulacaoRapidaDialog(QDialog):
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
         self.setMinimumWidth(360)
+        self._unidade_sigla = "cm"
         self.setStyleSheet(
             """
             QDialog { background:#f2f2f2; color:#111111; }
@@ -96,10 +98,12 @@ class ManipulacaoRapidaDialog(QDialog):
 
         grupo_param = QGroupBox("Parâmetros")
         grid = QGridLayout(grupo_param)
-        grid.addWidget(QLabel("Deslocamento da cópia (cm)"), 0, 0)
+        self.lbl_deslocamento = QLabel("Deslocamento da cópia (cm)")
+        grid.addWidget(self.lbl_deslocamento, 0, 0)
         self.ed_deslocamento = QLineEdit("5")
         grid.addWidget(self.ed_deslocamento, 0, 1)
-        grid.addWidget(QLabel("Fechar abertura até (cm)"), 1, 0)
+        self.lbl_folga = QLabel("Fechar abertura até (cm)")
+        grid.addWidget(self.lbl_folga, 1, 0)
         self.ed_folga = QLineEdit("0.2")
         grid.addWidget(self.ed_folga, 1, 1)
         grid.addWidget(QLabel("Girar seleção (graus)"), 2, 0)
@@ -156,11 +160,18 @@ class ManipulacaoRapidaDialog(QDialog):
         raiz.addLayout(linha)
 
     def valor_float(self, campo: QLineEdit, padrao: float) -> float:
-        valor = numero_decimal_ponto(campo.text(), float(padrao))
+        valor = numero_decimal_ponto(campo.text(), float(padrao), SUFIXOS_MEDIDA)
         if "," in str(campo.text() or ""):
             campo.setText(self._fmt(padrao))
             return float(padrao)
         return valor
+
+    def set_unidade(self, sigla: str) -> None:
+        self._unidade_sigla = str(sigla or "cm")
+        self.lbl_deslocamento.setText(f"Deslocamento da cópia ({self._unidade_sigla})")
+        self.lbl_folga.setText(f"Fechar abertura até ({self._unidade_sigla})")
+        self.ed_deslocamento.setPlaceholderText(self._unidade_sigla)
+        self.ed_folga.setPlaceholderText(self._unidade_sigla)
 
     @staticmethod
     def _fmt(valor: float) -> str:
@@ -199,7 +210,13 @@ class Ferramenta(FerramentaBase):
             dialog = ManipulacaoRapidaDialog(parent)
             self._dialog_por_canvas[chave] = dialog
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
+        dialog.set_unidade(unidade_canvas(canvas)[0])
         return dialog
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.set_unidade(unidade_canvas(canvas)[0])
 
     def _restaurar_dialog(self, canvas, dialog: ManipulacaoRapidaDialog) -> None:
         fallback = None

@@ -7,7 +7,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from core.formatacao import formatar_numero
-from tools.movimento_utils import mover_elemento_por_delta
+from tools.movimento_utils import mover_elemento_por_delta, rotacionar_elemento_por_funcao
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 
@@ -491,19 +491,7 @@ class Ferramenta(FerramentaBase):
             dx, dy = x - pivo.x(), y - pivo.y()
             return (pivo.x() + (dx * ca) + (dy * sa), pivo.y() - (dx * sa) + (dy * ca))
 
-        for chave in ("pontos", "controle_cantos", "controle_auxiliares", "marcacoes_no_perimetro", "distancias_no_perimetro", "marcacoes_perimetro"):
-            if isinstance(el.get(chave), list):
-                el[chave] = [rot(p) if self._eh_ponto(p) else p for p in el.get(chave, [])]
-        for chave in ("ponto_texto", "seta_origem", "seta_fim", "fio_origem", "fio_fim"):
-            if self._eh_ponto(el.get(chave)):
-                el[chave] = rot(el[chave])
-        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
-            if isinstance(el.get(chave), list):
-                for item in el[chave]:
-                    if isinstance(item, dict) and "x" in item and "y" in item:
-                        x, y = rot((item["x"], item["y"]))
-                        item["x"] = x
-                        item["y"] = y
+        rotacionar_elemento_por_funcao(el, rot)
 
     def _pivo_rotacao_fio(self, el: dict) -> QPointF:
         fio_origem = el.get("fio_origem")

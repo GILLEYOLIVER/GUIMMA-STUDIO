@@ -118,7 +118,7 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         self.assertEqual(molde["marcacoes_no_perimetro"], [(5.0, 0.0)])
         self.assertIn((5.0, 0.0), molde["pontos"])
         self.assertIn((5.0, 0.0), molde["controle_cantos"])
-        self.assertIn({"x": 5.0, "y": 0.0}, molde["pontos_controle_principais"])
+        self.assertIn({"x": 5.0, "y": 0.0, "origem": "pique", "divide_costura": False}, molde["pontos_controle_principais"])
         self.assertEqual(molde["controle_auxiliares"], [])
         self.assertEqual(molde["pontos_auxiliares"], [])
         self.assertEqual(molde["piques_config"][0]["tipo"], "T - forma T")
@@ -127,6 +127,59 @@ class InserirPiqueToolTestCase(unittest.TestCase):
         pontos = [p for segmento in molde["piques_config"][0]["segmentos"] for p in segmento]
         self.assertGreater(max(y for _x, y in pontos), 0.0)
         self.assertAlmostEqual(max(y for _x, y in pontos), 1.0)
+
+    def test_pique_em_ponto_principal_preserva_costura_do_trecho(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["molde_id"] = "m1"
+        molde["controle_cantos"] = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+        molde["pontos_controle_principais"] = [
+            {"x": 0.0, "y": 0.0},
+            {"x": 10.0, "y": 0.0},
+            {"x": 10.0, "y": 5.0},
+            {"x": 0.0, "y": 5.0},
+        ]
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "subtipo_audaces": "costura",
+                "costura_de_molde_id": "m1",
+                "costura_segmentos": [0],
+                "costura_parcial": True,
+                "pontos": [(0.0, -1.0), (10.0, -1.0)],
+                "metadados": {"subtipo_audaces": "costura", "costura_de_molde_id": "m1", "costura_segmentos": [0]},
+            }
+        )
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 0.0)))
+
+        costura = next(el for el in canvas.cena.elementos if el.get("subtipo_audaces") == "costura")
+        self.assertEqual(costura["costura_segmentos"], [0])
+        self.assertEqual(costura["metadados"]["costura_segmentos"], [0])
+        self.assertIn((5.0, 0.0), molde["pontos_controle_pique"])
+        self.assertIn({"x": 5.0, "y": 0.0, "origem": "pique", "divide_costura": False}, molde["pontos_controle_principais"])
+
+        from tools.costura_tool import Ferramenta as FerramentaCostura
+
+        trechos = FerramentaCostura()._segmentos_interativos_elemento(molde)
+        self.assertEqual(len(trechos), 4)
+        self.assertIn((5.0, 0.0), trechos[0])
+
+    def test_pique_no_contorno_mantem_direcao_interna_em_lados_opostos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaInserirPique()
+        ferramenta._dialog = InserirPiqueDialog()
+
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 0.0)))
+        self.assertTrue(ferramenta._aplicar_pique(canvas, 0, QPointF(5.0, 5.0)))
+
+        configs = canvas.cena.elementos[0]["piques_config"]
+        pontos_inferior = [p for segmento in configs[0]["segmentos"] for p in segmento]
+        pontos_superior = [p for segmento in configs[1]["segmentos"] for p in segmento]
+        self.assertGreater(max(y for _x, y in pontos_inferior), 0.0)
+        self.assertLess(min(y for _x, y in pontos_superior), 5.0)
 
     def test_aplicar_pique_reativa_visualizacao_de_piques(self):
         canvas = _FakeCanvas()

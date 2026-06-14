@@ -13,7 +13,7 @@ if find_spec("PySide6") is None:
     CenaDocumento = None
 else:
     from PySide6.QtCore import QPoint, QPointF, Qt
-    from PySide6.QtGui import QColor, QImage, QPainter
+    from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter
     from PySide6.QtWidgets import QApplication
 
     from canvas.cena import CenaDocumento
@@ -200,6 +200,57 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[1]))
         self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(canvas.cena.elementos[2]))
 
+    def test_costura_dependente_cria_costura_para_tamanho_novo_graduado(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "molde_id": "m1",
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "cor": "#111111", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#222222", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#333333", "base": False},
+                {"ativo": True, "tamanho": "GG", "cor": "#444444", "base": False},
+            ],
+            "graduacao_tabela": {
+                "modo": "dx_dy",
+                "pontos": {
+                    str(idx): {
+                        "indice": idx,
+                        "ponto": ponto,
+                        "valores": {
+                            "P": {"dx": -1.0, "dy": 0.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 2.0, "dy": 0.0},
+                            "GG": {"dx": 4.0, "dy": 0.0},
+                        },
+                    }
+                    for idx, ponto in enumerate([(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+                },
+            },
+        }
+        costura_base = {
+            "tipo": "polyline",
+            "subtipo_audaces": "costura",
+            "costura_de_molde_id": "m1",
+            "molde_id": "m1",
+            "costura_segmentos": [0, 1, 2, 3],
+            "costura_parcial": False,
+            "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 11.0), (-1.0, 11.0), (-1.0, -1.0)],
+        }
+        canvas.cena.elementos = [molde, costura_base]
+
+        self.assertTrue(canvas._sincronizar_costuras_dependentes())
+
+        graduadas = {
+            str(el.get("graduacao_tamanho")): el
+            for el in canvas.cena.elementos
+            if isinstance(el, dict) and el.get("costura_graduacao")
+        }
+        self.assertEqual(set(graduadas), {"P", "G", "GG"})
+        self.assertTrue(all(len(el.get("pontos", [])) >= 4 for el in graduadas.values()))
+
     def test_clique_em_costura_vinculada_seleciona_molde_dono(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.zoom = 10.0
@@ -223,6 +274,28 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(indices, [0])
         self.assertEqual(canvas._indices_transformacao_com_vinculados({1}), [0, 1])
+
+    def test_indice_costuras_vinculadas_atualiza_quando_cena_muda(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.cena.elementos = [
+            {"tipo": "polyline", "molde": True, "molde_id": "m1", "pontos": []},
+            {"tipo": "polyline", "subtipo_audaces": "costura", "costura_de_molde_id": "m1", "pontos": []},
+        ]
+
+        self.assertEqual(canvas._indices_costuras_vinculadas(0), [1])
+        self.assertEqual(canvas._indice_molde_dono_costura(1), 0)
+
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "subtipo_audaces": "costura",
+                "metadados": {"costura_de_molde_id": "m1", "subtipo_audaces": "costura"},
+                "pontos": [],
+            }
+        )
+
+        self.assertEqual(canvas._indices_costuras_vinculadas(0), [1, 2])
+        self.assertEqual(canvas._indice_molde_dono_costura(2), 0)
 
     def test_linhas_auxiliares_vinculadas_ficam_ocultas_quando_flag_nao_existe(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -337,6 +410,164 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(canvas._cor_tamanho_base_graduacao(molde), QColor("#222222").name())
         self.assertEqual(canvas._cor_tamanho_graduacao(molde, "G", "#ffffff"), QColor("#333333").name())
 
+    def test_graduacao_usa_pontos_controle_como_referencia_de_interpolacao(self):
+        contorno = [
+            QPointF(0.0, 0.0),
+            QPointF(2.0, 0.0),
+            QPointF(4.0, 0.0),
+            QPointF(6.0, 0.0),
+            QPointF(8.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 10.0),
+            QPointF(0.0, 10.0),
+        ]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(p.x(), p.y()) for p in contorno] + [(0.0, 0.0)],
+            "pontos_controle": [
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+                (4.0, 0.0),
+            ],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "base": True},
+                {"ativo": True, "tamanho": "G", "base": False},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "4": {
+                        "indice": 4,
+                        "ponto": (4.0, 0.0),
+                        "valores": {"G": {"dx": 0.0, "dy": -2.0}},
+                    }
+                }
+            },
+        }
+
+        deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+            molde["graduacao_tabela"]["pontos"],
+            "G",
+            len(contorno),
+            contorno=contorno,
+            referencias=VisualizacaoCanvas._pontos_referencia_graduacao(molde),
+        )
+
+        self.assertLess(deslocamentos[2][1], -1.9)
+        self.assertLess(deslocamentos[1][1], 0.0)
+        self.assertLess(deslocamentos[3][1], 0.0)
+
+    def test_graduacao_ignora_referencias_desalinhadas_do_contorno_atual(self):
+        contorno = [
+            QPointF(0.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 5.0),
+            QPointF(0.0, 5.0),
+        ]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(p.x(), p.y()) for p in contorno] + [(0.0, 0.0)],
+            "pontos_controle_principais": [
+                {"x": -80.0, "y": -60.0},
+                {"x": -40.0, "y": -50.0},
+                {"x": 70.0, "y": -45.0},
+            ],
+            "pontos_graduacao": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "base": True},
+                {"ativo": True, "tamanho": "G", "base": False},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "indice": 1,
+                        "ponto": (-40.0, -50.0),
+                        "valores": {"G": {"dx": 0.0, "dy": -2.0}},
+                    }
+                }
+            },
+        }
+
+        referencias = VisualizacaoCanvas._pontos_referencia_graduacao(molde, contorno=contorno)
+        deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+            molde["graduacao_tabela"]["pontos"],
+            "G",
+            len(contorno),
+            contorno=contorno,
+            referencias=referencias,
+        )
+
+        self.assertEqual([(p.x(), p.y()) for p in referencias], [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)])
+        self.assertEqual(deslocamentos[1], (0.0, -2.0))
+        self.assertEqual(deslocamentos[0], (0.0, 0.0))
+        self.assertEqual(deslocamentos[2], (0.0, 0.0))
+
+    def test_graduacao_interpola_por_comprimento_do_contorno(self):
+        contorno = [
+            QPointF(0.0, 0.0),
+            QPointF(1.0, 0.0),
+            QPointF(2.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 10.0),
+            QPointF(0.0, 10.0),
+        ]
+        pontos_cfg = {
+            "3": {
+                "ponto": (10.0, 0.0),
+                "valores": {"G": {"dx": 0.0, "dy": -10.0}},
+            }
+        }
+        referencias = [contorno[0], contorno[3], contorno[4], contorno[5]]
+
+        deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+            pontos_cfg,
+            "G",
+            len(contorno),
+            contorno=contorno,
+            referencias=referencias,
+        )
+
+        self.assertAlmostEqual(deslocamentos[1][1], -1.0)
+        self.assertAlmostEqual(deslocamentos[2][1], -2.0)
+        self.assertEqual(deslocamentos[3], (0.0, -10.0))
+        self.assertEqual(deslocamentos[4], (0.0, 0.0))
+
+    def test_graduacao_com_referencias_incompletas_nao_puxa_lado_oposto(self):
+        contorno = [
+            QPointF(0.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 5.0),
+            QPointF(0.0, 5.0),
+        ]
+        pontos_cfg = {
+            "0": {
+                "ponto": (10.0, 0.0),
+                "valores": {"G": {"dx": 2.0, "dy": -2.0}},
+            }
+        }
+        referencias_incompletas = [contorno[1], contorno[2]]
+
+        deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+            pontos_cfg,
+            "G",
+            len(contorno),
+            contorno=contorno,
+            referencias=referencias_incompletas,
+        )
+
+        self.assertEqual(deslocamentos[1], (2.0, -2.0))
+        self.assertEqual(deslocamentos[2], (0.0, 0.0))
+        self.assertEqual(deslocamentos[0], (0.0, 0.0))
+        self.assertEqual(deslocamentos[3], (0.0, 0.0))
+
     def test_opacidade_imagens_global_fica_limitada_entre_zero_e_um(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
 
@@ -422,6 +653,63 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(indices, [0])
 
+    def test_hit_test_ignora_segmentos_fora_do_bbox(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        distante = {"tipo": "polyline", "pontos": [(1000.0, 1000.0), (1010.0, 1000.0)]}
+        perto = {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]}
+        canvas.cena.elementos.extend([distante, perto])
+        original = canvas._pontos_hit_teste_elemento
+        chamadas = []
+
+        def contar(elemento):
+            chamadas.append(elemento)
+            return original(elemento)
+
+        canvas._pontos_hit_teste_elemento = contar
+
+        indices = canvas._indices_elementos_em_ponto(QPointF(5.0, 0.0))
+
+        self.assertEqual(indices, [1])
+        self.assertIn(perto, chamadas)
+        self.assertNotIn(distante, chamadas)
+
+    def test_indice_espacial_filtra_elementos_fora_do_viewport(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(200, 200)
+        canvas.zoom = 10.0
+        canvas.origem_cena = QPointF(0.0, 0.0)
+        canvas.cena.elementos = [
+            {"tipo": "polyline", "pontos": [(1.0, 1.0), (2.0, 1.0)]},
+            {"tipo": "polyline", "pontos": [(1000.0, 1000.0), (1010.0, 1000.0)]},
+        ]
+
+        indices = canvas._indices_elementos_visiveis_viewport()
+
+        self.assertEqual(indices, [0])
+
+    def test_indice_espacial_hit_test_nao_varre_elementos_distantes(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        for idx in range(100):
+            x = 1000.0 + (idx * 10.0)
+            canvas.cena.elementos.append({"tipo": "polyline", "pontos": [(x, 1000.0), (x + 1.0, 1000.0)]})
+        perto = {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]}
+        canvas.cena.elementos.append(perto)
+        original = canvas._pontos_hit_teste_elemento
+        chamadas = []
+
+        def contar(elemento):
+            chamadas.append(elemento)
+            return original(elemento)
+
+        canvas._pontos_hit_teste_elemento = contar
+
+        indices = canvas._indices_elementos_em_ponto(QPointF(5.0, 0.0))
+
+        self.assertEqual(indices, [100])
+        self.assertEqual(chamadas, [perto])
+
     def test_cache_bbox_invalida_quando_pontos_sao_substituidos(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.resize(800, 600)
@@ -433,6 +721,73 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         elemento["pontos"] = [(500.0, 500.0), (510.0, 510.0)]
 
         self.assertFalse(canvas._elemento_visivel_no_viewport(elemento))
+
+    def test_cache_pontos_render_invalida_quando_pontos_mudam(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        elemento = {"tipo": "polyline", "pontos": [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]}
+
+        pontos_1 = canvas._pontos_render_elemento(elemento)
+        pontos_2 = canvas._pontos_render_elemento(elemento)
+
+        self.assertIs(pontos_1, pontos_2)
+
+        elemento["pontos"][1] = (3.0, 0.0)
+        pontos_3 = canvas._pontos_render_elemento(elemento)
+
+        self.assertIsNot(pontos_1, pontos_3)
+        self.assertEqual(pontos_3[1], QPointF(3.0, 0.0))
+
+    def test_cache_path_polilinha_invalida_quando_view_muda(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        elemento = {"tipo": "polyline", "pontos": [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]}
+        pontos = canvas._pontos_render_elemento(elemento)
+
+        path_1 = canvas._path_polilinha_tela(pontos, elemento)
+        path_2 = canvas._path_polilinha_tela(pontos, elemento)
+
+        self.assertIs(path_1, path_2)
+
+        canvas.zoom = 20.0
+        path_3 = canvas._path_polilinha_tela(pontos, elemento)
+
+        self.assertIsNot(path_1, path_3)
+
+    def test_cache_path_curva_suave_invalida_quando_view_muda(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        elemento = {
+            "tipo": "polyline",
+            "curva_suave": True,
+            "pontos": [(0.0, 0.0), (2.0, 1.0), (4.0, 0.0), (6.0, 1.0)],
+        }
+        pontos = canvas._pontos_curva_suave_elemento(elemento)
+
+        path_1 = canvas._path_curva_suave_tela(pontos, False, elemento)
+        path_2 = canvas._path_curva_suave_tela(pontos, False, elemento)
+
+        self.assertIs(path_1, path_2)
+
+        canvas.origem_cena = QPointF(1.0, 0.0)
+        path_3 = canvas._path_curva_suave_tela(pontos, False, elemento)
+
+        self.assertIsNot(path_1, path_3)
+
+    def test_cache_layout_numeros_invalida_quando_zoom_muda(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        metrics = QFontMetrics(canvas.font())
+        itens = [(QPointF(0.0, 0.0), "1", True), (QPointF(10.0, 0.0), "2", True)]
+
+        layout_1 = canvas._layout_numeros_molde_canvas(metrics, itens, QPointF(5.0, 0.0), 8.0)
+        layout_2 = canvas._layout_numeros_molde_canvas(metrics, itens, QPointF(5.0, 0.0), 8.0)
+
+        self.assertIs(layout_1, layout_2)
+
+        canvas.zoom = 20.0
+        layout_3 = canvas._layout_numeros_molde_canvas(metrics, itens, QPointF(5.0, 0.0), 8.0)
+
+        self.assertIsNot(layout_1, layout_3)
 
     def test_finalizar_zoom_interativo_restaura_renderizacao_completa(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -583,6 +938,43 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertTrue(canvas.set_graduacao_visivel(True))
         self.assertTrue(molde["mostrar_graduacao"])
 
+    def test_alternar_graduacao_apenas_em_molde_selecionado(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde_1 = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+        }
+        molde_2 = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0), (20.0, 0.0)],
+        }
+        canvas.cena.elementos.extend([molde_1, molde_2])
+        canvas._selecionados = {0}
+
+        self.assertTrue(canvas.set_graduacao_visivel(False, apenas_selecionados=True))
+
+        self.assertFalse(molde_1["mostrar_graduacao"])
+        self.assertNotIn("mostrar_graduacao", molde_2)
+
+        self.assertTrue(canvas.set_graduacao_visivel(False))
+        self.assertFalse(molde_2["mostrar_graduacao"])
+
+    def test_alternar_costura_altera_visualizacao_dos_moldes(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+        }
+        canvas.cena.elementos.append(molde)
+
+        self.assertTrue(canvas.set_costura_visivel(False))
+        self.assertFalse(molde["mostrar_costura"])
+        self.assertTrue(canvas.set_costura_visivel(True))
+        self.assertTrue(molde["mostrar_costura"])
+
     def test_snap_sobre_graduacao_visivel_nao_deve_sobrepor_tamanhos(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.zoom = 10.0
@@ -663,6 +1055,75 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(caminhos[1][0], "G")
         self.assertEqual(caminhos[1][2], QPointF(10.0, 0.0))
         self.assertEqual(caminhos[1][3], QPointF(10.0, -1.0))
+
+    def test_cache_graduacao_reaproveita_e_invalida_quando_tabela_muda(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {"G": {"dx": 1.0, "dy": 0.0}},
+                    }
+                }
+            },
+        }
+
+        contornos_1 = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        contornos_2 = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        caminhos_1 = VisualizacaoCanvas._caminhos_graduacao_tabela(molde, base)
+        caminhos_2 = VisualizacaoCanvas._caminhos_graduacao_tabela(molde, base)
+
+        self.assertIs(contornos_1, contornos_2)
+        self.assertIs(caminhos_1, caminhos_2)
+
+        molde["graduacao_tabela"]["pontos"]["1"]["valores"]["G"]["dx"] = 2.0
+        contornos_3 = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        caminhos_3 = VisualizacaoCanvas._caminhos_graduacao_tabela(molde, base)
+
+        self.assertIsNot(contornos_1, contornos_3)
+        self.assertIsNot(caminhos_1, caminhos_3)
+        self.assertEqual(contornos_3[0][2][1], QPointF(12.0, 0.0))
+        self.assertEqual(caminhos_3[0][3], QPointF(12.0, 0.0))
+
+    def test_cache_deslocamentos_piques_graduados_invalida_quando_tabela_muda(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {"G": {"dx": 1.0, "dy": 0.0}},
+                    }
+                }
+            },
+        }
+        base = canvas._base_contorno_graduacao(molde)
+        linhas = canvas._linhas_graduacao_nao_base(molde)
+
+        deslocamentos_1 = canvas._deslocamentos_piques_graduados_configurados(molde, base, linhas)
+        deslocamentos_2 = canvas._deslocamentos_piques_graduados_configurados(molde, base, linhas)
+
+        self.assertIs(deslocamentos_1, deslocamentos_2)
+
+        molde["graduacao_tabela"]["pontos"]["1"]["valores"]["G"]["dx"] = 2.0
+        deslocamentos_3 = canvas._deslocamentos_piques_graduados_configurados(molde, base, linhas)
+
+        self.assertIsNot(deslocamentos_1, deslocamentos_3)
+        self.assertEqual(deslocamentos_3["G"][1], (2.0, 0.0))
 
     def test_caminho_grade_usa_apenas_pontos_principais_em_curva_amostrada(self):
         base = [

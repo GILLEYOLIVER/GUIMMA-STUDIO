@@ -42,7 +42,7 @@ Este manual resume **o que cada ferramenta faz** no ribbon atual do GUIMMA STUDI
 ## Como ler este manual
 
 - Ferramentas com módulo em `tools/` estão disponíveis no programa atual.
-- Ferramentas citadas como **em desenvolvimento** existem no mapa do ribbon ou na pasta `FERRAMENTAS NAO PRONTAS`, mas ainda não têm implementação final em `tools/`.
+- Ferramentas citadas como **em desenvolvimento** existem no mapa do ribbon, mas ainda nao tem implementacao final em `tools/`.
 - Quando uma ferramenta altera moldes, o comportamento esperado é preservar controles principais, controles auxiliares, fio, piques, nome e metadados sempre que esses dados existirem no molde.
 
 ## Atualizações recentes de comportamento

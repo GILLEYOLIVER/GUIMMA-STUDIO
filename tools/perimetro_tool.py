@@ -96,11 +96,9 @@ class Ferramenta(FerramentaBase):
 
         mudou = self._medicao is None or self._assinatura_medicao(self._medicao) != self._assinatura_medicao(info)
         self._medicao = info
-        medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
-        texto = f"Perímetro: {medida}"
+        texto = self._texto_status_medicao(canvas, info)
         self.set_status(texto)
-        if not silencioso:
-            mensagem_status(canvas, texto)
+        mensagem_status(canvas, texto)
         if mudou:
             canvas.update()
         return True
@@ -165,7 +163,7 @@ class Ferramenta(FerramentaBase):
         if not self._medicao:
             return
 
-        texto = f"P {self._formatar_medida(canvas, float(self._medicao.get('perimetro_total', 0.0)))}"
+        texto = self._texto_rotulo_medicao(canvas, self._medicao)
         base = self._medicao.get("ponto_mais_proximo")
         if base is None:
             base = pontos[len(pontos) // 2]
@@ -210,3 +208,44 @@ class Ferramenta(FerramentaBase):
 
         unidade = getattr(canvas, "_unidade_sigla", "cm")
         return f"{valor} {unidade}"
+
+    def _texto_status_medicao(self, canvas, info: dict) -> str:
+        medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
+        tamanho = self._tamanho_medicao(info)
+        if tamanho:
+            return f"Tamanho {tamanho} - Perímetro: {medida}"
+        return f"Perímetro: {medida}"
+
+    def _texto_rotulo_medicao(self, canvas, info: dict) -> str:
+        medida = self._formatar_medida(canvas, float(info.get("perimetro_total", 0.0)))
+        tamanho = self._tamanho_medicao(info)
+        if tamanho:
+            return f"{tamanho} {medida}"
+        return f"P {medida}"
+
+    @staticmethod
+    def _tamanho_medicao(info: dict | None) -> str:
+        if not isinstance(info, dict):
+            return ""
+        elemento = info.get("elemento")
+        if not isinstance(elemento, dict):
+            return ""
+        for chave in ("graduacao_tamanho", "tamanho", "nome_tamanho", "tamanho_extraido"):
+            valor = str(elemento.get(chave) or "").strip()
+            if valor:
+                return valor
+        metadados = elemento.get("metadados")
+        if isinstance(metadados, dict):
+            for chave in ("graduacao_tamanho", "tamanho", "nome_tamanho", "tamanho_extraido"):
+                valor = str(metadados.get(chave) or "").strip()
+                if valor:
+                    return valor
+        tamanhos = elemento.get("graduacao_tamanhos")
+        if isinstance(tamanhos, list):
+            linhas = [linha for linha in tamanhos if isinstance(linha, dict)]
+            base = next((linha for linha in linhas if bool(linha.get("base"))), None)
+            if base is None and linhas:
+                base = linhas[len(linhas) // 2]
+            if base is not None:
+                return str(base.get("tamanho") or base.get("nome") or "").strip()
+        return ""

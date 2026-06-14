@@ -14,6 +14,29 @@ bool better_snap(const SnapPoint& a, const SnapPoint& b) {
     return a.distance < b.distance;
 }
 
+void expand_bbox(BBox& box, const Point& point, bool& has_point) {
+    if (!has_point) {
+        box = BBox{point.x, point.y, point.x, point.y};
+        has_point = true;
+        return;
+    }
+    box.min_x = std::min(box.min_x, point.x);
+    box.min_y = std::min(box.min_y, point.y);
+    box.max_x = std::max(box.max_x, point.x);
+    box.max_y = std::max(box.max_y, point.y);
+}
+
+std::pair<BBox, bool> bbox_for_element(const PolylineElement& element) {
+    BBox box{0.0, 0.0, 0.0, 0.0};
+    bool has_point = false;
+    for (const auto& group : {element.points, element.main_controls, element.helper_controls, element.official_controls}) {
+        for (const auto& point : group) {
+            expand_bbox(box, point, has_point);
+        }
+    }
+    return {box, has_point};
+}
+
 }
 
 std::string snap_kind_to_string(SnapKind kind) {
@@ -37,6 +60,8 @@ std::string snap_kind_to_string(SnapKind kind) {
 
 void SnapEngine::clear() {
     elements_.clear();
+    element_bboxes_.clear();
+    element_has_bbox_.clear();
     index_.clear();
 }
 
@@ -50,6 +75,10 @@ void SnapEngine::set_grid(bool enabled, double step) {
 }
 
 void SnapEngine::add_polyline(const PolylineElement& element) {
+    const auto [bbox, has_bbox] = bbox_for_element(element);
+    element_bboxes_.push_back(bbox);
+    element_has_bbox_.push_back(has_bbox);
+
     if (!element.participates || element.points.size() < 2) {
         elements_.push_back(element);
         return;
@@ -78,8 +107,16 @@ std::vector<SnapPoint> SnapEngine::candidates(const Point& cursor, double zoom, 
 
     std::vector<SnapPoint> out;
 
-    for (const auto& element : elements_) {
+    for (std::size_t element_pos = 0; element_pos < elements_.size(); ++element_pos) {
+        const auto& element = elements_[element_pos];
         if (!element.participates) {
+            continue;
+        }
+        if (
+            element_pos < element_has_bbox_.size()
+            && element_has_bbox_[element_pos]
+            && !bbox_intersects(element_bboxes_[element_pos], search_box)
+        ) {
             continue;
         }
 

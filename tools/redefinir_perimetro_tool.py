@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLab
 from core.formatacao import numero_decimal_ponto
 from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -16,6 +17,7 @@ class RedefinirPerimetroDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Redefinir perímetro")
+        self._unidade_sigla = "cm"
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
         self.setFixedWidth(255)
@@ -45,15 +47,24 @@ class RedefinirPerimetroDialog(QDialog):
         self.ed_de.setReadOnly(True)
         self.ed_para = QLineEdit("0")
         self.ed_para.setObjectName("para")
+        self.lbl_de = QLabel("De (cm)")
+        self.lbl_para = QLabel("Para (cm)")
         form.addRow("Modo", self.cmb_modo)
-        form.addRow("De (cm)", self.ed_de)
-        form.addRow("Para (cm)", self.ed_para)
+        form.addRow(self.lbl_de, self.ed_de)
+        form.addRow(self.lbl_para, self.ed_para)
         lay.addLayout(form)
         rod = QHBoxLayout()
         self.btn_aplicar = QPushButton("Aplicar")
         rod.addStretch(1)
         rod.addWidget(self.btn_aplicar)
         lay.addLayout(rod)
+
+    def set_unidade(self, sigla: str) -> None:
+        self._unidade_sigla = str(sigla or "cm")
+        self.lbl_de.setText(f"De ({self._unidade_sigla})")
+        self.lbl_para.setText(f"Para ({self._unidade_sigla})")
+        self.ed_de.setPlaceholderText(self._unidade_sigla)
+        self.ed_para.setPlaceholderText(self._unidade_sigla)
 
 
 class Ferramenta(FerramentaBase):
@@ -212,6 +223,7 @@ class Ferramenta(FerramentaBase):
             dialog = RedefinirPerimetroDialog(parent)
             instalar_memoria_posicao(dialog, "dialog:redefinir_perimetro")
             self._dialog_por_canvas[chave] = dialog
+        dialog.set_unidade(unidade_canvas(canvas)[0])
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.btn_aplicar.clicked.connect(lambda: self._aplicar(canvas))
@@ -220,6 +232,11 @@ class Ferramenta(FerramentaBase):
             dialog.ed_para.editingFinished.connect(lambda: self._aplicar_preview(canvas))
             dialog.cmb_modo.currentTextChanged.connect(lambda _txt: self._aplicar_preview(canvas))
         return dialog
+
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.set_unidade(unidade_canvas(canvas)[0])
 
     def _aplicar(self, canvas):
         if self._segmento_alvo_por_canvas.get(id(canvas)) is None:
@@ -241,7 +258,8 @@ class Ferramenta(FerramentaBase):
         if alvo_segmento is None:
             return
         dialog = self._obter_dialog(canvas)
-        alvo = numero_decimal_ponto(dialog.ed_para.text(), 0.0)
+        alvo_u = numero_decimal_ponto(dialog.ed_para.text(), 0.0, SUFIXOS_MEDIDA)
+        alvo = valor_unidade_para_cena(canvas, alvo_u)
         atual = float(alvo_segmento.get("comprimento", 0.0))
         if atual <= 1e-9:
             return

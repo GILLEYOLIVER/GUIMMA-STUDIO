@@ -34,6 +34,11 @@ def cpp_disponivel() -> bool:
     return _cpp is not None
 
 
+def modulo_cpp():
+    """Retorna o modulo C++ carregado, ou None quando o build nativo nao existe."""
+    return _cpp
+
+
 def _elementos_para_polylines(elements: list[dict]) -> list[list[tuple[float, float]]]:
     """
     Converte elementos do GUIMMA para polylines simples aceitas pelo motor C++.
@@ -124,6 +129,33 @@ def extract_smallest_enclosing_contour_cpp(
                 float(tol),
             )
         return _resultado_para_pontos(resultado)
+    except Exception:
+        return None
+
+
+def seam_offset_closed_cpp(
+    points: list[tuple[float, float]],
+    margin: float,
+) -> list[tuple[float, float]] | None:
+    """
+    Offset fechado de costura calculado pelo motor C++.
+
+    Retorna None quando o modulo nativo nao esta disponivel ou quando a entrada
+    nao permite gerar uma costura valida. As ferramentas devem manter fallback
+    Python para preservar o funcionamento em ambientes sem build C++.
+    """
+    if _cpp is None:
+        return None
+    try:
+        if len(points or []) < 3:
+            return None
+        resultado = _cpp.seam_offset_closed(
+            [(float(x), float(y)) for x, y in points],
+            float(margin),
+        )
+        if not resultado:
+            return None
+        return [(float(x), float(y)) for x, y in resultado]
     except Exception:
         return None
 

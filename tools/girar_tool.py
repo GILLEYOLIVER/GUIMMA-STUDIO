@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from core.formatacao import formatar_numero
+from tools.movimento_utils import rotacionar_elemento_por_funcao
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -453,27 +454,7 @@ class Ferramenta(FerramentaBase):
             dx, dy = x - pivo.x(), y - pivo.y()
             return (pivo.x() + (dx * ca) - (dy * sa), pivo.y() + (dx * sa) + (dy * ca))
 
-        for chave in (
-            "pontos",
-            "controle_cantos",
-            "controle_auxiliares",
-            "pontos_controle_referencia",
-            "marcacoes_no_perimetro",
-            "distancias_no_perimetro",
-            "marcacoes_perimetro",
-        ):
-            if isinstance(el.get(chave), list):
-                el[chave] = [rot(p) if self._eh_ponto(p) else p for p in el.get(chave, [])]
-        for chave in ("fio_origem", "fio_fim", "p0", "p1", "p2"):
-            if self._eh_ponto(el.get(chave)):
-                el[chave] = rot(el[chave])
-        for chave in ("pontos_controle_principais", "pontos_auxiliares"):
-            if isinstance(el.get(chave), list):
-                for item in el[chave]:
-                    if isinstance(item, dict) and "x" in item and "y" in item:
-                        x, y = rot((item["x"], item["y"]))
-                        item["x"] = x
-                        item["y"] = y
+        rotacionar_elemento_por_funcao(el, rot)
         if "fio_angulo" in el:
             try:
                 el["fio_angulo"] = float(el.get("fio_angulo") or 0.0) + float(angulo)

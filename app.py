@@ -7,15 +7,17 @@ from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
 from PySide6.QtWidgets import QApplication
 
 from config import APP_NOME
+from ui.fonte_padrao import aplicar_fonte_padrao, argv_com_fonte_padrao
 from ui.hover_style import aplicar_hover_global
 from ui.janela_principal import GuimmaStudioMainWindow
 
 
 class GuimmaStudioApp:
     def __init__(self, argv: Sequence[str] | None = None):
-        self._argv = list(argv or sys.argv)
+        self._argv = argv_com_fonte_padrao(list(argv or sys.argv))
         self.qt_app = QApplication(self._argv)
         self.qt_app.setApplicationName(APP_NOME)
+        aplicar_fonte_padrao(self.qt_app)
         self._aplicar_traducao_qt_ptbr()
         aplicar_hover_global(self.qt_app)
         self.janela_principal = GuimmaStudioMainWindow()

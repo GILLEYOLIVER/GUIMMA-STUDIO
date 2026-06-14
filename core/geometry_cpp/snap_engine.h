@@ -61,6 +61,8 @@ private:
     bool snap_grid_ = false;
     double grid_step_ = 0.1;
     std::vector<PolylineElement> elements_;
+    std::vector<BBox> element_bboxes_;
+    std::vector<bool> element_has_bbox_;
     SpatialIndex index_;
 
     void add_point_candidate(std::vector<SnapPoint>& out, const Point& cursor, const Point& point, SnapKind kind, int element_index, int element_priority) const;

@@ -438,6 +438,87 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos"][0], molde["pontos"][-1])
         self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 2.5)
 
+    def test_excluir_canto_em_curva_remapeia_graduacao_sem_zerar_promovido(self):
+        canvas = _FakeCanvas()
+        pontos_graduacao = {
+            "0": {
+                "indice": 0,
+                "numero": 1,
+                "ponto": (0.0, 0.0),
+                "valores": {"P": {"dx": 0.0, "dy": -2.0}, "M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}},
+            },
+            "1": {
+                "indice": 1,
+                "numero": 2,
+                "ponto": (10.0, 0.0),
+                "valores": {"P": {"dx": 0.0, "dy": -3.0}, "M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 3.0}},
+            },
+            "2": {
+                "indice": 2,
+                "numero": 3,
+                "ponto": (20.0, 0.0),
+                "valores": {"P": {"dx": 0.0, "dy": -4.0}, "M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 4.0}},
+            },
+            "3": {
+                "indice": 3,
+                "numero": 4,
+                "ponto": (20.0, 8.0),
+                "valores": {"P": {"dx": 0.0, "dy": -6.0}, "M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 6.0}},
+            },
+        }
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (2.0, 1.8),
+                    (5.0, 3.0),
+                    (8.0, 1.8),
+                    (10.0, 0.0),
+                    (12.0, 1.8),
+                    (15.0, 3.0),
+                    (18.0, 1.8),
+                    (20.0, 0.0),
+                    (20.0, 8.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 8.0)],
+                "controle_auxiliares": [(5.0, 3.0), (15.0, 3.0), (20.0, 4.0), (10.0, 4.0)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 20.0, "y": 0.0},
+                    {"x": 20.0, "y": 8.0},
+                ],
+                "pontos_auxiliares": [
+                    {"x": 5.0, "y": 3.0},
+                    {"x": 15.0, "y": 3.0},
+                    {"x": 20.0, "y": 4.0},
+                    {"x": 10.0, "y": 4.0},
+                ],
+                "graduacao_tamanhos": [
+                    {"tamanho": "P", "ativo": True},
+                    {"tamanho": "M", "ativo": True},
+                    {"tamanho": "G", "ativo": True},
+                ],
+                "graduacao_tabela": {"modo": "dx_dy", "pontos": pontos_graduacao},
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "canto", 1))
+
+        molde = canvas.cena.elementos[0]
+        pontos_cfg = molde["graduacao_tabela"]["pontos"]
+        cfg_por_ponto = {tuple(cfg["ponto"]): cfg for cfg in pontos_cfg.values()}
+        self.assertEqual(set(cfg_por_ponto), set(molde["controle_cantos"]))
+        self.assertNotIn((10.0, 0.0), cfg_por_ponto)
+        self.assertIn((10.0, 4.0), cfg_por_ponto)
+        self.assertAlmostEqual(cfg_por_ponto[(20.0, 0.0)]["valores"]["G"]["dy"], 4.0, places=5)
+        self.assertAlmostEqual(cfg_por_ponto[(20.0, 0.0)]["valores"]["P"]["dy"], -4.0, places=5)
+        self.assertAlmostEqual(cfg_por_ponto[(10.0, 4.0)]["valores"]["G"]["dy"], 4.0, places=5)
+        self.assertAlmostEqual(cfg_por_ponto[(10.0, 4.0)]["valores"]["P"]["dy"], -4.0, places=5)
+
     def test_excluir_canto_preserva_trechos_distantes_do_molde(self):
         canvas = _FakeCanvas()
         pontos_distantes = [(24.0, 6.0), (28.0, 0.0), (14.0, -5.0)]

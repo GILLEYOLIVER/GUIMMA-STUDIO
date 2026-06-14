@@ -3,10 +3,107 @@ from __future__ import annotations
 from copy import deepcopy
 from math import sqrt
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from tools.tool_base import FerramentaBase
+from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+
+
+class RemoverPiqueDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RemoverPiqueDialog")
+        self.setWindowTitle("Remover Pique")
+        self.setWindowFlags(Qt.Tool)
+        self.setFixedWidth(292)
+
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(10, 10, 10, 10)
+        raiz.setSpacing(8)
+
+        titulo = QLabel("Remover piques")
+        titulo.setObjectName("titulo")
+        raiz.addWidget(titulo)
+
+        self.chk_todos_molde = QCheckBox("Remover todos os piques do molde")
+        self.chk_contorno = QCheckBox("Remover todos os piques do contorno")
+        self.chk_internos = QCheckBox("Remover todos os piques internos")
+        for chk in (self.chk_todos_molde, self.chk_contorno, self.chk_internos):
+            chk.clicked.connect(lambda _checked=False, origem=chk: self._marcar_exclusivo(origem))
+            raiz.addWidget(chk)
+
+        self.lbl_status = QLabel("Sem caixa marcada: clique em um pique para remover apenas ele.")
+        self.lbl_status.setObjectName("status")
+        self.lbl_status.setWordWrap(True)
+        raiz.addWidget(self.lbl_status)
+
+        botoes = QHBoxLayout()
+        botoes.setContentsMargins(0, 0, 0, 0)
+        botoes.setSpacing(6)
+        self.btn_limpar = QPushButton("Limpar")
+        self.btn_remover = QPushButton("Remover")
+        self.btn_limpar.clicked.connect(self.limpar_modo)
+        botoes.addWidget(self.btn_limpar)
+        botoes.addStretch(1)
+        botoes.addWidget(self.btn_remover)
+        raiz.addLayout(botoes)
+
+        self.setStyleSheet(
+            """
+            QDialog#RemoverPiqueDialog { background:#eef7f9; }
+            QLabel { color:#16202a; font-size:11px; }
+            QLabel#titulo { font-weight:600; font-size:12px; }
+            QLabel#status { color:#4c5d6f; }
+            QCheckBox { color:#16202a; font-size:11px; spacing:6px; }
+            QPushButton {
+                background:#f8fbfd;
+                border:1px solid #aeb8c2;
+                border-radius:4px;
+                min-height:24px;
+                padding:2px 12px;
+                font-size:11px;
+            }
+            QPushButton:hover { background:#d9efff; border-color:#77a8cc; }
+            QPushButton:pressed { background:#bfe3ff; }
+            """
+        )
+
+    def modo(self) -> str:
+        if self.chk_todos_molde.isChecked():
+            return "molde"
+        if self.chk_contorno.isChecked():
+            return "contorno"
+        if self.chk_internos.isChecked():
+            return "internos"
+        return "selecionar"
+
+    def limpar_modo(self) -> None:
+        for chk in (self.chk_todos_molde, self.chk_contorno, self.chk_internos):
+            chk.blockSignals(True)
+            chk.setChecked(False)
+            chk.blockSignals(False)
+        self.lbl_status.setText("Modo individual: clique em um pique para remover apenas ele.")
+
+    def _marcar_exclusivo(self, origem: QCheckBox) -> None:
+        if not origem.isChecked():
+            self.lbl_status.setText("Modo individual: clique em um pique para remover apenas ele.")
+            return
+        for chk in (self.chk_todos_molde, self.chk_contorno, self.chk_internos):
+            if chk is origem:
+                continue
+            chk.blockSignals(True)
+            chk.setChecked(False)
+            chk.blockSignals(False)
+        self.lbl_status.setText("Clique em um molde ou use Remover para aplicar a remoção.")
 
 
 class Ferramenta(FerramentaBase):
@@ -14,23 +111,31 @@ class Ferramenta(FerramentaBase):
     nome = "Remover Pique"
     usa_painel_auxiliar = False
     descricao_painel = "Remove piques configurados ou marcações simples do molde."
+    _dialog_global: RemoverPiqueDialog | None = None
 
     def __init__(self):
         super().__init__()
         self._hover: tuple[int, str, int, QPointF] | None = None
         self._molde_idx: int | None = None
+        self._dialog: RemoverPiqueDialog | None = type(self)._dialog_global
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._hover = None
-        self._molde_idx = None
-        self._status(canvas, "Remover Pique: clique no pique para apagar. Direito finaliza.")
+        self._molde_idx = self._molde_selecionado_canvas(canvas)
+        self._abrir_dialogo(canvas)
+        self._status(canvas, "Remover Pique: clique no pique para apagar ou marque uma opção de remoção.")
         canvas.update()
 
     def on_deactivate(self, canvas):
+        if self._dialog:
+            self._dialog.hide()
         self._hover = None
         self._molde_idx = None
         canvas.update()
+
+    def on_canvas_resize(self, canvas) -> None:
+        self._reposicionar_dialogo(canvas)
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = self._posicao_cena(canvas, event)
@@ -49,6 +154,27 @@ class Ferramenta(FerramentaBase):
             return False
 
         pos = self._posicao_cena(canvas, event)
+        modo = self._modo_dialogo()
+        if modo != "selecionar":
+            molde_idx = self._molde_em_posicao(canvas, pos)
+            if molde_idx is None:
+                molde_idx = self._molde_idx
+            if molde_idx is None:
+                self._status(canvas, "Selecione o molde que tera os piques removidos.")
+                event.accept()
+                return True
+            self._selecionar_molde(canvas, molde_idx)
+            removidos = self._remover_piques_do_molde(canvas, molde_idx, modo)
+            if removidos:
+                if hasattr(canvas, "_registrar_historico"):
+                    canvas._registrar_historico()
+                self._status(canvas, self._mensagem_remocao_total(removidos, modo))
+            else:
+                self._status(canvas, "Nenhum pique encontrado para esse modo.")
+            canvas.update()
+            event.accept()
+            return True
+
         indices = {self._molde_idx} if self._molde_idx is not None else None
         alvo = self._alvo_pique(canvas, pos, indices=indices)
         if alvo is None and self._molde_idx is None:
@@ -77,6 +203,68 @@ class Ferramenta(FerramentaBase):
         self._status(canvas, "Não foi possível remover o pique indicado.")
         event.accept()
         return True
+
+    def _abrir_dialogo(self, canvas) -> None:
+        cls = type(self)
+        if cls._dialog_global is None:
+            cls._dialog_global = RemoverPiqueDialog(canvas)
+            instalar_memoria_posicao(cls._dialog_global, "dialog:remover_pique")
+        self._dialog = cls._dialog_global
+        if self._dialog.parentWidget() is not canvas:
+            self._dialog.setParent(canvas)
+        try:
+            self._dialog.btn_remover.clicked.disconnect()
+        except Exception:
+            pass
+        self._dialog.btn_remover.clicked.connect(lambda: self._remover_pelo_dialogo(canvas))
+        if not self._dialog.isVisible():
+            self._dialog.show()
+        self._reposicionar_dialogo(canvas)
+
+    def _reposicionar_dialogo(self, canvas) -> None:
+        if self._dialog is None:
+            return
+        fallback = None
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
+            pos = canvas.calcular_posicao_painel_auxiliar(self._dialog.width(), self._dialog.height(), abaixo_coordenadas=True)
+            fallback = canvas.mapToGlobal(pos)
+        elif hasattr(canvas, "mapToGlobal"):
+            fallback = canvas.mapToGlobal(QPoint(12, 12))
+        restaurar_posicao(self._dialog, "dialog:remover_pique", fallback=fallback)
+
+    def _remover_pelo_dialogo(self, canvas) -> None:
+        modo = self._modo_dialogo()
+        if modo == "selecionar":
+            self._status(canvas, "Marque uma opção de remoção total ou clique em um pique individual.")
+            return
+        idx = self._molde_idx if self._molde_idx is not None else self._molde_selecionado_canvas(canvas)
+        if idx is None:
+            self._status(canvas, "Selecione um molde antes de remover.")
+            return
+        removidos = self._remover_piques_do_molde(canvas, idx, modo)
+        if removidos:
+            self._selecionar_molde(canvas, idx)
+            if hasattr(canvas, "_registrar_historico"):
+                canvas._registrar_historico()
+            self._status(canvas, self._mensagem_remocao_total(removidos, modo))
+        else:
+            self._status(canvas, "Nenhum pique encontrado para esse modo.")
+        canvas.update()
+
+    def _modo_dialogo(self) -> str:
+        if self._dialog is None:
+            return "selecionar"
+        return self._dialog.modo()
+
+    @staticmethod
+    def _mensagem_remocao_total(qtd: int, modo: str) -> str:
+        escopo = {
+            "molde": "do molde",
+            "contorno": "do contorno",
+            "internos": "internos",
+        }.get(modo, "")
+        plural = "s" if int(qtd) != 1 else ""
+        return f"{qtd} pique{plural} {escopo} removido{plural}."
 
     def on_paint_overlay(self, canvas, painter):
         if self._hover is None:
@@ -187,6 +375,41 @@ class Ferramenta(FerramentaBase):
             else:
                 self._remover_ponto_auxiliar(el, ponto_controle, configs)
         return True
+
+    def _remover_piques_do_molde(self, canvas, idx: int, modo: str) -> int:
+        if not (0 <= idx < len(canvas.cena.elementos)):
+            return 0
+        el = canvas.cena.elementos[idx]
+        if not isinstance(el, dict):
+            return 0
+
+        removidos = 0
+        configs = [cfg for cfg in (el.get("piques_config", []) or []) if isinstance(cfg, dict)]
+        for cfg_idx in range(len(configs) - 1, -1, -1):
+            cfg = configs[cfg_idx]
+            if not self._cfg_no_escopo(cfg, modo):
+                continue
+            ponto = self._ponto_pique_para_alvo(cfg) or QPointF(0.0, 0.0)
+            if self._remover_alvo(canvas, (idx, "config", cfg_idx, QPointF(ponto))):
+                removidos += 1
+
+        if modo in {"molde", "contorno"}:
+            marcacoes = list(el.get("marcacoes_no_perimetro", []) or [])
+            if marcacoes:
+                removidos += len(marcacoes)
+                el.pop("marcacoes_no_perimetro", None)
+        return removidos
+
+    @staticmethod
+    def _cfg_no_escopo(cfg: dict, modo: str) -> bool:
+        if modo == "molde":
+            return True
+        sobre_contorno = bool(cfg.get("sobre_contorno", True))
+        if modo == "contorno":
+            return sobre_contorno
+        if modo == "internos":
+            return not sobre_contorno
+        return False
 
     def _remover_marcacao_sem_config_restante(self, el: dict, ponto: QPointF, configs_restantes: list[dict]) -> None:
         if self._ponto_usado_por_configs(configs_restantes, ponto, incluir_controle=False):
@@ -339,6 +562,21 @@ class Ferramenta(FerramentaBase):
         for idx, el in enumerate(getattr(canvas.cena, "elementos", []) or []):
             if isinstance(el, dict) and el.get("molde") and self._ponto_dentro_bbox(el, pos):
                 return idx
+        return None
+
+    @staticmethod
+    def _molde_selecionado_canvas(canvas) -> int | None:
+        try:
+            selecionados = list(getattr(canvas, "_selecionados", set()) or [])
+        except Exception:
+            selecionados = []
+        for idx in selecionados:
+            try:
+                el = canvas.cena.elementos[int(idx)]
+            except Exception:
+                continue
+            if isinstance(el, dict) and el.get("molde"):
+                return int(idx)
         return None
 
     def _posicao_cena(self, canvas, event) -> QPointF:

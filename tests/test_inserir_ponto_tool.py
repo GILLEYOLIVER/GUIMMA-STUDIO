@@ -198,6 +198,81 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] < 5.0]), 3)
         self.assertEqual(len([pt for pt in auxiliares_novos if pt[0] > 5.0]), 3)
 
+    def test_inserir_principal_em_curva_preserva_e_interpola_graduacao(self):
+        canvas = _FakeCanvas()
+        pontos_originais = [
+            (0.0, 0.0),
+            (2.0, 1.6),
+            (5.0, 3.0),
+            (8.0, 1.6),
+            (10.0, 0.0),
+            (10.0, 8.0),
+            (0.0, 0.0),
+        ]
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": list(pontos_originais),
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)],
+                "controle_auxiliares": [(5.0, 3.0), (10.0, 4.0), (5.0, 4.0)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 10.0, "y": 8.0},
+                ],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                    {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                    {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                ],
+                "graduacao_tabela": {
+                    "modo": "dx_dy",
+                    "pontos": {
+                        "0": {
+                            "indice": 0,
+                            "ponto": (0.0, 0.0),
+                            "valores": {
+                                "P": {"dx": 0.0, "dy": -2.0},
+                                "M": {"dx": 0.0, "dy": 0.0},
+                                "G": {"dx": 0.0, "dy": 2.0},
+                            },
+                        },
+                        "1": {
+                            "indice": 1,
+                            "ponto": (10.0, 0.0),
+                            "valores": {
+                                "P": {"dx": 0.0, "dy": -4.0},
+                                "M": {"dx": 0.0, "dy": 0.0},
+                                "G": {"dx": 0.0, "dy": 4.0},
+                            },
+                        },
+                        "2": {
+                            "indice": 2,
+                            "ponto": (10.0, 8.0),
+                            "valores": {
+                                "P": {"dx": 0.0, "dy": -6.0},
+                                "M": {"dx": 0.0, "dy": 0.0},
+                                "G": {"dx": 0.0, "dy": 6.0},
+                            },
+                        },
+                    },
+                },
+            }
+        )
+        canvas.cena.elementos[0]["graduacao_pontos"] = canvas.cena.elementos[0]["graduacao_tabela"]["pontos"].copy()
+        ferramenta = FerramentaInserirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0), Qt.ShiftModifier)))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 3.0), Qt.ShiftModifier)))
+
+        pontos_cfg = canvas.cena.elementos[0]["graduacao_tabela"]["pontos"]
+        self.assertEqual(pontos_cfg["1"]["ponto"], (5.0, 3.0))
+        self.assertAlmostEqual(pontos_cfg["1"]["valores"]["P"]["dy"], -3.0)
+        self.assertAlmostEqual(pontos_cfg["1"]["valores"]["M"]["dy"], 0.0)
+        self.assertAlmostEqual(pontos_cfg["1"]["valores"]["G"]["dy"], 3.0)
+        self.assertEqual(pontos_cfg["2"]["ponto"], (10.0, 0.0))
+        self.assertEqual(pontos_cfg["2"]["valores"]["G"], {"dx": 0.0, "dy": 4.0})
+        self.assertEqual(canvas.cena.elementos[0]["graduacao_pontos"]["1"]["valores"]["G"]["dy"], 3.0)
+
     def test_inserir_principal_em_curva_garante_tres_auxiliares_por_trecho(self):
         canvas = _FakeCanvas()
         pontos_originais = [

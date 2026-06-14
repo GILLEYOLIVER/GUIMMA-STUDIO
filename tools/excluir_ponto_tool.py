@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QMessageBox
@@ -540,6 +542,14 @@ class Ferramenta(FerramentaBase):
         el["pontos"] = [(float(x), float(y)) for x, y in novos_pontos]
         el["fechado"] = bool(fechado)
         self._sincronizar_controles_molde(el)
+        if tipo == "canto":
+            self._remapear_graduacao_apos_remocao(
+                el,
+                [(float(p.x()), float(p.y())) for p in cantos_anteriores],
+                [(float(x), float(y)) for x, y in el.get("controle_cantos", []) or []],
+                controle_idx,
+                fechado=fechado,
+            )
         for temp_key in (
             "_controles_topologia_alterada",
             "_segmentos_auxiliares_arraste",
@@ -1065,6 +1075,148 @@ class Ferramenta(FerramentaBase):
         el["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in cantos]
         el["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in auxiliares]
 
+    def _remapear_graduacao_apos_remocao(
+        self,
+        el: dict,
+        pontos_antes: list[tuple[float, float]],
+        pontos_depois: list[tuple[float, float]],
+        removido_idx: int,
+        *,
+        fechado: bool,
+    ) -> None:
+        pontos_cfg = self._pontos_config_graduacao(el)
+        if not pontos_cfg:
+            return
+        base_antes = self._contorno_sem_fechamento(pontos_antes)
+        base_depois = self._contorno_sem_fechamento(pontos_depois)
+        if len(base_antes) < 2 or len(base_depois) < 2:
+            return
+        if not (0 <= int(removido_idx) < len(base_antes)):
+            return
+        try:
+            from canvas.visualizacao import VisualizacaoCanvas
+        except Exception:
+            return
+
+        nomes_tamanhos = self._nomes_tamanhos_graduacao(el, pontos_cfg)
+        if not nomes_tamanhos:
+            return
+
+        contorno_antes = [QPointF(x, y) for x, y in base_antes]
+        referencias_antes = [QPointF(x, y) for x, y in base_antes]
+        deslocamentos_por_tamanho: dict[str, list[tuple[float, float]]] = {}
+        for nome in nomes_tamanhos:
+            deslocamentos = VisualizacaoCanvas._deslocamentos_graduacao_tamanho(
+                pontos_cfg,
+                nome,
+                len(contorno_antes),
+                contorno=contorno_antes,
+                referencias=referencias_antes,
+            )
+            if not deslocamentos or len(deslocamentos) != len(contorno_antes):
+                deslocamentos = [(0.0, 0.0) for _ in contorno_antes]
+            deslocamentos_por_tamanho[str(nome)] = deslocamentos
+
+        pontos_remapeados: dict[str, dict] = {}
+        for novo_idx, ponto in enumerate(base_depois):
+            ponto_qt = QPointF(float(ponto[0]), float(ponto[1]))
+            valores: dict[str, dict[str, float]] = {}
+            for nome, deslocamentos in deslocamentos_por_tamanho.items():
+                dx, dy = self._deslocamento_interpolado_remocao(
+                    ponto_qt,
+                    contorno_antes,
+                    deslocamentos,
+                    fechado=fechado,
+                )
+                valores[nome] = {"dx": float(dx), "dy": float(dy)}
+            pontos_remapeados[str(novo_idx)] = {
+                "indice": int(novo_idx),
+                "numero": int(novo_idx) + 1,
+                "ponto": (float(ponto[0]), float(ponto[1])),
+                "valores": valores,
+            }
+
+        pontos_ordenados = self._ordenar_pontos_graduacao(pontos_remapeados)
+        tabela = el.setdefault("graduacao_tabela", {})
+        if isinstance(tabela, dict):
+            tabela["modo"] = "dx_dy"
+            tabela["pontos"] = pontos_ordenados
+        el["graduacao_pontos"] = deepcopy(pontos_ordenados)
+
+    def _deslocamento_interpolado_remocao(
+        self,
+        ponto: QPointF,
+        contorno: list[QPointF],
+        deslocamentos: list[tuple[float, float]],
+        *,
+        fechado: bool,
+    ) -> tuple[float, float]:
+        if not contorno or len(contorno) != len(deslocamentos):
+            return (0.0, 0.0)
+        for idx, existente in enumerate(contorno):
+            if self._dist_local(ponto, existente) <= 1e-6:
+                dx, dy = deslocamentos[idx]
+                return (float(dx), float(dy))
+
+        limite = len(contorno) if fechado and len(contorno) > 2 else len(contorno) - 1
+        melhor: tuple[float, int, int, float] | None = None
+        for idx in range(max(0, limite)):
+            prox_idx = (idx + 1) % len(contorno)
+            t, distancia = self._parametro_e_distancia_segmento(ponto, contorno[idx], contorno[prox_idx])
+            if melhor is None or distancia < melhor[0]:
+                melhor = (distancia, idx, prox_idx, t)
+        if melhor is None:
+            return (0.0, 0.0)
+
+        _distancia, idx_a, idx_b, fator = melhor
+        dx_a, dy_a = deslocamentos[idx_a]
+        dx_b, dy_b = deslocamentos[idx_b]
+        return (
+            float(dx_a + ((dx_b - dx_a) * fator)),
+            float(dy_a + ((dy_b - dy_a) * fator)),
+        )
+
+    def _pontos_config_graduacao(self, el: dict) -> dict:
+        tabela = el.get("graduacao_tabela") if isinstance(el.get("graduacao_tabela"), dict) else None
+        if isinstance(tabela, dict) and isinstance(tabela.get("pontos"), dict):
+            return tabela.get("pontos") or {}
+        legado = el.get("graduacao_pontos")
+        return legado if isinstance(legado, dict) else {}
+
+    def _nomes_tamanhos_graduacao(self, el: dict, pontos_cfg: dict) -> list[str]:
+        nomes: list[str] = []
+        for linha in el.get("graduacao_tamanhos", []) or []:
+            if not isinstance(linha, dict) or not linha.get("ativo", True):
+                continue
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if nome and nome not in nomes:
+                nomes.append(nome)
+        for cfg in pontos_cfg.values():
+            valores = cfg.get("valores") if isinstance(cfg, dict) else None
+            if not isinstance(valores, dict):
+                continue
+            for nome in valores:
+                texto = str(nome or "").strip()
+                if texto and texto not in nomes:
+                    nomes.append(texto)
+        return nomes
+
+    @staticmethod
+    def _ordenar_pontos_graduacao(pontos_cfg: dict) -> dict:
+        def chave_ordem(item) -> int:
+            try:
+                return int(item[0])
+            except Exception:
+                return 0
+
+        return {str(chave): valor for chave, valor in sorted(pontos_cfg.items(), key=chave_ordem)}
+
+    def _contorno_sem_fechamento(self, pontos: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        contorno = [(float(x), float(y)) for x, y in pontos]
+        if len(contorno) > 1 and self._dist_tuple(contorno[0], contorno[-1]) <= 1e-6:
+            contorno = contorno[:-1]
+        return contorno
+
     def _remover_ponto_duplicado_de_controles(self, controles: list, alvo: QPointF) -> list[tuple[float, float]]:
         saida: list[tuple[float, float]] = []
         for item in controles:
@@ -1235,6 +1387,14 @@ class Ferramenta(FerramentaBase):
         dy = a.y() - b.y()
         return (dx * dx + dy * dy) ** 0.5
 
+    @staticmethod
+    def _dist_tuple(a: tuple[float, float] | None, b: tuple[float, float]) -> float:
+        if a is None:
+            return float("inf")
+        dx = float(a[0]) - float(b[0])
+        dy = float(a[1]) - float(b[1])
+        return (dx * dx + dy * dy) ** 0.5
+
     # ------------------------------------------------------------------
     # Elementos livres: comportamento antigo mantido.
     # ------------------------------------------------------------------
@@ -1275,7 +1435,8 @@ class Ferramenta(FerramentaBase):
         if not (0 <= idx < len(canvas.cena.elementos)):
             return False
         el = canvas.cena.elementos[idx]
-        controles = self._controles_curva(el)
+        controles_antes = self._controles_curva(el)
+        controles = list(controles_antes)
         if not (0 <= controle_idx < len(controles)):
             self.set_status("Controle inválido para exclusão.")
             return False
@@ -1289,6 +1450,13 @@ class Ferramenta(FerramentaBase):
         el["pontos"] = self._helper._gerar_tracado_curva_real(controles, fechado=fechado, tipo_curva=tipo_curva)
         self._helper._salvar_controles_curva_real(el, controles)
         el["fechado"] = fechado
+        self._remapear_graduacao_apos_remocao(
+            el,
+            [(float(p.x()), float(p.y())) for p in controles_antes],
+            [(float(p.x()), float(p.y())) for p in controles],
+            controle_idx,
+            fechado=fechado,
+        )
         return len(el.get("pontos", []) or []) >= 2
 
     def _curva_editavel(self, el: dict) -> bool:

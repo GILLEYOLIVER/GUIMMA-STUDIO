@@ -15,8 +15,10 @@ if find_spec("PySide6") is None:
     NumeroLimpoDoubleSpinBox = None
     PreviewMoldeWidget = None
     PropriedadesMoldesDialog = None
+    FerramentaPropriedades = None
     QApplication = None
     QComboBox = None
+    QGroupBox = None
     QIcon = None
     QLabel = None
     QLineEdit = None
@@ -24,12 +26,13 @@ if find_spec("PySide6") is None:
     QTreeWidget = None
 else:
     from PySide6.QtCore import QPointF
-    from PySide6.QtGui import QIcon
-    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QTreeWidget
+    from PySide6.QtGui import QIcon, QPainterPath
+    from PySide6.QtWidgets import QApplication, QComboBox, QGroupBox, QLabel, QLineEdit, QTreeWidget
 
     from tools.propriedades_tool import (
         CHAVE_VISUALIZACAO_CUSTOMIZADA,
         FLAGS_VISUALIZACAO_MOLDE,
+        Ferramenta as FerramentaPropriedades,
         MoldeRef,
         NumeroLimpoDoubleSpinBox,
         PreviewMoldeWidget,
@@ -205,9 +208,13 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
             def __init__(self):
                 self.elementos_alterados = _SignalFake()
                 self.updates = 0
+                self.rascunho_visualizacao = None
 
             def update(self):
                 self.updates += 1
+
+            def set_visualizacao_rascunho(self, elementos):
+                self.rascunho_visualizacao = elementos
 
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         dialog._suspender_auto_aplicar = False
@@ -224,6 +231,7 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         dialog._moldes_alvo_graduacao = lambda: [rascunho]
         dialog._moldes_reais_alvo_graduacao = lambda: [real]
         dialog._sincronizar_valores_graduacao_tamanhos = lambda *args, **kwargs: None
+        dialog._elementos_edicao = lambda: [rascunho]
 
         PropriedadesMoldesDialog._sincronizar_gradacao_no_molde(dialog)
 
@@ -231,7 +239,7 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertIn("graduacao_tamanhos", rascunho)
         self.assertNotIn("graduacao_grade_nome", real)
         self.assertEqual(dialog.canvas.elementos_alterados.emissoes, 0)
-        self.assertEqual(dialog.canvas.updates, 0)
+        self.assertEqual(dialog.canvas.rascunho_visualizacao[0]["graduacao_grade_nome"], "P-G(M)")
 
     def test_flags_visualizacao_sao_lidos_e_aplicados_no_molde(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
@@ -264,7 +272,7 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertTrue(checks["chk_mostrar_fio"].isChecked())
         self.assertTrue(checks["chk_costura"].isChecked())
         self.assertTrue(checks["chk_mostrar_numeros"].isChecked())
-        self.assertTrue(checks["chk_caminho_grade"].isChecked())
+        self.assertFalse(checks["chk_caminho_grade"].isChecked())
         self.assertTrue(checks["chk_quantidade_visual"].isChecked())
         self.assertTrue(checks["chk_pique"].isChecked())
         self.assertFalse(checks["chk_modelo"].isChecked())
@@ -340,6 +348,131 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
 
         self.assertEqual(dialog._indice_atual, 2)
         self.assertEqual(preenchidos[-1], "K3")
+
+    def test_rascunho_propriedades_ignora_cache_runtime_qpainterpath(self):
+        path = QPainterPath(QPointF(0.0, 0.0))
+        path.lineTo(QPointF(10.0, 0.0))
+        elemento = {
+            "molde": True,
+            "nome_molde": "K1",
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "_runtime_path_polilinha_tela_cache": {"path": path},
+        }
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.canvas = SimpleNamespace(cena=SimpleNamespace(elementos=[elemento]))
+
+        rascunho = PropriedadesMoldesDialog._criar_rascunho_elementos(dialog)
+        snapshot = PropriedadesMoldesDialog._criar_snapshot_moldes(dialog)
+
+        self.assertEqual(rascunho[0]["nome_molde"], "K1")
+        self.assertEqual(snapshot[0]["nome_molde"], "K1")
+        self.assertNotIn("_runtime_path_polilinha_tela_cache", rascunho[0])
+        self.assertNotIn("_runtime_path_polilinha_tela_cache", snapshot[0])
+
+    def test_abrir_propriedades_centraliza_depois_de_mostrar(self):
+        eventos = []
+
+        class _DialogFake:
+            _indice_atual = 0
+
+            def isVisible(self):
+                return False
+
+            def _iniciar_sessao_edicao(self):
+                eventos.append("sessao")
+
+            def _indice_molde_preferencial(self):
+                return 0
+
+            def recarregar_lista(self):
+                eventos.append("lista")
+
+            def centralizar_na_tela(self):
+                eventos.append("centralizar")
+
+            def show(self):
+                eventos.append("show")
+
+            def raise_(self):
+                eventos.append("raise")
+
+            def activateWindow(self):
+                eventos.append("activate")
+
+            def geometry(self):
+                return SimpleNamespace(getRect=lambda: (0, 0, 100, 100))
+
+        class _CanvasFake:
+            def window(self):
+                return None
+
+            def findChildren(self, *_args, **_kwargs):
+                return []
+
+        ferramenta = FerramentaPropriedades()
+        ferramenta._obter_dialog = lambda _canvas: _DialogFake()
+
+        ferramenta.on_activate(_CanvasFake())
+
+        self.assertLess(eventos.index("show"), eventos.index("centralizar"))
+
+    def test_layout_visualizacao_tem_altura_para_nao_cortar_checkboxes(self):
+        canvas = SimpleNamespace(
+            cena=SimpleNamespace(elementos=[]),
+            _selecionados=set(),
+            _mostrar_cor_tecidos=False,
+            _cores_tecidos={},
+        )
+        dialog = PropriedadesMoldesDialog(canvas)
+        self.addCleanup(dialog.close)
+
+        grupo_visualizacao = dialog.findChild(QGroupBox, "VisualizacaoOptionsGroup")
+
+        self.assertIsNotNone(grupo_visualizacao)
+        self.assertGreaterEqual(dialog.height(), 830)
+        self.assertGreaterEqual(dialog.minimumHeight(), 790)
+        self.assertGreaterEqual(dialog.tabs.minimumHeight(), 470)
+        self.assertGreaterEqual(grupo_visualizacao.minimumHeight(), 205)
+        self.assertGreaterEqual(dialog.chk_caminho_grade.minimumHeight(), 24)
+        self.assertGreaterEqual(dialog.chk_grade_tam.minimumHeight(), 24)
+        self.assertEqual(dialog.tbl_graduacao.height(), 286)
+
+    def test_preview_piques_usa_segmentos_configurados_em_vez_de_x(self):
+        class _PainterFake:
+            def __init__(self):
+                self.linhas = []
+
+            def save(self):
+                pass
+
+            def restore(self):
+                pass
+
+            def setPen(self, _pen):
+                pass
+
+            def drawLine(self, *args):
+                self.linhas.append(args)
+
+        preview = PreviewMoldeWidget.__new__(PreviewMoldeWidget)
+        preview._molde = {
+            "mostrar_piques": True,
+            "piques_config": [
+                {
+                    "ponto": (5.0, 0.0),
+                    "segmentos": [((5.0, 0.0), (5.0, 1.0)), ((4.7, 1.0), (5.3, 1.0))],
+                }
+            ],
+            "marcacoes_no_perimetro": [(5.0, 0.0)],
+        }
+        painter = _PainterFake()
+
+        PreviewMoldeWidget._desenhar_piques(preview, painter, lambda ponto: QPointF(ponto), "#ffffff")
+
+        self.assertEqual(len(painter.linhas), 2)
+        self.assertTrue(all(len(args) == 2 for args in painter.linhas))
+        self.assertEqual((painter.linhas[0][0].x(), painter.linhas[0][0].y()), (5.0, 0.0))
+        self.assertEqual((painter.linhas[0][1].x(), painter.linhas[0][1].y()), (5.0, 1.0))
 
     def test_preview_graduacao_respeita_checkbox_visualizacao(self):
         from canvas.visualizacao import VisualizacaoCanvas
@@ -420,6 +553,46 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertEqual(valores["GG"], {"dx": 2.0, "dy": -2.0})
         self.assertEqual(molde["graduacao_pontos"]["0"]["valores"]["PP"], {"dx": -2.0, "dy": 2.0})
 
+    def test_tamanho_adicionado_continua_distancia_da_regra_existente(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        linhas_antigas = [
+            {"ativo": True, "tamanho": "P", "base": False},
+            {"ativo": True, "tamanho": "M", "base": True},
+            {"ativo": True, "tamanho": "G", "base": False},
+        ]
+        molde = {
+            "graduacao_tamanhos": linhas_antigas,
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "valores": {
+                            "P": {"dx": -1.0, "dy": -1.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 1.0, "dy": 1.0},
+                        }
+                    }
+                }
+            },
+        }
+        novas_linhas = [
+            {"ativo": True, "tamanho": "NOVO_SUP_1", "base": False},
+            {"ativo": True, "tamanho": "P", "base": False},
+            {"ativo": True, "tamanho": "M", "base": True},
+            {"ativo": True, "tamanho": "G", "base": False},
+            {"ativo": True, "tamanho": "NOVO_INF_1", "base": False},
+        ]
+
+        PropriedadesMoldesDialog._sincronizar_valores_graduacao_tamanhos(
+            dialog,
+            molde,
+            novas_linhas,
+            linhas_antigas=linhas_antigas,
+        )
+
+        valores = molde["graduacao_tabela"]["pontos"]["0"]["valores"]
+        self.assertEqual(valores["NOVO_SUP_1"], {"dx": -2.0, "dy": -2.0})
+        self.assertEqual(valores["NOVO_INF_1"], {"dx": 2.0, "dy": 2.0})
+
     def test_trocar_grade_mantem_graduacao_por_posicao(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         linhas_antigas = [
@@ -474,6 +647,33 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         cores = {linha["tamanho"]: linha["cor"] for linha in dialog._graduacao_linhas}
         self.assertEqual(cores, {"P": "#c87575", "M": "#d60b0b", "G": "#5d95b7"})
 
+    def test_carregar_graduacao_do_molde_respeita_linhas_reais_sem_impor_pmg(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-GG(M)"])
+        dialog._renderizar_tabela_graduacao = lambda: None
+
+        molde = {
+            "graduacao_grade_nome": "P-G(M)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "PP", "cor": "#ef4fa0", "base": False},
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": False},
+                {"ativo": True, "tamanho": "GG", "cor": "#6694e8", "base": False},
+                {"ativo": True, "tamanho": "NOVO_INF_1", "cor": "#92d4a3", "base": False},
+            ],
+        }
+
+        PropriedadesMoldesDialog._carregar_graduacao_do_molde(dialog, molde)
+
+        self.assertEqual(
+            [linha["tamanho"] for linha in dialog._graduacao_linhas],
+            ["PP", "P", "M", "G", "GG", "NOVO_INF_1"],
+        )
+        self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "PP/P/M/G/GG/NOVO_INF_1(M)")
+        self.assertNotEqual(dialog.cmb_grade_tamanhos.currentText(), "P-G(M)")
+
     def test_propriedades_define_conflito_quando_grade_difere_do_modelo(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         base = {
@@ -505,6 +705,7 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
             MoldeRef(indice=1, nome="K2", dados=diferente),
             MoldeRef(indice=2, nome="K3", dados=igual),
         ]
+        dialog.lbl_alerta_grade = QLabel()
 
         PropriedadesMoldesDialog._atualizar_conflitos_grade_modelo(dialog)
 
@@ -513,6 +714,18 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertEqual(diferente["grade_modelo_referencia"], "P-G(M)|P/M/G")
         self.assertFalse(igual["conflito_grade_modelo"])
         self.assertEqual(diferente["graduacao_grade_nome"], "36-44(40)")
+        self.assertFalse(dialog.lbl_alerta_grade.isHidden())
+        self.assertIn("Erro de grade", dialog.lbl_alerta_grade.text())
+        self.assertIn("P-G(M)", dialog.lbl_alerta_grade.text())
+        self.assertIn("36-44(40)", dialog.lbl_alerta_grade.text())
+
+        tooltip = PropriedadesMoldesDialog._tooltip_grade_molde(
+            dialog,
+            dialog._refs[1],
+            "P-G(M)|P/M/G",
+        )
+        self.assertIn("Grade diferente", tooltip)
+        self.assertIn("Referência: P-G(M)", tooltip)
 
 
 if __name__ == "__main__":

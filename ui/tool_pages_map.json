@@ -139,6 +139,7 @@
           "tools": [
             "encolhimento",
             "linha_simetria",
+            "transformar_em_elementos",
             "bainha",
             "dobrar",
             "desdobrar"
@@ -792,7 +793,7 @@
       "icon": "excluir_ponto.svg"
     },
     "transformar_em_elementos": {
-      "title": "Transformar em elementos",
+      "title": "Converter em linha",
       "module": "tools/transformar_em_elementos_tool.py",
       "class": "Ferramenta",
       "icon": "transformar_em_elementos.svg"

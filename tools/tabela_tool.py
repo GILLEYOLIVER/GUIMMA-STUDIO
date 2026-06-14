@@ -23,37 +23,52 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from core.graduacao import grade_graduacao_padrao
+from core.graduacao import grade_graduacao_padrao, grade_graduacao_referencia_canvas
 from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_cena_para_unidade, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
 class MedidaCmSpinBox(QDoubleSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
         self.setLocale(QLocale.c())
         self.setRange(0.0, 1000.0)
         self.setDecimals(3)
         self.setSingleStep(0.05)
         self.setSpecialValueText("")
 
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        valor_cena = float(self.value()) * fator_antigo
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.blockSignals(True)
+        self.setValue(valor_cena / self._unidade_fator)
+        self.blockSignals(False)
+        passo = 1.0 if self._unidade_sigla == "mm" else 0.05
+        self.setSingleStep(passo)
+        self.lineEdit().setPlaceholderText(self._unidade_sigla)
+
     def textFromValue(self, value: float) -> str:  # noqa: N802
         if abs(float(value or 0.0)) <= 1e-9:
             return ""
         texto = f"{float(value):.3f}".rstrip("0").rstrip(".")
-        return f"{texto} cm"
+        return f"{texto} {self._unidade_sigla}"
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
         texto = str(text or "").lower()
         try:
-            return numero_decimal_ponto(texto, float(self.value()), ("cm",))
+            return numero_decimal_ponto(texto, float(self.value()), SUFIXOS_MEDIDA)
         except ValueError:
             return float(self.value())
 
     def validate(self, text: str, pos: int):  # noqa: N802
         try:
-            texto = normalizar_decimal_ponto(str(text or "").lower(), ("cm",))
+            texto = normalizar_decimal_ponto(str(text or "").lower(), SUFIXOS_MEDIDA)
         except Exception:
             return QValidator.Invalid, text, pos
         if texto in {"", "+", "-", "0.", "+0.", "-0."}:
@@ -69,8 +84,8 @@ class MedidaCmSpinBox(QDoubleSpinBox):
         valor = self.valueFromText(texto)
         if abs(valor) > 1e-9:
             self.setValue(valor)
-            return valor
-        return float(self.value())
+            return valor * self._unidade_fator
+        return float(self.value()) * self._unidade_fator
 
 
 class GraduarTabelaDialog(QDialog):
@@ -84,6 +99,8 @@ class GraduarTabelaDialog(QDialog):
         self.setMinimumSize(330, 470)
         self._ferramenta = None
         self._canvas = None
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
         self._bloquear_eventos = False
         self._base_row = 0
         self.setStyleSheet(
@@ -240,10 +257,47 @@ class GraduarTabelaDialog(QDialog):
             botoes_copia.addWidget(btn, linha, col)
         raiz.addLayout(botoes_copia)
         self._aba_alterada(0)
+        self._atualizar_cabecalhos_unidade()
 
     def conectar(self, ferramenta, canvas):
         self._ferramenta = ferramenta
         self._canvas = canvas
+        self.set_unidade(*unidade_canvas(canvas))
+
+    def set_unidade(self, sigla: str, fator: float) -> None:
+        self._unidade_sigla = str(sigla or "cm")
+        self._unidade_fator = max(1e-9, float(fator or 1.0))
+        self.sp_incremento.set_unidade(self._unidade_sigla, self._unidade_fator)
+        self._atualizar_cabecalhos_unidade()
+
+    def _atualizar_cabecalhos_unidade(self) -> None:
+        unidade = self._unidade_sigla
+        self.tbl.setHorizontalHeaderLabels(["Tamanho", f"DX ({unidade})", f"DY ({unidade})"])
+        self.tbl_polar.setHorizontalHeaderLabels(["Tamanho", f"Dist.({unidade})", "Ang°"])
+        self.tbl_perimetro.setHorizontalHeaderLabels(
+            [
+                "Tamanho",
+                f"Perim. X ({unidade})",
+                f"Dif. X ({unidade})",
+                f"Perim. Y ({unidade})",
+                f"Dif. Y ({unidade})",
+                f"Total ({unidade})",
+                f"Dif. total ({unidade})",
+            ]
+        )
+
+    def _para_unidade(self, valor_cena: float) -> float:
+        if self._canvas is not None:
+            return valor_cena_para_unidade(self._canvas, valor_cena)
+        return float(valor_cena) / self._unidade_fator
+
+    def _para_cena(self, valor_unidade: float) -> float:
+        if self._canvas is not None:
+            return valor_unidade_para_cena(self._canvas, valor_unidade)
+        return float(valor_unidade) * self._unidade_fator
+
+    def _formatar_medida(self, valor_cena: float, casas: int = 3) -> str:
+        return self._formatar_float(self._para_unidade(valor_cena), casas=casas)
 
     def definir_pontos(self, quantidade: int, atual: int | None):
         self._bloquear_eventos = True
@@ -282,7 +336,7 @@ class GraduarTabelaDialog(QDialog):
 
             dados = valores.get(nome, {}) if isinstance(valores, dict) else {}
             for col, chave in ((1, "dx"), (2, "dy")):
-                item = QTableWidgetItem(self._formatar_float(dados.get(chave, 0.0)))
+                item = QTableWidgetItem(self._formatar_medida(dados.get(chave, 0.0)))
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
                 if row == base_row:
@@ -328,7 +382,7 @@ class GraduarTabelaDialog(QDialog):
                 (5, "perimetro"),
                 (6, "diferenca"),
             ):
-                item = QTableWidgetItem(self._formatar_float(linha.get(chave, 0.0), casas=2))
+                item = QTableWidgetItem(self._formatar_medida(linha.get(chave, 0.0), casas=2))
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 item.setTextAlignment(Qt.AlignCenter)
                 if base:
@@ -372,7 +426,7 @@ class GraduarTabelaDialog(QDialog):
         for row in range(self.tbl.rowCount()):
             item = self.tbl.item(row, col)
             if item is not None:
-                item.setText(self._formatar_float(valor))
+                self._set_valor(row, col, valor)
                 self._sincronizar_polar_linha(row)
         self._bloquear_eventos = False
         self._celula_alterada(None)
@@ -391,7 +445,7 @@ class GraduarTabelaDialog(QDialog):
                 self._sincronizar_polar_linha(row)
                 continue
             elif self.chk_incremental.isChecked():
-                fator = 1 if row > base_row else (-1 if row < base_row else 0)
+                fator = row - base_row
                 dx = dx_dir * incremento * fator
                 dy = dy_dir * incremento * fator
             elif row == row_atual:
@@ -484,14 +538,14 @@ class GraduarTabelaDialog(QDialog):
         item = self.tbl.item(row, col)
         if item is None:
             return 0.0
-        return numero_decimal_ponto(item.text(), 0.0)
+        return self._para_cena(numero_decimal_ponto(item.text(), 0.0, SUFIXOS_MEDIDA))
 
     def _set_valor(self, row: int, col: int, valor: float):
         item = self.tbl.item(row, col)
         if item is None:
             item = QTableWidgetItem()
             self.tbl.setItem(row, col, item)
-        item.setText(self._formatar_float(valor))
+        item.setText(self._formatar_medida(valor))
         item.setTextAlignment(Qt.AlignCenter)
         if row == self._linha_base():
             self._destacar_item_valor_base(item)
@@ -501,7 +555,8 @@ class GraduarTabelaDialog(QDialog):
         if item is None:
             item = QTableWidgetItem()
             self.tbl_polar.setItem(row, col, item)
-        item.setText(self._formatar_float(valor, casas=casas))
+        texto = self._formatar_medida(valor, casas=casas) if col == 1 else self._formatar_float(valor, casas=casas)
+        item.setText(texto)
         item.setTextAlignment(Qt.AlignCenter)
         if row == self._linha_base():
             self._destacar_item_valor_base(item)
@@ -534,7 +589,8 @@ class GraduarTabelaDialog(QDialog):
         item = self.tbl_polar.item(row, col)
         if item is None:
             return 0.0
-        return numero_decimal_ponto(item.text(), 0.0)
+        valor = numero_decimal_ponto(item.text(), 0.0, SUFIXOS_MEDIDA)
+        return self._para_cena(valor) if col == 1 else valor
 
     @staticmethod
     def _destacar_item_tamanho_base(item: QTableWidgetItem, cor: str):
@@ -612,6 +668,14 @@ class Ferramenta(FerramentaBase):
         if canvas is not None:
             canvas.update()
 
+    def on_unidade_medida_alterada(self, canvas):
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is None:
+            return
+        dialog.conectar(self, canvas)
+        self._atualizar_dialog(canvas)
+        self._repintar_canvas_agora(canvas)
+
     def on_mouse_press(self, canvas, event) -> bool:
         acumular = self._evento_ctrl(event)
         if event.button() == Qt.RightButton and not acumular:
@@ -669,7 +733,8 @@ class Ferramenta(FerramentaBase):
             return
         if not (0 <= self._molde_idx < len(canvas.cena.elementos)):
             return
-        pontos = self._pontos_contorno(canvas.cena.elementos[self._molde_idx])
+        molde = canvas.cena.elementos[self._molde_idx]
+        pontos = self._pontos_contorno(molde)
         selecionados = self._pontos_validos_selecionados(len(pontos))
         hover_idx = self._hover_ponto_idx if self._hover_ponto_idx is not None and 0 <= int(self._hover_ponto_idx) < len(pontos) else None
         if not pontos:
@@ -682,17 +747,15 @@ class Ferramenta(FerramentaBase):
             if idx in selecionados or idx == hover_idx:
                 continue
             tela = canvas._cena_para_tela(ponto)
-            cor_ponto = QColor("#008cff")
-            painter.setPen(QPen(cor_ponto, 1.6))
-            painter.setBrush(QColor(0, 140, 255, 34))
-            painter.drawEllipse(tela, 5, 5)
+            self._desenhar_ponto_overlay(canvas, painter, molde, idx, tela, raio=5)
         for idx in selecionados:
             tela = canvas._cena_para_tela(pontos[idx])
             ativo = idx == self._ponto_idx
             cor = QColor("#ff006e" if ativo else "#00d6ff")
             painter.setPen(QPen(cor, 2.0))
-            painter.setBrush(QColor(cor.red(), cor.green(), cor.blue(), 80))
-            painter.drawEllipse(tela, 7, 7)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(tela, 9, 9)
+            self._desenhar_ponto_overlay(canvas, painter, molde, idx, tela, raio=6)
             painter.setPen(QColor("#ffffff"))
             painter.drawText(int(tela.x() + 8), int(tela.y() - 8), str(idx + 1))
         if hover_idx is not None:
@@ -700,8 +763,9 @@ class Ferramenta(FerramentaBase):
             tela = canvas._cena_para_tela(pontos[idx])
             cor_hover = QColor("#008cff")
             painter.setPen(QPen(cor_hover, 3.0))
-            painter.setBrush(QColor(0, 140, 255, 60))
+            painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(tela, 11, 11)
+            self._desenhar_ponto_overlay(canvas, painter, molde, idx, tela, raio=6)
             painter.drawLine(QPointF(tela.x() - 14, tela.y()), QPointF(tela.x() - 8, tela.y()))
             painter.drawLine(QPointF(tela.x() + 8, tela.y()), QPointF(tela.x() + 14, tela.y()))
             painter.drawLine(QPointF(tela.x(), tela.y() - 14), QPointF(tela.x(), tela.y() - 8))
@@ -709,6 +773,46 @@ class Ferramenta(FerramentaBase):
             painter.setPen(cor_hover)
             painter.drawText(int(tela.x() + 13), int(tela.y() - 12), str(idx + 1))
         painter.restore()
+
+    def _desenhar_ponto_overlay(self, canvas, painter, molde: dict, ponto_idx: int, tela: QPointF, raio: int = 5) -> None:
+        cor, forma = self._config_visual_ponto_overlay(canvas, molde, ponto_idx)
+        desenhar = getattr(canvas, "_desenhar_marcador_ponto_tela", None)
+        if callable(desenhar):
+            desenhar(painter, tela, cor, forma, raio)
+            return
+        cor_qt = QColor(str(cor or "#008cff"))
+        if not cor_qt.isValid():
+            cor_qt = QColor("#008cff")
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.setBrush(cor_qt)
+        d = max(2, int(raio))
+        forma_txt = str(forma or "").strip().lower()
+        if "quadrado" in forma_txt:
+            painter.drawRect(int(tela.x() - d), int(tela.y() - d), d * 2, d * 2)
+        elif "circulo" in forma_txt or "círculo" in forma_txt:
+            painter.drawEllipse(tela, d, d)
+        else:
+            path = QPainterPath(QPointF(tela.x(), tela.y() - d))
+            path.lineTo(QPointF(tela.x() + d, tela.y()))
+            path.lineTo(QPointF(tela.x(), tela.y() + d))
+            path.lineTo(QPointF(tela.x() - d, tela.y()))
+            path.closeSubpath()
+            painter.drawPath(path)
+
+    def _config_visual_ponto_overlay(self, canvas, molde: dict, ponto_idx: int) -> tuple[str, str]:
+        chave = self._chave_config_ponto_overlay(molde, ponto_idx)
+        cor_padrao = "#008cff"
+        forma_padrao = "Circulo preenchido" if chave == "ponto_controle" else "Losango"
+        config = getattr(canvas, "_config_ponto_molde", None)
+        if callable(config):
+            try:
+                return config(chave, cor_padrao, forma_padrao)
+            except Exception:
+                pass
+        return cor_padrao, forma_padrao
+
+    def _chave_config_ponto_overlay(self, molde: dict | None, ponto_idx: int | None) -> str:
+        return "ponto_controle" if self._valores_ponto(molde, ponto_idx) else "ponto_nao_graduado"
 
     def selecionar_ponto(self, canvas, ponto_idx: int | None):
         self._ponto_idx = ponto_idx
@@ -742,6 +846,7 @@ class Ferramenta(FerramentaBase):
     def aplicar_dialog(self, canvas):
         if self._salvar_valores_dialog(canvas, registrar_historico=True):
             self._status(canvas, "Graduação por tabela aplicada ao ponto selecionado.")
+            self._repintar_canvas_agora(canvas)
         else:
             self._status(canvas, "Tabela: selecione um molde e um ponto para aplicar.")
 
@@ -775,6 +880,7 @@ class Ferramenta(FerramentaBase):
                 "valores": deepcopy(valores),
             }
         molde["graduacao_pontos"] = deepcopy(pontos_cfg)
+        molde["mostrar_graduacao"] = True
         if registrar_historico and hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
         return True
@@ -815,8 +921,9 @@ class Ferramenta(FerramentaBase):
 
     def _quando_canvas_elementos_alterados(self, canvas) -> None:
         dialog = self._dialog_por_canvas.get(id(canvas))
-        if dialog is None or not dialog.isVisible():
+        if dialog is None:
             return
+        visivel = bool(dialog.isVisible())
         selecionado = self._molde_selecionado(canvas)
         if selecionado is not None and selecionado != self._molde_idx:
             self._definir_molde_idx(canvas, selecionado)
@@ -824,17 +931,26 @@ class Ferramenta(FerramentaBase):
             self._hover_ponto_idx = None
             self._pontos_selecionados.clear()
         if not self._molde_atual_corresponde(canvas):
-            self._fechar_dialog_molde_indisponivel(canvas)
+            if visivel:
+                self._fechar_dialog_molde_indisponivel(canvas)
+            else:
+                self._molde_idx = None
+                self._molde_chave = None
+                self._ponto_idx = None
+                self._hover_ponto_idx = None
+                self._pontos_selecionados.clear()
             return
         pontos = self._pontos_contorno(self._molde_atual(canvas))
         if not pontos:
-            self._fechar_dialog_molde_indisponivel(canvas)
+            if visivel:
+                self._fechar_dialog_molde_indisponivel(canvas)
             return
         if self._ponto_idx is not None and not (0 <= self._ponto_idx < len(pontos)):
             self._ponto_idx = None
         self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos))
         self._atualizar_dialog(canvas)
-        self._repintar_canvas_agora(canvas)
+        if visivel:
+            self._repintar_canvas_agora(canvas)
 
     def _fechar_dialog_molde_indisponivel(self, canvas) -> None:
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -851,6 +967,7 @@ class Ferramenta(FerramentaBase):
 
     def _atualizar_dialog(self, canvas):
         dialog = self._obter_dialog(canvas)
+        dialog.conectar(self, canvas)
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
         if molde is not None:
@@ -869,6 +986,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is None:
             return
+        dialog.set_unidade(*unidade_canvas(canvas))
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
         tamanhos = self._tamanhos_molde(molde)
@@ -1193,7 +1311,7 @@ class Ferramenta(FerramentaBase):
     def _pontos_contorno(self, molde: dict | None) -> list[QPointF]:
         if not self._eh_molde_graduavel(molde):
             return []
-        origem = None
+        base = self._pontos_de_origem(molde.get("pontos") if isinstance(molde, dict) else None)
         for chave in (
             "pontos_controle_principais",
             "controle_cantos",
@@ -1203,9 +1321,15 @@ class Ferramenta(FerramentaBase):
             "pontos",
         ):
             valor = molde.get(chave)
-            if isinstance(valor, list) and valor:
-                origem = valor
-                break
+            pontos = self._pontos_de_origem(valor)
+            if not pontos:
+                continue
+            if chave != "pontos" and self._pontos_desalinhados_do_contorno(pontos, base):
+                continue
+            return pontos
+        return base
+
+    def _pontos_de_origem(self, origem) -> list[QPointF]:
         pontos: list[QPointF] = []
         for item in origem or []:
             ponto = self._ponto_qt(item)
@@ -1214,6 +1338,33 @@ class Ferramenta(FerramentaBase):
         if len(pontos) > 1 and self._dist(pontos[0], pontos[-1]) <= 1e-7:
             pontos.pop()
         return pontos
+
+    def _pontos_desalinhados_do_contorno(self, pontos: list[QPointF], base: list[QPointF]) -> bool:
+        if len(pontos) < 2 or len(base) < 2:
+            return False
+        tolerancia = self._tolerancia_fonte_contorno(base)
+        distantes = [
+            ponto
+            for ponto in pontos
+            if self._distancia_ponto_contorno(ponto, base) > tolerancia
+        ]
+        return bool(distantes)
+
+    def _tolerancia_fonte_contorno(self, base: list[QPointF]) -> float:
+        xs = [p.x() for p in base]
+        ys = [p.y() for p in base]
+        diagonal = hypot(max(xs) - min(xs), max(ys) - min(ys)) if xs and ys else 0.0
+        return max(1.0, diagonal * 0.08)
+
+    def _distancia_ponto_contorno(self, ponto: QPointF, base: list[QPointF]) -> float:
+        if not base:
+            return float("inf")
+        segmentos = list(zip(base, base[1:]))
+        if len(base) > 2:
+            segmentos.append((base[-1], base[0]))
+        if not segmentos:
+            return min(self._dist(ponto, item) for item in base)
+        return min(self._distancia_ponto_segmento(ponto, a, b) for a, b in segmentos)
 
     def _tamanhos_molde(self, molde: dict | None) -> list[dict]:
         linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
@@ -1248,6 +1399,7 @@ class Ferramenta(FerramentaBase):
         if not self._eh_molde_graduavel(molde):
             return False
         if not self._eh_tamanho_separado_sem_grade(molde):
+            self._sincronizar_grade_molde_extraido_sem_valores(canvas, molde)
             return True
         if not self._confirmar_definir_grade_molde_separado(canvas, molde):
             self._status(canvas, "Tabela: esse molde separado ainda não possui grade.")
@@ -1315,6 +1467,51 @@ class Ferramenta(FerramentaBase):
         ]
         molde["mostrar_graduacao"] = True
 
+    def _sincronizar_grade_molde_extraido_sem_valores(self, canvas, molde: dict) -> None:
+        if not isinstance(molde, dict):
+            return
+        if str(molde.get("origem_extracao") or "").strip() not in {"contorno", "face_auto"}:
+            return
+        if self._tem_valores_graduacao(molde):
+            return
+        referencia = grade_graduacao_referencia_canvas(canvas, ignorar_molde=molde)
+        if referencia is None:
+            return
+        grade_nome, linhas_ref, ativos_ref = referencia
+        if not linhas_ref:
+            return
+        if self._assinatura_grade_molde(molde) == self._assinatura_grade(grade_nome, linhas_ref):
+            return
+        molde["graduacao_grade_nome"] = grade_nome
+        molde["graduacao_tamanhos"] = [dict(linha) for linha in linhas_ref if isinstance(linha, dict)]
+        molde["graduacao_tamanhos_ativos"] = list(ativos_ref)
+
+    @staticmethod
+    def _assinatura_grade_molde(molde: dict) -> tuple[str, tuple[str, ...]]:
+        return Ferramenta._assinatura_grade(
+            str(molde.get("graduacao_grade_nome") or "").strip(),
+            molde.get("graduacao_tamanhos") if isinstance(molde.get("graduacao_tamanhos"), list) else [],
+        )
+
+    @staticmethod
+    def _assinatura_grade(grade_nome: str, linhas: list[dict]) -> tuple[str, tuple[str, ...]]:
+        nomes = [
+            str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            for linha in linhas
+            if isinstance(linha, dict)
+        ]
+        return str(grade_nome or "").strip(), tuple(nome for nome in nomes if nome)
+
+    def _tem_valores_graduacao(self, molde: dict) -> bool:
+        for pontos_cfg in self._fontes_pontos_graduacao(molde):
+            for cfg in pontos_cfg.values():
+                if not isinstance(cfg, dict):
+                    continue
+                valores = cfg.get("valores")
+                if isinstance(valores, dict) and valores:
+                    return True
+        return False
+
     @staticmethod
     def _eh_tamanho_separado_sem_grade(molde: dict) -> bool:
         if not isinstance(molde, dict):
@@ -1357,11 +1554,9 @@ class Ferramenta(FerramentaBase):
                 return valores
             dados = pontos_cfg.get(str(int(ponto_idx)))
             if isinstance(dados, dict):
-                ponto_dados = self._ponto_qt(dados.get("ponto"))
-                if ponto is None or ponto_dados is None or self._dist(ponto, ponto_dados) <= 1e-5:
-                    valores = self._valores_dados_graduacao(dados)
-                    if valores:
-                        return valores
+                valores = self._valores_dados_graduacao(dados)
+                if valores:
+                    return valores
         return {}
 
     def _ponto_contorno_por_indice(self, molde: dict, ponto_idx: int | None) -> QPointF | None:

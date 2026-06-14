@@ -5,7 +5,7 @@ from math import atan2, cos, degrees, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFormLayout, QLabel, QLineEdit
 
 from core.geometry.engine import (
     quadratic_bezier_control_for_point,
@@ -15,6 +15,7 @@ from core.geometry.engine import (
 from core.formatacao import numero_decimal_ponto
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
+from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -27,6 +28,8 @@ class Ferramenta(FerramentaBase):
     _dlg_global: QDialog | None = None
     _edt_dx_global: QLineEdit | None = None
     _edt_dy_global: QLineEdit | None = None
+    _lbl_dx_global: QLabel | None = None
+    _lbl_dy_global: QLabel | None = None
     _cmb_n_pontos_global: QComboBox | None = None
     _chk_discreto_global: QCheckBox | None = None
 
@@ -52,8 +55,12 @@ class Ferramenta(FerramentaBase):
         self._dlg_passo: QDialog | None = cls._dlg_global
         self._edt_dx: QLineEdit | None = cls._edt_dx_global
         self._edt_dy: QLineEdit | None = cls._edt_dy_global
+        self._lbl_dx: QLabel | None = cls._lbl_dx_global
+        self._lbl_dy: QLabel | None = cls._lbl_dy_global
         self._cmb_n_pontos: QComboBox | None = cls._cmb_n_pontos_global
         self._chk_discreto: QCheckBox | None = cls._chk_discreto_global
+        self._unidade_sigla = "cm"
+        self._unidade_fator = 1.0
 
     def on_activate(self, canvas):
         self._arrastando_ponto_poly = None
@@ -100,6 +107,8 @@ class Ferramenta(FerramentaBase):
                 cls._dlg_global = None
                 cls._edt_dx_global = None
                 cls._edt_dy_global = None
+                cls._lbl_dx_global = None
+                cls._lbl_dy_global = None
                 cls._cmb_n_pontos_global = None
                 cls._chk_discreto_global = None
         if cls._dlg_global is None:
@@ -110,11 +119,13 @@ class Ferramenta(FerramentaBase):
             lay = QFormLayout(cls._dlg_global)
             cls._edt_dx_global = QLineEdit("0")
             cls._edt_dy_global = QLineEdit("0")
+            cls._lbl_dx_global = QLabel("DX (cm)")
+            cls._lbl_dy_global = QLabel("DY (cm)")
             cls._cmb_n_pontos_global = QComboBox()
             cls._cmb_n_pontos_global.addItems(["1 ponto", "N pontos"])
             cls._chk_discreto_global = QCheckBox("Discreto")
-            lay.addRow("DX (cm)", cls._edt_dx_global)
-            lay.addRow("DY (cm)", cls._edt_dy_global)
+            lay.addRow(cls._lbl_dx_global, cls._edt_dx_global)
+            lay.addRow(cls._lbl_dy_global, cls._edt_dy_global)
             lay.addRow("Nº pontos", cls._cmb_n_pontos_global)
             lay.addRow("", cls._chk_discreto_global)
             cls._dlg_global.setFixedWidth(210)
@@ -122,11 +133,36 @@ class Ferramenta(FerramentaBase):
         self._dlg_passo = cls._dlg_global
         self._edt_dx = cls._edt_dx_global
         self._edt_dy = cls._edt_dy_global
+        self._lbl_dx = cls._lbl_dx_global
+        self._lbl_dy = cls._lbl_dy_global
         self._cmb_n_pontos = cls._cmb_n_pontos_global
         self._chk_discreto = cls._chk_discreto_global
+        self._atualizar_unidade_passo(canvas)
         if not self._dlg_passo.isVisible():
             self._dlg_passo.show()
         self._reposicionar_caixa_passo(canvas)
+
+    def _atualizar_unidade_passo(self, canvas) -> None:
+        fator_antigo = max(1e-9, float(getattr(self, "_unidade_fator", 1.0)))
+        valores_cena = []
+        for edt in (self._edt_dx, self._edt_dy):
+            if edt is None:
+                valores_cena.append(0.0)
+            else:
+                valores_cena.append(numero_decimal_ponto(edt.text(), 0.0, SUFIXOS_MEDIDA) * fator_antigo)
+        sigla, fator = unidade_canvas(canvas)
+        self._unidade_sigla = sigla
+        self._unidade_fator = fator
+        if self._lbl_dx is not None:
+            self._lbl_dx.setText(f"DX ({sigla})")
+        if self._lbl_dy is not None:
+            self._lbl_dy.setText(f"DY ({sigla})")
+        for edt, valor_cena in zip((self._edt_dx, self._edt_dy), valores_cena):
+            if edt is not None:
+                edt.setPlaceholderText(sigla)
+                if abs(valor_cena) > 1e-12:
+                    texto = f"{valor_cena / fator:.3f}".rstrip("0").rstrip(".")
+                    edt.setText("0" if texto in {"", "-0"} else texto)
 
     def _reposicionar_caixa_passo(self, canvas):
         if not self._dlg_passo:
@@ -140,9 +176,16 @@ class Ferramenta(FerramentaBase):
             restaurar_posicao(self._dlg_passo, f"dialog:{self.id_ferramenta}", fallback=canvas.mapToGlobal(pos_local))
 
     def _ler_delta_configurado(self) -> tuple[float, float]:
-        dx = numero_decimal_ponto(self._edt_dx.text() if self._edt_dx else "0", 0.0)
-        dy = numero_decimal_ponto(self._edt_dy.text() if self._edt_dy else "0", 0.0)
+        dx_u = numero_decimal_ponto(self._edt_dx.text() if self._edt_dx else "0", 0.0, SUFIXOS_MEDIDA)
+        dy_u = numero_decimal_ponto(self._edt_dy.text() if self._edt_dy else "0", 0.0, SUFIXOS_MEDIDA)
+        canvas = getattr(self, "canvas", None)
+        dx = valor_unidade_para_cena(canvas, dx_u) if canvas is not None else dx_u * self._unidade_fator
+        dy = valor_unidade_para_cena(canvas, dy_u) if canvas is not None else dy_u * self._unidade_fator
         return dx, dy
+
+    def on_unidade_medida_alterada(self, canvas):
+        if self.usar_caixa_passo and self._dlg_passo is not None:
+            self._atualizar_unidade_passo(canvas)
 
     def _modo_n_pontos(self) -> bool:
         if not self._cmb_n_pontos:

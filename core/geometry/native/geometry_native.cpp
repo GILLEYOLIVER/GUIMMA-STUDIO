@@ -45,8 +45,10 @@ static bool point_in_polygon(
     for (std::size_t i = 0; i < polygon.size(); ++i) {
         const auto& pi = polygon[i];
         const auto& pj = polygon[j];
+        const double dy = pj.second - pi.second;
         const bool intersects = ((pi.second > y) != (pj.second > y))
-            && (x < ((pj.first - pi.first) * (y - pi.second) / std::max((pj.second - pi.second), 1e-12)) + pi.first);
+            && (std::abs(dy) > 1e-12)
+            && (x < ((pj.first - pi.first) * (y - pi.second) / dy) + pi.first);
         if (intersects) inside = !inside;
         j = i;
     }
@@ -147,4 +149,3 @@ PYBIND11_MODULE(geometry_native, m) {
     m.def("point_segment_distance", &point_segment_distance, "Distância mínima entre ponto e segmento");
     m.def("polyline_perimeter", &polyline_perimeter, "Perímetro de polyline");
 }
-

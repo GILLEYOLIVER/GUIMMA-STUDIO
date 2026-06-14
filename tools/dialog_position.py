@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 
@@ -109,5 +109,77 @@ def posicionar_dialogo_abaixo_coordenadas(dialogo, canvas, margem: int = 8) -> N
             x = max(area.left(), min(x, area.right() - int(dialogo.width())))
             y = max(area.top(), min(y, area.bottom() - int(dialogo.height())))
         dialogo.move(int(x), int(y))
+    except Exception:
+        pass
+
+
+def _tela_para_referencia(dialogo, referencia=None):
+    try:
+        if referencia is not None and hasattr(referencia, "windowHandle") and referencia.windowHandle() is not None:
+            tela = referencia.windowHandle().screen()
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    try:
+        if referencia is not None and hasattr(referencia, "screen"):
+            tela = referencia.screen()
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    try:
+        if referencia is not None and hasattr(referencia, "mapToGlobal") and hasattr(referencia, "rect"):
+            centro = referencia.mapToGlobal(referencia.rect().center())
+            tela = QApplication.screenAt(centro)
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    try:
+        if dialogo.windowHandle() is not None:
+            tela = dialogo.windowHandle().screen()
+            if tela is not None:
+                return tela
+    except Exception:
+        pass
+    try:
+        tela = dialogo.screen()
+        if tela is not None:
+            return tela
+    except Exception:
+        pass
+    return QApplication.primaryScreen()
+
+
+def centralizar_dialogo_na_tela(dialogo, referencia=None, margem: int = 16) -> None:
+    try:
+        dialogo.adjustSize()
+    except Exception:
+        pass
+    try:
+        tela = _tela_para_referencia(dialogo, referencia)
+        if tela is None:
+            return
+        area = tela.availableGeometry()
+        margem = max(0, int(margem))
+        largura_max = max(120, area.width() - margem * 2)
+        altura_max = max(90, area.height() - margem * 2)
+        if int(dialogo.width()) > largura_max or int(dialogo.height()) > altura_max:
+            dialogo.resize(min(int(dialogo.width()), largura_max), min(int(dialogo.height()), altura_max))
+
+        geo = dialogo.frameGeometry()
+        if not geo.isValid() or geo.width() <= 0 or geo.height() <= 0:
+            geo = QRect(0, 0, max(1, int(dialogo.width())), max(1, int(dialogo.height())))
+        geo.moveCenter(area.center())
+        if geo.left() < area.left() + margem:
+            geo.moveLeft(area.left() + margem)
+        if geo.top() < area.top() + margem:
+            geo.moveTop(area.top() + margem)
+        if geo.right() > area.right() - margem:
+            geo.moveRight(area.right() - margem)
+        if geo.bottom() > area.bottom() - margem:
+            geo.moveBottom(area.bottom() - margem)
+        dialogo.move(geo.topLeft())
     except Exception:
         pass
