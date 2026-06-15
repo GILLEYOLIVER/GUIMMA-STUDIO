@@ -4,6 +4,37 @@
 
 namespace guimma {
 
+namespace {
+
+Point interpolate(const Point& a, const Point& b, double ta, double tb, double t) {
+    const double den = std::max(tb - ta, 1e-9);
+    return {
+        (((tb - t) / den) * a.x) + (((t - ta) / den) * b.x),
+        (((tb - t) / den) * a.y) + (((t - ta) / den) * b.y)
+    };
+}
+
+Point catmull_rom_centripetal(const Point& p0, const Point& p1, const Point& p2, const Point& p3, double t_norm) {
+    auto tj = [](double ti, const Point& a, const Point& b) {
+        return ti + std::sqrt(std::max(distance(a, b), 1e-6));
+    };
+
+    const double t0 = 0.0;
+    const double t1 = tj(t0, p0, p1);
+    const double t2 = tj(t1, p1, p2);
+    const double t3 = tj(t2, p2, p3);
+    const double t = t1 + std::max(0.0, std::min(1.0, t_norm)) * (t2 - t1);
+
+    const Point a1 = interpolate(p0, p1, t0, t1, t);
+    const Point a2 = interpolate(p1, p2, t1, t2, t);
+    const Point a3 = interpolate(p2, p3, t2, t3, t);
+    const Point b1 = interpolate(a1, a2, t0, t2, t);
+    const Point b2 = interpolate(a2, a3, t1, t3, t);
+    return interpolate(b1, b2, t1, t2, t);
+}
+
+}
+
 std::vector<Point> sample_quadratic_bezier(const Point& p0, const Point& control, const Point& p2, int segments) {
     const int n = std::max(8, segments);
     std::vector<Point> out;
@@ -74,6 +105,47 @@ std::vector<Point> sample_catmull_rom(const std::vector<Point>& controls, int sa
         out.push_back(pts.back());
     }
 
+    return out;
+}
+
+std::vector<Point> sample_catmull_rom_centripetal_dynamic(const std::vector<Point>& controls, bool closed) {
+    if (controls.size() <= 1) {
+        return controls;
+    }
+    if (controls.size() == 2) {
+        return {controls.front(), controls.back()};
+    }
+
+    const std::size_t total = controls.size();
+    const std::size_t limit = closed ? total : total - 1;
+    std::vector<Point> out;
+    out.reserve((limit * 12) + 1);
+
+    for (std::size_t i = 0; i < limit; ++i) {
+        const Point& p0 = (closed || i > 0) ? controls[(i + total - 1) % total] : controls[i];
+        const Point& p1 = controls[i];
+        const Point& p2 = controls[(i + 1) % total];
+        const Point& p3 = (closed || i + 2 < total) ? controls[(i + 2) % total] : p2;
+
+        if (i == 0) {
+            out.push_back(p1);
+        }
+        const double dist = distance(p1, p2);
+        const int samples = std::max(8, std::min(22, static_cast<int>(dist * 0.10) + 8));
+        for (int s = 1; s <= samples; ++s) {
+            out.push_back(catmull_rom_centripetal(
+                p0,
+                p1,
+                p2,
+                p3,
+                static_cast<double>(s) / static_cast<double>(samples)
+            ));
+        }
+    }
+
+    if (closed && !out.empty()) {
+        out.back() = out.front();
+    }
     return out;
 }
 

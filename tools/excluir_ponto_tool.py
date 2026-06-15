@@ -9,6 +9,11 @@ from PySide6.QtWidgets import QMessageBox
 from tools.tool_base import FerramentaBase
 from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
+try:
+    from core.geometry_cpp_bridge import sample_catmull_rom_centripetal_dynamic_cpp
+except Exception:  # pragma: no cover - ambientes sem ponte C++
+    sample_catmull_rom_centripetal_dynamic_cpp = None
+
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "excluir_ponto"
@@ -477,7 +482,8 @@ class Ferramenta(FerramentaBase):
         else:
             novos_cantos = outros_controles
             novos_auxiliares = novos_controles
-        if tipo == "canto":
+        minimo_cantos = 3 if fechado else 2
+        if tipo == "canto" and len(novos_cantos) < minimo_cantos:
             realocados = self._realocar_canto_removido(
                 pontos_anteriores,
                 novos_cantos,
@@ -500,7 +506,6 @@ class Ferramenta(FerramentaBase):
                 fechado,
                 evitar=[alvo],
                 regenerar_abaixo_de=2,
-                redistribuir_quando_curvo=True,
             )
             auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
         minimo = 3 if fechado else 2
@@ -527,11 +532,7 @@ class Ferramenta(FerramentaBase):
             controles_ordenados = self._controles_molde_restantes_ordenados(canvas, pontos_anteriores, cantos, auxiliares, fechado)
             if len(controles_ordenados) < minimo:
                 return False
-            novos_pontos = self._helper._gerar_tracado_curva_real(
-                controles_ordenados,
-                fechado=fechado,
-                tipo_curva="spline_catmull_rom",
-            )
+            novos_pontos = self._gerar_tracado_curva_molde(controles_ordenados, fechado=fechado)
         if len(novos_pontos) < minimo:
             return False
         if fechado and novos_pontos and not self._contorno_fechado_por_tuplas(novos_pontos):
@@ -926,11 +927,7 @@ class Ferramenta(FerramentaBase):
         controles_segmento = [a, *controles_internos, b]
         trecho_novo = [
             QPointF(float(x), float(y))
-            for x, y in self._helper._gerar_tracado_curva_real(
-                controles_segmento,
-                fechado=False,
-                tipo_curva="spline_catmull_rom",
-            )
+            for x, y in self._gerar_tracado_curva_molde(controles_segmento, fechado=False)
         ]
         if len(trecho_novo) < 2:
             trecho_novo = [a, b]
@@ -956,6 +953,19 @@ class Ferramenta(FerramentaBase):
             else:
                 novo_caminho[-1] = QPointF(novo_caminho[0])
         return [(float(p.x()), float(p.y())) for p in novo_caminho]
+
+    def _gerar_tracado_curva_molde(self, controles: list[QPointF], fechado: bool) -> list[tuple[float, float]]:
+        controles_qt = [QPointF(p) for p in controles]
+        controles_tuplas = [(float(p.x()), float(p.y())) for p in controles_qt]
+        if sample_catmull_rom_centripetal_dynamic_cpp is not None:
+            pontos_cpp = sample_catmull_rom_centripetal_dynamic_cpp(controles_tuplas, closed=fechado)
+            if pontos_cpp:
+                return pontos_cpp
+        return self._helper._gerar_tracado_curva_real(
+            controles_qt,
+            fechado=fechado,
+            tipo_curva="spline_catmull_rom",
+        )
 
     def _posicao_ponto_no_trecho(self, trecho: list[QPointF], ponto: QPointF) -> float:
         if len(trecho) < 2:

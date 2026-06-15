@@ -160,6 +160,32 @@ def seam_offset_closed_cpp(
         return None
 
 
+def sample_catmull_rom_centripetal_dynamic_cpp(
+    controls: list[tuple[float, float]],
+    closed: bool = False,
+) -> list[tuple[float, float]] | None:
+    """
+    Amostra Catmull-Rom centripeta com a mesma regra dinamica do editor Python.
+
+    Retorna None quando o modulo nativo nao esta disponivel, quando o build
+    ainda nao expoe essa funcao, ou quando a chamada nativa falha.
+    """
+    if _cpp is None or not hasattr(_cpp, "sample_catmull_rom_centripetal_dynamic"):
+        return None
+    try:
+        if len(controls or []) < 2:
+            return None
+        resultado = _cpp.sample_catmull_rom_centripetal_dynamic(
+            [(float(x), float(y)) for x, y in controls],
+            bool(closed),
+        )
+        if not resultado:
+            return None
+        return [(float(x), float(y)) for x, y in resultado]
+    except Exception:
+        return None
+
+
 def extract_local_enclosing_contour_safe(
     elements: list[dict],
     point: tuple[float, float],
