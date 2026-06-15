@@ -11,15 +11,17 @@ if find_spec("PySide6") is None:
     QApplication = None
     QWidget = None
     QPointF = None
+    Qt = None
     FerramentaDobrar = None
+    FerramentaDesdobrar = None
     FerramentaManipularPontos = None
     DesdobrarDialog = None
 else:
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.dobrar_tool import DobrarDialog, Ferramenta as FerramentaDobrar
-    from tools.desdobrar_tool import DesdobrarDialog
+    from tools.desdobrar_tool import DesdobrarDialog, Ferramenta as FerramentaDesdobrar
     from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
 
@@ -45,8 +47,29 @@ class _FakeCanvas(QWidget):
     def _registrar_historico(self):
         self.historico += 1
 
+    def _ponto_com_snap(self, pos):
+        return QPointF(pos)
+
+    def _indice_molde_em_ponto(self, pos):
+        return 0
+
     def update(self):
         pass
+
+
+class _FakeEvent:
+    def __init__(self, pos):
+        self._pos = QPointF(pos)
+        self.accepted = False
+
+    def button(self):
+        return Qt.LeftButton
+
+    def position(self):
+        return QPointF(self._pos)
+
+    def accept(self):
+        self.accepted = True
 
 
 @unittest.skipIf(FerramentaDobrar is None, "PySide6 nao disponivel neste ambiente")
@@ -66,9 +89,77 @@ class DobrarToolTestCase(unittest.TestCase):
     def test_desdobrar_dialog_fluxo_padrao(self):
         dialog = DesdobrarDialog()
         self.assertTrue(dialog.chk_automatico.isChecked())
+        self.assertTrue(dialog.chk_copiar_contorno_dobrado.isChecked())
         self.assertTrue(dialog.chk_fio_meio.isChecked())
         self.assertTrue(hasattr(dialog, "chk_inserir_pique"))
         self.assertFalse(dialog.chk_inserir_pique.isChecked())
+        self.assertGreaterEqual(dialog.minimumWidth(), 390)
+        self.assertEqual(dialog.chk_copiar_contorno_dobrado.text(), "Espelhar lado visível e deixar os lados idênticos")
+        dialog.deleteLater()
+
+    def test_desdobrar_curva_do_perimetro_usa_eixo_reto_e_lados_identicos(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (4.0, 2.0),
+                    (10.0, 0.0),
+                    (10.0, 5.0),
+                    (0.0, 5.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+                "pontos_controle_referencia": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+            }
+        )
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+
+        linha = ferramenta._linha_do_proprio_molde_em_ponto(canvas, 0, QPointF(4.0, 2.0))
+        self.assertIsNotNone(linha)
+        self.assertEqual(linha["origem_desdobrar"], "perimetro_principal")
+        self.assertGreater(len(ferramenta._pontos_para_hit_linha(linha)), 2)
+        preview_linha = ferramenta._pontos_para_preview_linha(linha)
+        self.assertEqual([(p.x(), p.y()) for p in preview_linha], [(0.0, 0.0), (10.0, 0.0)])
+        self.assertTrue(ferramenta._deve_espelhar_contorno_identico(canvas, linha, linha))
+
+        resultado = ferramenta._preview_desdobrar(canvas, 0, linha)
+        pontos = {(round(p.x(), 6), round(p.y(), 6)) for p in resultado}
+
+        self.assertIn((4.0, 2.0), pontos)
+        self.assertIn((4.0, -2.0), pontos)
+        dialog.deleteLater()
+
+    def test_desdobrar_primeiro_clique_na_curva_do_molde_prepara_preview(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (4.0, 2.0),
+                    (10.0, 0.0),
+                    (10.0, 5.0),
+                    (0.0, 5.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+                "pontos_controle_referencia": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+            }
+        )
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+
+        evento = _FakeEvent(QPointF(4.0, 2.0))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, evento))
+
+        self.assertTrue(evento.accepted)
+        self.assertEqual(ferramenta._molde_idx, 0)
+        self.assertIsNotNone(ferramenta._confirmar_ref)
+        self.assertEqual(ferramenta._confirmar_ref["origem_desdobrar"], "perimetro_principal")
         dialog.deleteLater()
 
     def test_dobra_meio_respeita_ponto_medio_da_reta_maior(self):

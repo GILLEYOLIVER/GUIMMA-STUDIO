@@ -162,6 +162,46 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(len(molde["controle_auxiliares"]), 3)
         self.assertEqual(len(molde["pontos_auxiliares"]), 3)
 
+    def test_excluir_auxiliar_de_quatro_em_curva_permite_ficar_com_tres(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    (0.0, 0.0),
+                    (1.5, 0.8),
+                    (3.5, 1.8),
+                    (6.5, 1.8),
+                    (8.5, 0.8),
+                    (10.0, 0.0),
+                    (0.0, 5.0),
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (0.0, 5.0)],
+                "controle_auxiliares": [(1.5, 0.8), (3.5, 1.8), (6.5, 1.8), (8.5, 0.8)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 0.0, "y": 5.0},
+                ],
+                "pontos_auxiliares": [
+                    {"x": 1.5, "y": 0.8},
+                    {"x": 3.5, "y": 1.8},
+                    {"x": 6.5, "y": 1.8},
+                    {"x": 8.5, "y": 0.8},
+                ],
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "aux", 0))
+
+        molde = canvas.cena.elementos[0]
+        self.assertNotIn((1.5, 0.8), molde["controle_auxiliares"])
+        self.assertEqual(molde["controle_auxiliares"], [(3.5, 1.8), (6.5, 1.8), (8.5, 0.8)])
+        self.assertEqual(len(molde["pontos_auxiliares"]), 3)
+        self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 1.0)
+
     def test_excluir_auxiliar_de_tres_em_curva_permite_ficar_com_dois(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
@@ -188,51 +228,11 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
 
         molde = canvas.cena.elementos[0]
         self.assertNotIn((2.0, 1.0), molde["controle_auxiliares"])
-        self.assertEqual(len(molde["controle_auxiliares"]), 2)
+        self.assertEqual(molde["controle_auxiliares"], [(5.0, 2.0), (8.0, 1.0)])
         self.assertEqual(len(molde["pontos_auxiliares"]), 2)
         xs = sorted(float(x) for x, _y in molde["controle_auxiliares"])
-        self.assertLess(xs[0], 4.0)
-        self.assertGreater(xs[1], 6.0)
-        self.assertGreater(xs[1] - xs[0], 3.0)
-        self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 1.0)
-
-    def test_excluir_auxiliar_abaixo_de_dois_recria_tres_no_trecho_curvo(self):
-        canvas = _FakeCanvas()
-        canvas.cena.elementos[0].update(
-            {
-                "pontos": [(0.0, 0.0), (2.0, 1.0), (5.0, 2.0), (8.0, 1.0), (10.0, 0.0), (0.0, 5.0), (0.0, 0.0)],
-                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (0.0, 5.0)],
-                "controle_auxiliares": [(2.0, 1.0), (5.0, 2.0), (8.0, 1.0)],
-                "pontos_controle_principais": [
-                    {"x": 0.0, "y": 0.0},
-                    {"x": 10.0, "y": 0.0},
-                    {"x": 0.0, "y": 5.0},
-                ],
-                "pontos_auxiliares": [
-                    {"x": 2.0, "y": 1.0},
-                    {"x": 5.0, "y": 2.0},
-                    {"x": 8.0, "y": 1.0},
-                ],
-                "fechado": True,
-            }
-        )
-        ferramenta = FerramentaExcluirPonto()
-
-        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "aux", 0))
-        self.assertEqual(len(canvas.cena.elementos[0]["controle_auxiliares"]), 2)
-        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "aux", 0))
-
-        molde = canvas.cena.elementos[0]
-        self.assertEqual(len(molde["controle_auxiliares"]), 3)
-        self.assertEqual(len(molde["pontos_auxiliares"]), 3)
-        self.assertNotIn((2.0, 1.0), molde["controle_auxiliares"])
-        self.assertNotIn((5.0, 2.0), molde["controle_auxiliares"])
-        xs = sorted(float(x) for x, _y in molde["controle_auxiliares"])
-        self.assertLess(xs[0], 3.0)
-        self.assertAlmostEqual(xs[1], 5.0, places=5)
-        self.assertGreater(xs[2], 7.0)
-        self.assertGreater(xs[1] - xs[0], 2.0)
-        self.assertGreater(xs[2] - xs[1], 2.0)
+        self.assertAlmostEqual(xs[0], 5.0, places=5)
+        self.assertAlmostEqual(xs[1], 8.0, places=5)
         self.assertEqual(molde["pontos"][0], molde["pontos"][-1])
         self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 1.0)
 
@@ -275,8 +275,8 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertNotIn((2.0, 1.0), molde["controle_auxiliares"])
         self.assertEqual(len(molde["controle_auxiliares"]), 2)
         xs = sorted(float(x) for x, _y in molde["controle_auxiliares"])
-        self.assertLess(xs[0], 4.0)
-        self.assertGreater(xs[1], 6.0)
+        self.assertAlmostEqual(xs[0], 5.0, places=5)
+        self.assertAlmostEqual(xs[1], 8.0, places=5)
 
     def test_hover_em_molde_selecionado_trava_em_controle_proximo(self):
         canvas = _FakeCanvas()
@@ -375,15 +375,14 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
 
         molde = canvas.cena.elementos[0]
         self.assertNotIn((10.0, 5.0), molde["pontos"])
-        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0), (10.0, 2.5), (0.0, 5.0)])
-        self.assertNotIn((10.0, 2.5), molde["controle_auxiliares"])
-        self.assertIn((5.0, 5.0), molde["controle_auxiliares"])
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (10.0, 0.0), (0.0, 5.0)])
+        self.assertNotIn((10.0, 2.5), molde["controle_cantos"])
+        self.assertGreaterEqual(len(molde["controle_auxiliares"]), 3)
         self.assertEqual(
             molde["pontos_controle_principais"],
             [
                 {"x": 0.0, "y": 0.0},
                 {"x": 10.0, "y": 0.0},
-                {"x": 10.0, "y": 2.5},
                 {"x": 0.0, "y": 5.0},
             ],
         )
@@ -428,17 +427,17 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "canto", 1))
 
         molde = canvas.cena.elementos[0]
-        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (20.0, 0.0), (20.0, 8.0), (10.0, 4.0)])
+        self.assertEqual(molde["controle_cantos"], [(0.0, 0.0), (20.0, 0.0), (20.0, 8.0)])
         self.assertNotIn((10.0, 0.0), molde["pontos"])
         self.assertIn((5.0, 3.0), molde["controle_auxiliares"])
         self.assertIn((15.0, 3.0), molde["controle_auxiliares"])
-        self.assertNotIn((10.0, 4.0), molde["controle_auxiliares"])
-        self.assertIn({"x": 10.0, "y": 4.0}, molde["pontos_controle_principais"])
+        self.assertIn((10.0, 4.0), molde["controle_auxiliares"])
+        self.assertNotIn({"x": 10.0, "y": 4.0}, molde["pontos_controle_principais"])
         self.assertGreater(len(molde["pontos"]), len(molde["controle_cantos"]) + len(molde["controle_auxiliares"]))
         self.assertEqual(molde["pontos"][0], molde["pontos"][-1])
         self.assertGreater(max(float(y) for _x, y in molde["pontos"]), 2.5)
 
-    def test_excluir_canto_em_curva_remapeia_graduacao_sem_zerar_promovido(self):
+    def test_excluir_canto_em_curva_remapeia_graduacao_sem_criar_promovido(self):
         canvas = _FakeCanvas()
         pontos_graduacao = {
             "0": {
@@ -513,11 +512,10 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         cfg_por_ponto = {tuple(cfg["ponto"]): cfg for cfg in pontos_cfg.values()}
         self.assertEqual(set(cfg_por_ponto), set(molde["controle_cantos"]))
         self.assertNotIn((10.0, 0.0), cfg_por_ponto)
-        self.assertIn((10.0, 4.0), cfg_por_ponto)
+        self.assertNotIn((10.0, 4.0), cfg_por_ponto)
+        self.assertIn((10.0, 4.0), molde["controle_auxiliares"])
         self.assertAlmostEqual(cfg_por_ponto[(20.0, 0.0)]["valores"]["G"]["dy"], 4.0, places=5)
         self.assertAlmostEqual(cfg_por_ponto[(20.0, 0.0)]["valores"]["P"]["dy"], -4.0, places=5)
-        self.assertAlmostEqual(cfg_por_ponto[(10.0, 4.0)]["valores"]["G"]["dy"], 4.0, places=5)
-        self.assertAlmostEqual(cfg_por_ponto[(10.0, 4.0)]["valores"]["P"]["dy"], -4.0, places=5)
 
     def test_excluir_canto_preserva_trechos_distantes_do_molde(self):
         canvas = _FakeCanvas()
@@ -736,6 +734,29 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas.cena.elementos[0]["pontos"], [(0.0, 0.0), (10.0, 0.0)])
         self.assertEqual(canvas.historico, 1)
+
+    def test_regenerar_tracado_curva_molde_usa_cpp_quando_disponivel(self):
+        import tools.excluir_ponto_tool as modulo
+
+        chamadas = []
+        original = modulo.sample_catmull_rom_centripetal_dynamic_cpp
+
+        def fake_cpp(controles, closed=False):
+            chamadas.append((list(controles), bool(closed)))
+            return [(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)]
+
+        modulo.sample_catmull_rom_centripetal_dynamic_cpp = fake_cpp
+        try:
+            ferramenta = FerramentaExcluirPonto()
+            resultado = ferramenta._gerar_tracado_curva_molde(
+                [QPointF(0.0, 0.0), QPointF(5.0, 2.0), QPointF(10.0, 0.0)],
+                fechado=True,
+            )
+        finally:
+            modulo.sample_catmull_rom_centripetal_dynamic_cpp = original
+
+        self.assertEqual(resultado, [(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)])
+        self.assertEqual(chamadas, [([(0.0, 0.0), (5.0, 2.0), (10.0, 0.0)], True)])
 
 
 if __name__ == "__main__":

@@ -19,15 +19,19 @@ class DesdobrarDialog(QDialog):
         self.setWindowTitle("Desdobrar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.setFixedWidth(280)
+        self.setMinimumWidth(390)
         check_icon = (ICONS_DIR / "check_marcado.svg").as_posix()
         self.setStyleSheet(
             """
             QDialog { background:#efefef; color:#111111; }
-            QCheckBox { color:#111111; }
+            QCheckBox {
+                color:#111111;
+                min-height:20px;
+                spacing:6px;
+            }
             QCheckBox::indicator {
-                width:14px;
-                height:14px;
+                width:15px;
+                height:15px;
                 border:1px solid #6c7480;
                 background:#ffffff;
             }
@@ -41,22 +45,22 @@ class DesdobrarDialog(QDialog):
         )
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 8)
+        raiz.setContentsMargins(10, 10, 10, 10)
         raiz.setSpacing(6)
-        self.chk_automatico = QCheckBox("Automático: usar dobra original, linha interna ou perímetro")
+        self.chk_automatico = QCheckBox("Automático: detectar dobra, linha interna ou perímetro")
         self.chk_automatico.setChecked(True)
         raiz.addWidget(self.chk_automatico)
-        self.chk_copiar_contorno_dobrado = QCheckBox("Copiar contorno exato do lado dobrado")
-        self.chk_copiar_contorno_dobrado.setChecked(False)
+        self.chk_copiar_contorno_dobrado = QCheckBox("Espelhar lado visível e deixar os lados idênticos")
+        self.chk_copiar_contorno_dobrado.setChecked(True)
         self.chk_copiar_contorno_dobrado.setToolTip(
             "Quando marcado, o desdobrar não restaura a assimetria antiga: "
             "ele espelha o contorno dobrado/visível para criar o outro lado igual."
         )
         raiz.addWidget(self.chk_copiar_contorno_dobrado)
-        self.chk_inserir_pique = QCheckBox("Criar pique nas pontas da dobra")
+        self.chk_inserir_pique = QCheckBox("Criar piques nas pontas da dobra")
         self.chk_inserir_pique.setChecked(False)
         raiz.addWidget(self.chk_inserir_pique)
-        self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
+        self.chk_fio_meio = QCheckBox("Centralizar sentido do fio no molde")
         self.chk_fio_meio.setChecked(True)
         raiz.addWidget(self.chk_fio_meio)
 
@@ -135,6 +139,14 @@ class Ferramenta(_DobrarBase):
             canvas._selecionados = {self._molde_idx}
             self._hover_idx = None
             if self._automatico_ativo(canvas):
+                alvo_inicial = self._linha_interna_em_ponto(canvas, self._molde_idx, pos)
+                if alvo_inicial is not None:
+                    self._hover_idx = alvo_inicial
+                    self._confirmar_ref = alvo_inicial
+                    canvas.update()
+                    self._status(canvas, "Linha do molde encontrada. Prévia pronta: clique novamente para desdobrar ou botão direito para cancelar.")
+                    event.accept()
+                    return True
                 ref_original = self._linha_ref_dobra_original(canvas.cena.elementos[self._molde_idx])
                 if ref_original is not None:
                     self._hover_idx = ref_original
@@ -256,7 +268,7 @@ class Ferramenta(_DobrarBase):
         if eixo is None:
             self._status(canvas, "A linha escolhida não tem extremidades válidas para desdobrar.")
             return
-        copiar_contorno = self._copiar_contorno_dobrado_ativo(canvas)
+        copiar_contorno = self._deve_espelhar_contorno_identico(canvas, linha_ref, linha)
         if not copiar_contorno and self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
             return
         if copiar_contorno:
@@ -303,7 +315,7 @@ class Ferramenta(_DobrarBase):
         eixo = self._eixo_linha(linha)
         if eixo is None:
             return []
-        if self._copiar_contorno_dobrado_ativo(canvas):
+        if self._deve_espelhar_contorno_identico(canvas, linha_ref, linha):
             return self._resultado_desdobrar_copia_exata(molde, eixo)
         return self._resultado_desdobrar(molde, linha, eixo)
 
@@ -623,7 +635,7 @@ class Ferramenta(_DobrarBase):
         melhor = None
         melhor_dist = tolerancia
         for linha in linhas:
-            pontos = self._pontos_para_preview_linha(linha)
+            pontos = self._pontos_para_hit_linha(linha)
             if len(pontos) < 2:
                 continue
             dist = min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
@@ -738,6 +750,15 @@ class Ferramenta(_DobrarBase):
         dialog = self._dialog_por_canvas.get(id(canvas))
         chk = getattr(dialog, "chk_copiar_contorno_dobrado", None) if dialog is not None else None
         return bool(chk is not None and chk.isChecked())
+
+    def _deve_espelhar_contorno_identico(self, canvas, linha_ref, linha: dict | None = None) -> bool:
+        if self._copiar_contorno_dobrado_ativo(canvas):
+            return True
+        linha = linha if linha is not None else self._elemento_linha_ref(canvas, linha_ref)
+        if linha is None:
+            return False
+        origem = str(linha.get("origem_desdobrar") or "").strip()
+        return origem != "dobra_original"
 
     def _inserir_pique_ativo(self, canvas) -> bool:
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -937,7 +958,7 @@ class Ferramenta(_DobrarBase):
             return True
         if bool(el.get("molde_linha_vinculada")) and molde_id and el_molde_id == molde_id:
             return True
-        pontos = self._pontos_para_preview_linha(el)
+        pontos = self._pontos_para_hit_linha(el)
         if not pontos:
             return False
         if any(self._ponto_dentro_molde(molde, p) for p in pontos):
@@ -966,6 +987,12 @@ class Ferramenta(_DobrarBase):
         return None
 
     def _pontos_para_preview_linha(self, el: dict) -> list[QPointF]:
+        pontos = self._pontos_para_hit_linha(el)
+        if len(pontos) < 2:
+            return pontos
+        return [QPointF(pontos[0]), QPointF(pontos[-1])]
+
+    def _pontos_para_hit_linha(self, el: dict) -> list[QPointF]:
         if el.get("tipo") == "bezier_quadratica":
             if self._eh_ponto(el.get("p0")) and self._eh_ponto(el.get("p1")) and self._eh_ponto(el.get("p2")):
                 p0 = QPointF(float(el["p0"][0]), float(el["p0"][1]))

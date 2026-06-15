@@ -13,6 +13,7 @@ from core.geometry_bridge_accelerated import (
 from core.geometry_cpp_bridge import cpp_disponivel
 from core.geometry_cpp_bridge import (
     extract_local_enclosing_contour_cpp,
+    sample_catmull_rom_centripetal_dynamic_cpp,
     extract_smallest_enclosing_contour_cpp,
 )
 
@@ -104,6 +105,19 @@ class GeometryCppBridgeTestCase(unittest.TestCase):
 
         self.assertIsNotNone(cpp_result)
         self.assertEqual(_canonical_contour(cpp_result), _canonical_contour(python_result))
+
+    def test_catmull_rom_centripeta_dinamica_cpp_expoe_amostragem(self):
+        controles = [(0.0, 0.0), (5.0, 3.0), (10.0, 0.0), (15.0, 2.0)]
+
+        resultado = sample_catmull_rom_centripetal_dynamic_cpp(controles, closed=False)
+
+        self.assertIsNotNone(resultado)
+        self.assertGreater(len(resultado), len(controles))
+        self.assertEqual(resultado[0], controles[0])
+        self.assertEqual(resultado[-1], controles[-1])
+        pontos_arredondados = {(round(x, 7), round(y, 7)) for x, y in resultado}
+        self.assertIn((5.0, 3.0), pontos_arredondados)
+        self.assertIn((10.0, 0.0), pontos_arredondados)
 
 
 if __name__ == "__main__":

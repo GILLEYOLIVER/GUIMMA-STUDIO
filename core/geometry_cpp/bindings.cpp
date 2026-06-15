@@ -134,6 +134,10 @@ PYBIND11_MODULE(guimma_geometry_cpp, m) {
         return to_tuples(guimma::sample_catmull_rom(to_points(controls), samples_per_span, closed));
     }, py::arg("controls"), py::arg("samples_per_span") = 18, py::arg("closed") = false);
 
+    m.def("sample_catmull_rom_centripetal_dynamic", [](const std::vector<PointTuple>& controls, bool closed) {
+        return to_tuples(guimma::sample_catmull_rom_centripetal_dynamic(to_points(controls), closed));
+    }, py::arg("controls"), py::arg("closed") = false);
+
     m.def("polygon_area", [](const std::vector<PointTuple>& polygon) {
         return guimma::polygon_area(to_points(polygon));
     });
