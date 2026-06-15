@@ -16,17 +16,19 @@ def _carregar_modulo_build_local():
                 if spec is None or spec.loader is None:
                     continue
                 module = importlib.util.module_from_spec(spec)
-                sys.modules.setdefault("guimma_geometry_cpp", module)
+                sys.modules["guimma_geometry_cpp"] = module
                 spec.loader.exec_module(module)
                 return module
             except Exception:
                 sys.modules.pop("guimma_geometry_cpp", None)
     return None
 
-try:
-    import guimma_geometry_cpp as _cpp
-except Exception:  # pragma: no cover - fallback quando o modulo C++ nao foi compilado
-    _cpp = _carregar_modulo_build_local()
+_cpp = _carregar_modulo_build_local()
+if _cpp is None:
+    try:
+        import guimma_geometry_cpp as _cpp
+    except Exception:  # pragma: no cover - fallback quando o modulo C++ nao foi compilado
+        _cpp = None
 
 
 def cpp_disponivel() -> bool:
@@ -178,6 +180,41 @@ def sample_catmull_rom_centripetal_dynamic_cpp(
         resultado = _cpp.sample_catmull_rom_centripetal_dynamic(
             [(float(x), float(y)) for x, y in controls],
             bool(closed),
+        )
+        if not resultado:
+            return None
+        return [(float(x), float(y)) for x, y in resultado]
+    except Exception:
+        return None
+
+
+def unfold_mirrored_contour_cpp(
+    points: list[tuple[float, float]],
+    axis_kind: int,
+    axis_value: float = 0.0,
+    axis_p1: tuple[float, float] = (0.0, 0.0),
+    axis_p2: tuple[float, float] = (1.0, 0.0),
+    tolerance: float = 1e-7,
+) -> list[tuple[float, float]] | None:
+    """
+    Desdobra uma meia peça espelhando pelo eixo de dobra no motor C++.
+
+    axis_kind: 0 horizontal, 1 vertical, 2 linha livre.
+    Retorna None se o C++ nao estiver disponivel ou se a funcao nativa ainda
+    nao existir no build carregado.
+    """
+    if _cpp is None or not hasattr(_cpp, "unfold_mirrored_contour"):
+        return None
+    try:
+        if len(points or []) < 3:
+            return None
+        resultado = _cpp.unfold_mirrored_contour(
+            [(float(x), float(y)) for x, y in points],
+            int(axis_kind),
+            float(axis_value),
+            (float(axis_p1[0]), float(axis_p1[1])),
+            (float(axis_p2[0]), float(axis_p2[1])),
+            float(tolerance),
         )
         if not resultado:
             return None

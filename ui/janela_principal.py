@@ -1408,9 +1408,21 @@ class GuimmaStudioMainWindow(QMainWindow):
             if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
                 self._fechar_submenu_backstage_hover(forcar=True)
                 self.backstage.hide()
+        if isinstance(watched, QDialog) and self._eh_caixa_auxiliar_ferramenta(watched) and tipo_evento == QEvent.Move:
+            programatica = getattr(watched, "_guimma_ultima_posicao_programatica", None)
+            if not isinstance(programatica, QPoint) or watched.pos() != programatica:
+                watched._guimma_posicao_movida_usuario = True  # type: ignore[attr-defined]
+
         if isinstance(watched, QDialog) and tipo_evento in (QEvent.Close, QEvent.Hide):
             self._garantir_selecionar_apos_fechar_janela()
         return super().eventFilter(watched, event)
+
+    def _eh_caixa_auxiliar_ferramenta(self, widget: QDialog) -> bool:
+        if widget is getattr(self, "_janela_aux_curva", None):
+            return True
+        if widget is getattr(self, "_janela_aux_retangulo", None):
+            return True
+        return widget in getattr(self, "_janelas_aux_instrucao", {}).values()
 
     def _alertar_propriedades_aberta_se_clique_fora(self, pos_global: QPoint) -> bool:
         app = QApplication.instance()
@@ -1881,6 +1893,25 @@ class GuimmaStudioMainWindow(QMainWindow):
         max_x = gx + max(8, canvas.width() - janela.width() - 8)
         max_y = gy + max(8, canvas.height() - janela.height() - 8)
 
+        pos_padrao = None
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+            pos_local = canvas.calcular_posicao_painel_auxiliar(janela.width(), janela.height(), abaixo_coordenadas=True)
+            pos_padrao = canvas.mapToGlobal(pos_local)
+        else:
+            x = gx + max(8, canvas.width() - janela.width() - 18)
+            y = gy + 16
+            pos_padrao = QPoint(max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
+
+        if not getattr(janela, "_guimma_posicao_movida_usuario", False):
+            destino = QPoint(
+                max(min_x, min(pos_padrao.x(), max_x)),
+                max(min_y, min(pos_padrao.y(), max_y)),
+            )
+            janela._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
+            janela.move(destino)
+            janela._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+            return
+
         pos = self._posicoes_caixas_aux.get(chave)
         if pos:
             x = max(min_x, min(pos[0], max_x))
@@ -1888,15 +1919,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             janela.move(x, y)
             return
 
-        if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
-            pos_local = canvas.calcular_posicao_painel_auxiliar(janela.width(), janela.height(), abaixo_coordenadas=True)
-            pos_global = canvas.mapToGlobal(pos_local)
-            janela.move(pos_global)
-            return
-
-        x = gx + max(8, canvas.width() - janela.width() - 18)
-        y = gy + 16
-        janela.move(max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
+        destino = QPoint(
+            max(min_x, min(pos_padrao.x(), max_x)),
+            max(min_y, min(pos_padrao.y(), max_y)),
+        )
+        janela._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
+        janela.move(destino)
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())
@@ -6908,6 +6936,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._atualizar_menu_moldes()
 
     def _limpar_abas_documentos(self):
+        self._soltar_ferramentas_canvas_para_selecionar()
         while self.abas_documentos.count():
             widget = self.abas_documentos.widget(0)
             self.abas_documentos.removeTab(0)
@@ -6921,6 +6950,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         nome_aba = self.abas_documentos.tabText(index)
         if not self._confirmar_fechamento_aba(index, nome_aba):
             return
+        self._soltar_ferramentas_canvas_para_selecionar()
         widget = self.abas_documentos.widget(index)
         self.abas_documentos.removeTab(index)
         if widget:
@@ -6928,6 +6958,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._renumerar_abas_sem_nome()
         self._reconfigurar_botoes_fechar_abas()
         self._on_aba_documento_alterada(self.abas_documentos.currentIndex())
+
+    def _soltar_ferramentas_canvas_para_selecionar(self):
+        if getattr(self, "_ferramenta_ativa_id", "selecionar") != "selecionar":
+            self._ativar_ferramenta_global("selecionar")
+        elif hasattr(self, "_ocultar_janelas_auxiliares"):
+            self._ocultar_janelas_auxiliares(exceto="selecionar")
+        if not hasattr(self, "abas_documentos"):
+            return
+        for i in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(i)
+            canvas = getattr(area, "canvas", None)
+            if canvas is not None and hasattr(canvas, "set_ferramenta_ativa"):
+                canvas.set_ferramenta_ativa("selecionar")
 
     def _on_zoom_canvas_alterado(self, zoom: float):
         area_atual = self._area_documento_atual()

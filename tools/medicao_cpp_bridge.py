@@ -4,7 +4,9 @@ from math import sqrt
 from PySide6.QtCore import QPointF
 
 try:
-    import guimma_geometry_cpp as _cpp
+    from core.geometry_cpp_bridge import modulo_cpp
+
+    _cpp = modulo_cpp()
 except Exception:
     _cpp = None
 

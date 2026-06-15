@@ -2857,7 +2857,7 @@ class VisualizacaoCanvas(QWidget):
         if isinstance(el.get("contornos_dobra_original"), list) and bool(el.get("contornos_dobra_original")):
             return True
         estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
-        if estado and estado.get("contorno_lado_oculto"):
+        if estado and estado.get("ativo") is not False and estado.get("contorno_lado_oculto"):
             return True
         return False
 
@@ -3997,7 +3997,9 @@ class VisualizacaoCanvas(QWidget):
         if not isinstance(el, dict):
             return None
         estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
-        if estado and (estado.get("contorno_lado_dobrado") or estado.get("contorno_lado_oculto") or estado.get("contorno_pontilhado")):
+        if estado and estado.get("ativo") is not False and (
+            estado.get("contorno_lado_dobrado") or estado.get("contorno_lado_oculto") or estado.get("contorno_pontilhado")
+        ):
             return estado
         registros = el.get("contornos_dobra_original")
         if isinstance(registros, list):

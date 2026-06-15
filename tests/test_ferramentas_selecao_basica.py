@@ -65,6 +65,25 @@ class _CanvasSelecao:
         self.update()
 
 
+class _CanvasFerramenta:
+    def __init__(self):
+        self.ativas: list[str] = []
+
+    def set_ferramenta_ativa(self, tool_id: str):
+        self.ativas.append(tool_id)
+
+
+class _AbasFake:
+    def __init__(self, areas):
+        self._areas = list(areas)
+
+    def count(self):
+        return len(self._areas)
+
+    def widget(self, index):
+        return self._areas[index]
+
+
 class FerramentasSelecaoBasicaTestCase(unittest.TestCase):
     def test_selecionar_tudo_executa_e_volta_para_selecionar(self):
         canvas = _CanvasSelecao()
@@ -118,6 +137,21 @@ class FerramentasSelecaoBasicaTestCase(unittest.TestCase):
         self.assertEqual(canvas._selecionados, {0, 2})
         self.assertEqual(ferramentas_ativas, ["selecionar"])
         self.assertIn("2 molde", janela.lbl_status.texto)
+
+    def test_fechar_canvas_soltas_ferramentas_e_volta_para_selecionar(self):
+        canvas_a = _CanvasFerramenta()
+        canvas_b = _CanvasFerramenta()
+        janela = GuimmaStudioMainWindow.__new__(GuimmaStudioMainWindow)
+        janela._ferramenta_ativa_id = "desdobrar"
+        janela.abas_documentos = _AbasFake([SimpleNamespace(canvas=canvas_a), SimpleNamespace(canvas=canvas_b)])
+        ferramentas_globais: list[str] = []
+        janela._ativar_ferramenta_global = lambda tool_id: ferramentas_globais.append(tool_id)
+
+        GuimmaStudioMainWindow._soltar_ferramentas_canvas_para_selecionar(janela)
+
+        self.assertEqual(ferramentas_globais, ["selecionar"])
+        self.assertEqual(canvas_a.ativas, ["selecionar"])
+        self.assertEqual(canvas_b.ativas, ["selecionar"])
 
 
 if __name__ == "__main__":

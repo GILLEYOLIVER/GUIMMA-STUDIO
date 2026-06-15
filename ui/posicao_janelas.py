@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QComboBox, QDialog, QLineEdit, QRadioButton, QSlider, QWidget
 
@@ -147,6 +147,33 @@ def salvar_posicao(widget: QWidget, chave: str) -> None:
     cfg.sync()
 
 
+def _normalizar_qpoint(pos) -> QPoint:
+    return QPoint(int(pos.x()), int(pos.y()))
+
+
+def _mover_widget(widget: QWidget, pos: QPoint) -> None:
+    destino = _normalizar_qpoint(pos)
+    widget._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
+    widget.move(destino)
+
+
+def _registrar_fallback_inicial(widget: QWidget, fallback: QPoint) -> None:
+    widget._guimma_fallback_inicial = _normalizar_qpoint(fallback)  # type: ignore[attr-defined]
+
+    def _aplicar():
+        try:
+            if getattr(widget, "_guimma_posicao_movida_usuario", False):
+                return
+            pos = getattr(widget, "_guimma_fallback_inicial", None)
+            if isinstance(pos, QPoint):
+                _mover_widget(widget, ajustar_para_area(widget, pos))
+                widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        except RuntimeError:
+            pass
+
+    QTimer.singleShot(0, _aplicar)
+
+
 def ajustar_para_area(widget: QWidget, pos: QPoint, margem: int = 8) -> QPoint:
     parent = widget.parentWidget()
     if parent is not None:
@@ -240,25 +267,32 @@ def restaurar_posicao(
     preferir_fallback_inicial: bool = True,
 ) -> bool:
     restaurar_estado(widget, chave)
-    if isinstance(widget, QDialog):
-        centralizar_widget_na_tela(widget, fallback)
-        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
-        return False
     if (
         fallback is not None
         and preferir_fallback_inicial
         and not getattr(widget, "_guimma_posicao_inicial_aplicada", False)
     ):
-        widget.move(ajustar_para_area(widget, fallback))
+        _registrar_fallback_inicial(widget, fallback)
+        _mover_widget(widget, ajustar_para_area(widget, fallback))
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        return False
+    if fallback is not None and not getattr(widget, "_guimma_posicao_movida_usuario", False):
+        _registrar_fallback_inicial(widget, fallback)
+        _mover_widget(widget, ajustar_para_area(widget, fallback))
         widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
         return False
     pos = posicao_salva(chave)
     if pos is not None:
-        widget.move(ajustar_para_area(widget, pos))
+        _mover_widget(widget, ajustar_para_area(widget, pos))
         widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
         return True
     if fallback is not None:
-        widget.move(ajustar_para_area(widget, fallback))
+        _registrar_fallback_inicial(widget, fallback)
+        _mover_widget(widget, ajustar_para_area(widget, fallback))
+        widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        return False
+    if isinstance(widget, QDialog):
+        centralizar_widget_na_tela(widget)
         widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
     return False
 
@@ -272,8 +306,18 @@ class _FiltroMemoriaPosicao(QObject):
     def eventFilter(self, obj, event):
         widget = getattr(self, "_widget", None)
         chave = getattr(self, "_chave", "")
-        if widget is not None and obj is widget and event.type() in (QEvent.Move, QEvent.Hide, QEvent.Close):
+        if widget is not None and obj is widget and event.type() in (QEvent.Show, QEvent.Move, QEvent.Hide, QEvent.Close):
             try:
+                if event.type() == QEvent.Show:
+                    fallback = getattr(widget, "_guimma_fallback_inicial", None)
+                    if isinstance(fallback, QPoint) and not getattr(widget, "_guimma_posicao_movida_usuario", False):
+                        _registrar_fallback_inicial(widget, fallback)
+                    return super().eventFilter(obj, event)
+                if event.type() == QEvent.Move:
+                    programatica = getattr(widget, "_guimma_ultima_posicao_programatica", None)
+                    if isinstance(programatica, QPoint) and widget.pos() == programatica:
+                        return super().eventFilter(obj, event)
+                    widget._guimma_posicao_movida_usuario = True  # type: ignore[attr-defined]
                 salvar_posicao(widget, chave)
             except RuntimeError:
                 pass

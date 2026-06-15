@@ -19,7 +19,7 @@ else:
     from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
     from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
-    from ui.posicao_janelas import _FiltroMemoriaPosicao, _grupo, _grupo_estado, ajustar_para_area, restaurar_posicao, salvar_posicao
+    from ui.posicao_janelas import _FiltroMemoriaPosicao, _grupo, _grupo_estado, ajustar_para_area, instalar_memoria_posicao, restaurar_posicao, salvar_posicao
 
 
 @unittest.skipIf(QApplication is None, "PySide6 nao disponivel neste ambiente")
@@ -52,8 +52,8 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
 
-    def test_restaurar_posicao_dialogo_abre_centralizado_na_tela(self):
-        chave = "teste:dialogo_centralizado_tela"
+    def test_restaurar_posicao_dialogo_prioriza_fallback_inicial(self):
+        chave = "teste:dialogo_fallback_inicial"
         cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
@@ -66,6 +66,65 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         dialog.resize(160, 100)
 
         self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(0, 0)))
+
+        self.assertEqual(dialog.pos(), QPoint(0, 0))
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+
+    def test_restaurar_posicao_dialogo_ignora_salvo_ate_usuario_mover(self):
+        chave = "teste:dialogo_fallback_ate_mover"
+        cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+        antigo = QDialog()
+        antigo.resize(120, 80)
+        antigo.move(QPoint(300, 260))
+        salvar_posicao(antigo, chave)
+
+        dialog = QDialog()
+        dialog.resize(160, 100)
+
+        self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(20, 30)))
+        self.assertEqual(dialog.pos(), QPoint(20, 30))
+        self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(40, 50)))
+        self.assertEqual(dialog.pos(), QPoint(40, 50))
+
+        dialog._guimma_posicao_movida_usuario = True
+        self.assertTrue(restaurar_posicao(dialog, chave, fallback=QPoint(60, 70)))
+        self.assertEqual(dialog.pos(), QPoint(300, 260))
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+
+    def test_dialogo_reaplica_fallback_apos_show(self):
+        chave = "teste:dialogo_reaplica_fallback_show"
+        cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+        dialog = QDialog()
+        dialog.resize(160, 100)
+        instalar_memoria_posicao(dialog, chave)
+
+        self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(25, 35)))
+        dialog._guimma_ultima_posicao_programatica = QPoint(300, 260)
+        dialog.move(QPoint(300, 260))
+        dialog.show()
+        QApplication.processEvents()
+        QApplication.processEvents()
+
+        self.assertEqual(dialog.pos(), QPoint(25, 35))
+        dialog.close()
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+
+    def test_restaurar_posicao_dialogo_sem_fallback_centraliza(self):
+        chave = "teste:dialogo_centralizado_sem_fallback"
+        cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+        dialog = QDialog()
+        dialog.resize(160, 100)
+
+        self.assertFalse(restaurar_posicao(dialog, chave))
 
         tela = dialog.screen() or QApplication.primaryScreen()
         self.assertIsNotNone(tela)

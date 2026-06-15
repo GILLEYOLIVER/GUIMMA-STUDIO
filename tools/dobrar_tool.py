@@ -48,7 +48,7 @@ class DobrarDialog(QDialog):
 
         form = QFormLayout()
         self.cmb_modo = QComboBox()
-        self.cmb_modo.addItems(["Horizontal", "Vertical", "Linha"])
+        self.cmb_modo.addItems(["Horizontal", "Vertical", "Elemento", "Linha"])
         form.addRow("Modo da dobra", self.cmb_modo)
         self.cmb_acao = QComboBox()
         self.cmb_acao.addItems(["Dobrar", "Conferir lados"])
@@ -80,6 +80,7 @@ class Ferramenta(FerramentaBase):
         self._preview_pos: QPointF | None = None
         self._linha_p1: QPointF | None = None
         self._linha_p2: QPointF | None = None
+        self._elemento_ref = None
         self._ultimo_direito = 0.0
 
     def on_activate(self, canvas):
@@ -122,8 +123,11 @@ class Ferramenta(FerramentaBase):
         self._preview_pos = QPointF(pos)
         dialog = self._obter_dialog(canvas)
         modo = dialog.cmb_modo.currentText()
-        if self._modo_normalizado(modo) == "linha":
+        modo_norm = self._modo_normalizado(modo)
+        if modo_norm == "linha":
             return self._clique_modo_linha(canvas, event, pos)
+        if modo_norm == "elemento":
+            return self._clique_modo_elemento(canvas, event, pos)
         return self._clique_modo_meio(canvas, event, pos, modo)
 
     def on_mouse_move(self, canvas, event) -> bool:
@@ -264,6 +268,56 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
+    def _clique_modo_elemento(self, canvas, event, pos: QPointF) -> bool:
+        candidato = canvas._indice_molde_em_ponto(pos) if hasattr(canvas, "_indice_molde_em_ponto") else None
+        selecionados = self._indices_moldes(canvas)
+        shift = bool(event.modifiers() & Qt.ShiftModifier)
+        if shift and candidato is not None:
+            atual = set(getattr(canvas, "_selecionados", set()) or set())
+            atual.add(int(candidato))
+            canvas._selecionados = atual
+            self._elemento_ref = None
+            self._lado_preview = 0
+            self._status(canvas, "Molde somado. Clique no elemento que serÃ¡ o eixo da dobra.")
+            canvas.update()
+            event.accept()
+            return True
+        if not selecionados or (candidato is not None and candidato not in selecionados and self._elemento_ref is None):
+            if candidato is None:
+                self._status(canvas, "Dobrar por elemento: selecione um molde primeiro.")
+            else:
+                canvas._selecionados = {int(candidato)}
+                self._elemento_ref = None
+                self._lado_preview = 0
+                dialog = self._obter_dialog(canvas)
+                if hasattr(dialog, "chk_mostrar_original"):
+                    self._mostrar_original_alterado(canvas, dialog.chk_mostrar_original.isChecked())
+                self._status(canvas, "Molde selecionado. Clique na linha ou elemento que serÃ¡ o eixo da dobra.")
+                canvas.update()
+            event.accept()
+            return True
+
+        if self._elemento_ref is None:
+            ref = self._elemento_dobra_em_ponto(canvas, selecionados, pos)
+            if ref is None:
+                self._status(canvas, "Clique sobre uma linha interna, elemento ou trecho do perÃ­metro para usar como eixo.")
+            else:
+                self._elemento_ref = ref
+                self._lado_preview = 0
+                self._status(canvas, "Elemento escolhido. Mova para o lado que deseja dobrar e clique para aplicar.")
+            canvas.update()
+            event.accept()
+            return True
+
+        self._lado_preview = self._calcular_lado_preview(canvas, pos)
+        if not self._lado_preview:
+            self._status(canvas, "Mova o mouse para um dos lados do elemento antes de aplicar.")
+            event.accept()
+            return True
+        self._aplicar(canvas, "Elemento")
+        event.accept()
+        return True
+
     def _aplicar(self, canvas, modo: str) -> None:
         indices = self._indices_moldes(canvas)
         eixo = self._eixo(canvas, indices, modo)
@@ -276,7 +330,7 @@ class Ferramenta(FerramentaBase):
         dialog = self._obter_dialog(canvas)
         if str(getattr(dialog, "cmb_acao", None).currentText() if getattr(dialog, "cmb_acao", None) is not None else "Dobrar").strip().lower().startswith("conferir"):
             self._conferir_lados(canvas, indices, eixo)
-            self._resetar_linha()
+            self._resetar_referencias()
             self._lado_preview = 0
             canvas.update()
             return
@@ -363,7 +417,7 @@ class Ferramenta(FerramentaBase):
                         self._dobrar_elemento(canvas.cena.elementos[vinculado], eixo_el, self._lado_preview)
         canvas._selecionados = set(indices)
         canvas._registrar_historico()
-        self._resetar_linha()
+        self._resetar_referencias()
         self._lado_preview = 0
         canvas.update()
         self._status(canvas, f"Dobra aplicada em {afetados} molde(s). Original preservado para abrir/conferir; duplo direito finaliza.")
@@ -396,6 +450,8 @@ class Ferramenta(FerramentaBase):
 
     def _modo_normalizado(self, modo: str) -> str:
         texto = str(modo or "").strip().lower()
+        if "elemento" in texto or "element" in texto:
+            return "elemento"
         if "linha" in texto or "line" in texto:
             return "linha"
         if "vertical" in texto:
@@ -419,7 +475,7 @@ class Ferramenta(FerramentaBase):
             pass
 
     def _modo_alterado(self, canvas):
-        self._resetar_linha()
+        self._resetar_referencias()
         self._lado_preview = 0
         canvas.update()
         self._status(canvas, "Modo de dobra alterado. Selecione molde(s) e escolha o lado da dobra.")
@@ -437,17 +493,14 @@ class Ferramenta(FerramentaBase):
             if self._linha_p1 is None or self._linha_p2 is None:
                 return None
             return ("line", QPointF(self._linha_p1), QPointF(self._linha_p2))
+        if modo_norm == "elemento":
+            return self._eixo_elemento_ref(canvas, self._elemento_ref)
         bbox = self._bbox_indices(canvas, indices)
         if bbox is None:
             return None
         min_x, min_y, max_x, max_y = bbox
-        ponto_medio_reta = self._ponto_medio_reta_maior(canvas, indices, modo_norm)
         if modo_norm == "horizontal":
-            if ponto_medio_reta is not None:
-                return ("h", ponto_medio_reta.y())
             return ("h", (min_y + max_y) / 2.0)
-        if ponto_medio_reta is not None:
-            return ("v", ponto_medio_reta.x())
         return ("v", (min_x + max_x) / 2.0)
 
     def _ponto_medio_reta_maior(self, canvas, indices: list[int], modo_norm: str) -> QPointF | None:
@@ -474,6 +527,264 @@ class Ferramenta(FerramentaBase):
                     melhor_comprimento = comprimento
                     melhor = QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
         return melhor or fallback
+
+    def _eixo_elemento_ref(self, canvas, ref):
+        linha = self._elemento_linha_ref(canvas, ref)
+        if linha is None:
+            return None
+        return self._eixo_linha(linha)
+
+    def _elemento_dobra_em_ponto(self, canvas, indices: list[int], pos: QPointF):
+        tolerancia = 8.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+        melhor_ref = None
+        melhor_dist = tolerancia
+        for idx, el in enumerate(getattr(canvas.cena, "elementos", []) or []):
+            if idx in indices or not self._eh_linha_candidata_dobra(el):
+                continue
+            if not any(self._eh_linha_interna_do_molde(canvas, molde_idx, el) for molde_idx in indices):
+                continue
+            pontos = self._pontos_para_hit_linha(el)
+            if len(pontos) < 2:
+                continue
+            dist = min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
+            if dist <= melhor_dist:
+                melhor_ref = idx
+                melhor_dist = dist
+        if melhor_ref is not None:
+            return melhor_ref
+
+        melhor_linha = None
+        for molde_idx in indices:
+            linha = self._linha_do_proprio_molde_em_ponto(canvas, molde_idx, pos, tolerancia)
+            if linha is None:
+                continue
+            pontos = self._pontos_para_hit_linha(linha)
+            if len(pontos) < 2:
+                continue
+            dist = min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
+            if dist <= melhor_dist:
+                melhor_linha = linha
+                melhor_dist = dist
+        return melhor_linha
+
+    def _elemento_linha_ref(self, canvas, ref) -> dict | None:
+        if isinstance(ref, int):
+            if 0 <= ref < len(canvas.cena.elementos):
+                el = canvas.cena.elementos[ref]
+                return el if isinstance(el, dict) else None
+            return None
+        if isinstance(ref, dict):
+            return ref
+        return None
+
+    def _eh_linha_candidata_dobra(self, el: dict) -> bool:
+        if not isinstance(el, dict) or el.get("molde"):
+            return False
+        return el.get("tipo") in {"polyline", "bezier_quadratica"}
+
+    def _linha_do_proprio_molde_em_ponto(self, canvas, molde_idx: int, pos: QPointF, tolerancia: float) -> dict | None:
+        if not (0 <= molde_idx < len(canvas.cena.elementos)):
+            return None
+        molde = canvas.cena.elementos[molde_idx]
+        melhor = None
+        melhor_dist = tolerancia
+        for linha in self._linhas_do_proprio_molde(molde):
+            pontos = self._pontos_para_hit_linha(linha)
+            if len(pontos) < 2:
+                continue
+            dist = min(self._distancia_ponto_segmento(a, b, pos) for a, b in zip(pontos, pontos[1:]))
+            if dist <= melhor_dist:
+                melhor = linha
+                melhor_dist = dist
+        return melhor
+
+    def _linhas_do_proprio_molde(self, molde: dict) -> list[dict]:
+        linhas: list[dict] = []
+        pontos = self._pontos_elemento(molde)
+        base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+        if len(base) < 2:
+            return linhas
+        indices_principais = self._indices_pontos_principais(base, molde)
+        if len(indices_principais) >= 2:
+            total = len(base)
+            for pos, inicio in enumerate(indices_principais):
+                fim = indices_principais[(pos + 1) % len(indices_principais)]
+                trecho = self._trecho_contorno(base, inicio, fim)
+                if self._comprimento_trecho(trecho) <= 1e-9:
+                    continue
+                linhas.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(p.x(), p.y()) for p in trecho],
+                        "origem_dobrar": "perimetro_principal",
+                        "indice_inicio": inicio,
+                        "indice_fim": fim,
+                    }
+                )
+                if len(linhas) > total:
+                    break
+            return linhas
+        for a, b in zip(base, base[1:] + base[:1]):
+            if self._dist(a, b) > 1e-9:
+                linhas.append(
+                    {
+                        "tipo": "polyline",
+                        "pontos": [(a.x(), a.y()), (b.x(), b.y())],
+                        "origem_dobrar": "perimetro_molde",
+                    }
+                )
+        return linhas
+
+    def _indices_pontos_principais(self, base: list[QPointF], molde: dict) -> list[int]:
+        indices: list[int] = []
+        for ponto in self._pontos_principais_molde(molde):
+            idx = min(range(len(base)), key=lambda i, p=ponto: self._dist(base[i], p))
+            if idx not in indices:
+                indices.append(idx)
+        indices.sort()
+        return indices
+
+    def _pontos_principais_molde(self, molde: dict) -> list[QPointF]:
+        pontos: list[QPointF] = []
+        for chave in ("controle_cantos", "pontos_controle_referencia"):
+            origem = molde.get(chave)
+            if not isinstance(origem, list):
+                continue
+            for p in origem:
+                if self._eh_ponto(p):
+                    pontos.append(QPointF(float(p[0]), float(p[1])))
+            if pontos:
+                return pontos
+        origem = molde.get("pontos_controle_principais")
+        if isinstance(origem, list):
+            for item in origem:
+                if isinstance(item, dict) and "x" in item and "y" in item:
+                    try:
+                        pontos.append(QPointF(float(item["x"]), float(item["y"])))
+                    except Exception:
+                        continue
+        return pontos
+
+    def _trecho_contorno(self, base: list[QPointF], inicio: int, fim: int) -> list[QPointF]:
+        if not base:
+            return []
+        total = len(base)
+        trecho = [QPointF(base[inicio % total])]
+        idx = inicio % total
+        limite = total + 1
+        while idx != (fim % total) and limite > 0:
+            idx = (idx + 1) % total
+            trecho.append(QPointF(base[idx]))
+            limite -= 1
+        return trecho
+
+    def _comprimento_trecho(self, pontos: list[QPointF]) -> float:
+        return sum(self._dist(a, b) for a, b in zip(pontos, pontos[1:]))
+
+    def _eh_linha_interna_do_molde(self, canvas, molde_idx: int, el: dict) -> bool:
+        if not self._eh_linha_candidata_dobra(el):
+            return False
+        subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").strip()
+        if subtipo in {"contorno", "costura"} or el.get("costura_de_molde_id"):
+            return False
+        if not (0 <= molde_idx < len(canvas.cena.elementos)):
+            return False
+        molde = canvas.cena.elementos[molde_idx]
+        molde_id = str(molde.get("molde_id") or molde.get("id") or "").strip()
+        el_molde_id = str(el.get("molde_id") or "").strip()
+        if molde_id and el_molde_id == molde_id:
+            return True
+        pontos = self._pontos_para_hit_linha(el)
+        if not pontos:
+            return False
+        amostras = self._amostras_linha(pontos)
+        if any(self._ponto_dentro_molde(molde, p) for p in amostras):
+            return True
+        bbox = self._bbox_pontos(self._pontos_elemento(molde))
+        if bbox is None:
+            return False
+        min_x, min_y, max_x, max_y = bbox
+        margem = max(max_x - min_x, max_y - min_y, 1.0) * 0.02
+        return any((min_x - margem) <= p.x() <= (max_x + margem) and (min_y - margem) <= p.y() <= (max_y + margem) for p in amostras)
+
+    def _amostras_linha(self, pontos: list[QPointF]) -> list[QPointF]:
+        amostras = [QPointF(p) for p in pontos]
+        for a, b in zip(pontos, pontos[1:]):
+            amostras.append(QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0))
+        return amostras
+
+    def _eixo_linha(self, el: dict):
+        eixo_serializado = el.get("eixo_serializado") if isinstance(el, dict) else None
+        eixo = self._eixo_serializado_para_eixo(eixo_serializado)
+        if eixo is not None:
+            return eixo
+        if el.get("tipo") == "bezier_quadratica":
+            p0 = el.get("p0")
+            p2 = el.get("p2")
+            if self._eh_ponto(p0) and self._eh_ponto(p2):
+                return ("line", QPointF(float(p0[0]), float(p0[1])), QPointF(float(p2[0]), float(p2[1])))
+            return None
+        pontos = self._pontos_para_preview_linha(el)
+        if len(pontos) >= 2 and self._dist(pontos[0], pontos[-1]) > 1e-9:
+            return ("line", QPointF(pontos[0]), QPointF(pontos[-1]))
+        return None
+
+    def _eixo_serializado_para_eixo(self, eixo_info):
+        if not isinstance(eixo_info, dict):
+            return None
+        tipo = str(eixo_info.get("tipo") or "").lower()
+        if tipo == "h":
+            try:
+                return ("h", float(eixo_info.get("valor")))
+            except Exception:
+                return None
+        if tipo == "v":
+            try:
+                return ("v", float(eixo_info.get("valor")))
+            except Exception:
+                return None
+        if tipo == "line":
+            p1 = eixo_info.get("p1")
+            p2 = eixo_info.get("p2")
+            if self._eh_ponto(p1) and self._eh_ponto(p2):
+                return ("line", QPointF(float(p1[0]), float(p1[1])), QPointF(float(p2[0]), float(p2[1])))
+        return None
+
+    def _pontos_para_preview_linha(self, el: dict) -> list[QPointF]:
+        pontos = self._pontos_para_hit_linha(el)
+        if len(pontos) < 2:
+            return pontos
+        return [QPointF(pontos[0]), QPointF(pontos[-1])]
+
+    def _pontos_para_hit_linha(self, el: dict) -> list[QPointF]:
+        if el.get("tipo") == "bezier_quadratica":
+            if self._eh_ponto(el.get("p0")) and self._eh_ponto(el.get("p1")) and self._eh_ponto(el.get("p2")):
+                p0 = QPointF(float(el["p0"][0]), float(el["p0"][1]))
+                p1 = QPointF(float(el["p1"][0]), float(el["p1"][1]))
+                p2 = QPointF(float(el["p2"][0]), float(el["p2"][1]))
+                return [self._bezier(p0, p1, p2, i / 24.0) for i in range(25)]
+            return []
+        return self._pontos_elemento(el)
+
+    def _ponto_dentro_molde(self, molde: dict, ponto: QPointF) -> bool:
+        pontos = self._pontos_elemento(molde)
+        if len(pontos) < 3:
+            return False
+        base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else pontos
+        dentro = False
+        j = len(base) - 1
+        for i, pi in enumerate(base):
+            pj = base[j]
+            denom = pj.y() - pi.y()
+            if abs(denom) <= 1e-12:
+                denom = 1e-12 if denom >= 0 else -1e-12
+            cruza = ((pi.y() > ponto.y()) != (pj.y() > ponto.y())) and (
+                ponto.x() < (pj.x() - pi.x()) * (ponto.y() - pi.y()) / denom + pi.x()
+            )
+            if cruza:
+                dentro = not dentro
+            j = i
+        return dentro
 
     def _centralizar_fio_no_molde(self, el: dict, eixo) -> None:
         pontos = self._pontos_elemento(el)
@@ -522,6 +833,10 @@ class Ferramenta(FerramentaBase):
     def _dobrar_elemento(self, el: dict, eixo, lado: int) -> None:
         lado_movido = -int(lado)
         dobrados_contorno: list[QPointF] = []
+        controles_originais = {
+            chave: list(el.get(chave, [])) if isinstance(el.get(chave), list) else []
+            for chave in ("controle_cantos", "pontos_controle_referencia")
+        }
 
         def conv(p):
             pt = QPointF(float(p[0]), float(p[1]))
@@ -556,10 +871,112 @@ class Ferramenta(FerramentaBase):
                         x, y = conv((item["x"], item["y"]))
                         item["x"] = x
                         item["y"] = y
-        if el.get("molde") and len(dobrados_contorno) >= 3:
-            cantos = dobrados_contorno[:-1] if self._pontos_mesmos(dobrados_contorno[0], dobrados_contorno[-1]) else dobrados_contorno
-            el["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
-            el["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+        if el.get("molde"):
+            if len(dobrados_contorno) >= 3:
+                self._atualizar_controles_dobra_visivel(el, eixo, int(lado), dobrados_contorno, controles_originais)
+            else:
+                self._deduplicar_controles_dobrados(el)
+
+    def _atualizar_controles_dobra_visivel(
+        self,
+        el: dict,
+        eixo,
+        lado: int,
+        contorno: list[QPointF],
+        controles_originais: dict[str, list],
+    ) -> None:
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
+        if len(base) < 2:
+            self._deduplicar_controles_dobrados(el)
+            return
+        tolerancia = self._tolerancia_contorno(base)
+        candidatos: list[QPointF] = []
+        for chave in ("controle_cantos", "pontos_controle_referencia"):
+            for item in controles_originais.get(chave, []):
+                if not self._eh_ponto(item):
+                    continue
+                ponto = QPointF(float(item[0]), float(item[1]))
+                lado_ponto = self._lado_ponto(ponto, eixo)
+                if lado_ponto not in {int(lado), 0}:
+                    continue
+                if self._ponto_no_contorno(ponto, base, tolerancia * 20.0):
+                    candidatos.append(ponto)
+            if candidatos:
+                break
+        candidatos.extend(self._pontos_controle_eixo_no_contorno(base, eixo))
+
+        controles: list[QPointF] = []
+        for ponto in base:
+            if not candidatos or any(self._dist(ponto, candidato) <= tolerancia * 20.0 for candidato in candidatos):
+                if not any(self._dist(ponto, existente) <= tolerancia for existente in controles):
+                    controles.append(QPointF(ponto))
+        if len(controles) < 2:
+            controles = self._controles_fallback_contorno(base)
+        serial = [(p.x(), p.y()) for p in controles]
+        el["controle_cantos"] = serial
+        el["pontos_controle_referencia"] = list(serial)
+
+    def _pontos_controle_eixo_no_contorno(self, contorno: list[QPointF], eixo) -> list[QPointF]:
+        tolerancia = self._tolerancia_contorno(contorno) * 20.0
+        pontos = [QPointF(p) for p in contorno if abs(self._valor_lado(p, eixo)) <= tolerancia]
+        if len(pontos) <= 2:
+            return pontos
+        inicio = min(pontos, key=lambda p: self._coordenada_no_eixo(p, eixo))
+        fim = max(pontos, key=lambda p: self._coordenada_no_eixo(p, eixo))
+        if self._dist(inicio, fim) <= tolerancia:
+            return [QPointF(inicio)]
+        return [QPointF(inicio), QPointF(fim)]
+
+    def _coordenada_no_eixo(self, ponto: QPointF, eixo) -> float:
+        if eixo[0] == "h":
+            return ponto.x()
+        if eixo[0] == "v":
+            return ponto.y()
+        a: QPointF = eixo[1]
+        b: QPointF = eixo[2]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        denom = (dx * dx) + (dy * dy)
+        if denom <= 1e-12:
+            return 0.0
+        return (((ponto.x() - a.x()) * dx) + ((ponto.y() - a.y()) * dy)) / denom
+
+    def _ponto_no_contorno(self, ponto: QPointF, contorno: list[QPointF], tolerancia: float) -> bool:
+        if len(contorno) < 2:
+            return False
+        return any(
+            self._distancia_ponto_segmento(a, b, ponto) <= tolerancia
+            for a, b in zip(contorno, contorno[1:] + contorno[:1])
+        )
+
+    def _controles_fallback_contorno(self, contorno: list[QPointF]) -> list[QPointF]:
+        if len(contorno) <= 16:
+            return [QPointF(p) for p in contorno]
+        passo = max(1, len(contorno) // 8)
+        return [QPointF(p) for idx, p in enumerate(contorno) if idx % passo == 0][:8]
+
+    def _tolerancia_contorno(self, pontos: list[QPointF]) -> float:
+        bbox = self._bbox_pontos(pontos)
+        if bbox is None:
+            return 1e-6
+        min_x, min_y, max_x, max_y = bbox
+        escala = max(max_x - min_x, max_y - min_y, 1.0)
+        return max(1e-6, escala * 1e-7)
+
+    def _deduplicar_controles_dobrados(self, el: dict) -> None:
+        for chave in ("controle_cantos", "pontos_controle_referencia"):
+            origem = el.get(chave)
+            if not isinstance(origem, list):
+                continue
+            controles: list[tuple[float, float]] = []
+            for item in origem:
+                if not self._eh_ponto(item):
+                    continue
+                ponto = QPointF(float(item[0]), float(item[1]))
+                if any(self._dist(ponto, QPointF(x, y)) <= 1e-7 for x, y in controles):
+                    continue
+                controles.append((ponto.x(), ponto.y()))
+            el[chave] = controles
 
     def _pontos_dobrados_preview(
         self,
@@ -579,14 +996,9 @@ class Ferramenta(FerramentaBase):
             ]
 
         base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
-        mantido = self._recortar_poligono_lado(base, eixo, int(lado_destino))
-        movido = self._recortar_poligono_lado(base, eixo, -int(lado_destino))
-        movido_espelhado = [self._espelhar_ponto(p, eixo) for p in movido]
-        referencias_uniao = [QPointF(p) for p in mantido] + [QPointF(p) for p in movido_espelhado]
-        unidos = self._unir_poligonos(mantido, movido_espelhado, referencias=referencias_uniao)
-        if len(unidos) < 3:
-            unidos = mantido or movido_espelhado
-        unidos = self._normalizar_vertices_dobra(unidos, referencias_uniao)
+        visivel = self._recortar_poligono_lado(base, eixo, int(lado_destino))
+        referencias = [QPointF(p) for p in base]
+        unidos = self._normalizar_vertices_dobra(visivel, referencias)
         if len(unidos) >= 3 and not self._pontos_mesmos(unidos[0], unidos[-1]):
             unidos.append(QPointF(unidos[0]))
         return unidos
@@ -981,8 +1393,12 @@ class Ferramenta(FerramentaBase):
     def _resetar_operacao(self):
         self._lado_preview = 0
         self._preview_pos = None
-        self._resetar_linha()
+        self._resetar_referencias()
         self._ultimo_direito = 0.0
+
+    def _resetar_referencias(self):
+        self._resetar_linha()
+        self._elemento_ref = None
 
     def _resetar_linha(self):
         self._linha_p1 = None
@@ -993,14 +1409,17 @@ class Ferramenta(FerramentaBase):
         if not indices:
             return False
         dialog = self._obter_dialog(canvas)
-        if self._modo_normalizado(dialog.cmb_modo.currentText()) == "linha":
+        modo_norm = self._modo_normalizado(dialog.cmb_modo.currentText())
+        if modo_norm == "linha":
             return self._linha_p1 is not None or self._linha_p2 is not None
+        if modo_norm == "elemento":
+            return self._elemento_ref is not None or bool(self._lado_preview)
         return bool(self._lado_preview)
 
     def _cancelar_operacao(self, canvas) -> None:
         self._lado_preview = 0
         self._preview_pos = None
-        self._resetar_linha()
+        self._resetar_referencias()
         canvas.update()
         self._status(canvas, "Operação de dobra cancelada. A seleção foi mantida; escolha novamente o eixo/lado.")
 
@@ -1049,6 +1468,19 @@ class Ferramenta(FerramentaBase):
     def _distancia_ponto_segmento(self, inicio: QPointF, fim: QPointF, ponto: QPointF) -> float:
         proj = self._projetar_em_segmento(ponto, inicio, fim)
         return self._dist(ponto, proj)
+
+    def _bbox_pontos(self, pontos: list[QPointF]) -> tuple[float, float, float, float] | None:
+        if not pontos:
+            return None
+        return min(p.x() for p in pontos), min(p.y() for p in pontos), max(p.x() for p in pontos), max(p.y() for p in pontos)
+
+    @staticmethod
+    def _bezier(p0: QPointF, p1: QPointF, p2: QPointF, t: float) -> QPointF:
+        u = 1.0 - t
+        return QPointF(
+            (u * u * p0.x()) + (2.0 * u * t * p1.x()) + (t * t * p2.x()),
+            (u * u * p0.y()) + (2.0 * u * t * p1.y()) + (t * t * p2.y()),
+        )
 
     def _status(self, canvas, texto: str) -> None:
         self.set_status(texto)

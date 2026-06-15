@@ -150,6 +150,17 @@ PYBIND11_MODULE(guimma_geometry_cpp, m) {
         return to_tuples(guimma::normalize_closed_polyline(to_points(polyline), clockwise, tolerance));
     }, py::arg("polyline"), py::arg("clockwise") = true, py::arg("tolerance") = 1e-9);
 
+    m.def("unfold_mirrored_contour", [](const std::vector<PointTuple>& polyline, int axis_kind, double axis_value, PointTuple axis_p1, PointTuple axis_p2, double tolerance) {
+        return to_tuples(guimma::unfold_mirrored_contour(
+            to_points(polyline),
+            axis_kind,
+            axis_value,
+            {axis_p1.first, axis_p1.second},
+            {axis_p2.first, axis_p2.second},
+            tolerance
+        ));
+    }, py::arg("polyline"), py::arg("axis_kind"), py::arg("axis_value") = 0.0, py::arg("axis_p1") = PointTuple{0.0, 0.0}, py::arg("axis_p2") = PointTuple{1.0, 0.0}, py::arg("tolerance") = 1e-7);
+
     m.def("seam_offset_closed", [](const std::vector<PointTuple>& polyline, double margin) {
         return to_tuples(guimma::seam_offset_closed(to_points(polyline), margin));
     }, py::arg("polyline"), py::arg("margin"));

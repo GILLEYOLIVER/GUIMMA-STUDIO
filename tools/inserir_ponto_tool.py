@@ -97,16 +97,30 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())
-        self._hover_principal = self._shift_pressionado(event)
+        hover_principal = self._shift_pressionado(event)
         moldes_selecionados = self._indices_moldes_selecionados(canvas)
-        self._hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=moldes_selecionados or None)
-        if self._hover_segmento is not None and not moldes_selecionados:
-            idx, _seg_idx, _ponto = self._hover_segmento
+        hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=moldes_selecionados or None)
+        if hover_segmento is not None and not moldes_selecionados:
+            idx, _seg_idx, _ponto = hover_segmento
             if 0 <= idx < len(canvas.cena.elementos) and canvas.cena.elementos[idx].get("molde"):
-                self._hover_segmento = None
-        canvas.update()
+                hover_segmento = None
+        if hover_principal != self._hover_principal or not self._hover_segmento_igual(hover_segmento, self._hover_segmento):
+            self._hover_principal = hover_principal
+            self._hover_segmento = hover_segmento
+            canvas.update()
         event.accept()
         return True
+
+    def _hover_segmento_igual(
+        self,
+        a: tuple[int, int, QPointF] | None,
+        b: tuple[int, int, QPointF] | None,
+    ) -> bool:
+        if a is None or b is None:
+            return a is b
+        if a[0] != b[0] or a[1] != b[1]:
+            return False
+        return self._dist_qt(a[2], b[2]) <= 1e-7
 
     def on_paint_overlay(self, canvas, painter):
         if self._hover_segmento is None:
@@ -127,8 +141,11 @@ class Ferramenta(FerramentaBase):
 
     def _segmento_mais_proximo(self, canvas, pos: QPointF, indices: list[int] | None = None) -> tuple[int, int, QPointF] | None:
         tolerancia = 10.0 / max(canvas.zoom, 0.001)
+        tolerancia2 = tolerancia * tolerancia
+        px = float(pos.x())
+        py = float(pos.y())
         melhor: tuple[int, int, QPointF] | None = None
-        melhor_dist = tolerancia
+        melhor_dist2 = tolerancia2
         candidatos = indices if indices is not None else range(len(canvas.cena.elementos))
         for idx in candidatos:
             if not (0 <= idx < len(canvas.cena.elementos)):
@@ -136,17 +153,52 @@ class Ferramenta(FerramentaBase):
             el = canvas.cena.elementos[idx]
             if el.get("tipo") != "polyline":
                 continue
-            pontos = [self._ponto_qt(p) for p in el.get("pontos", []) or []]
-            pontos = [p for p in pontos if p is not None]
+            pontos = el.get("pontos", []) or []
             if len(pontos) < 2:
                 continue
-            for seg_idx, (a, b) in enumerate(zip(pontos, pontos[1:])):
-                projetado = self._projetar_ponto_segmento(a, b, pos)
-                d = self._dist_qt(projetado, pos)
-                if d < melhor_dist:
-                    melhor_dist = d
-                    melhor = (idx, seg_idx, projetado)
+            anterior = self._tupla_ponto(pontos[0])
+            if anterior is None:
+                continue
+            for seg_idx, item in enumerate(pontos[1:]):
+                atual = self._tupla_ponto(item)
+                if atual is None:
+                    continue
+                ax, ay = anterior
+                bx, by = atual
+                anterior = atual
+                if px < min(ax, bx) - tolerancia or px > max(ax, bx) + tolerancia:
+                    continue
+                if py < min(ay, by) - tolerancia or py > max(ay, by) + tolerancia:
+                    continue
+                t, dist2, proj_x, proj_y = self._projetar_ponto_segmento_numerico(ax, ay, bx, by, px, py)
+                if 0.0 <= t <= 1.0 and dist2 < melhor_dist2:
+                    melhor_dist2 = dist2
+                    melhor = (idx, seg_idx, QPointF(proj_x, proj_y))
         return melhor
+
+    @staticmethod
+    def _projetar_ponto_segmento_numerico(
+        ax: float,
+        ay: float,
+        bx: float,
+        by: float,
+        px: float,
+        py: float,
+    ) -> tuple[float, float, float, float]:
+        abx = bx - ax
+        aby = by - ay
+        den = (abx * abx) + (aby * aby)
+        if den <= 1e-12:
+            dx = px - ax
+            dy = py - ay
+            return 0.0, (dx * dx) + (dy * dy), ax, ay
+        t = ((px - ax) * abx + (py - ay) * aby) / den
+        t = max(0.0, min(1.0, t))
+        proj_x = ax + (abx * t)
+        proj_y = ay + (aby * t)
+        dx = px - proj_x
+        dy = py - proj_y
+        return t, (dx * dx) + (dy * dy), proj_x, proj_y
 
     def _indices_moldes_selecionados(self, canvas) -> list[int]:
         saida: list[int] = []

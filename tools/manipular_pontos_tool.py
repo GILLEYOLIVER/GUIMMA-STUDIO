@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from math import atan2, cos, degrees, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt
@@ -32,6 +31,22 @@ class Ferramenta(FerramentaBase):
     _lbl_dy_global: QLabel | None = None
     _cmb_n_pontos_global: QComboBox | None = None
     _chk_discreto_global: QCheckBox | None = None
+    _CHAVES_MUTAVEIS_ARRASTE = {
+        "pontos",
+        "controle_cantos",
+        "controle_auxiliares",
+        "pontos_controle_principais",
+        "pontos_auxiliares",
+        "pontos_controle_curva",
+        "pontos_principais",
+        "pontos_controle",
+        "controle_pontos",
+        "controle_cantos_referencia",
+        "pontos_controle_referencia",
+        "fio_origem",
+        "fio_fim",
+        "contornos_dobra_original",
+    }
 
     def __init__(self):
         super().__init__()
@@ -51,6 +66,7 @@ class Ferramenta(FerramentaBase):
         self._estado_arraste_controle: dict | None = None
         self._estado_arraste_ponto: dict | None = None
         self._estado_arraste_dobra: dict | None = None
+        self._ultimo_destino_arraste: QPointF | None = None
         cls = type(self)
         self._dlg_passo: QDialog | None = cls._dlg_global
         self._edt_dx: QLineEdit | None = cls._edt_dx_global
@@ -63,6 +79,7 @@ class Ferramenta(FerramentaBase):
         self._unidade_fator = 1.0
 
     def on_activate(self, canvas):
+        self._limpar_dobras_inativas_canvas(canvas)
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
         self._arrastando_dobra_pontilhada = None
@@ -79,6 +96,7 @@ class Ferramenta(FerramentaBase):
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
         self._estado_arraste_dobra = None
+        self._ultimo_destino_arraste = None
         if self.usar_caixa_passo:
             self._abrir_caixa_passo(canvas)
         self.set_status(f"{self.nome}: clique em um ponto para prender no cursor, clique de novo para soltar. Shift seleciona varios pontos.")
@@ -92,6 +110,7 @@ class Ferramenta(FerramentaBase):
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
         self._estado_arraste_dobra = None
+        self._ultimo_destino_arraste = None
         self._guia_eixo = None
 
     def on_canvas_resize(self, canvas) -> None:
@@ -244,6 +263,7 @@ class Ferramenta(FerramentaBase):
             return True
         if event.button() != Qt.LeftButton:
             return False
+        self._limpar_dobras_inativas_canvas(canvas)
         pos = canvas._ponto_com_snap(event.position())
         if self.arraste_por_clique and self._arraste_ativo():
             self.on_mouse_move(canvas, event)
@@ -256,6 +276,7 @@ class Ferramenta(FerramentaBase):
             self._arrastando_dobra_pontilhada = dobra_pontilhada
             self._hover_dobra_pontilhada = dobra_pontilhada
             self._estado_arraste_dobra = self._criar_estado_arraste_dobra(canvas, dobra_pontilhada)
+            self._registrar_destino_arraste(pos)
             self._hover_controle_molde = None
             self._hover_ponto_poly = None
             if hasattr(canvas, "iniciar_operacao_coordenadas"):
@@ -286,6 +307,8 @@ class Ferramenta(FerramentaBase):
             self._ponto_selecionado = None
             self._estado_arraste_controle = self._criar_estado_arraste_controle(canvas, controle)
             origem_coord = self.origem_coordenadas(canvas)
+            origem_estado = self._estado_arraste_controle.get("origem") if self._estado_arraste_controle else None
+            self._registrar_destino_arraste(origem_estado if isinstance(origem_estado, QPointF) else origem_coord)
             if origem_coord is not None and hasattr(canvas, "iniciar_operacao_coordenadas"):
                 canvas.iniciar_operacao_coordenadas(origem_coord)
             dx, dy = self._ler_delta_configurado()
@@ -308,6 +331,8 @@ class Ferramenta(FerramentaBase):
         self._ponto_selecionado = (idx, p_idx)
         self._hover_ponto_poly = (idx, p_idx)
         self._estado_arraste_ponto = self._criar_estado_arraste_ponto(canvas, idx, p_idx)
+        origem_estado = self._estado_arraste_ponto.get("origem") if self._estado_arraste_ponto else None
+        self._registrar_destino_arraste(origem_estado if isinstance(origem_estado, QPointF) else None)
         origem_coord = self.origem_coordenadas(canvas)
         if origem_coord is not None and hasattr(canvas, "iniciar_operacao_coordenadas"):
             canvas.iniciar_operacao_coordenadas(origem_coord)
@@ -481,9 +506,16 @@ class Ferramenta(FerramentaBase):
         return out
 
     def on_mouse_move(self, canvas, event) -> bool:
+        if not self._arraste_ativo():
+            self._limpar_dobras_inativas_canvas(canvas)
         pos = self._posicao_arraste_livre(canvas, event)
         if self._arrastando_dobra_pontilhada is not None:
-            self._atualizar_dobra_pontilhada(canvas, self._arrastando_dobra_pontilhada, self._normalizar_destino(pos))
+            destino = self._normalizar_destino(pos)
+            if self._destino_arraste_repetido(canvas, destino):
+                event.accept()
+                return True
+            self._atualizar_dobra_pontilhada(canvas, self._arrastando_dobra_pontilhada, destino)
+            self._registrar_destino_arraste(destino)
             self._hover_dobra_pontilhada = self._arrastando_dobra_pontilhada
             if hasattr(canvas, "atualizar_operacao_coordenadas"):
                 canvas.atualizar_operacao_coordenadas(pos)
@@ -498,19 +530,27 @@ class Ferramenta(FerramentaBase):
                 origem = estado.get("origem")
                 if isinstance(origem, QPointF):
                     destino = self._destino_com_snap_e_eixos(canvas, origem, pos)
+                    if self._destino_arraste_repetido(canvas, destino):
+                        event.accept()
+                        return True
                     dx = destino.x() - origem.x()
                     dy = destino.y() - origem.y()
                     self._restaurar_estado_arraste(canvas, estado)
                     self._mover_controles_por_delta(canvas, set(estado.get("alvos", set())), dx, dy)
                     self._atualizar_info_angulo_controle_molde(canvas, idx, tipo, controle_idx, destino)
+                    self._registrar_destino_arraste(destino)
             else:
                 atual = self._ponto_controle_molde(canvas, idx, tipo, controle_idx)
                 if atual is not None:
                     destino = self._destino_com_snap_e_eixos(canvas, atual, pos)
+                    if self._destino_arraste_repetido(canvas, destino):
+                        event.accept()
+                        return True
                     dx = destino.x() - atual.x()
                     dy = destino.y() - atual.y()
                     self._mover_controles_por_delta(canvas, self._alvos_controle_para_arraste((idx, tipo, controle_idx)), dx, dy)
                     self._atualizar_info_angulo_controle_molde(canvas, idx, tipo, controle_idx, destino)
+                    self._registrar_destino_arraste(destino)
             self._hover_controle_molde = self._arrastando_controle_molde
             self._hover_molde_idx = idx
             destino_coord = self.posicao_coordenadas_atual(canvas)
@@ -528,13 +568,21 @@ class Ferramenta(FerramentaBase):
                 origem = estado.get("origem")
                 if isinstance(origem, QPointF):
                     destino = self._destino_com_snap_e_eixos(canvas, origem, pos)
+                    if self._destino_arraste_repetido(canvas, destino):
+                        event.accept()
+                        return True
                     self._restaurar_estado_arraste(canvas, estado)
                     dx = destino.x() - origem.x()
                     dy = destino.y() - origem.y()
                     self._atualizar_ponto(canvas, idx, p_idx, destino)
                     self._mover_ponto_proporcional(canvas, idx, p_idx, dx, dy, mover_n_pontos=self._modo_n_pontos())
+                    self._registrar_destino_arraste(destino)
             else:
+                if self._destino_arraste_repetido(canvas, destino):
+                    event.accept()
+                    return True
                 self._atualizar_ponto(canvas, idx, p_idx, destino)
+                self._registrar_destino_arraste(destino)
             self._guia_ponto_poly = self._gerar_guia(canvas, idx, p_idx)
             self._atualizar_info_angulo(canvas, idx, p_idx, destino)
             destino_coord = self.posicao_coordenadas_atual(canvas)
@@ -544,12 +592,24 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        self._hover_ponto_poly = self._ponto_polilinha_em_ponto(canvas, pos)
-        self._hover_controle_molde = self._controle_molde_em_ponto(canvas, pos)
-        self._hover_dobra_pontilhada = self._dobra_pontilhada_em_ponto(canvas, pos)
-        self._hover_molde_idx = self._hover_controle_molde[0] if self._hover_controle_molde is not None else None
-        self._hover_elemento_idx = self._elemento_em_hover(canvas, pos)
-        canvas.update()
+        hover_ponto = self._ponto_polilinha_em_ponto(canvas, pos)
+        hover_controle = self._controle_molde_em_ponto(canvas, pos)
+        hover_dobra = self._dobra_pontilhada_em_ponto(canvas, pos)
+        hover_molde = hover_controle[0] if hover_controle is not None else None
+        hover_elemento = self._elemento_em_hover(canvas, pos)
+        if (
+            hover_ponto != self._hover_ponto_poly
+            or hover_controle != self._hover_controle_molde
+            or hover_dobra != self._hover_dobra_pontilhada
+            or hover_molde != self._hover_molde_idx
+            or hover_elemento != self._hover_elemento_idx
+        ):
+            self._hover_ponto_poly = hover_ponto
+            self._hover_controle_molde = hover_controle
+            self._hover_dobra_pontilhada = hover_dobra
+            self._hover_molde_idx = hover_molde
+            self._hover_elemento_idx = hover_elemento
+            canvas.update()
         event.accept()
         return True
 
@@ -579,6 +639,7 @@ class Ferramenta(FerramentaBase):
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
         self._estado_arraste_dobra = None
+        self._ultimo_destino_arraste = None
         self._guia_ponto_poly = None
         self._guia_eixo = None
         self._angulo_info = None
@@ -607,6 +668,7 @@ class Ferramenta(FerramentaBase):
         self._estado_arraste_controle = None
         self._estado_arraste_ponto = None
         self._estado_arraste_dobra = None
+        self._ultimo_destino_arraste = None
         self._guia_ponto_poly = None
         self._guia_eixo = None
         self._angulo_info = None
@@ -975,6 +1037,8 @@ class Ferramenta(FerramentaBase):
             if not (0 <= idx < len(canvas.cena.elementos)):
                 continue
             el = canvas.cena.elementos[idx]
+            if not self._molde_dobra_ativa(el):
+                continue
             registros = el.get("contornos_dobra_original")
             if not isinstance(registros, list):
                 continue
@@ -996,6 +1060,30 @@ class Ferramenta(FerramentaBase):
                         melhor = (idx, reg_idx, p_idx)
                         melhor_dist = dist
         return melhor
+
+    def _limpar_dobras_inativas_canvas(self, canvas) -> bool:
+        alterou = False
+        for el in getattr(getattr(canvas, "cena", None), "elementos", []) or []:
+            if isinstance(el, dict) and el.get("molde"):
+                alterou = self._limpar_dobra_inativa_molde(el) or alterou
+        return alterou
+
+    def _limpar_dobra_inativa_molde(self, el: dict) -> bool:
+        if self._molde_dobra_ativa(el):
+            return False
+        chaves = ("contornos_dobra_original", "estado_dobra", "mostrar_contorno_dobra_original", "dobra_eixo")
+        alterou = False
+        for chave in chaves:
+            if chave in el:
+                el.pop(chave, None)
+                alterou = True
+        return alterou
+
+    def _molde_dobra_ativa(self, el: dict) -> bool:
+        if not isinstance(el, dict):
+            return False
+        estado = el.get("estado_dobra") if isinstance(el.get("estado_dobra"), dict) else None
+        return bool(el.get("molde_dobrado")) or bool(estado and estado.get("ativo"))
 
     def _atualizar_dobra_pontilhada(self, canvas, alvo: tuple[int, int, int], destino: QPointF) -> None:
         idx, reg_idx, p_idx = alvo
@@ -1295,6 +1383,16 @@ class Ferramenta(FerramentaBase):
             return QPointF(round(destino.x(), 2), round(destino.y(), 2))
         return QPointF(destino)
 
+    def _registrar_destino_arraste(self, destino: QPointF | None) -> None:
+        self._ultimo_destino_arraste = QPointF(destino) if isinstance(destino, QPointF) else None
+
+    def _destino_arraste_repetido(self, canvas, destino: QPointF) -> bool:
+        ultimo = self._ultimo_destino_arraste
+        if ultimo is None:
+            return False
+        tolerancia = max(1e-7, 0.25 / max(float(getattr(canvas, "zoom", 1.0)), 0.001))
+        return self._dist_pontos_local(ultimo, destino) <= tolerancia
+
     def _snap_exato_ativo(self, canvas) -> bool:
         snap = getattr(canvas, "_snap_resultado", None)
         tipo = str(getattr(snap, "tipo", "") or "").lower()
@@ -1351,6 +1449,8 @@ class Ferramenta(FerramentaBase):
 
     def _elementos_sombra_snap_arraste(self) -> dict:
         for estado in (self._estado_arraste_controle, self._estado_arraste_ponto, self._estado_arraste_dobra):
+            if isinstance(estado, dict) and isinstance(estado.get("elementos_sombra"), dict):
+                return estado.get("elementos_sombra") or {}
             if isinstance(estado, dict) and isinstance(estado.get("elementos"), dict):
                 return estado.get("elementos") or {}
         return {}
@@ -1387,9 +1487,16 @@ class Ferramenta(FerramentaBase):
         return {
             "origem": QPointF(origem),
             "alvos": set(alvos),
-            "elementos": self._capturar_elementos(canvas, indices),
+            "elementos": self._capturar_elementos(
+                canvas,
+                indices,
+                incluir_pontos=self._deve_incluir_pontos_estado_arraste(canvas, indices),
+            ),
+            "elementos_sombra": self._capturar_elementos_sombra(canvas, indices),
             "mapas_auxiliares": self._mapas_auxiliares_arraste(canvas, indices),
             "auxiliares_retos": self._auxiliares_retos_arraste(canvas, indices),
+            "densidades": self._densidades_segmentos_arraste(canvas, indices),
+            "fechados": self._fechados_arraste(canvas, indices),
         }
 
     def _criar_estado_arraste_ponto(self, canvas, idx: int, p_idx: int) -> dict | None:
@@ -1418,12 +1525,40 @@ class Ferramenta(FerramentaBase):
             "elementos": self._capturar_elementos(canvas, {idx}),
         }
 
-    def _capturar_elementos(self, canvas, indices: set[int]) -> dict[int, dict]:
+    def _capturar_elementos(self, canvas, indices: set[int], incluir_pontos: bool = True) -> dict[int, dict]:
         capturados: dict[int, dict] = {}
         for idx in indices:
             if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
-                capturados[idx] = deepcopy(canvas.cena.elementos[idx])
+                capturados[idx] = self._clonar_elemento_arraste(canvas.cena.elementos[idx], incluir_pontos=incluir_pontos)
         return capturados
+
+    def _capturar_elementos_sombra(self, canvas, indices: set[int]) -> dict[int, dict]:
+        sombras: dict[int, dict] = {}
+        for idx in indices:
+            if not (0 <= idx < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[idx]
+            if not isinstance(el, dict):
+                continue
+            sombra = self._clonar_elemento_arraste(el, incluir_pontos=True)
+            pontos = sombra.get("pontos")
+            if isinstance(pontos, list) and len(pontos) > 1200:
+                passo = max(1, len(pontos) // 600)
+                reduzidos = list(pontos[::passo])
+                if pontos[-1] != reduzidos[-1]:
+                    reduzidos.append(pontos[-1])
+                sombra["pontos"] = reduzidos
+            sombras[int(idx)] = sombra
+        return sombras
+
+    def _deve_incluir_pontos_estado_arraste(self, canvas, indices: set[int]) -> bool:
+        for idx in indices:
+            if not (0 <= int(idx) < len(canvas.cena.elementos)):
+                continue
+            pontos = canvas.cena.elementos[int(idx)].get("pontos", []) or []
+            if isinstance(pontos, list) and len(pontos) > 1200:
+                return False
+        return True
 
     def _restaurar_estado_arraste(self, canvas, estado: dict) -> None:
         elementos = estado.get("elementos", {})
@@ -1435,16 +1570,52 @@ class Ferramenta(FerramentaBase):
         auxiliares_retos = estado.get("auxiliares_retos", {})
         if not isinstance(auxiliares_retos, dict):
             auxiliares_retos = {}
+        densidades = estado.get("densidades", {})
+        if not isinstance(densidades, dict):
+            densidades = {}
+        fechados = estado.get("fechados", {})
+        if not isinstance(fechados, dict):
+            fechados = {}
         for idx, elemento in elementos.items():
             if 0 <= int(idx) < len(canvas.cena.elementos):
-                restaurado = deepcopy(elemento)
+                restaurado = self._clonar_elemento_arraste(elemento)
                 mapa = mapas_auxiliares.get(int(idx))
                 if mapa is not None:
                     restaurado["_segmentos_auxiliares_arraste"] = list(mapa)
                 retos = auxiliares_retos.get(int(idx))
                 if retos is not None:
                     restaurado["_auxiliares_retos_arraste"] = list(retos)
+                densidade = densidades.get(int(idx))
+                if isinstance(densidade, dict):
+                    restaurado["_densidades_segmentos_arraste"] = dict(densidade)
+                fechado = fechados.get(int(idx))
+                if fechado is not None:
+                    restaurado["_fechado_arraste"] = bool(fechado)
                 canvas.cena.elementos[int(idx)] = restaurado
+
+    def _clonar_elemento_arraste(self, elemento: dict, incluir_pontos: bool = True) -> dict:
+        clonado = dict(elemento)
+        for chave in self._CHAVES_MUTAVEIS_ARRASTE:
+            if chave == "pontos" and not incluir_pontos:
+                clonado.pop(chave, None)
+                continue
+            if chave in elemento:
+                clonado[chave] = self._clonar_valor_arraste(elemento[chave])
+        for chave, valor in elemento.items():
+            if isinstance(chave, str) and chave.startswith("_"):
+                clonado[chave] = self._clonar_valor_arraste(valor)
+        return clonado
+
+    def _clonar_valor_arraste(self, valor):
+        if isinstance(valor, QPointF):
+            return QPointF(valor)
+        if isinstance(valor, dict):
+            return {chave: self._clonar_valor_arraste(item) for chave, item in valor.items()}
+        if isinstance(valor, list):
+            return [self._clonar_valor_arraste(item) for item in valor]
+        if isinstance(valor, tuple):
+            return tuple(self._clonar_valor_arraste(item) for item in valor)
+        return valor
 
     def _mapas_auxiliares_arraste(self, canvas, indices: set[int]) -> dict[int, list[int]]:
         mapas: dict[int, list[int]] = {}
@@ -1468,6 +1639,35 @@ class Ferramenta(FerramentaBase):
             if valores:
                 retos[int(idx)] = valores
         return retos
+
+    def _densidades_segmentos_arraste(self, canvas, indices: set[int]) -> dict[int, dict[int, int]]:
+        saida: dict[int, dict[int, int]] = {}
+        for idx in indices:
+            if not (0 <= int(idx) < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[int(idx)]
+            if not self._molde_tem_controles_curva(el):
+                continue
+            cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+            if not cantos:
+                continue
+            pontos = list(el.get("pontos", []) or [])
+            fechado = self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
+            segmentos = self._segmentos_cantos(cantos, fechado)
+            if segmentos:
+                saida[int(idx)] = self._densidade_segmentos_molde(canvas, pontos, cantos, segmentos)
+        return saida
+
+    def _fechados_arraste(self, canvas, indices: set[int]) -> dict[int, bool]:
+        saida: dict[int, bool] = {}
+        for idx in indices:
+            if not (0 <= int(idx) < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[int(idx)]
+            cantos = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
+            pontos = list(el.get("pontos", []) or [])
+            saida[int(idx)] = self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos, cantos)
+        return saida
 
     def _mapa_segmentos_auxiliares_molde(self, canvas, el: dict) -> list[int]:
         if not self._molde_tem_controles_curva(el):
@@ -1944,7 +2144,7 @@ class Ferramenta(FerramentaBase):
     def _molde_tem_controles_curva(self, el: dict) -> bool:
         cantos = el.get("controle_cantos", [])
         auxiliares = el.get("controle_auxiliares", [])
-        return isinstance(cantos, list) and len(cantos) >= 1 and isinstance(auxiliares, list)
+        return isinstance(cantos, list) and len(cantos) >= 1 and isinstance(auxiliares, list) and len(auxiliares) > 0
 
     def _garantir_auxiliares_minimos_curva_molde(
         self,
@@ -2117,7 +2317,8 @@ class Ferramenta(FerramentaBase):
         if not cantos:
             return False
         pontos_anteriores = list(el.get("pontos", []) or [])
-        fechado = self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos_anteriores, cantos)
+        fechado_cache = el.pop("_fechado_arraste", None)
+        fechado = bool(fechado_cache) if fechado_cache is not None else self._molde_fechado_por_pontos_ou_controles(canvas, el, pontos_anteriores, cantos)
         if len(cantos) < 2 and not fechado:
             return False
         segmentos = self._segmentos_cantos(cantos, fechado)
@@ -2129,6 +2330,7 @@ class Ferramenta(FerramentaBase):
         preservar_ordem_contorno = bool(el.pop("_preservar_ordem_contorno_auxiliares", False))
         mapa_arraste = el.pop("_segmentos_auxiliares_arraste", None)
         auxiliares_retos_arraste = el.pop("_auxiliares_retos_arraste", None)
+        densidades_arraste = el.pop("_densidades_segmentos_arraste", None)
         auxiliar_arrastado_idx = el.pop("_auxiliar_arrastado_idx", None)
         atribuicoes_contorno = None
         if preservar_ordem_contorno:
@@ -2167,7 +2369,10 @@ class Ferramenta(FerramentaBase):
                 auxiliares_retos=auxiliares_retos_arraste,
             )
             atribuicoes = self._atribuir_auxiliares_a_segmentos(cantos, segmentos, auxiliares, preferir_ordem=not topologia_alterada)
-        densidades = self._densidade_segmentos_molde(canvas, pontos_anteriores, cantos, segmentos)
+        if isinstance(densidades_arraste, dict) and all(isinstance(v, int) for v in densidades_arraste.values()):
+            densidades = {int(k): int(v) for k, v in densidades_arraste.items()}
+        else:
+            densidades = self._densidade_segmentos_molde(canvas, pontos_anteriores, cantos, segmentos)
 
         novos: list[tuple[float, float]] = []
         for seg_ordem, (a_idx, b_idx) in enumerate(segmentos):
