@@ -402,6 +402,220 @@ std::vector<Point> normalize_closed_polyline(const std::vector<Point>& polyline,
     return poly;
 }
 
+std::vector<Point> unfold_mirrored_contour(
+    const std::vector<Point>& polyline,
+    int axis_kind,
+    double axis_value,
+    Point axis_p1,
+    Point axis_p2,
+    double tolerance
+) {
+    const double tol = std::max(std::abs(tolerance), 1e-9);
+    auto base = dedup_consecutive(polyline, tol);
+    if (base.size() >= 2 && near_point(base.front(), base.back(), tol)) {
+        base.pop_back();
+    }
+    if (base.size() < 3) {
+        return {};
+    }
+
+    auto side_value = [&](const Point& p) -> double {
+        if (axis_kind == 0) {
+            return p.y - axis_value;
+        }
+        if (axis_kind == 1) {
+            return p.x - axis_value;
+        }
+        const double dx = axis_p2.x - axis_p1.x;
+        const double dy = axis_p2.y - axis_p1.y;
+        return (dx * (p.y - axis_p1.y)) - (dy * (p.x - axis_p1.x));
+    };
+
+    auto mirror = [&](const Point& p) -> Point {
+        if (axis_kind == 0) {
+            return {p.x, (2.0 * axis_value) - p.y};
+        }
+        if (axis_kind == 1) {
+            return {(2.0 * axis_value) - p.x, p.y};
+        }
+        const double dx = axis_p2.x - axis_p1.x;
+        const double dy = axis_p2.y - axis_p1.y;
+        const double denom = (dx * dx) + (dy * dy);
+        if (denom <= 1e-12) {
+            return p;
+        }
+        const double t = (((p.x - axis_p1.x) * dx) + ((p.y - axis_p1.y) * dy)) / denom;
+        const Point proj{axis_p1.x + (t * dx), axis_p1.y + (t * dy)};
+        return {(2.0 * proj.x) - p.x, (2.0 * proj.y) - p.y};
+    };
+
+    auto intersection = [&](const Point& a, const Point& b) -> std::optional<Point> {
+        const double va = side_value(a);
+        const double vb = side_value(b);
+        const double denom = va - vb;
+        if (std::abs(denom) <= 1e-12) {
+            return std::nullopt;
+        }
+        const double t = std::clamp(va / denom, 0.0, 1.0);
+        return Point{a.x + ((b.x - a.x) * t), a.y + ((b.y - a.y) * t)};
+    };
+
+    std::vector<Point> augmented;
+    augmented.reserve(base.size() + 4);
+    auto append_unique = [&](const Point& p) {
+        if (augmented.empty() || !near_point(augmented.back(), p, tol)) {
+            augmented.push_back(p);
+        }
+    };
+    for (std::size_t i = 0; i < base.size(); ++i) {
+        const Point& a = base[i];
+        const Point& b = base[(i + 1) % base.size()];
+        append_unique(a);
+        const double va = side_value(a);
+        const double vb = side_value(b);
+        if ((va < -tol && vb > tol) || (va > tol && vb < -tol)) {
+            if (auto p = intersection(a, b); p.has_value()) {
+                append_unique(p.value());
+            }
+        }
+    }
+    if (augmented.size() >= 2 && near_point(augmented.front(), augmented.back(), tol)) {
+        augmented.pop_back();
+    }
+    if (augmented.size() < 3) {
+        return {};
+    }
+
+    std::vector<int> axis_indices;
+    for (std::size_t i = 0; i < augmented.size(); ++i) {
+        if (std::abs(side_value(augmented[i])) <= tol) {
+            axis_indices.push_back(static_cast<int>(i));
+        }
+    }
+    if (axis_indices.size() < 2) {
+        std::vector<Point> mirrored;
+        mirrored.reserve(augmented.size());
+        for (const auto& p : augmented) {
+            mirrored.push_back(mirror(p));
+        }
+        std::reverse(mirrored.begin(), mirrored.end());
+        std::vector<Point> out = augmented;
+        out.insert(out.end(), mirrored.begin(), mirrored.end());
+        return ensure_closed(out, tol);
+    }
+
+    auto axis_coord = [&](const Point& p) -> double {
+        if (axis_kind == 0) {
+            return p.x;
+        }
+        if (axis_kind == 1) {
+            return p.y;
+        }
+        const double dx = axis_p2.x - axis_p1.x;
+        const double dy = axis_p2.y - axis_p1.y;
+        const double len = std::sqrt((dx * dx) + (dy * dy));
+        if (len <= 1e-12) {
+            return 0.0;
+        }
+        return (((p.x - axis_p1.x) * dx) + ((p.y - axis_p1.y) * dy)) / len;
+    };
+
+    int i0 = axis_indices.front();
+    int i1 = axis_indices.front();
+    double min_coord = axis_coord(augmented[i0]);
+    double max_coord = min_coord;
+    for (int idx : axis_indices) {
+        const double coord = axis_coord(augmented[idx]);
+        if (coord < min_coord) {
+            min_coord = coord;
+            i0 = idx;
+        }
+        if (coord > max_coord) {
+            max_coord = coord;
+            i1 = idx;
+        }
+    }
+    if (i0 == i1) {
+        return {};
+    }
+
+    auto path_between = [&](int start, int end) -> std::vector<Point> {
+        std::vector<Point> out;
+        const int total = static_cast<int>(augmented.size());
+        int idx = ((start % total) + total) % total;
+        int guard = total + 1;
+        while (guard-- > 0) {
+            out.push_back(augmented[idx]);
+            if (idx == end) {
+                break;
+            }
+            idx = (idx + 1) % total;
+        }
+        return out;
+    };
+
+    auto path_length = [](const std::vector<Point>& pts) -> double {
+        double total = 0.0;
+        for (std::size_t i = 1; i < pts.size(); ++i) {
+            total += distance(pts[i - 1], pts[i]);
+        }
+        return total;
+    };
+
+    auto max_side = [&](const std::vector<Point>& pts) -> double {
+        double max_value = 0.0;
+        for (const auto& p : pts) {
+            max_value = std::max(max_value, std::abs(side_value(p)));
+        }
+        return max_value;
+    };
+
+    auto p_forward = path_between(i0, i1);
+    auto p_backward = path_between(i1, i0);
+    const double f_side = max_side(p_forward);
+    const double b_side = max_side(p_backward);
+    if (std::min(f_side, b_side) > tol * 10.0) {
+        std::vector<Point> mirrored;
+        mirrored.reserve(augmented.size());
+        for (const auto& p : augmented) {
+            mirrored.push_back(mirror(p));
+        }
+        std::reverse(mirrored.begin(), mirrored.end());
+        std::vector<Point> out = augmented;
+        for (const auto& p : mirrored) {
+            if (!out.empty() && near_point(out.back(), p, tol)) {
+                continue;
+            }
+            out.push_back(p);
+        }
+        return ensure_closed(out, tol);
+    }
+    std::vector<Point> outside = (f_side > b_side + tol || (std::abs(f_side - b_side) <= tol && path_length(p_forward) >= path_length(p_backward)))
+        ? p_forward
+        : p_backward;
+    outside = dedup_consecutive(outside, tol);
+    if (outside.size() < 2) {
+        return {};
+    }
+
+    std::vector<Point> mirrored;
+    mirrored.reserve(outside.size());
+    for (const auto& p : outside) {
+        mirrored.push_back(mirror(p));
+    }
+    std::reverse(mirrored.begin(), mirrored.end());
+
+    std::vector<Point> result = outside;
+    for (std::size_t i = 1; i < mirrored.size(); ++i) {
+        if (!result.empty() && near_point(result.back(), mirrored[i], tol)) {
+            continue;
+        }
+        result.push_back(mirrored[i]);
+    }
+    result = dedup_consecutive(result, tol);
+    return ensure_closed(result, tol);
+}
+
 std::optional<ContourResult> smallest_enclosing_contour(const std::vector<std::vector<Point>>& polylines, const Point& point, double tolerance) {
     const auto split_segments = split_segments_at_intersections(explode_segments(polylines), tolerance);
     if (split_segments.empty()) {

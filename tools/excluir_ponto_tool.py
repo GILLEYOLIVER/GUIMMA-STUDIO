@@ -25,6 +25,7 @@ class Ferramenta(FerramentaBase):
         self._hover_alvo: tuple[str, int, str, int] | tuple[str, int, int] | None = None
         self._molde_confirmado_idx: int | None = None
         self._helper = FerramentaManipularPontos()
+        self._cache_contorno_remocao: dict | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -159,20 +160,22 @@ class Ferramenta(FerramentaBase):
             alvo_controle = self._controle_molde_em_ponto(canvas, pos_sem_snap) or self._controle_molde_em_ponto(canvas, pos)
         if alvo_controle is not None:
             idx, tipo, controle_idx = alvo_controle
-            self._hover_alvo = ("molde", idx, tipo, controle_idx)
+            hover_alvo = ("molde", idx, tipo, controle_idx)
         else:
             alvo_curva = self._controle_curva_em_ponto(canvas, pos)
             if alvo_curva is not None:
                 idx, controle_idx = alvo_curva
-                self._hover_alvo = ("curva", idx, controle_idx)
+                hover_alvo = ("curva", idx, controle_idx)
             else:
                 alvo_vertice = self._vertice_em_ponto(canvas, pos)
                 if alvo_vertice is not None:
                     idx, ponto_idx = alvo_vertice
-                    self._hover_alvo = ("vertice", idx, ponto_idx)
+                    hover_alvo = ("vertice", idx, ponto_idx)
                 else:
-                    self._hover_alvo = None
-        canvas.update()
+                    hover_alvo = None
+        if hover_alvo != self._hover_alvo:
+            self._hover_alvo = hover_alvo
+            canvas.update()
         event.accept()
         return True
 
@@ -454,111 +457,126 @@ class Ferramenta(FerramentaBase):
         pontos_anteriores = [pt for pt in pontos_anteriores if pt is not None]
         cantos_anteriores = [p for p in (self._ponto_qt(item) for item in el.get("controle_cantos", []) or []) if p is not None]
         fechado = self._contorno_fechado_por_tuplas(pontos_anteriores) or bool(el.get("fechado"))
-        segmento_repor_auxiliares = None
-        if tipo == "aux":
-            segmento_repor_auxiliares = self._segmento_principal_do_ponto(
-                pontos_anteriores,
-                cantos_anteriores,
-                alvo,
-                fechado,
-            )
-        segmento_recalcular_canto = None
-        if tipo == "canto":
-            segmento_recalcular_canto = self._segmento_mesclado_ao_remover_canto(
-                pontos_anteriores,
-                cantos_anteriores,
-                alvo,
-                fechado,
-            )
+        self._cache_contorno_remocao = self._criar_cache_contorno_remocao(pontos_anteriores, fechado)
+        try:
+            segmento_repor_auxiliares = None
+            if tipo == "aux":
+                segmento_repor_auxiliares = self._segmento_principal_do_ponto(
+                    pontos_anteriores,
+                    cantos_anteriores,
+                    alvo,
+                    fechado,
+                )
+            segmento_recalcular_canto = None
+            if tipo == "canto":
+                segmento_recalcular_canto = self._segmento_mesclado_ao_remover_canto(
+                    pontos_anteriores,
+                    cantos_anteriores,
+                    alvo,
+                    fechado,
+                )
 
-        controles.pop(controle_idx)
-        novos_controles = [self._tupla_xy(item) for item in controles if self._tupla_xy(item) is not None]
-        outra_chave = "controle_auxiliares" if tipo == "canto" else "controle_cantos"
-        outros_controles = self._remover_ponto_duplicado_de_controles(el.get(outra_chave, []) or [], alvo)
+            controles.pop(controle_idx)
+            novos_controles = [pt for item in controles if (pt := self._tupla_xy(item)) is not None]
+            outra_chave = "controle_auxiliares" if tipo == "canto" else "controle_cantos"
+            outros_controles = self._remover_ponto_duplicado_de_controles(el.get(outra_chave, []) or [], alvo)
 
-        if tipo == "canto":
-            novos_cantos = novos_controles
-            novos_auxiliares = outros_controles
-        else:
-            novos_cantos = outros_controles
-            novos_auxiliares = novos_controles
-        minimo_cantos = 3 if fechado else 2
-        if tipo == "canto" and len(novos_cantos) < minimo_cantos:
-            realocados = self._realocar_canto_removido(
-                pontos_anteriores,
-                novos_cantos,
-                novos_auxiliares,
-                alvo,
-                fechado,
-            )
-            if realocados is None:
-                return False
-            novos_cantos, novos_auxiliares = realocados
-        novos_cantos = self._ordenar_controles_no_contorno(novos_cantos, pontos_anteriores, fechado)
-        cantos = [p for p in (self._ponto_qt(item) for item in novos_cantos) if p is not None]
-        auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
-        if segmento_repor_auxiliares is not None:
-            novos_auxiliares = self._garantir_minimo_auxiliares_no_segmento(
-                pontos_anteriores,
-                cantos,
-                auxiliares,
-                segmento_repor_auxiliares,
-                fechado,
-                evitar=[alvo],
-                regenerar_abaixo_de=2,
-            )
+            if tipo == "canto":
+                novos_cantos = novos_controles
+                novos_auxiliares = outros_controles
+            else:
+                novos_cantos = outros_controles
+                novos_auxiliares = novos_controles
+            minimo_cantos = 3 if fechado else 2
+            if tipo == "canto" and len(novos_cantos) < minimo_cantos:
+                realocados = self._realocar_canto_removido(
+                    pontos_anteriores,
+                    novos_cantos,
+                    novos_auxiliares,
+                    alvo,
+                    fechado,
+                )
+                if realocados is None:
+                    return False
+                novos_cantos, novos_auxiliares = realocados
+            novos_cantos = self._ordenar_controles_no_contorno(novos_cantos, pontos_anteriores, fechado)
+            cantos = [p for p in (self._ponto_qt(item) for item in novos_cantos) if p is not None]
             auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
-        minimo = 3 if fechado else 2
-        segmento_local = segmento_repor_auxiliares or segmento_recalcular_canto
-        if segmento_local is not None:
-            if segmento_recalcular_canto is not None:
+            if segmento_repor_auxiliares is not None:
                 novos_auxiliares = self._garantir_minimo_auxiliares_no_segmento(
                     pontos_anteriores,
                     cantos,
                     auxiliares,
-                    segmento_recalcular_canto,
+                    segmento_repor_auxiliares,
                     fechado,
                     evitar=[alvo],
+                    regenerar_abaixo_de=2,
                 )
                 auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
-            novos_pontos = self._regenerar_apenas_segmento_auxiliar(
-                pontos_anteriores,
-                cantos,
-                auxiliares,
-                segmento_local,
-                fechado,
-            )
-        else:
-            controles_ordenados = self._controles_molde_restantes_ordenados(canvas, pontos_anteriores, cantos, auxiliares, fechado)
-            if len(controles_ordenados) < minimo:
+            minimo = 3 if fechado else 2
+            segmento_local = segmento_repor_auxiliares or segmento_recalcular_canto
+            if segmento_local is not None:
+                if segmento_recalcular_canto is not None:
+                    novos_auxiliares = self._garantir_minimo_auxiliares_no_segmento(
+                        pontos_anteriores,
+                        cantos,
+                        auxiliares,
+                        segmento_recalcular_canto,
+                        fechado,
+                        evitar=[alvo],
+                    )
+                    auxiliares = [p for p in (self._ponto_qt(item) for item in novos_auxiliares) if p is not None]
+                suavizado = self._contorno_suavizado_apos_remocao(
+                    pontos_anteriores,
+                    alvo,
+                    cantos,
+                    auxiliares,
+                    segmento_local,
+                    fechado,
+                )
+                if len(suavizado) >= minimo:
+                    novos_pontos = suavizado
+                else:
+                    novos_pontos = self._regenerar_apenas_segmento_auxiliar(
+                        pontos_anteriores,
+                        cantos,
+                        auxiliares,
+                        segmento_local,
+                        fechado,
+                    )
+            else:
+                controles_ordenados = self._controles_molde_restantes_ordenados(canvas, pontos_anteriores, cantos, auxiliares, fechado)
+                if len(controles_ordenados) < minimo:
+                    return False
+                novos_pontos = self._gerar_tracado_curva_molde(controles_ordenados, fechado=fechado)
+            if len(novos_pontos) < minimo:
                 return False
-            novos_pontos = self._gerar_tracado_curva_molde(controles_ordenados, fechado=fechado)
-        if len(novos_pontos) < minimo:
-            return False
-        if fechado and novos_pontos and not self._contorno_fechado_por_tuplas(novos_pontos):
-            novos_pontos.append(novos_pontos[0])
+            if fechado and novos_pontos and not self._contorno_fechado_por_tuplas(novos_pontos):
+                novos_pontos.append(novos_pontos[0])
 
-        el["controle_cantos"] = [(float(x), float(y)) for x, y in novos_cantos]
-        el["controle_auxiliares"] = [(float(x), float(y)) for x, y in novos_auxiliares]
-        el["pontos"] = [(float(x), float(y)) for x, y in novos_pontos]
-        el["fechado"] = bool(fechado)
-        self._sincronizar_controles_molde(el)
-        if tipo == "canto":
-            self._remapear_graduacao_apos_remocao(
-                el,
-                [(float(p.x()), float(p.y())) for p in cantos_anteriores],
-                [(float(x), float(y)) for x, y in el.get("controle_cantos", []) or []],
-                controle_idx,
-                fechado=fechado,
-            )
-        for temp_key in (
-            "_controles_topologia_alterada",
-            "_segmentos_auxiliares_arraste",
-            "_auxiliares_retos_arraste",
-            "_auxiliar_arrastado_idx",
-        ):
-            el.pop(temp_key, None)
-        return True
+            el["controle_cantos"] = [(float(x), float(y)) for x, y in novos_cantos]
+            el["controle_auxiliares"] = [(float(x), float(y)) for x, y in novos_auxiliares]
+            el["pontos"] = [(float(x), float(y)) for x, y in novos_pontos]
+            el["fechado"] = bool(fechado)
+            self._sincronizar_controles_molde(el)
+            if tipo == "canto":
+                self._remapear_graduacao_apos_remocao(
+                    el,
+                    [(float(p.x()), float(p.y())) for p in cantos_anteriores],
+                    [(float(x), float(y)) for x, y in el.get("controle_cantos", []) or []],
+                    controle_idx,
+                    fechado=fechado,
+                )
+            for temp_key in (
+                "_controles_topologia_alterada",
+                "_segmentos_auxiliares_arraste",
+                "_auxiliares_retos_arraste",
+                "_auxiliar_arrastado_idx",
+            ):
+                el.pop(temp_key, None)
+            return True
+        finally:
+            self._cache_contorno_remocao = None
 
     def _garantir_minimo_auxiliares_no_segmento(
         self,
@@ -714,7 +732,7 @@ class Ferramenta(FerramentaBase):
                 [(float(p.x()), float(p.y())) for p in novos_aux],
             )
 
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         candidatos_contorno = [
             (self._dist_local(pt, removido), pt)
             for pt in caminho
@@ -736,7 +754,7 @@ class Ferramenta(FerramentaBase):
         ponto: QPointF,
         fechado: bool,
     ) -> tuple[QPointF, QPointF] | None:
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         cantos_ordenados = self._cantos_ordenados_no_caminho(caminho, cantos, fechado)
         if len(cantos_ordenados) < 2 or len(caminho) < 2:
             return None
@@ -773,7 +791,7 @@ class Ferramenta(FerramentaBase):
         canto_removido: QPointF,
         fechado: bool,
     ) -> tuple[QPointF, QPointF] | None:
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         cantos_ordenados = self._cantos_ordenados_no_caminho(caminho, cantos, fechado)
         if len(cantos_ordenados) < 3 or len(caminho) < 2:
             return None
@@ -813,7 +831,7 @@ class Ferramenta(FerramentaBase):
         pontos_anteriores: list[tuple[float, float]],
         fechado: bool,
     ) -> list[tuple[float, float]]:
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         ordenados = self._cantos_ordenados_no_caminho(caminho, controles, fechado)
         return [(float(p.x()), float(p.y())) for p in ordenados]
 
@@ -837,11 +855,11 @@ class Ferramenta(FerramentaBase):
         fim: QPointF,
         fechado: bool,
     ) -> list[QPointF]:
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         if len(caminho) < 2:
             return [QPointF(inicio), QPointF(fim)]
-        idx_inicio = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], inicio))
-        idx_fim = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], fim))
+        idx_inicio = self._indice_ponto_no_contorno(caminho, inicio, fechado)
+        idx_fim = self._indice_ponto_no_contorno(caminho, fim, fechado)
         if fechado:
             trecho = [QPointF(caminho[idx_inicio])]
             idx = idx_inicio
@@ -900,6 +918,393 @@ class Ferramenta(FerramentaBase):
     def _distancia_ponto_segmento_qt(self, ponto: QPointF, a: QPointF, b: QPointF) -> float:
         return self._parametro_e_distancia_segmento(ponto, a, b)[1]
 
+    def _criar_cache_contorno_remocao(self, pontos: list[tuple[float, float]], fechado: bool) -> dict:
+        caminho = self._caminho_contorno_qt(pontos, fechado)
+        acumulados: list[float] = []
+        acumulado = 0.0
+        for idx, ponto in enumerate(caminho):
+            if idx > 0:
+                acumulado += self._dist_local(caminho[idx - 1], ponto)
+            acumulados.append(acumulado)
+        assinaturas: dict[tuple[float, float], int] = {}
+        for idx, ponto in enumerate(caminho):
+            assinaturas.setdefault(self._assinatura_ponto(ponto), idx)
+        return {
+            "tamanho": len(caminho),
+            "fechado": bool(fechado),
+            "caminho": caminho,
+            "assinaturas": assinaturas,
+            "acumulados": acumulados,
+            "perimetro": acumulado,
+            "posicoes_projetadas": {},
+            "indices_projetados": {},
+        }
+
+    def _caminho_contorno_remocao(self, pontos: list[tuple[float, float]], fechado: bool) -> list[QPointF]:
+        cache = self._cache_contorno_remocao
+        if isinstance(cache, dict) and bool(cache.get("fechado")) == bool(fechado):
+            caminho = cache.get("caminho")
+            if isinstance(caminho, list):
+                return caminho
+        return self._caminho_contorno_qt(pontos, fechado)
+
+    def _indice_ponto_no_contorno(self, caminho: list[QPointF], ponto: QPointF, fechado: bool) -> int:
+        cache = self._cache_contorno_remocao
+        assinatura = self._assinatura_ponto(ponto)
+        if (
+            isinstance(cache, dict)
+            and cache.get("tamanho") == len(caminho)
+            and bool(cache.get("fechado")) == bool(fechado)
+        ):
+            indice = cache.get("assinaturas", {}).get(assinatura)
+            if indice is not None:
+                return int(indice)
+            indices_projetados = cache.get("indices_projetados")
+            if isinstance(indices_projetados, dict) and assinatura in indices_projetados:
+                return int(indices_projetados[assinatura])
+        indice = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], ponto))
+        if (
+            isinstance(cache, dict)
+            and cache.get("tamanho") == len(caminho)
+            and bool(cache.get("fechado")) == bool(fechado)
+        ):
+            indices_projetados = cache.get("indices_projetados")
+            if isinstance(indices_projetados, dict):
+                indices_projetados[assinatura] = int(indice)
+        return indice
+
+    def _contorno_preservado_sem_ponto(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        removido: QPointF,
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
+        if len(caminho) < 2:
+            return list(pontos_anteriores)
+        indice_removido = self._indice_ponto_no_contorno(caminho, removido, fechado)
+        if self._dist_local(caminho[indice_removido], removido) <= 1e-5:
+            caminho = [QPointF(ponto) for idx, ponto in enumerate(caminho) if idx != indice_removido]
+        saida = self._remover_duplicados_consecutivos(caminho)
+        if fechado and saida:
+            if self._dist_local(saida[0], saida[-1]) > 1e-7:
+                saida.append(QPointF(saida[0]))
+            else:
+                saida[-1] = QPointF(saida[0])
+        return [(float(p.x()), float(p.y())) for p in saida]
+
+    def _contorno_suavizado_apos_remocao(
+        self,
+        pontos_anteriores: list[tuple[float, float]],
+        removido: QPointF,
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        segmento: tuple[QPointF, QPointF],
+        fechado: bool,
+    ) -> list[tuple[float, float]]:
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
+        if len(caminho) < 2 or segmento is None:
+            return list(pontos_anteriores)
+        a, b = QPointF(segmento[0]), QPointF(segmento[1])
+        idx_a = self._indice_ponto_no_contorno(caminho, a, fechado)
+        idx_b = self._indice_ponto_no_contorno(caminho, b, fechado)
+        trecho_original = self._trecho_contorno_entre_pontos(pontos_anteriores, a, b, fechado)
+        if len(trecho_original) < 2:
+            return self._contorno_preservado_sem_ponto(pontos_anteriores, removido, fechado)
+
+        trecho_recalculado = self._trecho_regenerado_segmento(
+            trecho_original,
+            cantos,
+            auxiliares,
+            a,
+            b,
+            caminho,
+            fechado,
+        )
+        if len(trecho_recalculado) < 2:
+            trecho_recalculado = [QPointF(a), QPointF(b)]
+        trecho_recalculado[0] = QPointF(a)
+        trecho_recalculado[-1] = QPointF(b)
+
+        posicoes = self._posicoes_acumuladas_trecho(trecho_original)
+        comprimento = posicoes[-1] if posicoes else 0.0
+        if comprimento <= 1e-9:
+            return self._contorno_preservado_sem_ponto(pontos_anteriores, removido, fechado)
+
+        fracao_removido = self._fracao_ponto_no_segmento_contorno(caminho, removido, a, b, fechado)
+        fracoes = [posicao / comprimento for posicao in posicoes]
+        alvos_recalculados = self._pontos_em_caminho_por_fracoes_ordenadas(trecho_recalculado, fracoes)
+        erro_maximo = max(
+            (self._dist_local(ponto, alvo) for ponto, alvo in zip(trecho_original, alvos_recalculados)),
+            default=0.0,
+        )
+        forca_base = self._forca_reajuste_remocao(trecho_original, erro_maximo)
+        removido_assinatura = self._assinatura_ponto(removido)
+
+        trecho_novo: list[QPointF] = []
+        ultimo_indice = len(trecho_original) - 1
+        for indice, ponto_original in enumerate(trecho_original):
+            if indice not in {0, ultimo_indice} and self._assinatura_ponto(ponto_original) == removido_assinatura:
+                continue
+            if indice == 0:
+                trecho_novo.append(QPointF(a))
+                continue
+            if indice == ultimo_indice:
+                trecho_novo.append(QPointF(b))
+                continue
+            fracao = fracoes[indice]
+            alvo = self._alvo_remocao_sem_aumentar_curvatura(
+                ponto_original,
+                alvos_recalculados[indice],
+                a,
+                b,
+            )
+            envelope = self._envelope_reajuste_remocao(fracao, fracao_removido)
+            forca = forca_base * envelope
+            trecho_novo.append(
+                QPointF(
+                    ponto_original.x() + ((alvo.x() - ponto_original.x()) * forca),
+                    ponto_original.y() + ((alvo.y() - ponto_original.y()) * forca),
+                )
+            )
+
+        trecho_novo = self._remover_duplicados_consecutivos(trecho_novo)
+        if len(trecho_novo) < 2:
+            trecho_novo = [QPointF(a), QPointF(b)]
+
+        novo_caminho = self._substituir_trecho_no_contorno(caminho, idx_a, idx_b, trecho_novo, fechado)
+        novo_caminho = self._remover_duplicados_consecutivos(novo_caminho)
+        return self._fechar_contorno_saida(novo_caminho, fechado)
+
+    def _alvo_remocao_sem_aumentar_curvatura(
+        self,
+        original: QPointF,
+        alvo: QPointF,
+        a: QPointF,
+        b: QPointF,
+    ) -> QPointF:
+        abx = b.x() - a.x()
+        aby = b.y() - a.y()
+        comprimento = ((abx * abx) + (aby * aby)) ** 0.5
+        if comprimento <= 1e-9:
+            return QPointF(alvo)
+
+        ux = abx / comprimento
+        uy = aby / comprimento
+        nx = -uy
+        ny = ux
+
+        original_signed = ((original.x() - a.x()) * nx) + ((original.y() - a.y()) * ny)
+        alvo_signed = ((alvo.x() - a.x()) * nx) + ((alvo.y() - a.y()) * ny)
+        limite = abs(original_signed) * 0.96
+        if abs(alvo_signed) > limite:
+            if limite <= 1e-9:
+                alvo_signed = 0.0
+            else:
+                sinal = 1.0 if alvo_signed >= 0.0 else -1.0
+                alvo_signed = sinal * limite
+
+        alvo_param = ((alvo.x() - a.x()) * ux) + ((alvo.y() - a.y()) * uy)
+        return QPointF(a.x() + (ux * alvo_param) + (nx * alvo_signed), a.y() + (uy * alvo_param) + (ny * alvo_signed))
+
+    def _fechar_contorno_saida(self, pontos: list[QPointF], fechado: bool) -> list[tuple[float, float]]:
+        saida = [QPointF(p) for p in pontos]
+        if fechado and saida:
+            if self._dist_local(saida[0], saida[-1]) > 1e-7:
+                saida.append(QPointF(saida[0]))
+            else:
+                saida[-1] = QPointF(saida[0])
+        return [(float(p.x()), float(p.y())) for p in saida]
+
+    @staticmethod
+    def _distancia_indices_local(idx: int, centro: int, total: int, fechado: bool) -> int:
+        return abs(idx - centro)
+
+    @staticmethod
+    def _indices_vizinhos_local(idx: int, total: int, fechado: bool) -> tuple[int, int] | None:
+        if total < 3:
+            return None
+        if fechado:
+            return (idx - 1) % total, (idx + 1) % total
+        if idx <= 0 or idx >= total - 1:
+            return None
+        return idx - 1, idx + 1
+
+    def _trecho_regenerado_segmento(
+        self,
+        trecho_original: list[QPointF],
+        cantos: list[QPointF],
+        auxiliares: list[QPointF],
+        a: QPointF,
+        b: QPointF,
+        caminho: list[QPointF],
+        fechado: bool,
+    ) -> list[QPointF]:
+        idx_a = self._indice_ponto_no_contorno(caminho, a, fechado)
+        idx_b = self._indice_ponto_no_contorno(caminho, b, fechado)
+        indices_trecho = set(self._indices_intervalo_contorno(idx_a, idx_b, len(caminho), fechado))
+        controles_internos = [
+            QPointF(p)
+            for p in [*cantos, *auxiliares]
+            if self._dist_local(p, a) > 1e-5
+            and self._dist_local(p, b) > 1e-5
+            and self._indice_ponto_no_contorno(caminho, p, fechado) in indices_trecho
+        ]
+        controles_internos = self._pontos_unicos(controles_internos)
+        controles_internos.sort(key=lambda p: self._posicao_ponto_no_contorno(caminho, p, fechado))
+        controles_segmento = [QPointF(a), *controles_internos, QPointF(b)]
+        return [
+            QPointF(float(x), float(y))
+            for x, y in self._gerar_tracado_curva_molde(controles_segmento, fechado=False)
+        ]
+
+    def _indices_intervalo_contorno(self, inicio: int, fim: int, total: int, fechado: bool) -> list[int]:
+        if total <= 0:
+            return []
+        inicio = max(0, min(inicio, total - 1))
+        fim = max(0, min(fim, total - 1))
+        if not fechado or inicio <= fim:
+            return list(range(inicio, fim + 1))
+        return list(range(inicio, total)) + list(range(0, fim + 1))
+
+    def _posicoes_acumuladas_trecho(self, trecho: list[QPointF]) -> list[float]:
+        posicoes = [0.0]
+        acumulado = 0.0
+        for a, b in zip(trecho, trecho[1:]):
+            acumulado += self._dist_local(a, b)
+            posicoes.append(acumulado)
+        return posicoes
+
+    def _ponto_em_caminho_por_fracao(self, caminho: list[QPointF], fracao: float) -> QPointF:
+        if not caminho:
+            return QPointF()
+        if len(caminho) == 1:
+            return QPointF(caminho[0])
+        comprimentos = [self._dist_local(a, b) for a, b in zip(caminho, caminho[1:])]
+        total = sum(comprimentos)
+        if total <= 1e-9:
+            return QPointF(caminho[0])
+        alvo = total * max(0.0, min(1.0, fracao))
+        acumulado = 0.0
+        for idx, comprimento in enumerate(comprimentos):
+            if acumulado + comprimento >= alvo or idx == len(comprimentos) - 1:
+                t = 0.0 if comprimento <= 1e-9 else (alvo - acumulado) / comprimento
+                return self._interpolar(caminho[idx], caminho[idx + 1], t)
+            acumulado += comprimento
+        return QPointF(caminho[-1])
+
+    def _fracao_ponto_no_segmento_contorno(
+        self,
+        caminho: list[QPointF],
+        ponto: QPointF,
+        inicio: QPointF,
+        fim: QPointF,
+        fechado: bool,
+    ) -> float:
+        pos_inicio = self._posicao_ponto_no_contorno(caminho, inicio, fechado)
+        pos_fim = self._posicao_ponto_no_contorno(caminho, fim, fechado)
+        pos_ponto = self._posicao_ponto_no_contorno(caminho, ponto, fechado)
+        if fechado and pos_fim < pos_inicio:
+            cache = self._cache_contorno_remocao
+            perimetro = float(cache.get("perimetro", 0.0)) if isinstance(cache, dict) else 0.0
+            if perimetro > 1e-9:
+                pos_fim += perimetro
+                if pos_ponto < pos_inicio:
+                    pos_ponto += perimetro
+        elif not fechado and pos_fim < pos_inicio:
+            pos_inicio, pos_fim = pos_fim, pos_inicio
+        comprimento = pos_fim - pos_inicio
+        if comprimento <= 1e-9:
+            return 0.5
+        return max(0.0, min(1.0, (pos_ponto - pos_inicio) / comprimento))
+
+    def _pontos_em_caminho_por_fracoes_ordenadas(self, caminho: list[QPointF], fracoes: list[float]) -> list[QPointF]:
+        if not caminho:
+            return [QPointF() for _ in fracoes]
+        if len(caminho) == 1:
+            return [QPointF(caminho[0]) for _ in fracoes]
+        comprimentos = [self._dist_local(a, b) for a, b in zip(caminho, caminho[1:])]
+        total = sum(comprimentos)
+        if total <= 1e-9:
+            return [QPointF(caminho[0]) for _ in fracoes]
+
+        saida: list[QPointF] = []
+        seg_idx = 0
+        acumulado = 0.0
+        prox = comprimentos[0]
+        for fracao in fracoes:
+            alvo = total * max(0.0, min(1.0, float(fracao)))
+            while seg_idx < len(comprimentos) - 1 and alvo > prox:
+                acumulado = prox
+                seg_idx += 1
+                prox += comprimentos[seg_idx]
+            comprimento = comprimentos[seg_idx]
+            t = 0.0 if comprimento <= 1e-9 else (alvo - acumulado) / comprimento
+            saida.append(self._interpolar(caminho[seg_idx], caminho[seg_idx + 1], t))
+        return saida
+
+    def _erro_maximo_trechos_por_fracao(self, original: list[QPointF], recalculado: list[QPointF]) -> float:
+        if len(original) < 2 or len(recalculado) < 2:
+            return 0.0
+        posicoes = self._posicoes_acumuladas_trecho(original)
+        comprimento = posicoes[-1] if posicoes else 0.0
+        if comprimento <= 1e-9:
+            return 0.0
+        erro = 0.0
+        for ponto, posicao in zip(original, posicoes):
+            alvo = self._ponto_em_caminho_por_fracao(recalculado, posicao / comprimento)
+            erro = max(erro, self._dist_local(ponto, alvo))
+        return erro
+
+    def _forca_reajuste_remocao(self, trecho_original: list[QPointF], erro_maximo: float) -> float:
+        if erro_maximo <= 1e-9:
+            return 0.0
+        comprimento = self._comprimento_caminho(trecho_original)
+        tolerancia = max(0.15, min(1.25, comprimento * 0.025))
+        if erro_maximo <= tolerancia:
+            return 1.0
+        return max(0.16, min(0.45, tolerancia / erro_maximo))
+
+    @staticmethod
+    def _envelope_reajuste_remocao(fracao: float, fracao_removido: float) -> float:
+        fracao = max(0.0, min(1.0, float(fracao)))
+        fracao_removido = max(0.0, min(1.0, float(fracao_removido)))
+        borda = 1.0 - abs((fracao * 2.0) - 1.0)
+        borda = max(0.0, min(1.0, borda))
+        distancia = abs(fracao - fracao_removido)
+        raio = 0.42
+        local = max(0.0, 1.0 - (distancia / raio))
+        return min(1.0, max(0.08, (0.28 * borda) + (0.72 * local)))
+
+    def _substituir_trecho_no_contorno(
+        self,
+        caminho: list[QPointF],
+        idx_a: int,
+        idx_b: int,
+        trecho_novo: list[QPointF],
+        fechado: bool,
+    ) -> list[QPointF]:
+        trecho = [QPointF(p) for p in trecho_novo]
+        if not caminho:
+            return trecho
+        if fechado:
+            if idx_a <= idx_b:
+                return [*caminho[:idx_a], *trecho, *caminho[idx_b + 1 :]]
+            return [*trecho, *caminho[idx_b + 1 : idx_a]]
+        if idx_a <= idx_b:
+            return [*caminho[:idx_a], *trecho, *caminho[idx_b + 1 :]]
+        return [*caminho[:idx_b], *reversed(trecho), *caminho[idx_a + 1 :]]
+
+    def _comprimento_caminho(self, pontos: list[QPointF]) -> float:
+        return sum(self._dist_local(a, b) for a, b in zip(pontos, pontos[1:]))
+
+    @staticmethod
+    def _peso_suavizacao_remocao(distancia_ordem: int, janela: int) -> float:
+        if janela <= 0:
+            return 0.0
+        influencia = max(0.0, 1.0 - (float(distancia_ordem) / float(janela + 1)))
+        return 0.09 * influencia
+
     def _regenerar_apenas_segmento_auxiliar(
         self,
         pontos_anteriores: list[tuple[float, float]],
@@ -908,12 +1313,12 @@ class Ferramenta(FerramentaBase):
         segmento: tuple[QPointF, QPointF],
         fechado: bool,
     ) -> list[tuple[float, float]]:
-        caminho = self._caminho_contorno_qt(pontos_anteriores, fechado)
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         if len(caminho) < 2:
             return []
         a, b = QPointF(segmento[0]), QPointF(segmento[1])
-        idx_a = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], a))
-        idx_b = min(range(len(caminho)), key=lambda i: self._dist_local(caminho[i], b))
+        idx_a = self._indice_ponto_no_contorno(caminho, a, fechado)
+        idx_b = self._indice_ponto_no_contorno(caminho, b, fechado)
         trecho_original = self._trecho_contorno_entre_pontos(pontos_anteriores, a, b, fechado)
         controles_internos = [
             QPointF(p)
@@ -923,7 +1328,7 @@ class Ferramenta(FerramentaBase):
             and self._ponto_esta_no_intervalo_contorno(caminho, p, a, b, fechado)
         ]
         controles_internos = self._pontos_unicos(controles_internos)
-        controles_internos.sort(key=lambda p: self._posicao_ponto_no_trecho(trecho_original, p))
+        controles_internos.sort(key=lambda p: self._posicao_ponto_no_contorno(caminho, p, fechado))
         controles_segmento = [a, *controles_internos, b]
         trecho_novo = [
             QPointF(float(x), float(y))
@@ -1021,9 +1426,7 @@ class Ferramenta(FerramentaBase):
         if len(controles) <= 2:
             return controles
 
-        caminho = [QPointF(float(x), float(y)) for x, y in pontos_anteriores]
-        if fechado and len(caminho) >= 2 and self._dist_local(caminho[0], caminho[-1]) <= 1e-7:
-            caminho = caminho[:-1]
+        caminho = self._caminho_contorno_remocao(pontos_anteriores, fechado)
         if len(caminho) < 2:
             return controles
 
@@ -1043,6 +1446,20 @@ class Ferramenta(FerramentaBase):
     def _posicao_ponto_no_contorno(self, caminho: list[QPointF], ponto: QPointF, fechado: bool) -> float:
         if len(caminho) < 2:
             return 0.0
+        cache = self._cache_contorno_remocao
+        assinatura = self._assinatura_ponto(ponto)
+        if (
+            isinstance(cache, dict)
+            and cache.get("tamanho") == len(caminho)
+            and bool(cache.get("fechado")) == bool(fechado)
+        ):
+            indice = cache.get("assinaturas", {}).get(assinatura)
+            acumulados = cache.get("acumulados")
+            if indice is not None and isinstance(acumulados, list) and 0 <= int(indice) < len(acumulados):
+                return float(acumulados[int(indice)])
+            posicoes_projetadas = cache.get("posicoes_projetadas")
+            if isinstance(posicoes_projetadas, dict) and assinatura in posicoes_projetadas:
+                return float(posicoes_projetadas[assinatura])
         limite = len(caminho) if fechado else len(caminho) - 1
         acumulado = 0.0
         melhor_pos = 0.0
@@ -1056,6 +1473,14 @@ class Ferramenta(FerramentaBase):
                 melhor_dist = dist
                 melhor_pos = acumulado + (dist_ab * t)
             acumulado += dist_ab
+        if (
+            isinstance(cache, dict)
+            and cache.get("tamanho") == len(caminho)
+            and bool(cache.get("fechado")) == bool(fechado)
+        ):
+            posicoes_projetadas = cache.get("posicoes_projetadas")
+            if isinstance(posicoes_projetadas, dict):
+                posicoes_projetadas[assinatura] = float(melhor_pos)
         return melhor_pos
 
     @staticmethod
@@ -1076,6 +1501,10 @@ class Ferramenta(FerramentaBase):
                 continue
             saida.append(QPointF(ponto))
         return saida
+
+    @staticmethod
+    def _assinatura_ponto(ponto: QPointF) -> tuple[float, float]:
+        return (round(float(ponto.x()), 7), round(float(ponto.y()), 7))
 
     def _sincronizar_controles_molde(self, el: dict) -> None:
         cantos = [pt for item in el.get("controle_cantos", []) or [] if (pt := self._tupla_xy(item)) is not None]

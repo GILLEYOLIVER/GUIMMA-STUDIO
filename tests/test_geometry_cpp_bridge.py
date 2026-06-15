@@ -15,6 +15,7 @@ from core.geometry_cpp_bridge import (
     extract_local_enclosing_contour_cpp,
     sample_catmull_rom_centripetal_dynamic_cpp,
     extract_smallest_enclosing_contour_cpp,
+    unfold_mirrored_contour_cpp,
 )
 
 
@@ -118,6 +119,16 @@ class GeometryCppBridgeTestCase(unittest.TestCase):
         pontos_arredondados = {(round(x, 7), round(y, 7)) for x, y in resultado}
         self.assertIn((5.0, 3.0), pontos_arredondados)
         self.assertIn((10.0, 0.0), pontos_arredondados)
+
+    def test_desdobrar_espelhado_cpp_monta_contorno_pela_borda_de_dobra(self):
+        meia_peca = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]
+
+        resultado = unfold_mirrored_contour_cpp(meia_peca, 1, 0.0, (0.0, 0.0), (0.0, 1.0))
+
+        self.assertEqual(
+            resultado,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (-10.0, 5.0), (-10.0, 0.0), (0.0, 0.0)],
+        )
 
 
 if __name__ == "__main__":

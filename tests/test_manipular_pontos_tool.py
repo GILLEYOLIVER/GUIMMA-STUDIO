@@ -97,6 +97,7 @@ class _FakeCanvas(_BaseWidget):
         self._snap_resultado = None
         self.historico = 0
         self.atualizou = False
+        self.update_count = 0
         self.coordenadas_canceladas = False
         self.snap_override = None
         self.ignorar_snap_movimento = []
@@ -133,6 +134,7 @@ class _FakeCanvas(_BaseWidget):
 
     def update(self):
         self.atualizou = True
+        self.update_count += 1
 
     def cancelar_operacao_coordenadas(self, limpar_preview=False):
         self.coordenadas_canceladas = bool(limpar_preview)
@@ -363,6 +365,33 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["controle_cantos"][1], (12.0, 0.0))
         self.assertEqual(canvas.ignorar_snap_movimento[-1], {0})
         self.assertEqual(canvas.sombras_snap_movimento[-1][0]["controle_cantos"][1], (10.0, 0.0))
+
+    def test_arraste_de_controle_ignora_destino_repetido(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        chamadas = 0
+        original = ferramenta._mover_controles_por_delta
+
+        def contar_chamada(*args, **kwargs):
+            nonlocal chamadas
+            chamadas += 1
+            return original(*args, **kwargs)
+
+        ferramenta._mover_controles_por_delta = contar_chamada
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        canvas.snap_override = QPointF(12.0, 0.0)
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 0.6))))
+        self.assertEqual(chamadas, 1)
+
+        canvas.update_count = 0
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 0.6))))
+
+        self.assertEqual(chamadas, 1)
+        self.assertEqual(canvas.update_count, 0)
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (12.0, 0.0))
 
     def test_arraste_de_controle_nao_trava_forte_no_angulo(self):
         canvas = _FakeCanvas()
@@ -827,6 +856,70 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertEqual(molde["pontos"][0], (0.0, 2.0))
         self.assertContemPonto(molde["pontos"], (10.0, 2.0))
         self.assertEqual(molde["controle_auxiliares"][0], (5.0, 2.0))
+
+    def test_manipular_limpa_dobra_inativa_antes_de_arrastar(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde.update(
+            {
+                "molde_dobrado": False,
+                "dobra_eixo": {"tipo": "h", "valor": 0.0},
+                "mostrar_contorno_dobra_original": True,
+                "estado_dobra": {"ativo": False, "contorno_lado_oculto": [(0.0, 0.0), (10.0, 0.0)]},
+                "contornos_dobra_original": [{"contorno_pontilhado": [(0.0, 0.0), (10.0, 0.0)]}],
+            }
+        )
+
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        for chave in ("estado_dobra", "contornos_dobra_original", "mostrar_contorno_dobra_original", "dobra_eixo"):
+            self.assertNotIn(chave, molde)
+
+    def test_molde_desdobrado_sem_auxiliares_preserva_contorno_ao_arrastar_canto(self):
+        canvas = _FakeCanvas()
+        pontos_originais = [
+            (0.0, 0.0),
+            (2.5, 1.0),
+            (5.0, 0.0),
+            (7.5, -1.0),
+            (10.0, 0.0),
+            (10.0, 5.0),
+            (7.5, 6.0),
+            (5.0, 5.0),
+            (2.5, 4.0),
+            (0.0, 5.0),
+            (0.0, 0.0),
+        ]
+        canvas.cena.elementos[0] = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": list(pontos_originais),
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 10.0, "y": 0.0},
+                {"x": 10.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+            "controle_auxiliares": [],
+            "pontos_auxiliares": [],
+            "molde_dobrado": False,
+            "fio_origem": (2.0, 1.0),
+            "fio_fim": (8.0, 1.0),
+        }
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 1.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 1.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertGreater(len(molde["pontos"]), len(molde["controle_cantos"]) + 1)
+        self.assertEqual(len(molde["pontos"]), len(pontos_originais))
+        self.assertContemPonto(molde["pontos"], (12.0, 1.0))
+        self.assertEqual(molde["controle_cantos"][1], (12.0, 1.0))
 
 
 if __name__ == "__main__":

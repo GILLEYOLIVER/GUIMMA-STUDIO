@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QCheckBox, QDialog, QVBoxLayout
 
 from config import ICONS_DIR
+from core.geometry_cpp_bridge import unfold_mirrored_contour_cpp
 from tools.dobrar_tool import Ferramenta as _DobrarBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -268,6 +269,7 @@ class Ferramenta(_DobrarBase):
         if eixo is None:
             self._status(canvas, "A linha escolhida não tem extremidades válidas para desdobrar.")
             return
+        pontos_antes = self._pontos_elemento(molde)
         copiar_contorno = self._deve_espelhar_contorno_identico(canvas, linha_ref, linha)
         if not copiar_contorno and self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
             return
@@ -276,7 +278,7 @@ class Ferramenta(_DobrarBase):
         else:
             unidos = self._resultado_desdobrar(molde, linha, eixo)
         unidos = self._garantir_pontos_controle_no_desdobrado(molde, unidos, eixo)
-        if len(unidos) < 3:
+        if len(unidos) < 3 or not self._resultado_desdobrado_plausivel(pontos_antes, unidos, eixo):
             self._status(canvas, "Não foi possível formar o contorno desdobrado.")
             return
         cantos = self._controles_resultado_desdobrar(molde, unidos, eixo)
@@ -284,14 +286,12 @@ class Ferramenta(_DobrarBase):
         molde["pontos"] = [(p.x(), p.y()) for p in unidos]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+        self._limpar_topologia_auxiliar_dobra(molde)
         molde["molde_dobrado"] = False
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
         molde.pop("dobra_eixo", None)
-        if isinstance(molde.get("estado_dobra"), dict):
-            molde["estado_dobra"]["ativo"] = False
-            molde["estado_dobra"]["contorno_aberto"] = [(p.x(), p.y()) for p in unidos]
-        molde.pop("contornos_dobra_original", None)
+        self._limpar_estado_visual_dobra(molde)
         if self._fio_meio_ativo(canvas):
             self._centralizar_fio_no_molde(molde, eixo)
         molde.setdefault("metadados", {})["ultima_transformacao"] = "desdobrar"
@@ -331,10 +331,9 @@ class Ferramenta(_DobrarBase):
         if len(pontos) < 3:
             return []
         base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
-        espelhado = [self._espelhar_ponto(p, eixo) for p in base]
-        unidos = self._unir_poligonos(base, espelhado)
-        if len(unidos) < 3:
-            unidos = base + list(reversed(espelhado))
+        unidos = self._desdobrar_contorno_por_eixo(base, eixo)
+        if not self._resultado_desdobrado_plausivel(base, unidos, eixo):
+            return []
         return self._preparar_contorno_resultado(unidos, eixo)
 
     def _resultado_desdobrar(self, molde: dict, linha: dict, eixo) -> list[QPointF]:
@@ -343,11 +342,183 @@ class Ferramenta(_DobrarBase):
             return []
         base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
         base = self._remover_auxiliares_trecho_dobra(base, linha)
-        espelhado = [self._espelhar_ponto(p, eixo) for p in base]
-        unidos = self._unir_poligonos(base, espelhado)
-        if len(unidos) < 3:
+        unidos = self._desdobrar_contorno_por_eixo(base, eixo)
+        if len(unidos) < 3 or not self._resultado_desdobrado_plausivel(base, unidos, eixo):
             return []
         return self._preparar_contorno_resultado(unidos, eixo)
+
+    def _desdobrar_contorno_por_eixo(self, base: list[QPointF], eixo) -> list[QPointF]:
+        """Abre uma meia peça pela linha de dobra.
+
+        A operacao correta nao e uma uniao booleana generica de poligonos. A
+        dobra define duas pontas no contorno; o lado externo entre essas pontas
+        e espelhado e costurado de volta nessas mesmas pontas.
+        """
+        if len(base) < 3:
+            return []
+        pontos_cpp = [(float(p.x()), float(p.y())) for p in base]
+        axis_kind, axis_value, axis_p1, axis_p2 = self._parametros_eixo_cpp(eixo)
+        resultado_cpp = unfold_mirrored_contour_cpp(
+            pontos_cpp,
+            axis_kind,
+            axis_value,
+            axis_p1,
+            axis_p2,
+            tolerance=self._tolerancia_contorno(base),
+        )
+        if resultado_cpp:
+            pontos = [QPointF(float(x), float(y)) for x, y in resultado_cpp]
+            if self._resultado_desdobrado_plausivel(base, pontos, eixo):
+                return pontos
+        return self._desdobrar_contorno_por_eixo_python(base, eixo)
+
+    def _resultado_desdobrado_plausivel(self, base: list[QPointF], resultado: list[QPointF], eixo) -> bool:
+        if len(base) < 3 or len(resultado) < 3:
+            return False
+        if not all(isfinite(float(p.x())) and isfinite(float(p.y())) for p in resultado):
+            return False
+
+        base_aberta = base[:-1] if len(base) > 2 and self._pontos_mesmos(base[0], base[-1]) else list(base)
+        resultado_aberto = resultado[:-1] if len(resultado) > 2 and self._pontos_mesmos(resultado[0], resultado[-1]) else list(resultado)
+        if len(base_aberta) < 3 or len(resultado_aberto) < 3:
+            return False
+        if len(resultado_aberto) > max(16, (len(base_aberta) * 4) + 32):
+            return False
+
+        esperado = [QPointF(p) for p in base_aberta]
+        esperado.extend(self._espelhar_ponto(p, eixo) for p in base_aberta)
+        bbox_esperado = self._bbox_pontos(esperado)
+        bbox_resultado = self._bbox_pontos(resultado_aberto)
+        if bbox_esperado is None or bbox_resultado is None:
+            return False
+
+        min_x, min_y, max_x, max_y = bbox_esperado
+        r_min_x, r_min_y, r_max_x, r_max_y = bbox_resultado
+        diag = (((max_x - min_x) ** 2.0) + ((max_y - min_y) ** 2.0)) ** 0.5
+        margem = max(0.5, diag * 0.08)
+        if r_min_x < min_x - margem or r_max_x > max_x + margem:
+            return False
+        if r_min_y < min_y - margem or r_max_y > max_y + margem:
+            return False
+
+        area = abs(self._area_poligono(resultado_aberto))
+        return area > max(1e-6, (diag * diag) * 1e-8)
+
+    def _area_poligono(self, pontos: list[QPointF]) -> float:
+        if len(pontos) < 3:
+            return 0.0
+        area = 0.0
+        for a, b in zip(pontos, pontos[1:] + pontos[:1]):
+            area += (a.x() * b.y()) - (b.x() * a.y())
+        return area * 0.5
+
+    def _parametros_eixo_cpp(self, eixo) -> tuple[int, float, tuple[float, float], tuple[float, float]]:
+        if eixo[0] == "h":
+            valor = float(eixo[1])
+            return 0, valor, (0.0, valor), (1.0, valor)
+        if eixo[0] == "v":
+            valor = float(eixo[1])
+            return 1, valor, (valor, 0.0), (valor, 1.0)
+        p1 = QPointF(eixo[1])
+        p2 = QPointF(eixo[2])
+        return 2, 0.0, (float(p1.x()), float(p1.y())), (float(p2.x()), float(p2.y()))
+
+    def _desdobrar_contorno_por_eixo_python(self, base: list[QPointF], eixo) -> list[QPointF]:
+        tolerancia = self._tolerancia_contorno(base)
+        aumentado: list[QPointF] = []
+
+        def adicionar(ponto: QPointF) -> None:
+            if aumentado and self._dist(aumentado[-1], ponto) <= tolerancia:
+                return
+            aumentado.append(QPointF(ponto))
+
+        for a, b in zip(base, base[1:] + base[:1]):
+            adicionar(a)
+            va = self._valor_lado(a, eixo)
+            vb = self._valor_lado(b, eixo)
+            if (va < -tolerancia and vb > tolerancia) or (va > tolerancia and vb < -tolerancia):
+                inter = self._intersecao_segmento_eixo(a, b, eixo)
+                if inter is not None:
+                    adicionar(inter)
+        if len(aumentado) > 1 and self._dist(aumentado[0], aumentado[-1]) <= tolerancia:
+            aumentado.pop()
+        if len(aumentado) < 3:
+            return []
+
+        indices_eixo = [idx for idx, ponto in enumerate(aumentado) if abs(self._valor_lado(ponto, eixo)) <= tolerancia]
+        if len(indices_eixo) < 2:
+            espelhado = [self._espelhar_ponto(p, eixo) for p in aumentado]
+            espelhado.reverse()
+            return self._fechar_desdobrado(aumentado + espelhado, tolerancia)
+
+        inicio = min(indices_eixo, key=lambda idx: self._coordenada_no_eixo(aumentado[idx], eixo))
+        fim = max(indices_eixo, key=lambda idx: self._coordenada_no_eixo(aumentado[idx], eixo))
+        caminho_a = self._caminho_indices_circular(aumentado, inicio, fim)
+        caminho_b = self._caminho_indices_circular(aumentado, fim, inicio)
+        lado_a = max((abs(self._valor_lado(p, eixo)) for p in caminho_a), default=0.0)
+        lado_b = max((abs(self._valor_lado(p, eixo)) for p in caminho_b), default=0.0)
+        if min(lado_a, lado_b) > tolerancia * 10.0:
+            espelhado = [self._espelhar_ponto(p, eixo) for p in aumentado]
+            espelhado.reverse()
+            saida = [QPointF(p) for p in aumentado]
+            for ponto in espelhado:
+                if saida and self._dist(saida[-1], ponto) <= tolerancia:
+                    continue
+                saida.append(QPointF(ponto))
+            return self._fechar_desdobrado(saida, tolerancia)
+        if lado_a > lado_b + tolerancia:
+            externo = caminho_a
+        elif lado_b > lado_a + tolerancia:
+            externo = caminho_b
+        else:
+            externo = caminho_a if self._comprimento_trecho(caminho_a) >= self._comprimento_trecho(caminho_b) else caminho_b
+        externo = self._limpar_pontos_repetidos(externo)
+        if len(externo) < 2:
+            return []
+        espelhado = [self._espelhar_ponto(p, eixo) for p in externo]
+        espelhado.reverse()
+        saida = [QPointF(p) for p in externo]
+        for ponto in espelhado[1:]:
+            if saida and self._dist(saida[-1], ponto) <= tolerancia:
+                continue
+            saida.append(QPointF(ponto))
+        return self._fechar_desdobrado(saida, tolerancia)
+
+    def _coordenada_no_eixo(self, ponto: QPointF, eixo) -> float:
+        if eixo[0] == "h":
+            return float(ponto.x())
+        if eixo[0] == "v":
+            return float(ponto.y())
+        a = QPointF(eixo[1])
+        b = QPointF(eixo[2])
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        comprimento = ((dx * dx) + (dy * dy)) ** 0.5
+        if comprimento <= 1e-12:
+            return 0.0
+        return (((ponto.x() - a.x()) * dx) + ((ponto.y() - a.y()) * dy)) / comprimento
+
+    def _caminho_indices_circular(self, pontos: list[QPointF], inicio: int, fim: int) -> list[QPointF]:
+        if not pontos:
+            return []
+        total = len(pontos)
+        idx = inicio % total
+        destino = fim % total
+        saida: list[QPointF] = []
+        limite = total + 1
+        while limite > 0:
+            saida.append(QPointF(pontos[idx]))
+            if idx == destino:
+                break
+            idx = (idx + 1) % total
+            limite -= 1
+        return saida
+
+    def _fechar_desdobrado(self, pontos: list[QPointF], tolerancia: float) -> list[QPointF]:
+        saida = self._limpar_pontos_repetidos([QPointF(p) for p in pontos])
+        if len(saida) >= 2 and self._dist(saida[0], saida[-1]) > tolerancia:
+            saida.append(QPointF(saida[0]))
+        return saida
 
     def _remover_auxiliares_trecho_dobra(self, base: list[QPointF], linha: dict) -> list[QPointF]:
         if str(linha.get("origem_desdobrar") or "") != "perimetro_principal":
@@ -400,19 +571,19 @@ class Ferramenta(_DobrarBase):
         melhor = self._garantir_pontos_controle_no_desdobrado(molde, melhor, eixo_atual)
         if len(melhor) >= 3 and not self._pontos_mesmos(melhor[0], melhor[-1]):
             melhor.append(QPointF(melhor[0]))
+        if len(melhor) < 3 or not self._resultado_desdobrado_plausivel(pontos_atuais, melhor, eixo_atual):
+            return False
         cantos = self._controles_resultado_desdobrar(molde, melhor, eixo_atual)
         self._sincronizar_piques_resultado(molde, melhor, eixo_atual, inserir=self._inserir_pique_ativo(canvas))
         molde["pontos"] = [(p.x(), p.y()) for p in melhor]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+        self._limpar_topologia_auxiliar_dobra(molde)
         molde["molde_dobrado"] = False
         molde["dobra_horizontal"] = False
         molde["dobra_vertical"] = False
         molde.pop("dobra_eixo", None)
-        if isinstance(molde.get("estado_dobra"), dict):
-            molde["estado_dobra"]["ativo"] = False
-            molde["estado_dobra"]["contorno_aberto"] = [(p.x(), p.y()) for p in melhor]
-        molde.pop("contornos_dobra_original", None)
+        self._limpar_estado_visual_dobra(molde)
         if self._fio_meio_ativo(canvas):
             self._centralizar_fio_no_molde(molde, eixo_atual)
         molde.setdefault("metadados", {})["ultima_transformacao"] = "desdobrar_original"
@@ -423,6 +594,23 @@ class Ferramenta(_DobrarBase):
         canvas.update()
         self._status(canvas, "Molde restaurado ao contorno original da dobra.")
         return True
+
+    def _limpar_estado_visual_dobra(self, molde: dict) -> None:
+        molde.pop("contornos_dobra_original", None)
+        molde.pop("estado_dobra", None)
+        molde.pop("mostrar_contorno_dobra_original", None)
+
+    def _limpar_topologia_auxiliar_dobra(self, molde: dict) -> None:
+        for chave in (
+            "controle_auxiliares",
+            "pontos_auxiliares",
+            "_segmentos_auxiliares_arraste",
+            "_auxiliares_retos_arraste",
+            "_densidades_segmentos_arraste",
+            "_fechado_arraste",
+            "_auxiliar_arrastado_idx",
+        ):
+            molde.pop(chave, None)
 
     def _linha_ref_dobra_original(self, molde: dict) -> dict | None:
         """Cria uma linha de referência a partir da última dobra preservada no molde."""
@@ -883,18 +1071,42 @@ class Ferramenta(_DobrarBase):
         """
         base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
         if len(base) < 2:
-            return [QPointF(p) for p in base]
+            return []
 
         # Garante explicitamente os encontros do eixo no próprio contorno antes
         # de transformar em controles. Se o eixo cruza uma lateral, nasce um
         # ponto de controle ali. Se a extremidade antiga já existia, ela fica.
-        base = self._inserir_pontos_no_contorno(base, self._pontos_eixo_no_contorno(base, eixo))
         tolerancia = self._tolerancia_contorno(base)
+        candidatos: list[QPointF] = []
+        for ponto in self._pontos_principais_molde(molde):
+            candidatos.append(QPointF(ponto))
+            candidatos.append(self._espelhar_ponto(ponto, eixo))
+        candidatos.extend(self._pontos_controle_eixo_no_contorno(base, eixo))
+
         controles: list[QPointF] = []
-        for ponto in base:
+        for ponto in candidatos:
+            if not self._ponto_no_contorno(ponto, base, tolerancia=tolerancia * 20.0):
+                continue
             if not any(self._dist(ponto, existente) <= tolerancia for existente in controles):
                 controles.append(QPointF(ponto))
-        return controles
+        return controles if controles else self._controles_fallback_contorno(base)
+
+    def _controles_fallback_contorno(self, contorno: list[QPointF]) -> list[QPointF]:
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else list(contorno)
+        if len(base) <= 24:
+            return [QPointF(p) for p in base]
+        passo = max(1, len(base) // 12)
+        return [QPointF(p) for idx, p in enumerate(base) if idx % passo == 0][:12]
+
+    def _pontos_controle_eixo_no_contorno(self, contorno: list[QPointF], eixo) -> list[QPointF]:
+        pontos = self._pontos_eixo_no_contorno(contorno, eixo)
+        if len(pontos) <= 2:
+            return pontos
+        inicio = min(pontos, key=lambda p: self._coordenada_no_eixo(p, eixo))
+        fim = max(pontos, key=lambda p: self._coordenada_no_eixo(p, eixo))
+        if self._dist(inicio, fim) <= self._tolerancia_contorno(contorno):
+            return [QPointF(inicio)]
+        return [QPointF(inicio), QPointF(fim)]
 
     def _sincronizar_piques_resultado(self, molde: dict, contorno: list[QPointF], eixo, inserir: bool) -> None:
         marcacoes = []

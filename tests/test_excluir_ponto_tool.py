@@ -278,6 +278,68 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertAlmostEqual(xs[0], 5.0, places=5)
         self.assertAlmostEqual(xs[1], 8.0, places=5)
 
+    def test_excluir_auxiliar_reajusta_lateral_sem_destruir_outros_trechos(self):
+        canvas = _FakeCanvas()
+        ponto_amostra_local = (5.0, 2.6)
+        pontos_lateral_antes = [
+            (0.0, 0.0),
+            (1.0, 0.6),
+            (2.0, 1.2),
+            (3.0, 2.2),
+            (4.0, 2.8),
+            ponto_amostra_local,
+            (6.0, 2.4),
+            (7.0, 1.7),
+            (8.0, 1.0),
+            (9.0, 0.4),
+            (10.0, 0.0),
+        ]
+        pontos_distantes = [(14.0, -1.0), (16.0, -3.0), (18.0, -1.0), (22.0, 2.0), (26.0, 4.0), (30.0, 3.0), (34.0, 0.0)]
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [
+                    *pontos_lateral_antes,
+                    *pontos_distantes,
+                    (0.0, 0.0),
+                ],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (22.0, 2.0), (34.0, 0.0)],
+                "controle_auxiliares": [(2.0, 1.2), (4.0, 2.8), (6.0, 2.4), (8.0, 1.0), (16.0, -3.0), (26.0, 4.0), (30.0, 3.0)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 22.0, "y": 2.0},
+                    {"x": 34.0, "y": 0.0},
+                ],
+                "pontos_auxiliares": [
+                    {"x": 2.0, "y": 1.2},
+                    {"x": 4.0, "y": 2.8},
+                    {"x": 6.0, "y": 2.4},
+                    {"x": 8.0, "y": 1.0},
+                    {"x": 16.0, "y": -3.0},
+                    {"x": 26.0, "y": 4.0},
+                    {"x": 30.0, "y": 3.0},
+                ],
+                "fechado": True,
+            }
+        )
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta._excluir_controle_molde(canvas, 0, "aux", 1))
+
+        molde = canvas.cena.elementos[0]
+        self.assertNotIn((4.0, 2.8), molde["controle_auxiliares"])
+        for ponto in pontos_distantes:
+            self.assertIn(ponto, molde["pontos"])
+        distancia_local = min(
+            ((float(x) - ponto_amostra_local[0]) ** 2 + (float(y) - ponto_amostra_local[1]) ** 2) ** 0.5
+            for x, y in molde["pontos"]
+        )
+        self.assertGreater(distancia_local, 1e-4)
+        self.assertLess(distancia_local, 0.8)
+        desvio_antes = max(abs(y) for _x, y in pontos_lateral_antes)
+        desvio_depois = max(abs(float(y)) for x, y in molde["pontos"] if 0.0 <= float(x) <= 10.0)
+        self.assertLessEqual(desvio_depois, desvio_antes)
+
     def test_hover_em_molde_selecionado_trava_em_controle_proximo(self):
         canvas = _FakeCanvas()
         canvas._selecionados = {0}
@@ -622,7 +684,7 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(len(molde["pontos_auxiliares"]), len(molde["controle_auxiliares"]))
         self.assertEqual(molde["pontos"][0], molde["pontos"][-1])
 
-    def test_excluir_auxiliar_recalcula_contorno_pelos_controles_restantes(self):
+    def test_excluir_auxiliar_preserva_contorno_suavemente(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos[0].update(
             {
@@ -654,9 +716,11 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
 
         molde = canvas.cena.elementos[0]
         self.assertNotIn((9.0, 2.0), molde["pontos"])
-        self.assertNotIn((4.0, 1.0), molde["pontos"])
+        ponto_suavizado = molde["pontos"][1]
+        self.assertNotEqual(ponto_suavizado, (4.0, 1.0))
+        self.assertAlmostEqual(ponto_suavizado[0], 4.0, delta=0.2)
+        self.assertAlmostEqual(ponto_suavizado[1], 1.0, delta=0.2)
         self.assertIn((10.0, 0.0), molde["pontos"])
-        self.assertGreater(len(molde["pontos"]), len(molde["controle_cantos"]) + len(molde["controle_auxiliares"]))
         self.assertNotIn((9.0, 2.0), molde["controle_auxiliares"])
         self.assertIn((5.0, 5.0), molde["controle_auxiliares"])
         self.assertIn((0.0, 5.0), molde["controle_auxiliares"])

@@ -9,14 +9,11 @@ from PySide6.QtCore import QPointF
 from canvas.cena import CenaDocumento
 
 try:
-    import guimma_geometry_cpp as _guimma_cpp
-except Exception:  # pragma: no cover - o fallback Python deve continuar funcionando
-    try:
-        from core.geometry_cpp_bridge import modulo_cpp as _modulo_cpp
+    from core.geometry_cpp_bridge import modulo_cpp as _modulo_cpp
 
-        _guimma_cpp = _modulo_cpp()
-    except Exception:
-        _guimma_cpp = None
+    _guimma_cpp = _modulo_cpp()
+except Exception:  # pragma: no cover - o fallback Python deve continuar funcionando
+    _guimma_cpp = None
 
 
 @dataclass(slots=True)

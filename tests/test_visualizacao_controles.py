@@ -56,6 +56,22 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual([(p.x(), p.y()) for p in controles], [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)])
 
+    def test_dobra_inativa_nao_mantem_sombra_visual(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "molde_dobrado": False,
+            "estado_dobra": {
+                "ativo": False,
+                "contorno_lado_oculto": [(0.0, 0.0), (10.0, 0.0)],
+                "contorno_lado_dobrado": [(0.0, 0.0), (10.0, 0.0)],
+            },
+        }
+
+        self.assertFalse(canvas._molde_tem_referencia_dobra_original(molde))
+        self.assertIsNone(canvas._registro_dobra_visual_atual(molde))
+
     def test_numeracao_de_controles_segue_sentido_horario_na_tela(self):
         cantos = [
             QPointF(0.0, 4.0),
