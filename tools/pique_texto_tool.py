@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
+from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -223,15 +224,14 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def on_deactivate(self, canvas):
-        if self._dialog:
-            self._dialog.hide()
+        esconder_se_valido(self._dialog)
         self._hover = None
         self._molde_idx = None
         self._pos_mao = None
         canvas.update()
 
     def on_canvas_resize(self, canvas) -> None:
-        if self._dialog:
+        if qobject_valido(self._dialog):
             self._reposicionar_dialogo(canvas, self._dialog, None)
 
     def on_mouse_move(self, canvas, event) -> bool:
@@ -382,17 +382,23 @@ class Ferramenta(FerramentaBase):
 
     def _dialogo(self, canvas) -> PiqueTextoDialog:
         cls = type(self)
-        if cls._dialog_global is None:
+        if not qobject_valido(cls._dialog_global):
             cls._dialog_global = PiqueTextoDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:pique_texto")
+            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         dialog = cls._dialog_global
+        if not qobject_valido(dialog):
+            dialog = PiqueTextoDialog(canvas)
+            cls._dialog_global = dialog
+            instalar_memoria_posicao(dialog, "dialog:pique_texto")
+            limpar_global_ao_destruir(dialog, cls, "_dialog_global")
         if dialog.parentWidget() is not canvas:
             dialog.setParent(canvas)
         self._dialog = dialog
         return dialog
 
     def _valores_dialogo(self, canvas) -> dict:
-        dialog = self._dialog or self._dialogo(canvas)
+        dialog = self._dialog if qobject_valido(self._dialog) else self._dialogo(canvas)
         return dialog.valores()
 
     def _reposicionar_dialogo(self, canvas, dialog: PiqueTextoDialog, pos_clique: QPointF | None) -> None:
@@ -490,8 +496,7 @@ class Ferramenta(FerramentaBase):
         self._hover = None
         self._molde_idx = None
         self._pos_mao = None
-        if self._dialog:
-            self._dialog.hide()
+        esconder_se_valido(self._dialog)
         if hasattr(canvas, "set_ferramenta_ativa"):
             canvas.set_ferramenta_ativa("selecionar")
         else:

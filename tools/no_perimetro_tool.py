@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QGridLayout, QLabel
 from core.formatacao import formatar_numero, numero_decimal_ponto
 from tools.medicao_utils import mensagem_status, selecionar_segmento_mais_proximo, segmentos_de_elemento
 from tools.tool_base import FerramentaBase
+from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas
 
 
@@ -88,18 +89,19 @@ class Ferramenta(FerramentaBase):
     def _obter_dialog(self, canvas) -> PontosNoPerimetroDialog:
         parent = canvas.window() if hasattr(canvas, "window") else canvas
         dialog = Ferramenta._dialog_global
-        if dialog is None or dialog.parentWidget() is not parent:
-            if dialog is not None:
+        if not qobject_valido(dialog) or dialog.parentWidget() is not parent:
+            if qobject_valido(dialog):
                 dialog.close()
             dialog = PontosNoPerimetroDialog(parent)
             dialog.btn_remover_marcacoes.clicked.connect(lambda: self._remover_marcacoes(canvas))
             Ferramenta._dialog_global = dialog
+            limpar_global_ao_destruir(dialog, Ferramenta, "_dialog_global")
         dialog.set_unidade(*unidade_canvas(canvas))
         return dialog
 
     def on_unidade_medida_alterada(self, canvas):
         dialog = Ferramenta._dialog_global
-        if dialog is not None:
+        if qobject_valido(dialog):
             dialog.set_unidade(*unidade_canvas(canvas))
 
     def _remover_marcacoes(self, canvas):
@@ -154,8 +156,7 @@ class Ferramenta(FerramentaBase):
     def on_deactivate(self, canvas):
         super().on_deactivate(canvas)
         dialog = Ferramenta._dialog_global
-        if dialog is not None:
-            dialog.hide()
+        esconder_se_valido(dialog)
 
     def _dist(self, a: QPointF, b: QPointF) -> float:
         return sqrt((a.x() - b.x()) ** 2 + (a.y() - b.y()) ** 2)

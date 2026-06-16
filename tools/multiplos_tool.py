@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from core.formatacao import numero_decimal_ponto
 from tools.inserir_pique_tool import Ferramenta as FerramentaInserirPique
 from tools.inserir_pique_tool import TIPOS_PIQUE, _PiquePreview
+from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -215,8 +216,7 @@ class Ferramenta(FerramentaInserirPique):
         self.set_status("Múltiplos piques: primeiro clique inicia, mova no sentido desejado, segundo clique fixa.")
 
     def on_deactivate(self, canvas):
-        if self._dialog:
-            self._dialog.hide()
+        esconder_se_valido(self._dialog)
         self._hover = None
         self._molde_idx = None
         self._interativo = None
@@ -243,7 +243,7 @@ class Ferramenta(FerramentaInserirPique):
             return True
         if event.button() != Qt.LeftButton:
             return False
-        if self._dialog is None:
+        if not qobject_valido(self._dialog):
             return False
 
         pos = self._posicao_cena(canvas, event)
@@ -262,10 +262,13 @@ class Ferramenta(FerramentaInserirPique):
 
     def _abrir_dialogo(self, canvas) -> None:
         cls = type(self)
-        if cls._dialog_global is None:
+        if not qobject_valido(cls._dialog_global):
             cls._dialog_global = MultiplosPiquesDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:multiplos_piques")
+            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         self._dialog = cls._dialog_global
+        if not qobject_valido(self._dialog):
+            return
         if self._dialog.parentWidget() is not canvas:
             self._dialog.setParent(canvas)
         if not self._dialog.isVisible():
@@ -274,11 +277,11 @@ class Ferramenta(FerramentaInserirPique):
         self._reposicionar_dialogo(canvas)
 
     def on_unidade_medida_alterada(self, canvas):
-        if self._dialog is not None:
+        if qobject_valido(self._dialog):
             self._dialog.set_unidade(*unidade_canvas(canvas))
 
     def _reposicionar_dialogo(self, canvas) -> None:
-        if not self._dialog:
+        if not qobject_valido(self._dialog):
             return
         fallback = None
         if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
@@ -289,7 +292,7 @@ class Ferramenta(FerramentaInserirPique):
         restaurar_posicao(self._dialog, "dialog:multiplos_piques", fallback=fallback)
 
     def _iniciar_interativo(self, canvas, event, pos: QPointF, modo: str) -> bool:
-        if self._dialog is None:
+        if not qobject_valido(self._dialog):
             return False
         alvo_contorno = self._alvo_no_contorno(canvas, pos)
         if modo == "Pontos do mouse" and alvo_contorno is None:
@@ -355,7 +358,7 @@ class Ferramenta(FerramentaInserirPique):
         return True
 
     def _finalizar_interativo(self, canvas, event, pos: QPointF) -> bool:
-        if self._dialog is None or self._interativo is None:
+        if not qobject_valido(self._dialog) or self._interativo is None:
             return False
         self._atualizar_preview_interativo(canvas, pos)
         estado = dict(self._interativo)
@@ -382,7 +385,7 @@ class Ferramenta(FerramentaInserirPique):
         return True
 
     def _atualizar_preview_interativo(self, canvas, pos: QPointF) -> None:
-        if self._dialog is None or self._interativo is None:
+        if not qobject_valido(self._dialog) or self._interativo is None:
             self._preview_pontos = []
             return
         tipo = self._interativo.get("tipo")
@@ -424,7 +427,7 @@ class Ferramenta(FerramentaInserirPique):
         )
 
     def _desenhar_preview_multiplos(self, canvas, painter) -> None:
-        if self._dialog is None or self._interativo is None:
+        if not qobject_valido(self._dialog) or self._interativo is None:
             return
         idx = int(self._interativo.get("idx", -1))
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -470,12 +473,12 @@ class Ferramenta(FerramentaInserirPique):
         indices = {self._molde_idx} if self._molde_idx is not None else None
         alvo = self._alvo_no_contorno(canvas, pos, indices=indices)
         if alvo is not None:
-            if self._dialog:
+            if qobject_valido(self._dialog):
                 self._dialog.set_sobre_contorno(True)
             return alvo
         idx = self._molde_idx if self._molde_idx is not None else self._molde_em_posicao(canvas, pos)
         if idx is not None and self._ponto_dentro_molde(canvas.cena.elementos[idx], pos):
-            if self._dialog:
+            if qobject_valido(self._dialog):
                 self._dialog.set_sobre_contorno(False)
             return idx, QPointF(pos)
         return None

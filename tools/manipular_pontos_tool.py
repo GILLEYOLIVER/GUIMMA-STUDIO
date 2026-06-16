@@ -12,6 +12,7 @@ from core.geometry.engine import (
     sample_quadratic_bezier_through_point,
 )
 from core.formatacao import numero_decimal_ponto
+from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
@@ -102,8 +103,7 @@ class Ferramenta(FerramentaBase):
         self.set_status(f"{self.nome}: clique em um ponto para prender no cursor, clique de novo para soltar. Shift seleciona varios pontos.")
 
     def on_deactivate(self, canvas):
-        if self._dlg_passo:
-            self._dlg_passo.hide()
+        esconder_se_valido(self._dlg_passo)
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
         self._arrastando_dobra_pontilhada = None
@@ -119,17 +119,14 @@ class Ferramenta(FerramentaBase):
 
     def _abrir_caixa_passo(self, canvas):
         cls = type(self)
-        if cls._dlg_global is not None:
-            try:
-                cls._dlg_global.isVisible()
-            except RuntimeError:
-                cls._dlg_global = None
-                cls._edt_dx_global = None
-                cls._edt_dy_global = None
-                cls._lbl_dx_global = None
-                cls._lbl_dy_global = None
-                cls._cmb_n_pontos_global = None
-                cls._chk_discreto_global = None
+        if not qobject_valido(cls._dlg_global):
+            cls._dlg_global = None
+            cls._edt_dx_global = None
+            cls._edt_dy_global = None
+            cls._lbl_dx_global = None
+            cls._lbl_dy_global = None
+            cls._cmb_n_pontos_global = None
+            cls._chk_discreto_global = None
         if cls._dlg_global is None:
             cls._dlg_global = QDialog(canvas)
             cls._dlg_global.setObjectName(f"guimma_{self.id_ferramenta}_dialog")
@@ -149,7 +146,10 @@ class Ferramenta(FerramentaBase):
             lay.addRow("", cls._chk_discreto_global)
             cls._dlg_global.setFixedWidth(210)
             instalar_memoria_posicao(cls._dlg_global, f"dialog:{self.id_ferramenta}")
+            limpar_global_ao_destruir(cls._dlg_global, cls, "_dlg_global")
         self._dlg_passo = cls._dlg_global
+        if not qobject_valido(self._dlg_passo):
+            return
         self._edt_dx = cls._edt_dx_global
         self._edt_dy = cls._edt_dy_global
         self._lbl_dx = cls._lbl_dx_global
@@ -184,7 +184,7 @@ class Ferramenta(FerramentaBase):
                     edt.setText("0" if texto in {"", "-0"} else texto)
 
     def _reposicionar_caixa_passo(self, canvas):
-        if not self._dlg_passo:
+        if not qobject_valido(self._dlg_passo):
             return
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
             pos_local = canvas.calcular_posicao_painel_auxiliar(
@@ -203,7 +203,7 @@ class Ferramenta(FerramentaBase):
         return dx, dy
 
     def on_unidade_medida_alterada(self, canvas):
-        if self.usar_caixa_passo and self._dlg_passo is not None:
+        if self.usar_caixa_passo and qobject_valido(self._dlg_passo):
             self._atualizar_unidade_passo(canvas)
 
     def _modo_n_pontos(self) -> bool:

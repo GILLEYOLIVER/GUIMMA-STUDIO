@@ -17,6 +17,7 @@ if find_spec("PySide6") is None:
 else:
     from PySide6.QtCore import QPointF, Qt, Signal
     from PySide6.QtWidgets import QApplication, QWidget
+    from shiboken6 import delete
 
     from tools.separar_tool import Ferramenta as FerramentaSeparar
 
@@ -203,6 +204,23 @@ class SepararToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(21.0, 2.5))))
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(canvas._selecionados, {1, 2})
+
+    def test_reativar_recria_dialogo_deletado_pelo_qt(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSeparar()
+        ferramenta.on_activate(canvas)
+        dialog_antigo = ferramenta._dialog
+        self.assertIsNotNone(dialog_antigo)
+
+        delete(dialog_antigo)
+        self.assertFalse(ferramenta._dialog_valido(dialog_antigo))
+
+        nova = FerramentaSeparar()
+        nova.on_activate(canvas)
+
+        self.assertIsNotNone(nova._dialog)
+        self.assertTrue(nova._dialog_valido(nova._dialog))
+        self.assertIsNot(nova._dialog, dialog_antigo)
 
 
 if __name__ == "__main__":
