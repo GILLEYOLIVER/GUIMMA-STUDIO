@@ -93,22 +93,10 @@ class SepararToolTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
 
-    def setUp(self):
-        FerramentaSeparar._dialog_global = None
-
-    def _selecionar_tamanhos(self, ferramenta, *nomes):
-        dialog = ferramenta._dialog
-        self.assertIsNotNone(dialog)
-        dialog.chk_todos.setChecked(False)
-        selecionados = set(nomes)
-        for nome, check in dialog._checks_tamanhos.items():
-            check.setChecked(nome in selecionados)
-
     def test_hover_e_clique_criam_copia_nomeada_do_tamanho(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSeparar()
         ferramenta.on_activate(canvas)
-        self._selecionar_tamanhos(ferramenta, "G")
 
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(11.0, 2.5))))
         self.assertEqual(ferramenta._hover["nome_tamanho"], "G")
@@ -132,7 +120,6 @@ class SepararToolTestCase(unittest.TestCase):
         canvas = _FakeCanvas()
         ferramenta = FerramentaSeparar()
         ferramenta.on_activate(canvas)
-        self._selecionar_tamanhos(ferramenta, "G")
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(11.0, 2.5))))
         self.assertEqual(len(canvas.cena.elementos), 2)
@@ -172,7 +159,6 @@ class SepararToolTestCase(unittest.TestCase):
         molde["graduacao_pontos"] = valores_g
         ferramenta = FerramentaSeparar()
         ferramenta.on_activate(canvas)
-        self._selecionar_tamanhos(ferramenta, "G")
 
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(9.0, 2.5))))
 
@@ -185,24 +171,6 @@ class SepararToolTestCase(unittest.TestCase):
         self.assertEqual(copia["controle_cantos"][0], (1.0, 0.0))
         self.assertEqual(copia["controle_auxiliares"], [(5.0, 0.5), (5.0, 5.0)])
         self.assertEqual(copia["pontos_auxiliares"], [{"x": 5.0, "y": 0.5}, {"x": 5.0, "y": 5.0}])
-
-    def test_modo_todos_separa_todos_os_tamanhos_do_molde(self):
-        canvas = _FakeCanvas()
-        ferramenta = FerramentaSeparar()
-        ferramenta.on_activate(canvas)
-
-        self.assertTrue(ferramenta._dialog.chk_todos.isChecked())
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(11.0, 2.5))))
-
-        self.assertEqual(len(canvas.cena.elementos), 3)
-        nomes = [el["nome_molde"] for el in canvas.cena.elementos[1:]]
-        self.assertEqual(nomes, ["K1 - M", "K1 - G"])
-        self.assertEqual(canvas._selecionados, {1, 2})
-
-        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(21.0, 2.5))))
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(21.0, 2.5))))
-        self.assertEqual(canvas.historico, 1)
-        self.assertEqual(canvas._selecionados, {1, 2})
 
 
 if __name__ == "__main__":

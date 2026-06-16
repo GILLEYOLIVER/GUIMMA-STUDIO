@@ -6,110 +6,15 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QCheckBox, QDialog, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
-from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
-
-
-class SepararTamanhosDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("SepararTamanhosDialog")
-        self.setWindowTitle("Separar tamanhos do molde")
-        self.setWindowFlags(Qt.Tool)
-        self.setFixedWidth(260)
-        self._checks_tamanhos: dict[str, QCheckBox] = {}
-
-        raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 8)
-        raiz.setSpacing(6)
-
-        titulo = QLabel("Separar tamanhos do molde")
-        titulo.setObjectName("titulo")
-        raiz.addWidget(titulo)
-
-        self.chk_todos = QCheckBox("Separar todos os tamanhos")
-        self.chk_todos.setChecked(True)
-        self.chk_todos.toggled.connect(self._atualizar_estado_checks)
-        raiz.addWidget(self.chk_todos)
-
-        self.lbl_lista = QLabel("Selecionar tamanho")
-        self.lbl_lista.setObjectName("subtitulo")
-        raiz.addWidget(self.lbl_lista)
-
-        self._lista_widget = QWidget(self)
-        self._lista_layout = QVBoxLayout(self._lista_widget)
-        self._lista_layout.setContentsMargins(0, 0, 0, 0)
-        self._lista_layout.setSpacing(2)
-
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setMaximumHeight(150)
-        scroll.setWidget(self._lista_widget)
-        raiz.addWidget(scroll)
-
-        self.setStyleSheet(
-            """
-            QDialog#SepararTamanhosDialog { background:#f2f2f2; }
-            QLabel { color:#222; font-size:11px; }
-            QLabel#titulo { color:#777; }
-            QLabel#subtitulo { font-weight:600; margin-top:2px; }
-            QCheckBox { color:#222; font-size:11px; spacing:5px; }
-            QScrollArea { background:transparent; }
-            """
-        )
-
-    def set_tamanhos(self, nomes: list[str]) -> None:
-        nomes_validos = [str(nome).strip() for nome in nomes if str(nome).strip()]
-        existentes = set(self._checks_tamanhos)
-        novos = set(nomes_validos)
-        if existentes == novos and list(self._checks_tamanhos) == nomes_validos:
-            self._atualizar_estado_checks()
-            return
-
-        selecionados = {
-            nome
-            for nome, check in self._checks_tamanhos.items()
-            if check.isChecked()
-        }
-        while self._lista_layout.count():
-            item = self._lista_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._checks_tamanhos.clear()
-
-        for nome in nomes_validos:
-            check = QCheckBox(nome)
-            check.setChecked(nome in selecionados or not selecionados)
-            self._lista_layout.addWidget(check)
-            self._checks_tamanhos[nome] = check
-        self._lista_layout.addStretch(1)
-        self._atualizar_estado_checks()
-
-    def separar_todos(self) -> bool:
-        return bool(self.chk_todos.isChecked())
-
-    def tamanhos_selecionados(self) -> list[str]:
-        if self.separar_todos():
-            return list(self._checks_tamanhos)
-        return [nome for nome, check in self._checks_tamanhos.items() if check.isChecked()]
-
-    def _atualizar_estado_checks(self) -> None:
-        habilitar = not self.separar_todos()
-        self.lbl_lista.setEnabled(habilitar)
-        for check in self._checks_tamanhos.values():
-            check.setEnabled(habilitar)
 
 
 class Ferramenta(FerramentaBase):
     id_ferramenta = "separar"
     nome = "Separar"
-    _dialog_global: SepararTamanhosDialog | None = None
     descricao_painel = "Destaca um tamanho graduado e cria uma cópia separada do molde."
 
     def __init__(self):
@@ -117,49 +22,38 @@ class Ferramenta(FerramentaBase):
         self._hover: dict | None = None
         self._hover_pos: QPointF | None = None
         self._arrastando_idx: int | None = None
-        self._arrastando_indices: list[int] = []
         self._ultimo_pos_arrasto: QPointF | None = None
         self._origem_arrasto: QPointF | None = None
         self._guia_angular: tuple[QPointF, QPointF, float] | None = None
-        self._dialog: SepararTamanhosDialog | None = type(self)._dialog_global
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._hover = None
         self._hover_pos = None
         self._arrastando_idx = None
-        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
-        self._abrir_dialogo(canvas)
         self._status(canvas, "Separar Tamanhos: passe sobre um tamanho e clique para retirar uma cópia.")
         if hasattr(canvas, "update"):
             canvas.update()
 
     def on_deactivate(self, canvas):
-        if self._dialog is not None:
-            self._dialog.hide()
         self._hover = None
         self._hover_pos = None
         self._arrastando_idx = None
-        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
         if hasattr(canvas, "update"):
             canvas.update()
 
-    def on_canvas_resize(self, canvas) -> None:
-        self._reposicionar_dialogo(canvas)
-
     def on_mouse_move(self, canvas, event) -> bool:
         pos = self._pos_cena(canvas, event.position())
-        if self._arrastando_indices:
+        if self._arrastando_idx is not None:
             self._arrastar_copia(canvas, pos)
             event.accept()
             return True
-        self._atualizar_dialogo_tamanhos(canvas)
         self._hover = self._candidato_em_posicao(canvas, pos)
         self._hover_pos = QPointF(pos) if self._hover is not None else None
         if hasattr(canvas, "update"):
@@ -169,7 +63,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = self._pos_cena(canvas, event.position())
-        if self._arrastando_indices:
+        if self._arrastando_idx is not None:
             if event.button() == Qt.LeftButton:
                 self._finalizar_arraste(canvas)
                 event.accept()
@@ -187,35 +81,26 @@ class Ferramenta(FerramentaBase):
             self._status(canvas, "Separar Tamanhos: clique sobre uma linha de tamanho graduado.")
             event.accept()
             return True
-        candidatos = self._candidatos_para_separacao(canvas, candidato)
-        indices: list[int] = []
-        for item in candidatos:
-            idx = self._criar_copia_tamanho(canvas, item)
-            if idx is not None:
-                indices.append(idx)
-        if not indices:
+        idx = self._criar_copia_tamanho(canvas, candidato)
+        if idx is None:
             self._status(canvas, "Separar Tamanhos: não foi possível criar a cópia desse tamanho.")
             event.accept()
             return True
         self._hover = None
         self._hover_pos = None
-        self._arrastando_indices = indices
-        self._arrastando_idx = indices[-1]
+        self._arrastando_idx = idx
         self._ultimo_pos_arrasto = QPointF(pos)
         self._origem_arrasto = QPointF(pos)
         self._guia_angular = None
-        canvas._selecionados = set(indices)
-        if len(indices) == 1:
-            self._status(canvas, "Tamanho em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
-        else:
-            self._status(canvas, "Tamanhos em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
+        canvas._selecionados = {idx}
+        self._status(canvas, "Tamanho em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
         canvas.update()
         event.accept()
         return True
 
     def on_key_press(self, canvas, event) -> bool:
         if event.key() == Qt.Key_Escape:
-            if self._arrastando_indices:
+            if self._arrastando_idx is not None:
                 self._cancelar_arraste(canvas)
             else:
                 self._hover = None
@@ -249,67 +134,6 @@ class Ferramenta(FerramentaBase):
             painter.drawText(destino_tela + QPointF(4.0, -4.0), f"{angulo:g}°")
             painter.restore()
 
-    def _abrir_dialogo(self, canvas) -> None:
-        cls = type(self)
-        if cls._dialog_global is None:
-            cls._dialog_global = SepararTamanhosDialog(canvas)
-            instalar_memoria_posicao(cls._dialog_global, "dialog:separar_tamanhos")
-        self._dialog = cls._dialog_global
-        if self._dialog.parentWidget() is not canvas:
-            self._dialog.setParent(canvas)
-        self._atualizar_dialogo_tamanhos(canvas)
-        if not self._dialog.isVisible():
-            self._dialog.show()
-        self._reposicionar_dialogo(canvas)
-
-    def _reposicionar_dialogo(self, canvas) -> None:
-        if self._dialog is None:
-            return
-        fallback = None
-        if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
-            pos = canvas.calcular_posicao_painel_auxiliar(self._dialog.width(), self._dialog.height(), abaixo_coordenadas=True)
-            fallback = canvas.mapToGlobal(pos)
-        elif hasattr(canvas, "mapToGlobal"):
-            fallback = canvas.mapToGlobal(QPointF(12.0, 12.0).toPoint())
-        restaurar_posicao(self._dialog, "dialog:separar_tamanhos", fallback=fallback)
-
-    def _atualizar_dialogo_tamanhos(self, canvas) -> None:
-        if self._dialog is None:
-            return
-        self._dialog.set_tamanhos(self._nomes_tamanhos_canvas(canvas))
-
-    def _nomes_tamanhos_canvas(self, canvas) -> list[str]:
-        nomes: list[str] = []
-        vistos: set[str] = set()
-        for molde in getattr(canvas.cena, "elementos", []) or []:
-            if not isinstance(molde, dict) or not molde.get("molde"):
-                continue
-            for linha in self._linhas_tamanhos(molde):
-                nome = self._nome_tamanho(linha)
-                if nome and nome not in vistos:
-                    nomes.append(nome)
-                    vistos.add(nome)
-        return nomes
-
-    def _filtro_tamanhos_dialogo(self) -> set[str] | None:
-        if self._dialog is None or self._dialog.separar_todos():
-            return None
-        return {nome for nome in self._dialog.tamanhos_selecionados() if nome}
-
-    def _candidatos_para_separacao(self, canvas, candidato: dict) -> list[dict]:
-        molde_idx = int(candidato.get("molde_idx", -1))
-        candidatos = [
-            item
-            for item in self._candidatos_tamanhos(canvas)
-            if int(item.get("molde_idx", -2)) == molde_idx
-        ]
-        if self._dialog is not None and self._dialog.separar_todos():
-            return candidatos
-        selecionados = self._filtro_tamanhos_dialogo()
-        if selecionados:
-            return [item for item in candidatos if str(item.get("nome_tamanho") or "") in selecionados]
-        return [candidato]
-
     def _candidato_em_posicao(self, canvas, pos: QPointF) -> dict | None:
         melhor: tuple[float, dict] | None = None
         tolerancia = max(0.18, 14.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001))
@@ -321,7 +145,6 @@ class Ferramenta(FerramentaBase):
 
     def _candidatos_tamanhos(self, canvas) -> list[dict]:
         candidatos: list[dict] = []
-        filtro = self._filtro_tamanhos_dialogo()
         for idx, molde in enumerate(getattr(canvas.cena, "elementos", []) or []):
             if not isinstance(molde, dict) or not molde.get("molde"):
                 continue
@@ -332,10 +155,6 @@ class Ferramenta(FerramentaBase):
             auxiliares_base = self._auxiliares_base_molde(molde)
             linhas = self._linhas_tamanhos(molde)
             base_linha = self._linha_base(linhas)
-            if base_linha is not None:
-                nome_base = self._nome_tamanho(base_linha)
-                if filtro is not None and nome_base not in filtro:
-                    base_linha = None
             if base_linha is not None:
                 candidatos.append(
                     {
@@ -348,8 +167,6 @@ class Ferramenta(FerramentaBase):
                     }
                 )
             for nome, cor, pontos in VisualizacaoCanvas._contornos_graduacao_tabela(molde, base):
-                if filtro is not None and str(nome) not in filtro:
-                    continue
                 pontos_tamanho = [QPointF(p) for p in pontos]
                 candidatos.append(
                     {
@@ -410,8 +227,7 @@ class Ferramenta(FerramentaBase):
         return len(canvas.cena.elementos) - 1
 
     def _arrastar_copia(self, canvas, pos: QPointF) -> None:
-        indices = [idx for idx in self._arrastando_indices if 0 <= idx < len(canvas.cena.elementos)]
-        if not indices:
+        if self._arrastando_idx is None or not (0 <= self._arrastando_idx < len(canvas.cena.elementos)):
             return
         pos_restrita = self._posicao_arrasto_com_ima(canvas, pos)
         if self._ultimo_pos_arrasto is None:
@@ -420,8 +236,7 @@ class Ferramenta(FerramentaBase):
         dx = pos_restrita.x() - self._ultimo_pos_arrasto.x()
         dy = pos_restrita.y() - self._ultimo_pos_arrasto.y()
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
-            for idx in indices:
-                mover_elemento_por_delta(canvas.cena.elementos[idx], dx, dy)
+            mover_elemento_por_delta(canvas.cena.elementos[self._arrastando_idx], dx, dy)
             self._ultimo_pos_arrasto = QPointF(pos_restrita)
             canvas.update()
 
@@ -456,7 +271,6 @@ class Ferramenta(FerramentaBase):
 
     def _finalizar_arraste(self, canvas) -> None:
         self._arrastando_idx = None
-        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
@@ -466,12 +280,10 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _cancelar_arraste(self, canvas) -> None:
-        for idx in sorted(self._arrastando_indices, reverse=True):
-            if 0 <= idx < len(canvas.cena.elementos):
-                canvas.cena.elementos.pop(idx)
+        if self._arrastando_idx is not None and 0 <= self._arrastando_idx < len(canvas.cena.elementos):
+            canvas.cena.elementos.pop(self._arrastando_idx)
         canvas._selecionados = set()
         self._arrastando_idx = None
-        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
