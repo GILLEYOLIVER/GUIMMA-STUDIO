@@ -3803,7 +3803,11 @@ class PropriedadesMoldesDialog(QDialog):
             with QSignalBlocker(self.arvore):
                 self.arvore.setCurrentItem(escolhido)
                 selecionados_canvas = getattr(self.canvas, "_selecionados", set())
-                if isinstance(selecionados_canvas, (set, list, tuple)) and selecionados_canvas:
+                if self._tem_preferencia_molde_forcada():
+                    for item in self._iter_items(raiz):
+                        item.setSelected(False)
+                    escolhido.setSelected(True)
+                elif isinstance(selecionados_canvas, (set, list, tuple)) and selecionados_canvas:
                     for item in self._iter_items(raiz):
                         idx_sel = item.data(0, Qt.UserRole)
                         item.setSelected(idx_sel in selecionados_canvas if idx_sel is not None else False)
@@ -4185,10 +4189,61 @@ class PropriedadesMoldesDialog(QDialog):
             refs.append(MoldeRef(indice=idx, nome=str(el.get("nome_molde") or f"K{idx + 1}"), dados=el))
         return refs
 
+    @staticmethod
+    def _valor_texto_identidade(molde: dict, chave: str) -> str:
+        return str(molde.get(chave) or "").strip()
+
+    def _indice_por_identidade_preferida(self, elementos: list, identidade: dict | None) -> int | None:
+        if not isinstance(identidade, dict):
+            return None
+
+        for chave in ("molde_id", "shape_id", "id", "uuid"):
+            valor = str(identidade.get(chave) or "").strip()
+            if not valor:
+                continue
+            for idx, el in enumerate(elementos):
+                if (
+                    isinstance(el, dict)
+                    and el.get("molde")
+                    and self._valor_texto_identidade(el, chave) == valor
+                ):
+                    return int(idx)
+
+        nome = str(identidade.get("nome_molde") or "").strip()
+        if not nome:
+            return None
+        origem = str(identidade.get("origem_extracao") or "").strip()
+        tamanho = str(identidade.get("tamanho_extraido") or "").strip()
+        candidatos: list[int] = []
+        for idx, el in enumerate(elementos):
+            if not isinstance(el, dict) or not el.get("molde"):
+                continue
+            if self._valor_texto_identidade(el, "nome_molde") != nome:
+                continue
+            if origem and self._valor_texto_identidade(el, "origem_extracao") != origem:
+                continue
+            if tamanho and self._valor_texto_identidade(el, "tamanho_extraido") != tamanho:
+                continue
+            candidatos.append(int(idx))
+        return candidatos[0] if len(candidatos) == 1 else None
+
+    def _tem_preferencia_molde_forcada(self) -> bool:
+        identidade = getattr(self.canvas, "_propriedades_molde_identidade_preferida", None)
+        if isinstance(identidade, dict) and any(str(valor or "").strip() for valor in identidade.values()):
+            return True
+        return getattr(self.canvas, "_indice_propriedades_preferido", None) is not None
+
     def _indice_molde_preferencial(self) -> int | None:
         elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return None
+
+        idx_identidade = self._indice_por_identidade_preferida(
+            elementos,
+            getattr(self.canvas, "_propriedades_molde_identidade_preferida", None),
+        )
+        if idx_identidade is not None:
+            return idx_identidade
 
         preferido_forcado = getattr(self.canvas, "_indice_propriedades_preferido", None)
         try:
@@ -5422,6 +5477,8 @@ class Ferramenta(FerramentaBase):
                 canvas._propriedades_tab_preferida = None
             if hasattr(canvas, "_indice_propriedades_preferido"):
                 canvas._indice_propriedades_preferido = None
+            if hasattr(canvas, "_propriedades_molde_identidade_preferida"):
+                canvas._propriedades_molde_identidade_preferida = None
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
             if dialog._indice_atual is None:
                 try:

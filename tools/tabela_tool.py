@@ -1198,6 +1198,21 @@ class Ferramenta(FerramentaBase):
                 return f"{chave}:{valor}"
         return f"obj:{id(molde)}"
 
+    @staticmethod
+    def _identidade_molde_para_propriedades(molde: dict | None) -> dict:
+        if not isinstance(molde, dict):
+            return {}
+        identidade: dict[str, str] = {}
+        for chave in ("molde_id", "shape_id", "id", "uuid"):
+            valor = str(molde.get(chave) or "").strip()
+            if valor:
+                identidade[chave] = valor
+        for chave in ("nome_molde", "origem_extracao", "tamanho_extraido"):
+            valor = str(molde.get(chave) or "").strip()
+            if valor:
+                identidade[chave] = valor
+        return identidade
+
     def _molde_selecionado(self, canvas) -> int | None:
         for idx in sorted(getattr(canvas, "_selecionados", set()) or []):
             if 0 <= int(idx) < len(canvas.cena.elementos) and self._eh_molde_graduavel(canvas.cena.elementos[int(idx)]):
@@ -1438,8 +1453,17 @@ class Ferramenta(FerramentaBase):
         return caixa.exec() == QMessageBox.Yes
 
     def _abrir_propriedades_graduacao(self, canvas, molde_idx: int) -> None:
+        molde = None
+        elementos = getattr(getattr(canvas, "cena", None), "elementos", []) or []
+        if 0 <= int(molde_idx) < len(elementos):
+            candidato = elementos[int(molde_idx)]
+            if isinstance(candidato, dict):
+                molde = candidato
         if hasattr(canvas, "_selecionados"):
             canvas._selecionados = {int(molde_idx)}
+        identidade = self._identidade_molde_para_propriedades(molde)
+        if identidade:
+            setattr(canvas, "_propriedades_molde_identidade_preferida", identidade)
         setattr(canvas, "_indice_propriedades_preferido", int(molde_idx))
         setattr(canvas, "_propriedades_tab_preferida", "graduacao")
         if hasattr(canvas, "update"):

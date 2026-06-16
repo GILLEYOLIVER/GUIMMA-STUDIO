@@ -317,6 +317,82 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
 
         self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 2)
 
+    def test_indice_molde_preferencial_usa_identidade_forcada_antes_da_selecao(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        elementos = [
+            {"molde": True, "nome_molde": "K1", "molde_id": "mae"},
+            {"molde": True, "nome_molde": "K1 - M", "molde_id": "sep-m"},
+            {
+                "molde": True,
+                "nome_molde": "K1 - G",
+                "molde_id": "sep-g",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "G",
+            },
+        ]
+        dialog.canvas = SimpleNamespace(
+            _selecionados={0},
+            _indice_propriedades_preferido=0,
+            _propriedades_molde_identidade_preferida={
+                "molde_id": "sep-g",
+                "nome_molde": "K1 - G",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "G",
+            },
+        )
+        dialog._elementos_edicao = lambda: elementos
+
+        self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 2)
+
+    def test_recarregar_lista_marca_molde_redirecionado_por_identidade(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        elementos = [
+            {"molde": True, "nome_molde": "K1", "tecido": "1", "molde_id": "mae"},
+            {"molde": True, "nome_molde": "K1 - M", "tecido": "1", "molde_id": "sep-m"},
+            {
+                "molde": True,
+                "nome_molde": "K1 - G",
+                "tecido": "1",
+                "molde_id": "sep-g",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "G",
+            },
+        ]
+        preenchidos = []
+        dialog.canvas = SimpleNamespace(
+            _selecionados={0},
+            _indice_propriedades_preferido=0,
+            _propriedades_molde_identidade_preferida={"molde_id": "sep-g"},
+        )
+        dialog.arvore = QTreeWidget()
+        dialog._indice_atual = 0
+        dialog._refs = []
+        dialog._itens_molde_por_indice = {}
+        dialog._combos_tecido_por_item = {}
+        dialog._suspender_item_changed = False
+        dialog._suspender_combo_tecido_arvore = False
+        dialog._elementos_edicao = lambda: elementos
+        dialog._atualizar_conflitos_grade_modelo = lambda: None
+        dialog._tecidos_disponiveis = lambda: []
+        dialog._assinatura_grade_referencia_global = lambda: None
+        dialog._icone_status_molde = lambda *_args, **_kwargs: QIcon()
+        dialog._instalar_combo_tecido_item = lambda *_args, **_kwargs: None
+        dialog._atualizar_combo_moldes = lambda: None
+        dialog._preencher_campos = lambda molde: preenchidos.append(
+            molde.get("nome_molde") if isinstance(molde, dict) else None
+        )
+
+        PropriedadesMoldesDialog.recarregar_lista(dialog)
+
+        selecionados = [
+            idx
+            for idx, item in dialog._itens_molde_por_indice.items()
+            if item.isSelected()
+        ]
+        self.assertEqual(dialog._indice_atual, 2)
+        self.assertEqual(selecionados, [2])
+        self.assertEqual(preenchidos[-1], "K1 - G")
+
     def test_recarregar_lista_prioriza_molde_selecionado_no_canvas(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         elementos = [
