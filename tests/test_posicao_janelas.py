@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from importlib.util import find_spec
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -19,6 +20,8 @@ else:
     from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
     from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
+    from tools.dialog_position_patch import aplicar_patch_posicao_dialogos
+    from ui.janela_principal import GuimmaStudioMainWindow
     from ui.posicao_janelas import _FiltroMemoriaPosicao, _grupo, _grupo_estado, ajustar_para_area, instalar_memoria_posicao, restaurar_posicao, salvar_posicao
 
 
@@ -71,7 +74,7 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
 
-    def test_restaurar_posicao_dialogo_ignora_salvo_ate_usuario_mover(self):
+    def test_restaurar_posicao_dialogo_com_fallback_ignora_salvo_mesmo_apos_mover(self):
         chave = "teste:dialogo_fallback_ate_mover"
         cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
         cfg.remove(_grupo(chave))
@@ -90,8 +93,8 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         self.assertEqual(dialog.pos(), QPoint(40, 50))
 
         dialog._guimma_posicao_movida_usuario = True
-        self.assertTrue(restaurar_posicao(dialog, chave, fallback=QPoint(60, 70)))
-        self.assertEqual(dialog.pos(), QPoint(300, 260))
+        self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(60, 70)))
+        self.assertEqual(dialog.pos(), QPoint(60, 70))
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
 
@@ -112,6 +115,26 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         QApplication.processEvents()
 
         self.assertEqual(dialog.pos(), QPoint(25, 35))
+        dialog.close()
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+
+    def test_patch_global_show_respeita_fallback_da_ferramenta(self):
+        aplicar_patch_posicao_dialogos()
+        chave = "teste:dialogo_patch_fallback"
+        cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+        dialog = QDialog()
+        dialog.resize(160, 100)
+        instalar_memoria_posicao(dialog, chave)
+
+        self.assertFalse(restaurar_posicao(dialog, chave, fallback=QPoint(45, 55)))
+        dialog.move(QPoint(300, 260))
+        dialog.show()
+        QApplication.processEvents()
+
+        self.assertEqual(dialog.pos(), QPoint(45, 55))
         dialog.close()
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
@@ -150,6 +173,23 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         self.assertGreaterEqual(pos.y(), area.top())
         self.assertLessEqual(pos.x() + dialog.width(), area.right() + 1)
         self.assertLessEqual(pos.y() + dialog.height(), area.bottom() + 1)
+
+    def test_caixa_auxiliar_ferramenta_ignora_posicao_salva_no_meio(self):
+        canvas = QWidget()
+        canvas.resize(1000, 700)
+        canvas.calcular_posicao_painel_auxiliar = lambda largura, altura, abaixo_coordenadas=True: QPoint(700, 90)  # type: ignore[attr-defined]
+        fake_main = SimpleNamespace(
+            _posicoes_caixas_aux={"curva": (300, 260)},
+            _area_documento_atual=lambda: SimpleNamespace(canvas=canvas),
+        )
+        dialog = QDialog(canvas)
+        dialog.resize(220, 120)
+        dialog._guimma_posicao_movida_usuario = True  # type: ignore[attr-defined]
+
+        GuimmaStudioMainWindow._restaurar_posicao_caixa_aux(fake_main, dialog, "curva")
+
+        self.assertEqual(dialog.pos(), canvas.mapToGlobal(QPoint(700, 90)))
+        self.assertFalse(getattr(dialog, "_guimma_posicao_movida_usuario", True))
 
 
 if __name__ == "__main__":

@@ -84,21 +84,28 @@ class DobrarToolTestCase(unittest.TestCase):
 
     def test_manter_dimensoes_inicia_marcado(self):
         dialog = DobrarDialog()
-        self.assertTrue(dialog.chk_manter_dimensoes.isChecked())
-        self.assertEqual(dialog.chk_manter_dimensoes.text(), "Preservar original para desdobrar")
-        self.assertEqual([dialog.cmb_modo.itemText(i) for i in range(dialog.cmb_modo.count())], ["Horizontal", "Vertical", "Elemento", "Linha"])
+        self.assertFalse(dialog.chk_manter_dimensoes.isChecked())
+        self.assertEqual(dialog.chk_manter_dimensoes.text(), "Manter dobra")
+        self.assertEqual([dialog.cmb_modo.itemText(i) for i in range(dialog.cmb_modo.count())], ["Horizontal", "Vertical", "Elemento"])
+        self.assertFalse(dialog.cmb_acao.isVisible())
+        self.assertFalse(dialog.chk_mostrar_original.isVisible())
         self.assertFalse(dialog.chk_fio_meio.isChecked())
         dialog.deleteLater()
 
     def test_desdobrar_dialog_fluxo_padrao(self):
         dialog = DesdobrarDialog()
         self.assertTrue(dialog.chk_automatico.isChecked())
-        self.assertTrue(dialog.chk_copiar_contorno_dobrado.isChecked())
+        self.assertEqual(dialog.chk_automatico.text(), "Apenas desdobrar")
+        self.assertFalse(dialog.chk_copiar_contorno_dobrado.isChecked())
         self.assertTrue(dialog.chk_fio_meio.isChecked())
         self.assertTrue(hasattr(dialog, "chk_inserir_pique"))
         self.assertFalse(dialog.chk_inserir_pique.isChecked())
         self.assertGreaterEqual(dialog.minimumWidth(), 390)
-        self.assertEqual(dialog.chk_copiar_contorno_dobrado.text(), "Espelhar lado visível e deixar os lados idênticos")
+        self.assertEqual(dialog.chk_copiar_contorno_dobrado.text(), "Desdobrar copiando")
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
+        self.assertFalse(dialog.chk_automatico.isChecked())
+        dialog.chk_automatico.setChecked(True)
+        self.assertFalse(dialog.chk_copiar_contorno_dobrado.isChecked())
         dialog.deleteLater()
 
     def test_desdobrar_curva_do_perimetro_usa_eixo_reto_e_lados_identicos(self):
@@ -119,7 +126,7 @@ class DobrarToolTestCase(unittest.TestCase):
         )
         ferramenta = FerramentaDesdobrar()
         dialog = DesdobrarDialog(canvas)
-        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
         ferramenta._dialog_por_canvas[id(canvas)] = dialog
 
         linha = ferramenta._linha_do_proprio_molde_em_ponto(canvas, 0, QPointF(4.0, 2.0))
@@ -183,7 +190,7 @@ class DobrarToolTestCase(unittest.TestCase):
         canvas = _FakeCanvas()
         ferramenta = FerramentaDesdobrar()
         dialog = DesdobrarDialog(canvas)
-        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
         ferramenta._dialog_por_canvas[id(canvas)] = dialog
         molde = canvas.cena.elementos[0]
         pontos_originais = list(molde["pontos"])
@@ -245,10 +252,158 @@ class DobrarToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 0)
         dialog.deleteLater()
 
+    def test_desdobrar_apenas_restaura_dobra_mantida_sem_copiar_lado(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        molde = canvas.cena.elementos[0]
+        molde["pontos"] = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]
+        original_assimetrico = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (-6.0, 4.0), (0.0, 0.0)]
+        molde["contornos_dobra_original"] = [
+            {
+                "pontos": original_assimetrico,
+                "contorno_dobrado": list(molde["pontos"]),
+                "eixo": {"tipo": "v", "valor": 0.0},
+            }
+        ]
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 5.0)], "origem_desdobrar": "dobra_original"}
+
+        ferramenta._aplicar_desdobrar(canvas, 0, linha)
+
+        pontos = {(round(x, 6), round(y, 6)) for x, y in molde["pontos"]}
+        self.assertIn((-6.0, 4.0), pontos)
+        self.assertNotIn((-10.0, 5.0), pontos)
+        self.assertEqual(molde["metadados"]["ultima_transformacao"], "desdobrar_original")
+        self.assertEqual(canvas.historico, 1)
+        dialog.deleteLater()
+
+    def test_preview_desdobrar_apenas_mostra_resultado_restaurado(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        molde = canvas.cena.elementos[0]
+        molde["pontos"] = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]
+        molde["contornos_dobra_original"] = [
+            {
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (-6.0, 4.0), (0.0, 0.0)],
+                "contorno_dobrado": list(molde["pontos"]),
+                "eixo": {"tipo": "v", "valor": 0.0},
+            }
+        ]
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 5.0)], "origem_desdobrar": "dobra_original"}
+
+        preview = ferramenta._preview_desdobrar(canvas, 0, linha)
+        pontos = {(round(p.x(), 6), round(p.y(), 6)) for p in preview}
+
+        self.assertIn((-6.0, 4.0), pontos)
+        self.assertNotIn((-10.0, 5.0), pontos)
+        dialog.deleteLater()
+
+    def test_desdobrar_copiando_ignora_original_salvo_e_espelha_lado_visivel(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        molde = canvas.cena.elementos[0]
+        molde["pontos"] = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]
+        molde["contornos_dobra_original"] = [
+            {
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (-6.0, 4.0), (0.0, 0.0)],
+                "contorno_dobrado": list(molde["pontos"]),
+                "eixo": {"tipo": "v", "valor": 0.0},
+            }
+        ]
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 5.0)], "origem_desdobrar": "dobra_original"}
+
+        ferramenta._aplicar_desdobrar(canvas, 0, linha)
+
+        pontos = {(round(x, 6), round(y, 6)) for x, y in molde["pontos"]}
+        self.assertIn((-10.0, 5.0), pontos)
+        self.assertNotIn((-6.0, 4.0), pontos)
+        self.assertEqual(molde["metadados"]["ultima_transformacao"], "desdobrar")
+        self.assertEqual(canvas.historico, 1)
+        dialog.deleteLater()
+
+    def test_desdobrar_copiando_espelha_graduacao_do_lado_visivel(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        molde = canvas.cena.elementos[0]
+        molde.update(
+            {
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True},
+                    {"ativo": True, "tamanho": "G", "base": False},
+                ],
+                "graduacao_tabela": {
+                    "modo": "dx_dy",
+                    "pontos": {
+                        "0": {
+                            "indice": 2,
+                            "numero": 3,
+                            "ponto": (10.0, 5.0),
+                            "valores": {"G": {"dx": 2.0, "dy": 1.0}},
+                        }
+                    },
+                },
+            }
+        )
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 5.0)], "origem_desdobrar": "manual"}
+
+        ferramenta._aplicar_desdobrar(canvas, 0, linha)
+
+        pontos_cfg = molde["graduacao_tabela"]["pontos"]
+        pontos = {chave: cfg["ponto"] for chave, cfg in pontos_cfg.items()}
+        self.assertIn((10.0, 5.0), pontos.values())
+        self.assertIn((-10.0, 5.0), pontos.values())
+        espelhado = next(cfg for cfg in pontos_cfg.values() if cfg["ponto"] == (-10.0, 5.0))
+        self.assertEqual(espelhado["valores"]["G"], {"dx": -2.0, "dy": 1.0})
+        self.assertEqual(molde["graduacao_pontos"], pontos_cfg)
+        self.assertTrue(molde["mostrar_graduacao"])
+        dialog.deleteLater()
+
+    def test_desdobrar_apenas_sem_dobra_mantida_nao_copia(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        molde = canvas.cena.elementos[0]
+        pontos_antes = list(molde["pontos"])
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 8.0)], "origem_desdobrar": "manual"}
+
+        ferramenta._aplicar_desdobrar(canvas, 0, linha)
+
+        self.assertEqual(molde["pontos"], pontos_antes)
+        self.assertEqual(canvas.historico, 0)
+        dialog.deleteLater()
+
+    def test_preview_desdobrar_apenas_sem_dobra_mantida_nao_mostra_copia(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaDesdobrar()
+        dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(False)
+        ferramenta._dialog_por_canvas[id(canvas)] = dialog
+        linha = {"tipo": "polyline", "pontos": [(0.0, 0.0), (0.0, 8.0)], "origem_desdobrar": "manual"}
+
+        preview = ferramenta._preview_desdobrar(canvas, 0, linha)
+
+        self.assertEqual(preview, [])
+        dialog.deleteLater()
+
     def test_desdobrar_limpa_sombra_estado_e_auxiliares_da_dobra(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaDesdobrar()
         dialog = DesdobrarDialog(canvas)
+        dialog.chk_copiar_contorno_dobrado.setChecked(True)
         ferramenta._dialog_por_canvas[id(canvas)] = dialog
         molde = canvas.cena.elementos[0]
         molde.update(
@@ -374,6 +529,32 @@ class DobrarToolTestCase(unittest.TestCase):
         self.assertTrue(all(p.y() <= 1e-6 for p in resultado))
         self.assertEqual(resultado[0], resultado[-1])
 
+    def test_dobrar_preserva_avanco_do_lado_dobrado(self):
+        ferramenta = FerramentaDobrar()
+        pontos = [
+            QPointF(-12.0, -4.0),
+            QPointF(3.0, -4.0),
+            QPointF(3.0, 4.0),
+            QPointF(-8.0, 4.0),
+            QPointF(-12.0, -4.0),
+        ]
+
+        resultado = ferramenta._pontos_dobrados_preview(pontos, ("v", 0.0), 1, fechado=True)
+        xs = [p.x() for p in resultado]
+
+        self.assertEqual(resultado[0], resultado[-1])
+        self.assertGreaterEqual(max(xs), 12.0 - 1e-6)
+        self.assertTrue(all(x >= -1e-6 for x in xs))
+
+    def test_dobrar_normalizacao_nao_encaixa_detalhe_real(self):
+        ferramenta = FerramentaDobrar()
+        pontos = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 4.0), QPointF(0.2, 4.0)]
+        referencias = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 4.0), QPointF(0.0, 4.0)]
+
+        normalizado = ferramenta._normalizar_vertices_dobra(pontos, referencias)
+
+        self.assertTrue(any(abs(p.x() - 0.2) <= 1e-6 and abs(p.y() - 4.0) <= 1e-6 for p in normalizado))
+
     def test_dobrar_modo_elemento_usa_linha_interna_como_eixo(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos.append(
@@ -448,8 +629,8 @@ class DobrarToolTestCase(unittest.TestCase):
         ferramenta._dobrar_elemento(molde, ("v", 0.0), 1)
 
         self.assertLess(len(molde["controle_cantos"]), total_amostras)
-        self.assertLessEqual(len(molde["controle_cantos"]), 2)
-        self.assertLessEqual(len(molde["pontos_controle_referencia"]), 2)
+        self.assertLessEqual(len(molde["controle_cantos"]), 4)
+        self.assertLessEqual(len(molde["pontos_controle_referencia"]), 4)
 
     def test_manipular_pontos_edita_contorno_pontilhado_da_dobra(self):
         canvas = _FakeCanvas()

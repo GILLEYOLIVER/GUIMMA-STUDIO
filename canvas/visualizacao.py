@@ -2909,7 +2909,7 @@ class VisualizacaoCanvas(QWidget):
             # A referência pontilhada acompanha o lado dobrado do papel.
             # Ela NÃO representa mais o molde aberto antigo; representa onde o lado ficou após dobrar.
             # O eixo azul continua sendo apenas guia operacional de Dobrar/Desdobrar.
-            if self._deve_desenhar_contorno_dobra_original(el):
+            if self._deve_desenhar_contorno_dobra_original(el) and not self._dobra_original_congelada_por_ferramenta(idx):
                 self._desenhar_contorno_dobra_original(painter, el)
             if self._deve_desenhar_eixo_dobra_salvo():
                 self._desenhar_eixo_dobra_salvo(painter, el)
@@ -3979,6 +3979,15 @@ class VisualizacaoCanvas(QWidget):
         if c_atual is None or c_ref is None:
             return QPointF(0.0, 0.0)
         return QPointF(c_atual.x() - c_ref.x(), c_atual.y() - c_ref.y())
+
+    def _dobra_original_congelada_por_ferramenta(self, idx: int) -> bool:
+        ferramenta = getattr(self, "_runtime_tool", None)
+        if ferramenta is None or not hasattr(ferramenta, "indices_moldes_com_original_congelado"):
+            return False
+        try:
+            return int(idx) in set(ferramenta.indices_moldes_com_original_congelado() or set())
+        except Exception:
+            return False
 
     def _aplicar_offset_pontos(self, pontos: list[QPointF], offset: QPointF) -> list[QPointF]:
         if abs(offset.x()) <= 1e-9 and abs(offset.y()) <= 1e-9:

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
+from tools.graduacao_snap_utils import ponto_base_para_snap_graduacao
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -581,7 +582,7 @@ class Ferramenta(FerramentaBase):
 
     def _posicao_cena(self, canvas, event) -> QPointF:
         try:
-            return canvas._ponto_com_snap(event.position())
+            return ponto_base_para_snap_graduacao(canvas, canvas._ponto_com_snap(event.position()))
         except Exception:
             if hasattr(canvas, "_tela_para_cena"):
                 return canvas._tela_para_cena(event.position())

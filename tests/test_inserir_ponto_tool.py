@@ -17,6 +17,7 @@ else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from canvas.snap import SnapResult
     from tools.inserir_ponto_tool import Ferramenta as FerramentaInserirPonto
 
 _BaseWidget = QWidget if QWidget is not None else object
@@ -48,6 +49,7 @@ class _FakeCanvas(_BaseWidget):
         self._selecionados = set()
         self.historico = 0
         self.atualizou = False
+        self._snap_resultado = None
         self.cena = SimpleNamespace(
             elementos=[
                 {
@@ -272,6 +274,46 @@ class InserirPontoToolTestCase(unittest.TestCase):
         self.assertEqual(pontos_cfg["2"]["ponto"], (10.0, 0.0))
         self.assertEqual(pontos_cfg["2"]["valores"]["G"], {"dx": 0.0, "dy": 4.0})
         self.assertEqual(canvas.cena.elementos[0]["graduacao_pontos"]["1"]["valores"]["G"]["dy"], 3.0)
+
+    def test_inserir_em_borda_graduada_usa_posicao_base_do_molde(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados = {0}
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+                "controle_auxiliares": [(10.0, 2.5)],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 10.0, "y": 5.0},
+                ],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True},
+                    {"ativo": True, "tamanho": "G", "base": False},
+                ],
+                "graduacao_tabela": {
+                    "modo": "dx_dy",
+                    "pontos": {
+                        "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "1": {"indice": 1, "ponto": (10.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "2": {"indice": 2, "ponto": (10.0, 5.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                    },
+                },
+            }
+        )
+        canvas.cena.elementos[0]["graduacao_pontos"] = canvas.cena.elementos[0]["graduacao_tabela"]["pontos"].copy()
+        canvas._snap_resultado = SnapResult(QPointF(5.0, 2.0), "borda graduação", 0.0, 0)
+
+        ferramenta = FerramentaInserirPonto()
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertNotIn((5.0, 2.0), molde["controle_cantos"])
+        pontos_cfg = molde["graduacao_tabela"]["pontos"]
+        self.assertEqual(pontos_cfg["1"]["ponto"], (5.0, 0.0))
+        self.assertAlmostEqual(pontos_cfg["1"]["valores"]["G"]["dy"], 2.0)
 
     def test_inserir_principal_em_curva_garante_tres_auxiliares_por_trecho(self):
         canvas = _FakeCanvas()

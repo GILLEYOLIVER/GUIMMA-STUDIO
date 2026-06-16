@@ -48,18 +48,23 @@ class DobrarDialog(QDialog):
 
         form = QFormLayout()
         self.cmb_modo = QComboBox()
-        self.cmb_modo.addItems(["Horizontal", "Vertical", "Elemento", "Linha"])
+        self.cmb_modo.addItems(["Horizontal", "Vertical", "Elemento"])
         form.addRow("Modo da dobra", self.cmb_modo)
         self.cmb_acao = QComboBox()
         self.cmb_acao.addItems(["Dobrar", "Conferir lados"])
+        self.cmb_acao.hide()
         form.addRow("Ação", self.cmb_acao)
+        label_acao = form.labelForField(self.cmb_acao)
+        if label_acao is not None:
+            label_acao.hide()
         raiz.addLayout(form)
 
-        self.chk_manter_dimensoes = QCheckBox("Preservar original para desdobrar")
-        self.chk_manter_dimensoes.setChecked(True)
+        self.chk_manter_dimensoes = QCheckBox("Manter dobra")
+        self.chk_manter_dimensoes.setChecked(False)
         raiz.addWidget(self.chk_manter_dimensoes)
         self.chk_mostrar_original = QCheckBox("Mostrar lado original oculto")
         self.chk_mostrar_original.setChecked(True)
+        self.chk_mostrar_original.hide()
         raiz.addWidget(self.chk_mostrar_original)
         self.chk_fio_meio = QCheckBox("Sentido do fio no meio do molde")
         self.chk_fio_meio.setChecked(False)
@@ -420,7 +425,8 @@ class Ferramenta(FerramentaBase):
         self._resetar_referencias()
         self._lado_preview = 0
         canvas.update()
-        self._status(canvas, f"Dobra aplicada em {afetados} molde(s). Original preservado para abrir/conferir; duplo direito finaliza.")
+        detalhe = "Dobra mantida para desdobrar sem copiar" if preservar_original else "Dobra aplicada sem guardar o lado original"
+        self._status(canvas, f"Dobra aplicada em {afetados} molde(s). {detalhe}; duplo direito finaliza.")
 
     def _obter_dialog(self, canvas) -> DobrarDialog:
         chave = id(canvas)
@@ -996,9 +1002,19 @@ class Ferramenta(FerramentaBase):
             ]
 
         base = pontos[:-1] if self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)
-        visivel = self._recortar_poligono_lado(base, eixo, int(lado_destino))
+        lado_destino = int(lado_destino)
+        lado_movido = -lado_destino
+        fixo = self._recortar_poligono_lado(base, eixo, lado_destino)
+        movido = self._recortar_poligono_lado(base, eixo, lado_movido)
+        movido_dobrado = [self._espelhar_ponto(p, eixo) for p in movido]
         referencias = [QPointF(p) for p in base]
-        unidos = self._normalizar_vertices_dobra(visivel, referencias)
+        referencias.extend(self._espelhar_ponto(p, eixo) for p in base)
+        if len(fixo) >= 3 and len(movido_dobrado) >= 3:
+            unidos = self._unir_poligonos(fixo, movido_dobrado, referencias)
+        elif len(fixo) >= 3:
+            unidos = self._normalizar_vertices_dobra(fixo, referencias)
+        else:
+            unidos = self._normalizar_vertices_dobra(movido_dobrado, referencias)
         if len(unidos) >= 3 and not self._pontos_mesmos(unidos[0], unidos[-1]):
             unidos.append(QPointF(unidos[0]))
         return unidos
@@ -1094,9 +1110,8 @@ class Ferramenta(FerramentaBase):
         xs = [p.x() for p in pontos]
         ys = [p.y() for p in pontos]
         diag = sqrt((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2)
-        # Em centímetros de cena, fica pequeno o bastante para não apagar detalhes
-        # reais, mas suficiente para eliminar o pequeno canto da união da dobra.
-        return max(0.08, min(2.0, diag * 0.035))
+        # A dobra precisa ser rigida; esta folga cobre apenas ruido numerico.
+        return max(1e-7, min(0.01, diag * 1e-6))
 
     def _referencia_mais_proxima(self, ponto: QPointF, referencias: list[QPointF]) -> QPointF | None:
         melhor = None

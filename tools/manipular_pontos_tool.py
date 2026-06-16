@@ -632,6 +632,8 @@ class Ferramenta(FerramentaBase):
         return True
 
     def _finalizar_arraste(self, canvas, event) -> None:
+        ocultar_dobra_visual = self._arrastando_ponto_poly is not None or self._arrastando_controle_molde is not None
+        indices_manipulados = self._indices_ignorados_snap_arraste() if ocultar_dobra_visual else set()
         destino_final = self.posicao_coordenadas_atual(canvas)
         self._arrastando_ponto_poly = None
         self._arrastando_controle_molde = None
@@ -654,6 +656,8 @@ class Ferramenta(FerramentaBase):
                 canvas.definir_origem_preview_coordenadas(destino_final)
                 if hasattr(canvas, "painel_coordenadas"):
                     canvas.painel_coordenadas.atualizar_preview(destino_final, destino_final)
+        if ocultar_dobra_visual:
+            self._ocultar_dobra_original_visual(canvas, indices_manipulados)
         canvas._registrar_historico()
         canvas.update()
         event.accept()
@@ -1446,6 +1450,21 @@ class Ferramenta(FerramentaBase):
                 except Exception:
                     continue
         return indices
+
+    def indices_moldes_com_original_congelado(self) -> set[int]:
+        if self._arrastando_ponto_poly is None and self._arrastando_controle_molde is None:
+            return set()
+        return self._indices_ignorados_snap_arraste()
+
+    def _ocultar_dobra_original_visual(self, canvas, indices: set[int]) -> None:
+        for idx in indices:
+            if not (0 <= int(idx) < len(canvas.cena.elementos)):
+                continue
+            el = canvas.cena.elementos[int(idx)]
+            if not isinstance(el, dict) or not self._molde_dobra_ativa(el):
+                continue
+            if el.get("contornos_dobra_original") or el.get("estado_dobra"):
+                el["mostrar_contorno_dobra_original"] = False
 
     def _elementos_sombra_snap_arraste(self) -> dict:
         for estado in (self._estado_arraste_controle, self._estado_arraste_ponto, self._estado_arraste_dobra):

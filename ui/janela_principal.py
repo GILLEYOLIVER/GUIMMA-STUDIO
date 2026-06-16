@@ -1902,29 +1902,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             y = gy + 16
             pos_padrao = QPoint(max(min_x, min(x, max_x)), max(min_y, min(y, max_y)))
 
-        if not getattr(janela, "_guimma_posicao_movida_usuario", False):
-            destino = QPoint(
-                max(min_x, min(pos_padrao.x(), max_x)),
-                max(min_y, min(pos_padrao.y(), max_y)),
-            )
-            janela._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
-            janela.move(destino)
-            janela._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
-            return
-
-        pos = self._posicoes_caixas_aux.get(chave)
-        if pos:
-            x = max(min_x, min(pos[0], max_x))
-            y = max(min_y, min(pos[1], max_y))
-            janela.move(x, y)
-            return
-
         destino = QPoint(
             max(min_x, min(pos_padrao.x(), max_x)),
             max(min_y, min(pos_padrao.y(), max_y)),
         )
         janela._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
         janela.move(destino)
+        janela._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
+        janela._guimma_posicao_movida_usuario = False  # type: ignore[attr-defined]
 
     def _memorizar_posicao_caixa_aux(self, janela: QDialog, chave: str):
         self._posicoes_caixas_aux[chave] = (janela.x(), janela.y())

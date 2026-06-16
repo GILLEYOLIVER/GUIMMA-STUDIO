@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QDialog
 
 from tools.dialog_position import centralizar_dialogo_na_tela
-from ui.posicao_janelas import instalar_memoria_posicao, restaurar_estado
+from ui.posicao_janelas import ajustar_para_area, instalar_memoria_posicao, restaurar_estado
 
 
 _CLASSES_IGNORADAS = {
@@ -55,9 +55,25 @@ def aplicar_patch_posicao_dialogos() -> None:
             if not _deve_gerenciar(dialogo):
                 return
             chave = _chave_dialogo(dialogo)
-            instalar_memoria_posicao(dialogo, chave)
-            restaurar_estado(dialogo, chave)
+            memoria_ja_instalada = bool(getattr(dialogo, "_guimma_memoria_posicao_instalada", False))
+            if not memoria_ja_instalada:
+                instalar_memoria_posicao(dialogo, chave)
+                restaurar_estado(dialogo, chave)
+            fallback = getattr(dialogo, "_guimma_fallback_inicial", None)
+            if fallback is not None:
+                dialogo.move(ajustar_para_area(dialogo, fallback))
+                dialogo._guimma_posicao_inicial_aplicada_auto = True  # type: ignore[attr-defined]
+                return
             parent = dialogo.parentWidget() or dialogo.parent()
+            if parent is not None and hasattr(parent, "calcular_posicao_painel_auxiliar") and hasattr(parent, "mapToGlobal"):
+                pos_local = parent.calcular_posicao_painel_auxiliar(
+                    dialogo.width(),
+                    dialogo.height(),
+                    abaixo_coordenadas=True,
+                )
+                dialogo.move(ajustar_para_area(dialogo, parent.mapToGlobal(pos_local)))
+                dialogo._guimma_posicao_inicial_aplicada_auto = True  # type: ignore[attr-defined]
+                return
             centralizar_dialogo_na_tela(dialogo, parent)
             dialogo._guimma_posicao_inicial_aplicada_auto = True  # type: ignore[attr-defined]
         except Exception:

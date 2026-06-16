@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from math import isfinite
 from time import monotonic
 
@@ -48,14 +49,13 @@ class DesdobrarDialog(QDialog):
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(10, 10, 10, 10)
         raiz.setSpacing(6)
-        self.chk_automatico = QCheckBox("Automático: detectar dobra, linha interna ou perímetro")
+        self.chk_automatico = QCheckBox("Apenas desdobrar")
         self.chk_automatico.setChecked(True)
         raiz.addWidget(self.chk_automatico)
-        self.chk_copiar_contorno_dobrado = QCheckBox("Espelhar lado visível e deixar os lados idênticos")
-        self.chk_copiar_contorno_dobrado.setChecked(True)
+        self.chk_copiar_contorno_dobrado = QCheckBox("Desdobrar copiando")
+        self.chk_copiar_contorno_dobrado.setChecked(False)
         self.chk_copiar_contorno_dobrado.setToolTip(
-            "Quando marcado, o desdobrar não restaura a assimetria antiga: "
-            "ele espelha o contorno dobrado/visível para criar o outro lado igual."
+            "Copia o lado visivel espelhado para deixar os dois lados iguais."
         )
         raiz.addWidget(self.chk_copiar_contorno_dobrado)
         self.chk_inserir_pique = QCheckBox("Criar piques nas pontas da dobra")
@@ -64,6 +64,25 @@ class DesdobrarDialog(QDialog):
         self.chk_fio_meio = QCheckBox("Centralizar sentido do fio no molde")
         self.chk_fio_meio.setChecked(True)
         raiz.addWidget(self.chk_fio_meio)
+        self.chk_automatico.toggled.connect(self._sincronizar_modo_apenas)
+        self.chk_copiar_contorno_dobrado.toggled.connect(self._sincronizar_modo_copiando)
+
+    def _sincronizar_modo_apenas(self, marcado: bool) -> None:
+        if not marcado:
+            if not self.chk_copiar_contorno_dobrado.isChecked():
+                self.chk_automatico.blockSignals(True)
+                self.chk_automatico.setChecked(True)
+                self.chk_automatico.blockSignals(False)
+            return
+        if self.chk_copiar_contorno_dobrado.isChecked():
+            self.chk_copiar_contorno_dobrado.blockSignals(True)
+            self.chk_copiar_contorno_dobrado.setChecked(False)
+            self.chk_copiar_contorno_dobrado.blockSignals(False)
+
+    def _sincronizar_modo_copiando(self, marcado: bool) -> None:
+        self.chk_automatico.blockSignals(True)
+        self.chk_automatico.setChecked(not marcado)
+        self.chk_automatico.blockSignals(False)
 
 
 class Ferramenta(_DobrarBase):
@@ -221,7 +240,9 @@ class Ferramenta(_DobrarBase):
         if self._confirmar_ref is not None and self._molde_idx is not None:
             preview = self._preview_desdobrar(canvas, self._molde_idx, self._confirmar_ref)
             if len(preview) >= 2:
-                painter.setPen(QPen(cor, 1.8, Qt.DashLine))
+                pen_preview = QPen(cor, 2.2, Qt.DashLine)
+                pen_preview.setDashPattern([6.0, 3.0])
+                painter.setPen(pen_preview)
                 for a, b in zip(preview, preview[1:]):
                     painter.drawLine(canvas._cena_para_tela(a), canvas._cena_para_tela(b))
         painter.restore()
@@ -271,12 +292,15 @@ class Ferramenta(_DobrarBase):
             return
         pontos_antes = self._pontos_elemento(molde)
         copiar_contorno = self._deve_espelhar_contorno_identico(canvas, linha_ref, linha)
-        if not copiar_contorno and self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
+        if not copiar_contorno:
+            if self._restaurar_dobra_original(canvas, molde_idx, molde, linha, eixo):
+                return
+            self._status(
+                canvas,
+                "Apenas desdobrar precisa de uma dobra mantida. Use Desdobrar copiando para espelhar o lado visivel.",
+            )
             return
-        if copiar_contorno:
-            unidos = self._resultado_desdobrar_copia_exata(molde, eixo)
-        else:
-            unidos = self._resultado_desdobrar(molde, linha, eixo)
+        unidos = self._resultado_desdobrar_copia_exata(molde, eixo)
         unidos = self._garantir_pontos_controle_no_desdobrado(molde, unidos, eixo)
         if len(unidos) < 3 or not self._resultado_desdobrado_plausivel(pontos_antes, unidos, eixo):
             self._status(canvas, "Não foi possível formar o contorno desdobrado.")
@@ -286,6 +310,8 @@ class Ferramenta(_DobrarBase):
         molde["pontos"] = [(p.x(), p.y()) for p in unidos]
         molde["controle_cantos"] = [(p.x(), p.y()) for p in cantos]
         molde["pontos_controle_referencia"] = [(p.x(), p.y()) for p in cantos]
+        if copiar_contorno:
+            self._espelhar_graduacao_desdobrar_copiando(molde, eixo, unidos)
         self._limpar_topologia_auxiliar_dobra(molde)
         molde["molde_dobrado"] = False
         molde["dobra_horizontal"] = False
@@ -317,7 +343,36 @@ class Ferramenta(_DobrarBase):
             return []
         if self._deve_espelhar_contorno_identico(canvas, linha_ref, linha):
             return self._resultado_desdobrar_copia_exata(molde, eixo)
-        return self._resultado_desdobrar(molde, linha, eixo)
+        return self._preview_restaurar_dobra_original(molde, eixo)
+
+    def _preview_restaurar_dobra_original(self, molde: dict, eixo_atual) -> list[QPointF]:
+        registros = molde.get("contornos_dobra_original")
+        if not isinstance(registros, list) or not registros:
+            return []
+        pontos_atuais = self._pontos_elemento(molde)
+        offset_salvo = self._offset_dobra_salva_para_molde_atual(molde, pontos_atuais)
+        melhor = None
+        melhor_dist = float("inf")
+        for registro in reversed(registros):
+            pontos = self._pontos_restauracao_original(registro, pontos_atuais)
+            pontos = self._aplicar_offset_pontos(pontos, offset_salvo)
+            if len(pontos) < 3:
+                continue
+            eixo_reg = self._eixo_registro_original(registro)
+            eixo_reg = self._aplicar_offset_eixo(eixo_reg, offset_salvo) if eixo_reg is not None else None
+            dist = self._distancia_eixos(eixo_atual, eixo_reg) if eixo_reg is not None else 0.0
+            if dist < melhor_dist:
+                melhor = pontos
+                melhor_dist = dist
+        if not melhor:
+            return []
+        melhor = self._garantir_pontos_controle_no_desdobrado(molde, melhor, eixo_atual)
+        if len(melhor) >= 3 and not self._pontos_mesmos(melhor[0], melhor[-1]):
+            melhor.append(QPointF(melhor[0]))
+        pontos_atuais = pontos_atuais or self._pontos_elemento(molde)
+        if len(melhor) < 3 or not self._resultado_desdobrado_plausivel(pontos_atuais, melhor, eixo_atual):
+            return []
+        return melhor
 
     def _resultado_desdobrar_copia_exata(self, molde: dict, eixo) -> list[QPointF]:
         """Desdobra espelhando o contorno dobrado/visível, sem restaurar assimetria antiga.
@@ -346,6 +401,114 @@ class Ferramenta(_DobrarBase):
         if len(unidos) < 3 or not self._resultado_desdobrado_plausivel(base, unidos, eixo):
             return []
         return self._preparar_contorno_resultado(unidos, eixo)
+
+    def _espelhar_graduacao_desdobrar_copiando(self, molde: dict, eixo, contorno: list[QPointF]) -> None:
+        pontos_cfg = self._pontos_graduacao_molde(molde)
+        if not pontos_cfg:
+            return
+        tolerancia = max(self._tolerancia_contorno(contorno) * 20.0, 1e-7)
+        resultado = deepcopy(pontos_cfg)
+        for chave, cfg in list(pontos_cfg.items()):
+            if not isinstance(cfg, dict):
+                continue
+            ponto = self._ponto_graduacao_cfg(cfg)
+            if ponto is None or abs(self._valor_lado(ponto, eixo)) <= tolerancia:
+                continue
+            espelhado = self._espelhar_ponto(ponto, eixo)
+            if self._existe_graduacao_no_ponto(resultado, espelhado, tolerancia):
+                continue
+            novo = deepcopy(cfg)
+            novo["ponto"] = (espelhado.x(), espelhado.y())
+            idx_contorno = self._indice_ponto_contorno_mais_proximo(contorno, espelhado)
+            if idx_contorno is not None:
+                novo["indice"] = int(idx_contorno)
+                novo["numero"] = int(idx_contorno) + 1
+            novo["valores"] = self._espelhar_valores_graduacao(cfg.get("valores"), ponto, eixo)
+            resultado[self._proxima_chave_graduacao(resultado, chave)] = novo
+        if resultado == pontos_cfg:
+            return
+        tabela = molde.setdefault("graduacao_tabela", {})
+        if isinstance(tabela, dict):
+            tabela["pontos"] = resultado
+            tabela.setdefault("modo", "dx_dy")
+        molde["graduacao_pontos"] = deepcopy(resultado)
+        molde["mostrar_graduacao"] = True
+
+    def _pontos_graduacao_molde(self, molde: dict) -> dict:
+        tabela = molde.get("graduacao_tabela")
+        if isinstance(tabela, dict) and isinstance(tabela.get("pontos"), dict):
+            return tabela.get("pontos") or {}
+        legado = molde.get("graduacao_pontos")
+        if isinstance(legado, dict):
+            return legado
+        return {}
+
+    def _ponto_graduacao_cfg(self, cfg: dict) -> QPointF | None:
+        ponto = cfg.get("ponto")
+        try:
+            if isinstance(ponto, QPointF):
+                return QPointF(ponto)
+            if isinstance(ponto, dict):
+                return QPointF(float(ponto.get("x", 0.0)), float(ponto.get("y", 0.0)))
+            if isinstance(ponto, (tuple, list)) and len(ponto) >= 2:
+                return QPointF(float(ponto[0]), float(ponto[1]))
+        except Exception:
+            return None
+        return None
+
+    def _espelhar_valores_graduacao(self, valores, ponto_base: QPointF, eixo) -> dict:
+        if not isinstance(valores, dict):
+            return {}
+        saida: dict = {}
+        base_espelhada = self._espelhar_ponto(ponto_base, eixo)
+        for tamanho, valor in valores.items():
+            if not isinstance(valor, dict):
+                saida[tamanho] = deepcopy(valor)
+                continue
+            try:
+                dx = float(valor.get("dx", 0.0))
+                dy = float(valor.get("dy", 0.0))
+            except Exception:
+                saida[tamanho] = deepcopy(valor)
+                continue
+            destino = QPointF(ponto_base.x() + dx, ponto_base.y() + dy)
+            destino_espelhado = self._espelhar_ponto(destino, eixo)
+            novo = deepcopy(valor)
+            novo["dx"] = destino_espelhado.x() - base_espelhada.x()
+            novo["dy"] = destino_espelhado.y() - base_espelhada.y()
+            saida[tamanho] = novo
+        return saida
+
+    def _existe_graduacao_no_ponto(self, pontos_cfg: dict, ponto: QPointF, tolerancia: float) -> bool:
+        for cfg in pontos_cfg.values():
+            if not isinstance(cfg, dict):
+                continue
+            atual = self._ponto_graduacao_cfg(cfg)
+            if atual is not None and self._dist(atual, ponto) <= tolerancia:
+                return True
+        return False
+
+    @staticmethod
+    def _proxima_chave_graduacao(pontos_cfg: dict, chave_origem) -> str:
+        numeros = []
+        for chave in pontos_cfg.keys():
+            try:
+                numeros.append(int(chave))
+            except Exception:
+                continue
+        proxima = max(numeros, default=-1) + 1
+        while str(proxima) in pontos_cfg:
+            proxima += 1
+        return str(proxima)
+
+    def _indice_ponto_contorno_mais_proximo(self, contorno: list[QPointF], ponto: QPointF) -> int | None:
+        if not contorno:
+            return None
+        base = contorno[:-1] if len(contorno) > 2 and self._pontos_mesmos(contorno[0], contorno[-1]) else contorno
+        if not base:
+            return None
+        melhor_idx = min(range(len(base)), key=lambda idx: self._dist(base[idx], ponto))
+        return int(melhor_idx)
 
     def _desdobrar_contorno_por_eixo(self, base: list[QPointF], eixo) -> list[QPointF]:
         """Abre uma meia peça pela linha de dobra.
@@ -940,13 +1103,7 @@ class Ferramenta(_DobrarBase):
         return bool(chk is not None and chk.isChecked())
 
     def _deve_espelhar_contorno_identico(self, canvas, linha_ref, linha: dict | None = None) -> bool:
-        if self._copiar_contorno_dobrado_ativo(canvas):
-            return True
-        linha = linha if linha is not None else self._elemento_linha_ref(canvas, linha_ref)
-        if linha is None:
-            return False
-        origem = str(linha.get("origem_desdobrar") or "").strip()
-        return origem != "dobra_original"
+        return self._copiar_contorno_dobrado_ativo(canvas)
 
     def _inserir_pique_ativo(self, canvas) -> bool:
         dialog = self._dialog_por_canvas.get(id(canvas))
@@ -959,9 +1116,7 @@ class Ferramenta(_DobrarBase):
         return bool(chk is not None and chk.isChecked())
 
     def _automatico_ativo(self, canvas) -> bool:
-        dialog = self._dialog_por_canvas.get(id(canvas))
-        chk = getattr(dialog, "chk_automatico", None) if dialog is not None else None
-        return bool(chk is None or chk.isChecked())
+        return True
 
     def _preparar_contorno_resultado(self, pontos: list[QPointF], eixo) -> list[QPointF]:
         base = pontos[:-1] if len(pontos) > 2 and self._pontos_mesmos(pontos[0], pontos[-1]) else list(pontos)

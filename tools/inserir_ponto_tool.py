@@ -6,6 +6,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 
 from tools.tool_base import FerramentaBase
+from tools.graduacao_snap_utils import ponto_base_para_snap_graduacao
 from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
 
@@ -30,7 +31,7 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        pos = canvas._ponto_com_snap(event.position())
+        pos = ponto_base_para_snap_graduacao(canvas, canvas._ponto_com_snap(event.position()))
         molde_alvo = self._molde_em_ponto(canvas, pos)
         moldes_selecionados = self._indices_moldes_selecionados(canvas)
         controle_alvo = None
@@ -96,7 +97,7 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
-        pos = canvas._ponto_com_snap(event.position())
+        pos = ponto_base_para_snap_graduacao(canvas, canvas._ponto_com_snap(event.position()))
         hover_principal = self._shift_pressionado(event)
         moldes_selecionados = self._indices_moldes_selecionados(canvas)
         hover_segmento = self._segmento_mais_proximo(canvas, pos, indices=moldes_selecionados or None)

@@ -17,6 +17,7 @@ else:
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from canvas.snap import SnapResult
     from tools.excluir_ponto_tool import Ferramenta as FerramentaExcluirPonto
 
 _BaseWidget = QWidget if QWidget is not None else object
@@ -44,6 +45,7 @@ class _FakeCanvas(_BaseWidget):
         self._selecionados = set()
         self.historico = 0
         self.atualizou = False
+        self._snap_resultado = None
         self.cena = SimpleNamespace(
             elementos=[
                 {
@@ -107,6 +109,52 @@ class ExcluirPontoToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas.cena.elementos[0]["controle_auxiliares"], auxiliares)
         self.assertEqual(canvas.historico, 0)
+
+    def test_excluir_em_borda_graduada_remove_ponto_base_sem_deformar_graduacao(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos[0].update(
+            {
+                "pontos": [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+                "controle_cantos": [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+                "controle_auxiliares": [],
+                "pontos_controle_principais": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 5.0, "y": 0.0},
+                    {"x": 10.0, "y": 0.0},
+                    {"x": 10.0, "y": 5.0},
+                    {"x": 0.0, "y": 5.0},
+                ],
+                "pontos_auxiliares": [],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "M", "base": True},
+                    {"ativo": True, "tamanho": "G", "base": False},
+                ],
+                "graduacao_tabela": {
+                    "modo": "dx_dy",
+                    "pontos": {
+                        "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "1": {"indice": 1, "ponto": (5.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "2": {"indice": 2, "ponto": (10.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "3": {"indice": 3, "ponto": (10.0, 5.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                        "4": {"indice": 4, "ponto": (0.0, 5.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}, "G": {"dx": 0.0, "dy": 2.0}}},
+                    },
+                },
+            }
+        )
+        canvas.cena.elementos[0]["graduacao_pontos"] = canvas.cena.elementos[0]["graduacao_tabela"]["pontos"].copy()
+        canvas._snap_resultado = SnapResult(QPointF(5.0, 2.0), "borda graduação", 0.0, 0)
+        ferramenta = FerramentaExcluirPonto()
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.0))))
+
+        molde = canvas.cena.elementos[0]
+        self.assertNotIn((5.0, 0.0), molde["controle_cantos"])
+        self.assertNotIn((5.0, 2.0), molde["controle_cantos"])
+        cfg_por_ponto = {tuple(cfg["ponto"]): cfg for cfg in molde["graduacao_tabela"]["pontos"].values()}
+        self.assertNotIn((5.0, 0.0), cfg_por_ponto)
+        self.assertNotIn((5.0, 2.0), cfg_por_ponto)
+        self.assertAlmostEqual(cfg_por_ponto[(10.0, 0.0)]["valores"]["G"]["dy"], 2.0)
 
     def test_excluir_auxiliar_remove_controles_espelhados(self):
         canvas = _FakeCanvas()

@@ -267,11 +267,7 @@ def restaurar_posicao(
     preferir_fallback_inicial: bool = True,
 ) -> bool:
     restaurar_estado(widget, chave)
-    if (
-        fallback is not None
-        and preferir_fallback_inicial
-        and not getattr(widget, "_guimma_posicao_inicial_aplicada", False)
-    ):
+    if fallback is not None and preferir_fallback_inicial:
         _registrar_fallback_inicial(widget, fallback)
         _mover_widget(widget, ajustar_para_area(widget, fallback))
         widget._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]

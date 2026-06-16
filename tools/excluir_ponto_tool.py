@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QMessageBox
 
 from tools.tool_base import FerramentaBase
+from tools.graduacao_snap_utils import ponto_base_para_snap_graduacao, snap_atual_eh_graduacao
 from tools.manipular_pontos_tool import Ferramenta as FerramentaManipularPontos
 
 try:
@@ -37,8 +38,10 @@ class Ferramenta(FerramentaBase):
     def on_mouse_press(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:
             return False
-        pos = canvas._ponto_com_snap(event.position())
+        pos = ponto_base_para_snap_graduacao(canvas, canvas._ponto_com_snap(event.position()))
         pos_sem_snap = canvas._tela_para_cena(event.position()) if hasattr(canvas, "_tela_para_cena") else pos
+        if snap_atual_eh_graduacao(canvas):
+            pos_sem_snap = QPointF(pos)
 
         if self._molde_confirmado_idx is None:
             idx_confirmar = self._indice_molde_para_confirmar(canvas, pos_sem_snap, pos)
@@ -149,8 +152,10 @@ class Ferramenta(FerramentaBase):
         return True
 
     def on_mouse_move(self, canvas, event) -> bool:
-        pos = canvas._ponto_com_snap(event.position())
+        pos = ponto_base_para_snap_graduacao(canvas, canvas._ponto_com_snap(event.position()))
         pos_sem_snap = canvas._tela_para_cena(event.position()) if hasattr(canvas, "_tela_para_cena") else pos
+        if snap_atual_eh_graduacao(canvas):
+            pos_sem_snap = QPointF(pos)
         if self._molde_confirmado_idx is not None:
             alvo_controle = (
                 self._controle_molde_em_ponto_indices(canvas, pos_sem_snap, [self._molde_confirmado_idx], 22.0)

@@ -29,6 +29,7 @@ class Ferramenta(FerramentaBase):
         self._hover_idx: int | None = None
         self._originais_arraste: dict[int, dict] = {}
         self._alinhamento_duplo_molde: dict[tuple[int, int], dict] = {}
+        self._alvo_clique: int | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -39,6 +40,7 @@ class Ferramenta(FerramentaBase):
         self._movido = False
         self._hover_idx = None
         self._originais_arraste = {}
+        self._alvo_clique = None
         self.set_status("Clique para selecionar. Arraste para seleção por área. RMB cicla sobrepostos.")
 
     def on_mouse_press(self, canvas, event) -> bool:
@@ -94,12 +96,21 @@ class Ferramenta(FerramentaBase):
             else:
                 if selecionado not in canvas._selecionados:
                     canvas._selecionados = {selecionado}
-                self._arrastando_selecao = True
-                self._ultimo_ponto_arrasto = pos_snap
-                self._movido = False
-                self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
-            self._inicio_caixa = None
-            self._fim_caixa = None
+                    self._alvo_clique = selecionado
+                    self._arrastando_selecao = False
+                    self._ultimo_ponto_arrasto = None
+                    self._movido = False
+                    self._originais_arraste = {}
+                    self._inicio_caixa = pos_sem_snap
+                    self._fim_caixa = pos_sem_snap
+                else:
+                    self._alvo_clique = None
+                    self._arrastando_selecao = True
+                    self._ultimo_ponto_arrasto = pos_snap
+                    self._movido = False
+                    self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
+                    self._inicio_caixa = None
+                    self._fim_caixa = None
             self.set_status(f"{len(canvas._selecionados)} elemento(s) selecionado(s).")
             canvas.update()
             event.accept()
@@ -107,6 +118,7 @@ class Ferramenta(FerramentaBase):
 
         if not (event.modifiers() & Qt.ShiftModifier):
             canvas._selecionados.clear()
+        self._alvo_clique = None
         self._inicio_caixa = pos_sem_snap
         self._fim_caixa = pos_sem_snap
         self.set_status("Arraste para selecionar por área.")
@@ -143,6 +155,12 @@ class Ferramenta(FerramentaBase):
             canvas.update()
             return True
         self._fim_caixa = pos_sem_snap
+        if self._alvo_clique is not None:
+            limite = 4.0 / max(float(getattr(canvas, "zoom", 1.0)), 0.001)
+            dx = self._fim_caixa.x() - self._inicio_caixa.x()
+            dy = self._fim_caixa.y() - self._inicio_caixa.y()
+            if sqrt((dx * dx) + (dy * dy)) > limite:
+                canvas._selecionados.clear()
         canvas.update()
         event.accept()
         return True
@@ -340,7 +358,7 @@ class Ferramenta(FerramentaBase):
             selecionados_area: set[int] = set()
             for idx, el in enumerate(canvas.cena.elementos):
                 pontos = self._pontos_elemento_para_selecao(canvas, el)
-                if pontos and all(x1 <= p.x() <= x2 and y1 <= p.y() <= y2 for p in pontos):
+                if pontos and self._elemento_intersecta_retangulo(pontos, x1, y1, x2, y2):
                     selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
                 canvas._selecionados |= selecionados_area
@@ -350,9 +368,60 @@ class Ferramenta(FerramentaBase):
 
         self._inicio_caixa = None
         self._fim_caixa = None
+        self._alvo_clique = None
         canvas.update()
         event.accept()
         return True
+
+    def _elemento_intersecta_retangulo(self, pontos: list[QPointF], x1: float, y1: float, x2: float, y2: float) -> bool:
+        if any(self._ponto_em_retangulo(p, x1, y1, x2, y2) for p in pontos):
+            return True
+        return any(self._segmento_intersecta_retangulo(a, b, x1, y1, x2, y2) for a, b in zip(pontos, pontos[1:]))
+
+    @staticmethod
+    def _ponto_em_retangulo(p: QPointF, x1: float, y1: float, x2: float, y2: float) -> bool:
+        return x1 <= p.x() <= x2 and y1 <= p.y() <= y2
+
+    def _segmento_intersecta_retangulo(self, a: QPointF, b: QPointF, x1: float, y1: float, x2: float, y2: float) -> bool:
+        if max(a.x(), b.x()) < x1 or min(a.x(), b.x()) > x2:
+            return False
+        if max(a.y(), b.y()) < y1 or min(a.y(), b.y()) > y2:
+            return False
+        cantos = [
+            QPointF(x1, y1),
+            QPointF(x2, y1),
+            QPointF(x2, y2),
+            QPointF(x1, y2),
+        ]
+        arestas = zip(cantos, cantos[1:] + cantos[:1])
+        return any(self._segmentos_intersectam(a, b, c, d) for c, d in arestas)
+
+    @staticmethod
+    def _segmentos_intersectam(a: QPointF, b: QPointF, c: QPointF, d: QPointF) -> bool:
+        def orientacao(p: QPointF, q: QPointF, r: QPointF) -> float:
+            return ((q.x() - p.x()) * (r.y() - p.y())) - ((q.y() - p.y()) * (r.x() - p.x()))
+
+        def sobre_segmento(p: QPointF, q: QPointF, r: QPointF) -> bool:
+            tol = 1e-9
+            return (
+                min(p.x(), r.x()) - tol <= q.x() <= max(p.x(), r.x()) + tol
+                and min(p.y(), r.y()) - tol <= q.y() <= max(p.y(), r.y()) + tol
+            )
+
+        o1 = orientacao(a, b, c)
+        o2 = orientacao(a, b, d)
+        o3 = orientacao(c, d, a)
+        o4 = orientacao(c, d, b)
+        tol = 1e-9
+        if abs(o1) <= tol and sobre_segmento(a, c, b):
+            return True
+        if abs(o2) <= tol and sobre_segmento(a, d, b):
+            return True
+        if abs(o3) <= tol and sobre_segmento(c, a, d):
+            return True
+        if abs(o4) <= tol and sobre_segmento(c, b, d):
+            return True
+        return (o1 > 0.0) != (o2 > 0.0) and (o3 > 0.0) != (o4 > 0.0)
 
     def on_mouse_double_click(self, canvas, event) -> bool:
         if event.button() != Qt.LeftButton:

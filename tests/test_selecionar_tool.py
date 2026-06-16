@@ -189,6 +189,43 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.ignorar_snap_movimento[-1], {0})
         self.assertEqual(canvas.sombras_snap_movimento[-1][0]["pontos"][0], (0.0, 0.0))
 
+    def test_caixa_de_selecao_pega_elementos_que_cruzam_a_area(self):
+        canvas = _FakeCanvas()
+        canvas._indices_elementos_em_ponto = lambda _pos: []
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(-5.0, 2.0), (15.0, 2.0)],
+            }
+        )
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(-20.0, -20.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
+
+        self.assertEqual(canvas._selecionados, {0, 1})
+
+    def test_arraste_sobre_elemento_nao_selecionado_abre_caixa_de_selecao(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(-5.0, 2.0), (15.0, 2.0)],
+            }
+        )
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
+
+        self.assertEqual(canvas._selecionados, {0, 1})
+        self.assertEqual(canvas.historico, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

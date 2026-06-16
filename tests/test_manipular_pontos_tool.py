@@ -301,6 +301,33 @@ class ManipularPontosToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
         self.assertIsNone(ferramenta._estado_arraste_controle)
 
+    def test_arraste_congela_referencia_original_e_esconde_apos_finalizar(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde.update(
+            {
+                "molde_dobrado": True,
+                "mostrar_contorno_dobra_original": True,
+                "estado_dobra": {"ativo": True, "contorno_dobrado": list(molde["pontos"])},
+                "contornos_dobra_original": [{"contorno_pontilhado": [(100.0, 100.0), (101.0, 101.0)]}],
+            }
+        )
+        ferramenta = FerramentaManipularPontos()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(10.0, 0.0))))
+        self.assertEqual(ferramenta.indices_moldes_com_original_congelado(), {0})
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertTrue(molde["mostrar_contorno_dobra_original"])
+        self.assertEqual(ferramenta._estado_arraste_controle["elementos"][0]["controle_cantos"][1], (10.0, 0.0))
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(12.0, 2.0))))
+        self.assertEqual(ferramenta.indices_moldes_com_original_congelado(), set())
+        self.assertFalse(canvas.cena.elementos[0]["mostrar_contorno_dobra_original"])
+        self.assertIn("contornos_dobra_original", canvas.cena.elementos[0])
+        self.assertIn("estado_dobra", canvas.cena.elementos[0])
+
     def test_botao_direito_cancela_arraste_em_andamento_sem_gravar_historico(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaManipularPontos()
