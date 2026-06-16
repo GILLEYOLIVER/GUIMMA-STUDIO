@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
-from tools.dialog_lifetime import limpar_global_ao_destruir, qobject_valido
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -415,16 +414,10 @@ class Ferramenta(FerramentaBase):
 
     def _dialogo(self, canvas) -> DimensionarDialog:
         cls = type(self)
-        if not qobject_valido(cls._dialog_global):
+        if cls._dialog_global is None:
             cls._dialog_global = DimensionarDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:dimensionar")
-            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         dialog = cls._dialog_global
-        if not qobject_valido(dialog):
-            dialog = DimensionarDialog(canvas)
-            cls._dialog_global = dialog
-            instalar_memoria_posicao(dialog, "dialog:dimensionar")
-            limpar_global_ao_destruir(dialog, cls, "_dialog_global")
         if dialog.parentWidget() is not canvas:
             dialog.setParent(canvas)
         return dialog

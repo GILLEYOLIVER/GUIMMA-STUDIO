@@ -9,7 +9,6 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QDialog, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
-from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
@@ -139,7 +138,8 @@ class Ferramenta(FerramentaBase):
             canvas.update()
 
     def on_deactivate(self, canvas):
-        esconder_se_valido(self._dialog)
+        if self._dialog is not None:
+            self._dialog.hide()
         self._hover = None
         self._hover_pos = None
         self._arrastando_idx = None
@@ -251,13 +251,10 @@ class Ferramenta(FerramentaBase):
 
     def _abrir_dialogo(self, canvas) -> None:
         cls = type(self)
-        if not qobject_valido(cls._dialog_global):
+        if cls._dialog_global is None:
             cls._dialog_global = SepararTamanhosDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:separar_tamanhos")
-            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         self._dialog = cls._dialog_global
-        if not qobject_valido(self._dialog):
-            return
         if self._dialog.parentWidget() is not canvas:
             self._dialog.setParent(canvas)
         self._atualizar_dialogo_tamanhos(canvas)
@@ -266,7 +263,7 @@ class Ferramenta(FerramentaBase):
         self._reposicionar_dialogo(canvas)
 
     def _reposicionar_dialogo(self, canvas) -> None:
-        if not qobject_valido(self._dialog):
+        if self._dialog is None:
             return
         fallback = None
         if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
@@ -277,7 +274,7 @@ class Ferramenta(FerramentaBase):
         restaurar_posicao(self._dialog, "dialog:separar_tamanhos", fallback=fallback)
 
     def _atualizar_dialogo_tamanhos(self, canvas) -> None:
-        if not qobject_valido(self._dialog):
+        if self._dialog is None:
             return
         self._dialog.set_tamanhos(self._nomes_tamanhos_canvas(canvas))
 
@@ -295,7 +292,7 @@ class Ferramenta(FerramentaBase):
         return nomes
 
     def _filtro_tamanhos_dialogo(self) -> set[str] | None:
-        if not qobject_valido(self._dialog) or self._dialog.separar_todos():
+        if self._dialog is None or self._dialog.separar_todos():
             return None
         return {nome for nome in self._dialog.tamanhos_selecionados() if nome}
 
@@ -306,16 +303,12 @@ class Ferramenta(FerramentaBase):
             for item in self._candidatos_tamanhos(canvas)
             if int(item.get("molde_idx", -2)) == molde_idx
         ]
-        if qobject_valido(self._dialog) and self._dialog.separar_todos():
+        if self._dialog is not None and self._dialog.separar_todos():
             return candidatos
         selecionados = self._filtro_tamanhos_dialogo()
         if selecionados:
             return [item for item in candidatos if str(item.get("nome_tamanho") or "") in selecionados]
         return [candidato]
-
-    @staticmethod
-    def _dialog_valido(dialog) -> bool:
-        return qobject_valido(dialog)
 
     def _candidato_em_posicao(self, canvas, pos: QPointF) -> dict | None:
         melhor: tuple[float, dict] | None = None

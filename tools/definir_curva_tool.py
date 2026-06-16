@@ -8,7 +8,6 @@ from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QSpinBox
 
 from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
-from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
 
@@ -37,7 +36,8 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def on_deactivate(self, canvas) -> None:
-        esconder_se_valido(self._dlg)
+        if self._dlg:
+            self._dlg.hide()
         if type(self)._canvas_preview_global is canvas:
             type(self)._canvas_preview_global = None
         self._inicio = None
@@ -114,17 +114,20 @@ class Ferramenta(FerramentaBase):
 
     def set_status(self, texto: str):
         try:
-            if qobject_valido(self._dlg):
+            if self._dlg is not None:
                 self._dlg.setToolTip(texto)
         except Exception:
             pass
 
     def _abrir_dialogo(self, canvas) -> None:
         cls = type(self)
-        if not qobject_valido(cls._dlg_global):
-            cls._dlg_global = None
-            cls._edt_pontos_global = None
-            cls._preview_signal_conectado = False
+        if cls._dlg_global is not None:
+            try:
+                cls._dlg_global.isVisible()
+            except RuntimeError:
+                cls._dlg_global = None
+                cls._edt_pontos_global = None
+                cls._preview_signal_conectado = False
         if cls._dlg_global is None:
             cls._dlg_global = QDialog(canvas)
             cls._dlg_global.setObjectName("guimma_definir_curva_dialog")
@@ -138,11 +141,8 @@ class Ferramenta(FerramentaBase):
             layout.addRow("Auxiliares", cls._edt_pontos_global)
             cls._dlg_global.setFixedWidth(205)
             instalar_memoria_posicao(cls._dlg_global, "dialog:definir_curva")
-            limpar_global_ao_destruir(cls._dlg_global, cls, "_dlg_global")
             cls._preview_signal_conectado = False
         self._dlg = cls._dlg_global
-        if not qobject_valido(self._dlg):
-            return
         self._edt_pontos = cls._edt_pontos_global
         cls._canvas_preview_global = canvas
         if self._edt_pontos is not None and hasattr(self._edt_pontos, "setKeyboardTracking"):
@@ -161,7 +161,7 @@ class Ferramenta(FerramentaBase):
             canvas.update()
 
     def _reposicionar_dialogo(self, canvas) -> None:
-        if not qobject_valido(self._dlg):
+        if not self._dlg:
             return
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
             pos = canvas.calcular_posicao_painel_auxiliar(self._dlg.width(), self._dlg.height(), abaixo_coordenadas=True)

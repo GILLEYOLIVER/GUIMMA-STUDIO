@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
 )
 
 from tools.tool_base import FerramentaBase
-from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.graduacao_snap_utils import ponto_base_para_snap_graduacao
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -130,7 +129,8 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def on_deactivate(self, canvas):
-        esconder_se_valido(self._dialog)
+        if self._dialog:
+            self._dialog.hide()
         self._hover = None
         self._molde_idx = None
         canvas.update()
@@ -207,13 +207,10 @@ class Ferramenta(FerramentaBase):
 
     def _abrir_dialogo(self, canvas) -> None:
         cls = type(self)
-        if not qobject_valido(cls._dialog_global):
+        if cls._dialog_global is None:
             cls._dialog_global = RemoverPiqueDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:remover_pique")
-            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         self._dialog = cls._dialog_global
-        if not qobject_valido(self._dialog):
-            return
         if self._dialog.parentWidget() is not canvas:
             self._dialog.setParent(canvas)
         try:
@@ -226,7 +223,7 @@ class Ferramenta(FerramentaBase):
         self._reposicionar_dialogo(canvas)
 
     def _reposicionar_dialogo(self, canvas) -> None:
-        if not qobject_valido(self._dialog):
+        if self._dialog is None:
             return
         fallback = None
         if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
@@ -256,7 +253,7 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _modo_dialogo(self) -> str:
-        if not qobject_valido(self._dialog):
+        if self._dialog is None:
             return "selecionar"
         return self._dialog.modo()
 

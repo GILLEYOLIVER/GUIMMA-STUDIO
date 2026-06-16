@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 
 from core.formatacao import numero_decimal_ponto
 from tools.tool_base import FerramentaBase
-from tools.dialog_lifetime import esconder_se_valido, limpar_global_ao_destruir, qobject_valido
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
 
@@ -295,7 +294,8 @@ class Ferramenta(FerramentaBase):
         self.set_status("Clique esquerdo seleciona o molde. Depois clique para inserir piques. Direito finaliza.")
 
     def on_deactivate(self, canvas):
-        esconder_se_valido(self._dialog)
+        if self._dialog:
+            self._dialog.hide()
         self._hover = None
         self._molde_idx = None
         canvas.update()
@@ -305,7 +305,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         pos = self._posicao_cena(canvas, event)
-        if self._molde_idx is not None and qobject_valido(self._dialog) and not self._dialog.chk_sobre_contorno.isChecked():
+        if self._molde_idx is not None and self._dialog is not None and not self._dialog.chk_sobre_contorno.isChecked():
             self._hover = (self._molde_idx, pos)
         else:
             indices = {self._molde_idx} if self._molde_idx is not None else None
@@ -335,7 +335,7 @@ class Ferramenta(FerramentaBase):
             event.accept()
             return True
 
-        if qobject_valido(self._dialog) and not self._dialog.chk_sobre_contorno.isChecked():
+        if self._dialog is not None and not self._dialog.chk_sobre_contorno.isChecked():
             alvo = (self._molde_idx, pos)
         else:
             alvo = self._alvo_no_contorno(canvas, pos, indices={self._molde_idx})
@@ -393,7 +393,7 @@ class Ferramenta(FerramentaBase):
         painter.restore()
 
     def _desenhar_preview_pique(self, canvas, painter) -> None:
-        if not qobject_valido(self._dialog) or self._hover is None:
+        if self._dialog is None or self._hover is None:
             return
         idx, ponto = self._hover
         if not (0 <= idx < len(canvas.cena.elementos)):
@@ -430,18 +430,15 @@ class Ferramenta(FerramentaBase):
         painter.restore()
 
     def set_status(self, texto: str):
-        if qobject_valido(self._dialog):
+        if self._dialog is not None:
             self._dialog.lbl_status.setText(texto)
 
     def _abrir_dialogo(self, canvas) -> None:
         cls = type(self)
-        if not qobject_valido(cls._dialog_global):
+        if cls._dialog_global is None:
             cls._dialog_global = InserirPiqueDialog(canvas)
             instalar_memoria_posicao(cls._dialog_global, "dialog:inserir_pique")
-            limpar_global_ao_destruir(cls._dialog_global, cls, "_dialog_global")
         self._dialog = cls._dialog_global
-        if not qobject_valido(self._dialog):
-            return
         if self._dialog.parentWidget() is not canvas:
             self._dialog.setParent(canvas)
         if not self._dialog.isVisible():
@@ -450,18 +447,18 @@ class Ferramenta(FerramentaBase):
         self._reposicionar_dialogo(canvas)
 
     def on_unidade_medida_alterada(self, canvas):
-        if qobject_valido(self._dialog):
+        if self._dialog is not None:
             self._dialog.set_unidade(*unidade_canvas(canvas))
 
     def _reposicionar_dialogo(self, canvas) -> None:
-        if not qobject_valido(self._dialog):
+        if not self._dialog:
             return
         if hasattr(canvas, "calcular_posicao_painel_auxiliar"):
             pos = canvas.calcular_posicao_painel_auxiliar(self._dialog.width(), self._dialog.height(), abaixo_coordenadas=True)
             restaurar_posicao(self._dialog, "dialog:inserir_pique", fallback=canvas.mapToGlobal(pos))
 
     def _aplicar_pique(self, canvas, idx: int, ponto: QPointF) -> bool:
-        if not qobject_valido(self._dialog) or not (0 <= idx < len(canvas.cena.elementos)):
+        if self._dialog is None or not (0 <= idx < len(canvas.cena.elementos)):
             return False
         el = canvas.cena.elementos[idx]
         ponto_final = QPointF(ponto.x() + self._dialog.dx(), ponto.y() - self._dialog.dy())
