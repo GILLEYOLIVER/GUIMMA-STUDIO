@@ -6,10 +6,39 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import QCheckBox, QDialog, QVBoxLayout
 
 from canvas.visualizacao import VisualizacaoCanvas
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
+
+
+class SepararTamanhosDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SepararTamanhosDialog")
+        self.setWindowTitle("Separar tamanhos do molde")
+        self.setWindowFlags(Qt.Tool)
+        self.setFixedWidth(230)
+        self._guimma_ignorar_patch_posicao = True
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        self.chk_todos = QCheckBox("Separar todos os tamanhos")
+        self.chk_todos.setChecked(False)
+        layout.addWidget(self.chk_todos)
+
+        self.setStyleSheet(
+            """
+            QDialog#SepararTamanhosDialog { background:#f2f2f2; color:#111; }
+            QCheckBox { color:#111; font-size:11px; spacing:5px; }
+            """
+        )
+
+    def separar_todos(self) -> bool:
+        return bool(self.chk_todos.isChecked())
 
 
 class Ferramenta(FerramentaBase):
@@ -22,35 +51,44 @@ class Ferramenta(FerramentaBase):
         self._hover: dict | None = None
         self._hover_pos: QPointF | None = None
         self._arrastando_idx: int | None = None
+        self._arrastando_indices: list[int] = []
         self._ultimo_pos_arrasto: QPointF | None = None
         self._origem_arrasto: QPointF | None = None
         self._guia_angular: tuple[QPointF, QPointF, float] | None = None
+        self._dialog: SepararTamanhosDialog | None = None
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
         self._hover = None
         self._hover_pos = None
         self._arrastando_idx = None
+        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
+        self._abrir_dialogo(canvas)
         self._status(canvas, "Separar Tamanhos: passe sobre um tamanho e clique para retirar uma cópia.")
         if hasattr(canvas, "update"):
             canvas.update()
 
     def on_deactivate(self, canvas):
+        self._esconder_dialogo()
         self._hover = None
         self._hover_pos = None
         self._arrastando_idx = None
+        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
         if hasattr(canvas, "update"):
             canvas.update()
 
+    def on_canvas_resize(self, canvas) -> None:
+        self._reposicionar_dialogo(canvas)
+
     def on_mouse_move(self, canvas, event) -> bool:
         pos = self._pos_cena(canvas, event.position())
-        if self._arrastando_idx is not None:
+        if self._arrastando_indices:
             self._arrastar_copia(canvas, pos)
             event.accept()
             return True
@@ -63,7 +101,7 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_press(self, canvas, event) -> bool:
         pos = self._pos_cena(canvas, event.position())
-        if self._arrastando_idx is not None:
+        if self._arrastando_indices:
             if event.button() == Qt.LeftButton:
                 self._finalizar_arraste(canvas)
                 event.accept()
@@ -81,26 +119,31 @@ class Ferramenta(FerramentaBase):
             self._status(canvas, "Separar Tamanhos: clique sobre uma linha de tamanho graduado.")
             event.accept()
             return True
-        idx = self._criar_copia_tamanho(canvas, candidato)
-        if idx is None:
+        candidatos = self._candidatos_para_separar(canvas, candidato)
+        indices = [idx for item in candidatos if (idx := self._criar_copia_tamanho(canvas, item)) is not None]
+        if not indices:
             self._status(canvas, "Separar Tamanhos: não foi possível criar a cópia desse tamanho.")
             event.accept()
             return True
         self._hover = None
         self._hover_pos = None
-        self._arrastando_idx = idx
+        self._arrastando_indices = indices
+        self._arrastando_idx = indices[-1]
         self._ultimo_pos_arrasto = QPointF(pos)
         self._origem_arrasto = QPointF(pos)
         self._guia_angular = None
-        canvas._selecionados = {idx}
-        self._status(canvas, "Tamanho em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
+        canvas._selecionados = set(indices)
+        if len(indices) == 1:
+            self._status(canvas, "Tamanho em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
+        else:
+            self._status(canvas, "Tamanhos em mãos: mova o mouse e clique esquerdo para soltar. Direito cancela.")
         canvas.update()
         event.accept()
         return True
 
     def on_key_press(self, canvas, event) -> bool:
         if event.key() == Qt.Key_Escape:
-            if self._arrastando_idx is not None:
+            if self._arrastando_indices:
                 self._cancelar_arraste(canvas)
             else:
                 self._hover = None
@@ -133,6 +176,49 @@ class Ferramenta(FerramentaBase):
             painter.setFont(QFont("Arial", 8))
             painter.drawText(destino_tela + QPointF(4.0, -4.0), f"{angulo:g}°")
             painter.restore()
+
+    def _abrir_dialogo(self, canvas) -> None:
+        if not self._dialogo_valido():
+            self._dialog = SepararTamanhosDialog(canvas)
+        if self._dialog.parentWidget() is not canvas:
+            self._dialog.setParent(canvas)
+        if not self._dialog.isVisible():
+            self._dialog.show()
+        self._reposicionar_dialogo(canvas)
+
+    def _reposicionar_dialogo(self, canvas) -> None:
+        if not self._dialogo_valido():
+            return
+        if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
+            pos = canvas.calcular_posicao_painel_auxiliar(self._dialog.width(), self._dialog.height(), abaixo_coordenadas=True)
+            self._dialog.move(canvas.mapToGlobal(pos))
+
+    def _esconder_dialogo(self) -> None:
+        if self._dialogo_valido():
+            self._dialog.hide()
+
+    def _dialogo_valido(self) -> bool:
+        if self._dialog is None:
+            return False
+        try:
+            self._dialog.isVisible()
+            return True
+        except RuntimeError:
+            self._dialog = None
+            return False
+
+    def _separar_todos_marcado(self) -> bool:
+        return bool(self._dialogo_valido() and self._dialog.separar_todos())
+
+    def _candidatos_para_separar(self, canvas, candidato: dict) -> list[dict]:
+        if not self._separar_todos_marcado():
+            return [candidato]
+        molde_idx = int(candidato.get("molde_idx", -1))
+        return [
+            item
+            for item in self._candidatos_tamanhos(canvas)
+            if int(item.get("molde_idx", -2)) == molde_idx
+        ]
 
     def _candidato_em_posicao(self, canvas, pos: QPointF) -> dict | None:
         melhor: tuple[float, dict] | None = None
@@ -227,7 +313,8 @@ class Ferramenta(FerramentaBase):
         return len(canvas.cena.elementos) - 1
 
     def _arrastar_copia(self, canvas, pos: QPointF) -> None:
-        if self._arrastando_idx is None or not (0 <= self._arrastando_idx < len(canvas.cena.elementos)):
+        indices = [idx for idx in self._arrastando_indices if 0 <= idx < len(canvas.cena.elementos)]
+        if not indices:
             return
         pos_restrita = self._posicao_arrasto_com_ima(canvas, pos)
         if self._ultimo_pos_arrasto is None:
@@ -236,7 +323,8 @@ class Ferramenta(FerramentaBase):
         dx = pos_restrita.x() - self._ultimo_pos_arrasto.x()
         dy = pos_restrita.y() - self._ultimo_pos_arrasto.y()
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
-            mover_elemento_por_delta(canvas.cena.elementos[self._arrastando_idx], dx, dy)
+            for idx in indices:
+                mover_elemento_por_delta(canvas.cena.elementos[idx], dx, dy)
             self._ultimo_pos_arrasto = QPointF(pos_restrita)
             canvas.update()
 
@@ -271,6 +359,7 @@ class Ferramenta(FerramentaBase):
 
     def _finalizar_arraste(self, canvas) -> None:
         self._arrastando_idx = None
+        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
@@ -280,10 +369,12 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _cancelar_arraste(self, canvas) -> None:
-        if self._arrastando_idx is not None and 0 <= self._arrastando_idx < len(canvas.cena.elementos):
-            canvas.cena.elementos.pop(self._arrastando_idx)
+        for idx in sorted(self._arrastando_indices, reverse=True):
+            if 0 <= idx < len(canvas.cena.elementos):
+                canvas.cena.elementos.pop(idx)
         canvas._selecionados = set()
         self._arrastando_idx = None
+        self._arrastando_indices = []
         self._ultimo_pos_arrasto = None
         self._origem_arrasto = None
         self._guia_angular = None
