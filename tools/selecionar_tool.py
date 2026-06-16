@@ -96,21 +96,13 @@ class Ferramenta(FerramentaBase):
             else:
                 if selecionado not in canvas._selecionados:
                     canvas._selecionados = {selecionado}
-                    self._alvo_clique = selecionado
-                    self._arrastando_selecao = False
-                    self._ultimo_ponto_arrasto = None
-                    self._movido = False
-                    self._originais_arraste = {}
-                    self._inicio_caixa = pos_sem_snap
-                    self._fim_caixa = pos_sem_snap
-                else:
-                    self._alvo_clique = None
-                    self._arrastando_selecao = True
-                    self._ultimo_ponto_arrasto = pos_snap
-                    self._movido = False
-                    self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
-                    self._inicio_caixa = None
-                    self._fim_caixa = None
+                self._alvo_clique = None
+                self._arrastando_selecao = True
+                self._ultimo_ponto_arrasto = pos_snap
+                self._movido = False
+                self._originais_arraste = self._capturar_originais(canvas, self._indices_para_mover(canvas))
+                self._inicio_caixa = None
+                self._fim_caixa = None
             self.set_status(f"{len(canvas._selecionados)} elemento(s) selecionado(s).")
             canvas.update()
             event.accept()
@@ -206,7 +198,42 @@ class Ferramenta(FerramentaBase):
             if idx not in existentes:
                 indices.append(idx)
                 existentes.add(idx)
+        for idx in self._indices_moldes_contendo_ponto(canvas, pos):
+            if idx not in existentes:
+                indices.append(idx)
+                existentes.add(idx)
         return indices
+
+    def _indices_moldes_contendo_ponto(self, canvas, pos: QPointF) -> list[int]:
+        encontrados: list[int] = []
+        for idx in range(len(canvas.cena.elementos) - 1, -1, -1):
+            el = canvas.cena.elementos[idx]
+            if not isinstance(el, dict) or not el.get("molde"):
+                continue
+            pontos = self._pontos_polyline(el)
+            if len(pontos) > 1 and self._dist_qp(pontos[0], pontos[-1]) <= 1e-7:
+                pontos = pontos[:-1]
+            if len(pontos) >= 3 and self._ponto_dentro_poligono(pos, pontos):
+                encontrados.append(idx)
+        return encontrados
+
+    @staticmethod
+    def _ponto_dentro_poligono(pos: QPointF, pontos: list[QPointF]) -> bool:
+        dentro = False
+        j = len(pontos) - 1
+        x = pos.x()
+        y = pos.y()
+        for i, pi in enumerate(pontos):
+            pj = pontos[j]
+            cruza = (pi.y() > y) != (pj.y() > y)
+            if cruza:
+                denom = pj.y() - pi.y()
+                if abs(denom) > 1e-12:
+                    x_inter = ((pj.x() - pi.x()) * (y - pi.y()) / denom) + pi.x()
+                    if x < x_inter:
+                        dentro = not dentro
+            j = i
+        return dentro
 
     def _pontos_elemento_para_selecao(self, canvas, el: dict) -> list[QPointF]:
         if not isinstance(el, dict):
@@ -358,7 +385,7 @@ class Ferramenta(FerramentaBase):
             selecionados_area: set[int] = set()
             for idx, el in enumerate(canvas.cena.elementos):
                 pontos = self._pontos_elemento_para_selecao(canvas, el)
-                if pontos and self._elemento_intersecta_retangulo(pontos, x1, y1, x2, y2):
+                if pontos and self._elemento_totalmente_dentro_retangulo(pontos, x1, y1, x2, y2):
                     selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
                 canvas._selecionados |= selecionados_area
@@ -373,10 +400,8 @@ class Ferramenta(FerramentaBase):
         event.accept()
         return True
 
-    def _elemento_intersecta_retangulo(self, pontos: list[QPointF], x1: float, y1: float, x2: float, y2: float) -> bool:
-        if any(self._ponto_em_retangulo(p, x1, y1, x2, y2) for p in pontos):
-            return True
-        return any(self._segmento_intersecta_retangulo(a, b, x1, y1, x2, y2) for a, b in zip(pontos, pontos[1:]))
+    def _elemento_totalmente_dentro_retangulo(self, pontos: list[QPointF], x1: float, y1: float, x2: float, y2: float) -> bool:
+        return bool(pontos) and all(self._ponto_em_retangulo(p, x1, y1, x2, y2) for p in pontos)
 
     @staticmethod
     def _ponto_em_retangulo(p: QPointF, x1: float, y1: float, x2: float, y2: float) -> bool:

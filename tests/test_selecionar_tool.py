@@ -204,9 +204,15 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.ignorar_snap_movimento[-1], {0})
         self.assertEqual(canvas.sombras_snap_movimento[-1][0]["pontos"][0], (0.0, 0.0))
 
-    def test_caixa_de_selecao_pega_elementos_que_cruzam_a_area(self):
+    def test_caixa_de_selecao_pega_apenas_elementos_totalmente_dentro_da_area(self):
         canvas = _FakeCanvas()
         canvas._indices_elementos_em_ponto = lambda _pos: []
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(-30.0, 2.0), (15.0, 2.0)],
+            }
+        )
         canvas.cena.elementos.append(
             {
                 "tipo": "polyline",
@@ -220,9 +226,9 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
         self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
 
-        self.assertEqual(canvas._selecionados, {0, 1})
+        self.assertEqual(canvas._selecionados, {0, 2})
 
-    def test_arraste_sobre_elemento_nao_selecionado_abre_caixa_de_selecao(self):
+    def test_arraste_sobre_elemento_nao_selecionado_move_o_elemento_sem_abrir_caixa(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos.append(
             {
@@ -238,8 +244,24 @@ class SelecionarToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
         self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
 
-        self.assertEqual(canvas._selecionados, {0, 1})
-        self.assertEqual(canvas.historico, 0)
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertEqual(canvas.cena.elementos[0]["pontos"][0], (20.0, 10.0))
+        self.assertEqual(canvas.cena.elementos[1]["pontos"][0], (-5.0, 2.0))
+        self.assertEqual(canvas.historico, 1)
+
+    def test_arraste_dentro_do_molde_move_mesmo_sem_hit_test_de_borda(self):
+        canvas = _FakeCanvas()
+        canvas._indices_elementos_em_ponto = lambda _pos: []
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(7.0, 2.0))))
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(9.0, 3.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(9.0, 3.0))))
+
+        self.assertEqual(canvas.cena.elementos[0]["pontos"][0], (2.0, 1.0))
+        self.assertEqual(canvas.historico, 1)
 
 
 if __name__ == "__main__":
