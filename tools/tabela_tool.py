@@ -643,7 +643,9 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         molde_inicial = self._molde_selecionado(canvas)
+        bloquear_tabela = False
         if molde_inicial is not None and not self._preparar_molde_para_tabela(canvas, molde_inicial, permitir_propriedades=False):
+            bloquear_tabela = self._molde_precisa_definir_grade(canvas, molde_inicial)
             molde_inicial = None
         self._definir_molde_idx(canvas, molde_inicial)
         self._ponto_idx = None
@@ -652,6 +654,10 @@ class Ferramenta(FerramentaBase):
         if self._molde_idx is not None and hasattr(canvas, "_selecionados"):
             canvas._selecionados = {self._molde_idx}
         self._observar_canvas(canvas)
+        if bloquear_tabela:
+            self._ocultar_dialog(canvas)
+            self._status(canvas, "Tabela: defina a grade do molde separado antes de graduar.")
+            return
         dialog = self._obter_dialog(canvas)
         dialog.conectar(self, canvas)
         self._atualizar_dialog(canvas)
@@ -894,6 +900,11 @@ class Ferramenta(FerramentaBase):
             self._dialog_por_canvas[chave] = dialog
             instalar_memoria_posicao(dialog, dialog._chave_posicao)
         return dialog
+
+    def _ocultar_dialog(self, canvas) -> None:
+        dialog = self._dialog_por_canvas.get(id(canvas))
+        if dialog is not None:
+            dialog.hide()
 
     def _restaurar_dialog(self, canvas, dialog: GraduarTabelaDialog):
         fallback = None
@@ -1413,24 +1424,24 @@ class Ferramenta(FerramentaBase):
         molde = canvas.cena.elementos[int(molde_idx)]
         if not self._eh_molde_graduavel(molde):
             return False
-        if self._eh_tamanho_separado_com_grade_incompleta(molde):
+        if self._molde_precisa_definir_grade(canvas, int(molde_idx)):
+            self._ocultar_dialog(canvas)
             if not permitir_propriedades:
-                return True
+                return False
             if not self._confirmar_definir_grade_molde_separado(canvas, molde):
                 self._status(canvas, "Tabela: defina a grade do molde separado antes de graduar.")
                 return False
             self._abrir_propriedades_graduacao(canvas, int(molde_idx))
             self._status(canvas, "Escolha a grade do molde separado em Propriedades.")
             return False
-        if not self._eh_tamanho_separado_sem_grade(molde):
-            self._sincronizar_grade_molde_extraido_sem_valores(canvas, molde)
-            return True
-        if not self._confirmar_definir_grade_molde_separado(canvas, molde):
-            self._status(canvas, "Tabela: esse molde separado ainda não possui grade.")
+        self._sincronizar_grade_molde_extraido_sem_valores(canvas, molde)
+        return True
+
+    def _molde_precisa_definir_grade(self, canvas, molde_idx: int | None) -> bool:
+        if molde_idx is None or not (0 <= int(molde_idx) < len(canvas.cena.elementos)):
             return False
-        self._abrir_propriedades_graduacao(canvas, int(molde_idx))
-        self._status(canvas, "Escolha a grade do molde separado em Propriedades.")
-        return False
+        molde = canvas.cena.elementos[int(molde_idx)]
+        return self._eh_tamanho_separado_com_grade_incompleta(molde) or self._eh_tamanho_separado_sem_grade(molde)
 
     def _confirmar_definir_grade_molde_separado(self, canvas, molde: dict) -> bool:
         confirmador = getattr(canvas, "confirmar_definir_grade_molde_separado", None)

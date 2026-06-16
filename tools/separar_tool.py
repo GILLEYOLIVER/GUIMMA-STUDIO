@@ -477,11 +477,20 @@ class Ferramenta(FerramentaBase):
         max_y = max(p.y() for p in pontos)
         centro = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
         largura = max(0.1, max_x - min_x)
-        y_fio = centro[1]
+        altura = max(0.1, max_y - min_y)
+        afastamento = max(0.2, min(1.2, altura * 0.12))
+        y_nome = max(min_y + afastamento, centro[1] - afastamento)
+        y_fio = min(max_y - afastamento, centro[1] + afastamento)
+        if y_fio <= y_nome:
+            y_nome = centro[1] - (afastamento * 0.5)
+            y_fio = centro[1] + (afastamento * 0.5)
+        pos_nome = (centro[0], y_nome)
         fio_inicio = (centro[0] - largura * 0.25, y_fio)
         fio_fim = (centro[0] + largura * 0.25, y_fio)
         for chave in ("ponto_texto", "ponto_texto_nome", "nome_posicao", "nome_centro"):
-            molde[chave] = centro
+            molde[chave] = pos_nome
+        molde["referencia_texto_nome"] = "Livre"
+        molde["alinhamento_texto_nome"] = "Centro"
         molde["fio_origem"] = fio_inicio
         molde["fio_fim"] = fio_fim
         molde["fio_angulo"] = 0.0

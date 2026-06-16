@@ -114,6 +114,8 @@ class SepararToolTestCase(unittest.TestCase):
         self.assertEqual(copia["graduacao_tamanhos_ativos"], ["G"])
         self.assertFalse(copia["mostrar_graduacao"])
         self.assertEqual(copia["cor"], "#5d95b7")
+        self.assertEqual(copia["referencia_texto_nome"], "Livre")
+        self.assertLess(copia["ponto_texto_nome"][1], copia["fio_origem"][1])
         self.assertEqual(canvas._selecionados, {1})
 
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(21.0, 2.5))))

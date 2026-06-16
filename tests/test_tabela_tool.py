@@ -682,7 +682,7 @@ class TabelaToolTestCase(unittest.TestCase):
         molde["graduacao_tamanhos_ativos"] = ["G"]
 
         ferramenta = FerramentaTabela()
-        self.assertTrue(ferramenta._preparar_molde_para_tabela(canvas, 0, permitir_propriedades=False))
+        self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0, permitir_propriedades=False))
         self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0))
 
         self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
@@ -694,6 +694,46 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(canvas._propriedades_tab_preferida, "graduacao")
         self.assertEqual(molde["graduacao_tamanhos_ativos"], ["G"])
         self.assertNotIn("graduacao_tabela", molde)
+
+    def test_tabela_nao_aparece_ao_ativar_molde_separado_com_grade_incompleta(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["origem_extracao"] = "separar_tamanho"
+        molde["tamanho_extraido"] = "G"
+        molde["nome_molde"] = "K1 - G"
+        molde["graduacao_grade_nome"] = "G(G)"
+        molde["graduacao_tamanhos"] = [{"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": True}]
+        molde["graduacao_tamanhos_ativos"] = ["G"]
+        canvas._selecionados = {0}
+
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+
+        dialog = ferramenta._dialog_por_canvas.get(id(canvas))
+        self.assertTrue(dialog is None or not dialog.isVisible())
+        self.assertIsNone(ferramenta._molde_idx)
+        self.assertEqual(canvas.confirmacoes_definir_grade, [])
+
+    def test_tabela_fecha_antes_de_perguntar_grade_do_molde_separado(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["origem_extracao"] = "separar_tamanho"
+        molde["tamanho_extraido"] = "G"
+        molde["nome_molde"] = "K1 - G"
+        molde["graduacao_grade_nome"] = "G(G)"
+        molde["graduacao_tamanhos"] = [{"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": True}]
+        molde["graduacao_tamanhos_ativos"] = ["G"]
+
+        ferramenta = FerramentaTabela()
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.show()
+        self.assertTrue(dialog.isVisible())
+
+        self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0))
+
+        self.assertFalse(dialog.isVisible())
+        self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
+        self.assertEqual(canvas.ferramenta_ativa, "propriedades")
 
     def test_molde_separado_sem_grade_recusado_nao_inicializa_grade(self):
         canvas = _FakeCanvas()
