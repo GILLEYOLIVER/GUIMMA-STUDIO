@@ -114,12 +114,14 @@ class Ferramenta(FerramentaBase):
 
         if event.button() != Qt.LeftButton:
             return False
-        candidato = self._candidato_em_posicao(canvas, pos)
-        if candidato is None:
-            self._status(canvas, "Separar Tamanhos: clique sobre uma linha de tamanho graduado.")
+        candidatos = self._candidatos_do_clique(canvas, pos)
+        if not candidatos:
+            if self._separar_todos_marcado():
+                self._status(canvas, "Separar Tamanhos: clique dentro do molde ou sobre uma linha de tamanho.")
+            else:
+                self._status(canvas, "Separar Tamanhos: clique sobre a linha do tamanho desejado.")
             event.accept()
             return True
-        candidatos = self._candidatos_para_separar(canvas, candidato)
         indices = [idx for item in candidatos if (idx := self._criar_copia_tamanho(canvas, item)) is not None]
         if not indices:
             self._status(canvas, "Separar Tamanhos: não foi possível criar a cópia desse tamanho.")
@@ -214,11 +216,79 @@ class Ferramenta(FerramentaBase):
         if not self._separar_todos_marcado():
             return [candidato]
         molde_idx = int(candidato.get("molde_idx", -1))
+        return self._candidatos_do_molde(canvas, molde_idx)
+
+    def _candidatos_do_clique(self, canvas, pos: QPointF) -> list[dict]:
+        candidato = self._candidato_em_posicao(canvas, pos)
+        if candidato is not None:
+            return self._candidatos_para_separar(canvas, candidato)
+        if not self._separar_todos_marcado():
+            return []
+        molde_idx = self._molde_em_posicao(canvas, pos)
+        if molde_idx is None:
+            return []
+        return self._candidatos_do_molde(canvas, molde_idx)
+
+    def _candidatos_do_molde(self, canvas, molde_idx: int) -> list[dict]:
         return [
             item
             for item in self._candidatos_tamanhos(canvas)
             if int(item.get("molde_idx", -2)) == molde_idx
         ]
+
+    def _molde_em_posicao(self, canvas, pos: QPointF) -> int | None:
+        if hasattr(canvas, "_indice_molde_em_ponto"):
+            try:
+                idx = canvas._indice_molde_em_ponto(pos)
+                if idx is not None:
+                    return int(idx)
+            except Exception:
+                pass
+        selecionados = list(getattr(canvas, "_selecionados", set()) or [])
+        indices = selecionados + [
+            idx for idx in range(len(getattr(canvas.cena, "elementos", []) or []))
+            if idx not in selecionados
+        ]
+        for idx in indices:
+            elementos = getattr(canvas.cena, "elementos", []) or []
+            if not (0 <= idx < len(elementos)):
+                continue
+            molde = elementos[idx]
+            if isinstance(molde, dict) and molde.get("molde") and self._ponto_dentro_molde(molde, pos):
+                return idx
+        return None
+
+    def _ponto_dentro_molde(self, molde: dict, pos: QPointF) -> bool:
+        pontos = self._pontos_base_molde(molde)
+        if len(pontos) >= 3 and self._ponto_dentro_poligono(pos, pontos):
+            return True
+        return self._ponto_dentro_bbox(pontos, pos)
+
+    @staticmethod
+    def _ponto_dentro_poligono(pos: QPointF, pontos: list[QPointF]) -> bool:
+        dentro = False
+        j = len(pontos) - 1
+        x = pos.x()
+        y = pos.y()
+        for i, pi in enumerate(pontos):
+            pj = pontos[j]
+            cruza = (pi.y() > y) != (pj.y() > y)
+            if cruza:
+                denom = pj.y() - pi.y()
+                if abs(denom) > 1e-12:
+                    x_inter = ((pj.x() - pi.x()) * (y - pi.y()) / denom) + pi.x()
+                    if x < x_inter:
+                        dentro = not dentro
+            j = i
+        return dentro
+
+    @staticmethod
+    def _ponto_dentro_bbox(pontos: list[QPointF], pos: QPointF) -> bool:
+        if not pontos:
+            return False
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        return min(xs) <= pos.x() <= max(xs) and min(ys) <= pos.y() <= max(ys)
 
     def _candidato_em_posicao(self, canvas, pos: QPointF) -> dict | None:
         melhor: tuple[float, dict] | None = None

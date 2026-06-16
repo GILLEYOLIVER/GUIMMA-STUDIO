@@ -191,6 +191,28 @@ class SepararToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertIsNone(ferramenta._arrastando_idx)
 
+    def test_caixa_marcada_aceita_clique_dentro_do_molde_para_separar_todos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSeparar()
+        ferramenta.on_activate(canvas)
+        ferramenta._dialog.chk_todos.setChecked(True)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.5))))
+
+        self.assertEqual(len(canvas.cena.elementos), 3)
+        self.assertEqual([el["tamanho_extraido"] for el in canvas.cena.elementos[1:]], ["M", "G"])
+        self.assertEqual(canvas._selecionados, {1, 2})
+
+    def test_caixa_desmarcada_nao_separa_ao_clicar_apenas_dentro_do_molde(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaSeparar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 2.5))))
+
+        self.assertEqual(len(canvas.cena.elementos), 1)
+        self.assertEqual(canvas._selecionados, set())
+
 
 if __name__ == "__main__":
     unittest.main()
