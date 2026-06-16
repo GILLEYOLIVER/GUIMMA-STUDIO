@@ -5412,6 +5412,14 @@ class Ferramenta(FerramentaBase):
             dialog._iniciar_sessao_edicao()
             dialog._indice_atual = dialog._indice_molde_preferencial()
             dialog.recarregar_lista()
+            tab_preferida = str(getattr(canvas, "_propriedades_tab_preferida", "") or "").strip().lower()
+            if tab_preferida in {"graduacao", "graduação"} and hasattr(dialog, "tabs"):
+                try:
+                    dialog.tabs.setCurrentIndex(1)
+                except Exception:
+                    pass
+            if hasattr(canvas, "_propriedades_tab_preferida"):
+                canvas._propriedades_tab_preferida = None
             if hasattr(canvas, "_indice_propriedades_preferido"):
                 canvas._indice_propriedades_preferido = None
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")

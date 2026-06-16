@@ -643,7 +643,7 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         molde_inicial = self._molde_selecionado(canvas)
-        if molde_inicial is not None and not self._preparar_molde_para_tabela(canvas, molde_inicial):
+        if molde_inicial is not None and not self._preparar_molde_para_tabela(canvas, molde_inicial, permitir_propriedades=False):
             molde_inicial = None
         self._definir_molde_idx(canvas, molde_inicial)
         self._ponto_idx = None
@@ -1392,11 +1392,20 @@ class Ferramenta(FerramentaBase):
         grade_nome, _linhas_padrao = grade_graduacao_padrao()
         molde.setdefault("graduacao_grade_nome", grade_nome)
 
-    def _preparar_molde_para_tabela(self, canvas, molde_idx: int | None) -> bool:
+    def _preparar_molde_para_tabela(self, canvas, molde_idx: int | None, *, permitir_propriedades: bool = True) -> bool:
         if molde_idx is None or not (0 <= int(molde_idx) < len(canvas.cena.elementos)):
             return False
         molde = canvas.cena.elementos[int(molde_idx)]
         if not self._eh_molde_graduavel(molde):
+            return False
+        if self._eh_tamanho_separado_com_grade_incompleta(molde):
+            if not permitir_propriedades:
+                return True
+            if not self._confirmar_definir_grade_molde_separado(canvas, molde):
+                self._status(canvas, "Tabela: defina a grade do molde separado antes de graduar.")
+                return False
+            self._abrir_propriedades_graduacao(canvas, int(molde_idx))
+            self._status(canvas, "Escolha a grade do molde separado em Propriedades.")
             return False
         if not self._eh_tamanho_separado_sem_grade(molde):
             self._sincronizar_grade_molde_extraido_sem_valores(canvas, molde)
@@ -1404,9 +1413,9 @@ class Ferramenta(FerramentaBase):
         if not self._confirmar_definir_grade_molde_separado(canvas, molde):
             self._status(canvas, "Tabela: esse molde separado ainda não possui grade.")
             return False
-        self._definir_grade_base_molde_separado(molde)
-        self._status(canvas, "Tabela: grade definida; o tamanho separado virou base.")
-        return True
+        self._abrir_propriedades_graduacao(canvas, int(molde_idx))
+        self._status(canvas, "Escolha a grade do molde separado em Propriedades.")
+        return False
 
     def _confirmar_definir_grade_molde_separado(self, canvas, molde: dict) -> bool:
         confirmador = getattr(canvas, "confirmar_definir_grade_molde_separado", None)
@@ -1420,7 +1429,7 @@ class Ferramenta(FerramentaBase):
             estilizar(caixa)
         caixa.setWindowTitle("Definir grade")
         caixa.setIcon(QMessageBox.Question)
-        caixa.setText("Esse molde não possui grade.\nDeseja definir agora?")
+        caixa.setText("Este molde separado possui apenas o tamanho extraído.\nEscolher grade agora?")
         caixa.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         caixa.setDefaultButton(QMessageBox.Yes)
         traduzir = getattr(parent, "_traduzir_botoes_padrao_message_box", None)
@@ -1428,44 +1437,21 @@ class Ferramenta(FerramentaBase):
             traduzir(caixa)
         return caixa.exec() == QMessageBox.Yes
 
-    def _definir_grade_base_molde_separado(self, molde: dict) -> None:
-        grade_nome, linhas_padrao = grade_graduacao_padrao()
-        linhas = [dict(linha) for linha in linhas_padrao if isinstance(linha, dict)]
-        if not linhas:
+    def _abrir_propriedades_graduacao(self, canvas, molde_idx: int) -> None:
+        if hasattr(canvas, "_selecionados"):
+            canvas._selecionados = {int(molde_idx)}
+        setattr(canvas, "_indice_propriedades_preferido", int(molde_idx))
+        setattr(canvas, "_propriedades_tab_preferida", "graduacao")
+        if hasattr(canvas, "update"):
+            canvas.update()
+        ativar_canvas = getattr(canvas, "set_ferramenta_ativa", None)
+        if callable(ativar_canvas):
+            ativar_canvas("propriedades")
             return
-
-        tamanho_base = self._tamanho_base_molde_separado(molde)
-        base_idx = next((idx for idx, linha in enumerate(linhas) if bool(linha.get("base"))), len(linhas) // 2)
-        if tamanho_base:
-            idx_tamanho = next(
-                (
-                    idx
-                    for idx, linha in enumerate(linhas)
-                    if str(linha.get("tamanho") or linha.get("nome") or "").strip() == tamanho_base
-                ),
-                None,
-            )
-            if idx_tamanho is None:
-                linhas[base_idx]["tamanho"] = tamanho_base
-                idx_tamanho = base_idx
-            base_idx = int(idx_tamanho)
-            grade_nome = self._grade_nome_com_base(grade_nome, tamanho_base)
-
-        cor_base = str(molde.get("cor") or "").strip()
-        for idx, linha in enumerate(linhas):
-            linha["base"] = idx == base_idx
-            linha["ativo"] = bool(linha.get("ativo", True))
-            if idx == base_idx and cor_base:
-                linha["cor"] = cor_base
-
-        molde["graduacao_grade_nome"] = grade_nome
-        molde["graduacao_tamanhos"] = linhas
-        molde["graduacao_tamanhos_ativos"] = [
-            str(linha.get("tamanho") or linha.get("nome") or "")
-            for linha in linhas
-            if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
-        ]
-        molde["mostrar_graduacao"] = True
+        parent = canvas.window() if hasattr(canvas, "window") else None
+        abrir = getattr(parent, "_abrir_pagina_ferramenta", None)
+        if callable(abrir):
+            abrir("propriedades")
 
     def _sincronizar_grade_molde_extraido_sem_valores(self, canvas, molde: dict) -> None:
         if not isinstance(molde, dict):
@@ -1521,6 +1507,23 @@ class Ferramenta(FerramentaBase):
         linhas = molde.get("graduacao_tamanhos")
         return not (isinstance(linhas, list) and any(isinstance(linha, dict) for linha in linhas))
 
+    def _eh_tamanho_separado_com_grade_incompleta(self, molde: dict) -> bool:
+        if not isinstance(molde, dict):
+            return False
+        if str(molde.get("origem_extracao") or "").strip() != "separar_tamanho":
+            return False
+        if self._tem_valores_graduacao(molde):
+            return False
+        linhas = [
+            linha
+            for linha in (molde.get("graduacao_tamanhos") or [])
+            if isinstance(linha, dict) and linha.get("ativo", True)
+        ]
+        if len(linhas) != 1:
+            return False
+        tamanho_unico = str(linhas[0].get("tamanho") or linhas[0].get("nome") or "").strip()
+        return bool(tamanho_unico and tamanho_unico == self._tamanho_base_molde_separado(molde))
+
     @staticmethod
     def _tamanho_base_molde_separado(molde: dict) -> str:
         tamanho = str(molde.get("tamanho_extraido") or "").strip()
@@ -1530,18 +1533,6 @@ class Ferramenta(FerramentaBase):
         if " - " in nome:
             return nome.rsplit(" - ", 1)[-1].strip()
         return ""
-
-    @staticmethod
-    def _grade_nome_com_base(grade_nome: str, tamanho_base: str) -> str:
-        grade = str(grade_nome or "").strip()
-        base = str(tamanho_base or "").strip()
-        if not grade or not base:
-            return grade
-        inicio = grade.rfind("(")
-        fim = grade.rfind(")")
-        if 0 <= inicio < fim:
-            return f"{grade[:inicio + 1]}{base}{grade[fim:]}"
-        return f"{grade}({base})"
 
     def _valores_ponto(self, molde: dict | None, ponto_idx: int | None) -> dict[str, dict]:
         if not isinstance(molde, dict) or ponto_idx is None:

@@ -416,6 +416,58 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
 
         self.assertLess(eventos.index("show"), eventos.index("centralizar"))
 
+    def test_abrir_propriedades_respeita_aba_graduacao_preferida(self):
+        indices_tabs = []
+
+        class _DialogFake:
+            _indice_atual = 0
+            tabs = SimpleNamespace(setCurrentIndex=lambda idx: indices_tabs.append(idx))
+
+            def isVisible(self):
+                return False
+
+            def _iniciar_sessao_edicao(self):
+                pass
+
+            def _indice_molde_preferencial(self):
+                return 0
+
+            def recarregar_lista(self):
+                pass
+
+            def centralizar_na_tela(self):
+                pass
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def geometry(self):
+                return SimpleNamespace(getRect=lambda: (0, 0, 100, 100))
+
+        class _CanvasFake:
+            _propriedades_tab_preferida = "graduacao"
+
+            def window(self):
+                return None
+
+            def findChildren(self, *_args, **_kwargs):
+                return []
+
+        canvas = _CanvasFake()
+        ferramenta = FerramentaPropriedades()
+        ferramenta._obter_dialog = lambda _canvas: _DialogFake()
+
+        ferramenta.on_activate(canvas)
+
+        self.assertEqual(indices_tabs, [1])
+        self.assertIsNone(canvas._propriedades_tab_preferida)
+
     def test_layout_visualizacao_tem_altura_para_nao_cortar_checkboxes(self):
         canvas = SimpleNamespace(
             cena=SimpleNamespace(elementos=[]),

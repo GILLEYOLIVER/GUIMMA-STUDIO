@@ -108,7 +108,11 @@ class SepararToolTestCase(unittest.TestCase):
         copia = canvas.cena.elementos[1]
         self.assertEqual(copia["nome_molde"], "K1 - G")
         self.assertEqual(copia["tamanho_extraido"], "G")
-        self.assertFalse(any(str(chave).startswith("graduacao_") for chave in copia))
+        self.assertNotIn("graduacao_tabela", copia)
+        self.assertEqual(copia["graduacao_grade_nome"], "G(G)")
+        self.assertEqual(copia["graduacao_tamanhos"], [{"ativo": True, "tamanho": "G", "cor": "#5d95b7", "base": True}])
+        self.assertEqual(copia["graduacao_tamanhos_ativos"], ["G"])
+        self.assertFalse(copia["mostrar_graduacao"])
         self.assertEqual(copia["cor"], "#5d95b7")
         self.assertEqual(canvas._selecionados, {1})
 
@@ -185,6 +189,7 @@ class SepararToolTestCase(unittest.TestCase):
 
         self.assertEqual(len(canvas.cena.elementos), 3)
         self.assertEqual([el["nome_molde"] for el in canvas.cena.elementos[1:]], ["K1 - M", "K1 - G"])
+        self.assertEqual([el["graduacao_tamanhos_ativos"] for el in canvas.cena.elementos[1:]], [["M"], ["G"]])
         self.assertEqual(canvas._selecionados, {1, 2})
 
         self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(21.0, 2.5))))

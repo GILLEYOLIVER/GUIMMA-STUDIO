@@ -374,13 +374,30 @@ class Ferramenta(FerramentaBase):
         novo["controle_cantos"] = [(float(p.x()), float(p.y())) for p in controles]
         novo["pontos_controle_principais"] = [{"x": float(p.x()), "y": float(p.y())} for p in controles]
         novo["pontos_graduacao"] = [{"x": float(p.x()), "y": float(p.y())} for p in controles]
+        novo["cor"] = str(candidato.get("cor") or novo.get("cor") or "#ffffff")
+        self._definir_grade_tamanho_extraido(novo, nome_tamanho)
         novo["controle_auxiliares"] = [(float(p.x()), float(p.y())) for p in auxiliares]
         novo["pontos_auxiliares"] = [{"x": float(p.x()), "y": float(p.y())} for p in auxiliares]
-        novo["cor"] = str(candidato.get("cor") or novo.get("cor") or "#ffffff")
         self._reposicionar_textos_e_fio(novo, sem_fechamento)
 
         canvas.cena.elementos.append(novo)
         return len(canvas.cena.elementos) - 1
+
+    def _definir_grade_tamanho_extraido(self, molde: dict, nome_tamanho: str) -> None:
+        tamanho = str(nome_tamanho or "").strip()
+        if not tamanho:
+            return
+        cor = str(molde.get("cor") or "#ffffff")
+        molde["graduacao_grade_nome"] = f"{tamanho}({tamanho})"
+        molde["graduacao_tamanhos"] = [
+            {
+                "ativo": True,
+                "tamanho": tamanho,
+                "cor": cor,
+                "base": True,
+            }
+        ]
+        molde["graduacao_tamanhos_ativos"] = [tamanho]
 
     def _arrastar_copia(self, canvas, pos: QPointF) -> None:
         indices = [idx for idx in self._arrastando_indices if 0 <= idx < len(canvas.cena.elementos)]

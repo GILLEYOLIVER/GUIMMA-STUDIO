@@ -645,7 +645,7 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual([linha["tamanho"] for linha in extraido["graduacao_tamanhos"]], ["P", "M", "G"])
         self.assertEqual(extraido["graduacao_tamanhos_ativos"], ["P", "M", "G"])
 
-    def test_molde_separado_sem_grade_pergunta_e_define_tamanho_extraido_como_base(self):
+    def test_molde_separado_sem_grade_pergunta_e_abre_propriedades_para_definir_grade(self):
         canvas = _FakeCanvas()
         molde = canvas.cena.elementos[0]
         molde["origem_extracao"] = "separar_tamanho"
@@ -657,26 +657,37 @@ class TabelaToolTestCase(unittest.TestCase):
         molde.pop("graduacao_grade_nome", None)
 
         ferramenta = FerramentaTabela()
-        ferramenta.on_activate(canvas)
+        self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0))
 
         self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
-        self.assertEqual([linha["tamanho"] for linha in molde["graduacao_tamanhos"]], ["P", "M", "G"])
-        self.assertEqual([linha["base"] for linha in molde["graduacao_tamanhos"]], [False, False, True])
-        self.assertEqual(molde["graduacao_grade_nome"], "P-G(G)")
-        self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "M", "G"])
-        self.assertTrue(molde["mostrar_graduacao"])
+        self.assertEqual(canvas.ferramenta_ativa, "propriedades")
+        self.assertEqual(canvas._selecionados, {0})
+        self.assertEqual(canvas._indice_propriedades_preferido, 0)
+        self.assertEqual(canvas._propriedades_tab_preferida, "graduacao")
+        self.assertNotIn("graduacao_tamanhos", molde)
+        self.assertNotIn("graduacao_tabela", molde)
 
-        ferramenta.selecionar_ponto(canvas, 1)
-        dialog = ferramenta._obter_dialog(canvas)
-        dialog.sp_incremento.setValue(1.0)
-        dialog.btn_cima.click()
-        ferramenta.aplicar_dialog(canvas)
+    def test_molde_separado_com_apenas_tamanho_extraido_abre_propriedades_ao_graduar(self):
+        canvas = _FakeCanvas()
+        molde = canvas.cena.elementos[0]
+        molde["origem_extracao"] = "separar_tamanho"
+        molde["tamanho_extraido"] = "G"
+        molde["nome_molde"] = "K1 - G"
+        molde["cor"] = "#ff8c00"
+        molde["graduacao_grade_nome"] = "G(G)"
+        molde["graduacao_tamanhos"] = [{"ativo": True, "tamanho": "G", "cor": "#ff8c00", "base": True}]
+        molde["graduacao_tamanhos_ativos"] = ["G"]
 
-        valores = molde["graduacao_tabela"]["pontos"]["1"]["valores"]
-        self.assertEqual(valores["P"], {"dx": 0.0, "dy": 2.0})
-        self.assertEqual(valores["M"], {"dx": 0.0, "dy": 1.0})
-        self.assertEqual(valores["G"], {"dx": 0.0, "dy": 0.0})
-        self.assertEqual(canvas.historico, 1)
+        ferramenta = FerramentaTabela()
+        self.assertTrue(ferramenta._preparar_molde_para_tabela(canvas, 0, permitir_propriedades=False))
+        self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0))
+
+        self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
+        self.assertEqual(canvas.ferramenta_ativa, "propriedades")
+        self.assertEqual(canvas._indice_propriedades_preferido, 0)
+        self.assertEqual(canvas._propriedades_tab_preferida, "graduacao")
+        self.assertEqual(molde["graduacao_tamanhos_ativos"], ["G"])
+        self.assertNotIn("graduacao_tabela", molde)
 
     def test_molde_separado_sem_grade_recusado_nao_inicializa_grade(self):
         canvas = _FakeCanvas()
@@ -689,10 +700,11 @@ class TabelaToolTestCase(unittest.TestCase):
         molde.pop("graduacao_grade_nome", None)
 
         ferramenta = FerramentaTabela()
-        ferramenta.on_activate(canvas)
+        self.assertFalse(ferramenta._preparar_molde_para_tabela(canvas, 0))
 
         self.assertEqual(canvas.confirmacoes_definir_grade, [molde])
         self.assertIsNone(ferramenta._molde_idx)
+        self.assertIsNone(canvas.ferramenta_ativa)
         self.assertNotIn("graduacao_tamanhos", molde)
         self.assertNotIn("graduacao_tabela", molde)
 
