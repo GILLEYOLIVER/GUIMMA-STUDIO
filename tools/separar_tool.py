@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from math import atan2, cos, hypot, pi, sin
 from uuid import uuid4
 
@@ -9,6 +8,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QDialog, QVBoxLayout
 
 from canvas.visualizacao import VisualizacaoCanvas
+from tools.elemento_runtime_utils import copiar_elemento_sem_runtime
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.tool_base import FerramentaBase
 
@@ -351,7 +351,7 @@ class Ferramenta(FerramentaBase):
 
         nome_origem = str(origem.get("nome_molde") or f"K{idx_origem + 1}").strip() or f"K{idx_origem + 1}"
         nome_tamanho = str(candidato.get("nome_tamanho") or "").strip()
-        novo = deepcopy(origem)
+        novo = copiar_elemento_sem_runtime(origem)
         for chave in list(novo.keys()):
             if str(chave).startswith("graduacao_"):
                 novo.pop(chave, None)

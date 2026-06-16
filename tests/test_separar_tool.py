@@ -16,6 +16,7 @@ if find_spec("PySide6") is None:
     FerramentaSeparar = None
 else:
     from PySide6.QtCore import QPointF, Qt, Signal
+    from PySide6.QtGui import QPainterPath
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.separar_tool import Ferramenta as FerramentaSeparar
@@ -212,6 +213,19 @@ class SepararToolTestCase(unittest.TestCase):
 
         self.assertEqual(len(canvas.cena.elementos), 1)
         self.assertEqual(canvas._selecionados, set())
+
+    def test_separar_ignora_cache_runtime_qpainterpath_do_molde(self):
+        canvas = _FakeCanvas()
+        path = QPainterPath(QPointF(0.0, 0.0))
+        path.lineTo(QPointF(10.0, 0.0))
+        canvas.cena.elementos[0]["_runtime_path_polilinha_tela_cache"] = {"valor": path}
+        ferramenta = FerramentaSeparar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(11.0, 2.5))))
+
+        self.assertEqual(len(canvas.cena.elementos), 2)
+        self.assertNotIn("_runtime_path_polilinha_tela_cache", canvas.cena.elementos[1])
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from math import atan2, cos, degrees, isfinite, radians, sin, sqrt
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from core.formatacao import formatar_numero
+from tools.elemento_runtime_utils import copiar_elemento_sem_runtime
 from tools.movimento_utils import mover_elemento_por_delta, rotacionar_elemento_por_funcao
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
@@ -548,7 +548,7 @@ class Ferramenta(FerramentaBase):
         originais: dict[int, dict] = {}
         for idx in indices:
             if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
-                originais[idx] = deepcopy(canvas.cena.elementos[idx])
+                originais[idx] = copiar_elemento_sem_runtime(canvas.cena.elementos[idx])
         return originais
 
     def _girar_molde_para_fio(self, el: dict, pivo: QPointF, angulo: float) -> None:

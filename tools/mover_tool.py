@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
 from PySide6.QtCore import QPointF, Qt
 
+from tools.elemento_runtime_utils import copiar_elemento_sem_runtime
 from tools.movimento_utils import mover_elemento_por_delta
 from tools.preview_original_utils import desenhar_elementos_originais
 from tools.tool_base import FerramentaBase
@@ -122,5 +121,5 @@ class Ferramenta(FerramentaBase):
         originais: dict[int, dict] = {}
         for idx in indices:
             if 0 <= idx < len(canvas.cena.elementos) and isinstance(canvas.cena.elementos[idx], dict):
-                originais[idx] = deepcopy(canvas.cena.elementos[idx])
+                originais[idx] = copiar_elemento_sem_runtime(canvas.cena.elementos[idx])
         return originais

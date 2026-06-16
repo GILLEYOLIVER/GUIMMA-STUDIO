@@ -21,6 +21,7 @@ if find_spec("PySide6") is None:
     Qt = _QtIndisponivel()
 else:
     from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QPainterPath
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.mover_tool import Ferramenta as FerramentaMover
@@ -181,6 +182,19 @@ class MoverToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(QPointF(2.0, 1.0))))
         self.assertEqual(ferramenta._originais_arraste, {})
         self.assertEqual(canvas.historico, 1)
+
+    def test_mover_ignora_cache_runtime_qpainterpath_no_snapshot_original(self):
+        canvas = _FakeCanvas()
+        path = QPainterPath(QPointF(0.0, 0.0))
+        path.lineTo(QPointF(10.0, 0.0))
+        canvas.cena.elementos[0]["_runtime_path_polilinha_tela_cache"] = {"valor": path}
+        ferramenta = FerramentaMover()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(0.0, 0.0))))
+
+        self.assertIn(0, ferramenta._originais_arraste)
+        self.assertNotIn("_runtime_path_polilinha_tela_cache", ferramenta._originais_arraste[0])
 
 
 if __name__ == "__main__":
