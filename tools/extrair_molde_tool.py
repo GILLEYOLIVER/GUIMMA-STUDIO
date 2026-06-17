@@ -62,7 +62,7 @@ class Ferramenta(FerramentaBase):
         "quebrar_auxiliares": True,
         "converter_auxiliares": True,
     }
-    _log_extracao_habilitado = os.environ.get("GUIMMA_EXTRACAO_LOG", "1").strip().lower() not in {"0", "false", "off", "no"}
+    _log_extracao_habilitado = os.environ.get("GUIMMA_EXTRACAO_LOG", "0").strip().lower() not in {"0", "false", "off", "no"}
 
     @classmethod
     def _limpar_referencias_ui_global(cls):

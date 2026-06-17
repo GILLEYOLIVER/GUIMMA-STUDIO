@@ -31,6 +31,9 @@ from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_li
 from ui.hover_style import aplicar_hover_menu, folha_estilo_hover_global
 
 
+_ICON_CACHE: dict[str, QIcon] = {}
+
+
 @dataclass(slots=True)
 class ToolDef:
     tool_id: str
@@ -773,6 +776,9 @@ class RibbonWidget(QWidget):
         self._active_tool_id: str | None = None
         self._botoes_por_tool_id: dict[str, list[RibbonButton]] = {}
         self._cache_botoes_ribbon_valido = False
+        self._user_tools_signature: tuple[tuple[str, ...], str] | None = None
+        self._tema_aplicado_signature: tuple[tuple[str, str], ...] | None = None
+        self._paginas_construidas: set[int] = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -781,20 +787,12 @@ class RibbonWidget(QWidget):
 
         self.tabbar = RibbonTabBar()
         self.paginas = QStackedWidget()
-        self.tabbar.currentChanged.connect(self.paginas.setCurrentIndex)
-        self.tabbar.currentChanged.connect(self._atualizar_destaque_aba)
 
         for tab in self._tabs:
             self.tabbar.addTab(tab.title)
-            grupos: list[tuple[str, list[ToolDef]]] = []
-            for group in tab.groups:
-                grupos.append((group.title, [self._tools[tid] for tid in group.tools]))
-            pagina = RibbonPage(grupos)
-            pagina.tool_selected.connect(self._on_tool_selected)
-            pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)
-            for grupo in pagina.findChildren(RibbonGroup):
-                grupo.estilo_changed.connect(self.estilo_changed.emit)
-            self.paginas.addWidget(self._criar_viewport_pagina(pagina))
+            self.paginas.addWidget(QWidget())
+
+        self.tabbar.currentChanged.connect(self._on_tab_index_changed)
 
         if include_tabbar:
             layout.addWidget(self.tabbar)
@@ -822,6 +820,7 @@ class RibbonWidget(QWidget):
             }
             """
         )
+        self._garantir_pagina(self.tabbar.currentIndex())
         self._atualizar_destaque_aba(self.tabbar.currentIndex())
         self.aplicar_tema(self._tema_interface)
 
@@ -834,12 +833,46 @@ class RibbonWidget(QWidget):
             return
 
         titulo = titulo.strip() or "1"
+        tool_ids_validos = tuple(tid for tid in tool_ids if tid in self._tools)
+        assinatura = (tool_ids_validos, titulo)
+        if self._user_tools_signature == assinatura:
+            if self._tabs[index].title != titulo:
+                self._tabs[index].title = titulo
+                self.tabbar.setTabText(index, titulo)
+            return
+
         self._tabs[index].title = titulo
         self.tabbar.setTabText(index, titulo)
 
-        tools = [self._tools[tid] for tid in tool_ids if tid in self._tools]
+        tools = [self._tools[tid] for tid in tool_ids_validos]
         grupos = [("Usuario", tools)] if tools else []
         pagina = RibbonPage(grupos, compactar_grupos=False)
+        self._substituir_pagina(index, pagina)
+        self._paginas_construidas.add(index)
+        self._user_tools_signature = assinatura
+        self.aplicar_tema(self._tema_interface)
+
+    def _on_tab_index_changed(self, index: int):
+        self._garantir_pagina(index)
+        self.paginas.setCurrentIndex(index)
+        self._atualizar_destaque_aba(index)
+
+    def _garantir_pagina(self, index: int):
+        if index in self._paginas_construidas or not (0 <= index < len(self._tabs)):
+            return
+        pagina = self._criar_pagina_tab(index)
+        self._substituir_pagina(index, pagina)
+        self._paginas_construidas.add(index)
+        self.aplicar_tema(self._tema_interface)
+
+    def _criar_pagina_tab(self, index: int) -> RibbonPage:
+        tab = self._tabs[index]
+        grupos: list[tuple[str, list[ToolDef]]] = []
+        for group in tab.groups:
+            grupos.append((group.title, [self._tools[tid] for tid in group.tools if tid in self._tools]))
+        return RibbonPage(grupos)
+
+    def _substituir_pagina(self, index: int, pagina: RibbonPage) -> QWidget:
         pagina.tool_selected.connect(self._on_tool_selected)
         pagina.adicionar_usuario.connect(self.adicionar_usuario.emit)
         for grupo in pagina.findChildren(RibbonGroup):
@@ -847,13 +880,15 @@ class RibbonWidget(QWidget):
 
         pagina_atual = self.paginas.currentIndex()
         antiga = self.paginas.widget(index)
+        nova = self._criar_viewport_pagina(pagina)
         self.paginas.removeWidget(antiga)
         antiga.deleteLater()
-        self.paginas.insertWidget(index, self._criar_viewport_pagina(pagina))
+        self.paginas.insertWidget(index, nova)
         if pagina_atual == index:
             self.paginas.setCurrentIndex(index)
         self._cache_botoes_ribbon_valido = False
-        self.aplicar_tema(self._tema_interface)
+        self._tema_aplicado_signature = None
+        return nova
 
     def _on_tool_selected(self, tool_id: str):
         self.set_active_tool(tool_id)
@@ -933,6 +968,10 @@ class RibbonWidget(QWidget):
             controle.set_valor(estilo)
 
     def aplicar_tema(self, tema: dict[str, str]):
+        assinatura = tuple(sorted((str(chave), str(valor)) for chave, valor in tema.items()))
+        if self._tema_aplicado_signature == assinatura:
+            return
+        self._tema_aplicado_signature = assinatura
         self._tema_interface = dict(tema)
         self.setStyleSheet(f"background:{tema.get('painel', '#ffffff')}; color:{tema.get('texto', '#111111')};")
         self.tabbar.setStyleSheet(
@@ -1072,11 +1111,17 @@ def groups_tools_flat(groups: list[dict]) -> set[str]:
     return resultado
 
 
-def _carregar_icone(icon_name: str) -> QIcon:
+def carregar_icone(icon_name: str) -> QIcon:
+    chave = icon_name or "__fallback__"
+    if chave in _ICON_CACHE:
+        return _ICON_CACHE[chave]
+
     if icon_name:
         icon_path = ICONS_DIR / icon_name
         if icon_path.exists():
-            return QIcon(str(icon_path))
+            icone = QIcon(str(icon_path))
+            _ICON_CACHE[chave] = icone
+            return icone
 
     pix = QPixmap(20, 20)
     pix.fill(Qt.transparent)
@@ -1088,4 +1133,10 @@ def _carregar_icone(icon_name: str) -> QIcon:
     painter.setBrush(QColor("#ffffff"))
     painter.drawRoundedRect(5, 5, 10, 10, 2, 2)
     painter.end()
-    return QIcon(pix)
+    icone = QIcon(pix)
+    _ICON_CACHE[chave] = icone
+    return icone
+
+
+def _carregar_icone(icon_name: str) -> QIcon:
+    return carregar_icone(icon_name)

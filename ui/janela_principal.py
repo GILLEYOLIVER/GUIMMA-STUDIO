@@ -66,7 +66,7 @@ from formats.audaces_pair_import import AudacesPairImport
 from formats.dxf_import import importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.hover_style import folha_estilo_hover_global
-from ui.ribbon import RibbonWidget
+from ui.ribbon import RibbonWidget, carregar_icone
 from ui.salvar_como_dialog import SalvarComoDialog
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
@@ -523,7 +523,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._limpar_abas_documentos()
         self._configurar_atalhos()
         QApplication.instance().installEventFilter(self)
-        self._oferecer_recuperacao_pos_falha()
+        QTimer.singleShot(250, self._oferecer_recuperacao_pos_falha)
         QTimer.singleShot(0, lambda: self._ativar_ferramenta_global("selecionar"))
 
     def exibir_inicial(self):
@@ -2352,7 +2352,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if icon_name:
                 caminho = ICONS_DIR / icon_name
                 if caminho.exists():
-                    acao.setIcon(QIcon(str(caminho)))
+                    acao.setIcon(carregar_icone(icon_name))
             return acao
 
         menu.addAction("Opções", self._abrir_dialogo_opcoes)
@@ -6011,7 +6011,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 icon_name = getattr(tool, "icon", "")
                 caminho_icone = ICONS_DIR / icon_name if icon_name else None
                 if caminho_icone is not None and caminho_icone.exists():
-                    btn.setIcon(QIcon(str(caminho_icone)))
+                    btn.setIcon(carregar_icone(icon_name))
             except Exception:
                 pass
             btn.setIconSize(QSize(18, 18))
@@ -6822,7 +6822,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 continue
             btn = _BotaoFerramentaUsuario(tool_id)
             btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
-            btn.setIcon(QIcon(str(ICONS_DIR / tool.icon)))
+            btn.setIcon(carregar_icone(tool.icon))
             btn.setIconSize(QSize(28, 28))
             btn.setFixedSize(30, 30)
             btn.setToolTip(tool.title)
@@ -7549,7 +7549,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         tamanho = QSize(22, 22)
         icone_snap = ICONS_DIR / "snap.svg"
         if icone_snap.exists():
-            pix = QIcon(str(icone_snap)).pixmap(tamanho)
+            pix = carregar_icone("snap.svg").pixmap(tamanho)
         else:
             pix = QPixmap(tamanho)
             pix.fill(Qt.transparent)
@@ -7754,7 +7754,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_grid.setStyleSheet(estilo_botao_icone)
         icone_grid = ICONS_DIR / "grid.svg"
         if icone_grid.exists():
-            self.btn_grid.setIcon(QIcon(str(icone_grid)))
+            self.btn_grid.setIcon(carregar_icone("grid.svg"))
             self.btn_grid.setText("")
         self.btn_grid.toggled.connect(self._alternar_grid_canvas)
         row.addWidget(self.btn_grid)
@@ -7774,7 +7774,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.btn_costura.setStyleSheet(estilo_botao_icone)
         icone_costura = ICONS_DIR / "costura.svg"
         if icone_costura.exists():
-            self.btn_costura.setIcon(QIcon(str(icone_costura)))
+            self.btn_costura.setIcon(carregar_icone("costura.svg"))
             self.btn_costura.setText("")
         self.btn_costura.toggled.connect(self._alternar_costura_canvas)
         row.addWidget(self.btn_costura)
