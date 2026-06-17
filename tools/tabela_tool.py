@@ -2548,3 +2548,5 @@ class Ferramenta(FerramentaBase):
         proj_x = ax + t * dx
         proj_y = ay + t * dy
         return hypot(px - proj_x, py - proj_y)
+
+#ok 17/06/2026
