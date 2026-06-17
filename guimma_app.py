@@ -161,6 +161,7 @@ class GuimmaStudioApp:
     def _on_ribbon_tab_changed(self, *_args):
         try:
             self._fixar_nome_aba_usuario(self.janela_principal)
+            self._corrigir_scroll_ribbon_principal(self.janela_principal)
         except Exception:
             pass
 
@@ -328,6 +329,7 @@ class GuimmaStudioApp:
                 rib.paginas.insertWidget(index, nova_area)
                 rib._cache_botoes_ribbon_valido = False
                 rib._usuario_layout_compacto_assinatura = assinatura
+                rib._tema_aplicado_signature = None
                 if pagina_visivel == index:
                     rib.paginas.setCurrentIndex(index)
                 rib.aplicar_tema(rib._tema_interface)
