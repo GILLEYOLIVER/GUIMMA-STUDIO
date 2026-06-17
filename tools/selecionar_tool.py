@@ -382,16 +382,29 @@ class Ferramenta(FerramentaBase):
         y2 = max(self._inicio_caixa.y(), self._fim_caixa.y())
 
         if sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) > (4.0 / max(canvas.zoom, 0.001)):
+            # Seleção estilo CAD/Audaces:
+            # - arraste da esquerda para a direita: seleciona somente o que ficou inteiro dentro da janela;
+            # - arraste da direita para a esquerda: seleciona qualquer elemento que toque/cruze a janela.
+            selecionar_por_toque = self._fim_caixa.x() < self._inicio_caixa.x()
+
             selecionados_area: set[int] = set()
             for idx, el in enumerate(canvas.cena.elementos):
                 pontos = self._pontos_elemento_para_selecao(canvas, el)
-                if pontos and self._elemento_totalmente_dentro_retangulo(pontos, x1, y1, x2, y2):
-                    selecionados_area.add(idx)
+                if not pontos:
+                    continue
+
+                if selecionar_por_toque:
+                    if self._elemento_intersecta_retangulo(pontos, x1, y1, x2, y2):
+                        selecionados_area.add(idx)
+                else:
+                    if self._elemento_totalmente_dentro_retangulo(pontos, x1, y1, x2, y2):
+                        selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
                 canvas._selecionados |= selecionados_area
             else:
                 canvas._selecionados = selecionados_area
-            self.set_status(f"Seleção por área: {len(canvas._selecionados)} elemento(s).")
+            modo = "por toque" if selecionar_por_toque else "contida"
+            self.set_status(f"Seleção por área ({modo}): {len(canvas._selecionados)} elemento(s).")
 
         self._inicio_caixa = None
         self._fim_caixa = None
@@ -402,6 +415,43 @@ class Ferramenta(FerramentaBase):
 
     def _elemento_totalmente_dentro_retangulo(self, pontos: list[QPointF], x1: float, y1: float, x2: float, y2: float) -> bool:
         return bool(pontos) and all(self._ponto_em_retangulo(p, x1, y1, x2, y2) for p in pontos)
+
+    def _elemento_intersecta_retangulo(
+            self,
+            pontos: list[QPointF],
+            x1: float,
+            y1: float,
+            x2: float,
+            y2: float,
+    ) -> bool:
+        if not pontos:
+            return False
+
+        # Algum ponto do elemento está dentro da janela.
+        for p in pontos:
+            if self._ponto_em_retangulo(p, x1, y1, x2, y2):
+                return True
+
+        # Algum segmento do elemento cruza a janela.
+        for a, b in zip(pontos, pontos[1:]):
+            if self._segmento_intersecta_retangulo(a, b, x1, y1, x2, y2):
+                return True
+
+        # Caso especial: uma janela pequena pode estar completamente dentro
+        # de um contorno fechado; nesse caso também é interseção.
+        fechado = len(pontos) >= 3 and self._dist_qp(pontos[0], pontos[-1]) <= 1e-7
+        if fechado:
+            poligono = pontos[:-1]
+            cantos_retangulo = [
+                QPointF(x1, y1),
+                QPointF(x2, y1),
+                QPointF(x2, y2),
+                QPointF(x1, y2),
+            ]
+            if any(self._ponto_dentro_poligono(canto, poligono) for canto in cantos_retangulo):
+                return True
+
+        return False
 
     @staticmethod
     def _ponto_em_retangulo(p: QPointF, x1: float, y1: float, x2: float, y2: float) -> bool:

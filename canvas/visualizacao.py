@@ -2423,6 +2423,8 @@ class VisualizacaoCanvas(QWidget):
                                              fase_inicial=float(elemento.get("fase_inicio", 0.0)),
                                              elemento=elemento)
                     self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
+                    if selecionado and not is_molde:
+                        self._desenhar_bbox_selecao_elemento(painter, elemento)
                     continue
                 if self._desenhar_parabola_3p_elemento(
                     painter,
@@ -2433,10 +2435,14 @@ class VisualizacaoCanvas(QWidget):
                     amplitude=float(elemento.get("amplitude", 1.0)),
                 ):
                     self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
+                    if selecionado and not is_molde:
+                        self._desenhar_bbox_selecao_elemento(painter, elemento)
                     continue
                 if self._elemento_curva_suave(elemento) and not elemento.get("pontos_tracado_real"):
                     self._desenhar_curva_suave_elemento(painter, elemento, cor=cor, espessura=esp, estilo=estilo)
                     self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
+                    if selecionado and not is_molde:
+                        self._desenhar_bbox_selecao_elemento(painter, elemento)
                     continue
                 self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
                                          estilo=estilo,
