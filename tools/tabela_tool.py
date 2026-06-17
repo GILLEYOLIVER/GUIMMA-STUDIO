@@ -1358,23 +1358,20 @@ class Ferramenta(FerramentaBase):
 
         chave = id(canvas)
 
-        # Observa alterações reais no canvas.
-        # Não pode retornar cedo demais, porque mesmo sem esse sinal
-        # ainda precisamos tentar observar a janela de Propriedades.
         if chave not in self._canvas_observados:
             sinal = getattr(canvas, "elementos_alterados", None)
 
             if sinal is not None and hasattr(sinal, "connect"):
+                def atualizar_por_canvas(*_args):
+                    self._agendar_atualizacao_canvas(canvas)
+
                 try:
-                    sinal.connect(
-                        lambda *_args, canvas=canvas: self._agendar_atualizacao_canvas(canvas)
-                    )
+                    sinal.connect(atualizar_por_canvas)
                 except Exception:
                     pass
 
             self._canvas_observados.add(chave)
 
-        # Observa também a janela Propriedades, quando ela estiver aberta.
         self._observar_dialog_propriedades(canvas)
 
     def _observar_dialog_propriedades(self, canvas) -> None:
@@ -1392,27 +1389,58 @@ class Ferramenta(FerramentaBase):
         if chave_dialog in self._dialog_propriedades_observados:
             return
 
-        # A janela Propriedades emite dados_aplicados quando o usuário confirma.
         sinal = getattr(dialog, "dados_aplicados", None)
         if sinal is not None and hasattr(sinal, "connect"):
+            def atualizar_por_propriedades(*_args):
+                self._agendar_atualizacao_canvas(canvas)
+
             try:
-                sinal.connect(
-                    lambda *_args, canvas=canvas: self._agendar_atualizacao_canvas(canvas)
-                )
+                sinal.connect(atualizar_por_propriedades)
             except Exception:
                 pass
 
-        # Quando a janela fechar/destruir, libera a chave para poder conectar novamente
-        # numa próxima abertura.
         try:
-            dialog.destroyed.connect(
-                lambda *_args, chave_dialog=chave_dialog: self._dialog_propriedades_observados.discard(chave_dialog)
-            )
+            def limpar_dialog_observado(*_args):
+                try:
+                    self._dialog_propriedades_observados.discard(chave_dialog)
+                except Exception:
+                    pass
+
+            dialog.destroyed.connect(limpar_dialog_observado)
         except Exception:
             pass
 
         self._dialog_propriedades_observados.add(chave_dialog)
 
+    def _agendar_atualizacao_canvas(self, canvas) -> None:
+        if canvas is None:
+            return
+
+        if not hasattr(self, "_atualizacoes_canvas_agendadas"):
+            self._atualizacoes_canvas_agendadas = set()
+
+        chave = id(canvas)
+
+        if chave in self._atualizacoes_canvas_agendadas:
+            return
+
+        self._atualizacoes_canvas_agendadas.add(chave)
+
+        def executar_atualizacao():
+            try:
+                self._atualizacoes_canvas_agendadas.discard(chave)
+            except Exception:
+                pass
+
+            try:
+                self._quando_canvas_elementos_alterados(canvas)
+            except Exception:
+                pass
+
+        try:
+            QTimer.singleShot(0, executar_atualizacao)
+        except Exception:
+            executar_atualizacao()
 
     def _agendar_atualizacao_canvas(self, canvas) -> None:
         if canvas is None:
