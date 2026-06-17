@@ -52,6 +52,32 @@ TAMANHO_TEXTO_PADRAO_CM = 0.7
 TAMANHO_NOME_PADRAO_CM = 3.0
 TAMANHO_NUMERO_PADRAO_CM = 0.7
 
+GRADES_TAMANHOS_OPCOES = [
+    "P-G(M)",
+    "PP-GG(M)",
+    "PP-XG(M)",
+    "PP-G2(P)",
+    "S-L(M)",
+    "S-XL(M)",
+    "1-3(2)",
+    "1-4(2)",
+    "1-5(3)",
+    "2-12(6)",
+    "36-50(40)",
+]
+
+GRADES_TAMANHOS_CORES_FIXAS = {
+    "PP-G2(P)": {
+        "PP": "#00ff00",
+        "P": "#ffff00",
+        "M": "#2b7cd3",
+        "G": "#ffffff",
+        "GG": "#ff00ff",
+        "G1": "#ff8c00",
+        "G2": "#7b1fff",
+    },
+}
+
 # Regra do GUIMMA STUDIO: valores decimais sempre usam ponto.
 # Exemplos: 0.5 cm = meio centímetro; 0.4 cm = 4 mm; 1.2 cm = 12 mm.
 QLocale.setDefault(QLocale.c())
@@ -2237,7 +2263,7 @@ class PropriedadesMoldesDialog(QDialog):
         self.cmb_area_tamanho = QComboBox()
         self.cmb_area_tamanho.addItems(["Manter diferença", "Igual tamanho", "Tamanho intermediário"])
         self.cmb_grade_tamanhos = QComboBox()
-        self.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-GG(M)", "PP-XG(M)", "S-L(M)", "S-XL(M)", "1-3(2)", "1-4(2)", "1-5(3)", "2-12(6)", "36-50(40)"])
+        self.cmb_grade_tamanhos.addItems(GRADES_TAMANHOS_OPCOES)
         self.cmb_grade_tamanhos.currentTextChanged.connect(self._aplicar_grade_tamanhos)
         form.addRow("Aplicar", self.cmb_aplicar_grade)
         form.addRow("Área do tamanho", self.cmb_area_tamanho)
@@ -2294,13 +2320,22 @@ class PropriedadesMoldesDialog(QDialog):
             if isinstance(linha, dict)
         }
         cores_padrao = self._cores_padrao_grade(grade_texto)
+        usar_cores_fixas = str(grade_texto or "").strip() in GRADES_TAMANHOS_CORES_FIXAS
         self._graduacao_linhas = []
         for tamanho in tamanhos:
+            tamanho_str = str(tamanho)
+            cor_padrao = cores_padrao.get(tamanho_str)
+            cor_existente = cores_existentes.get(tamanho_str)
             self._graduacao_linhas.append({
                 "ativo": True,
                 "tamanho": tamanho,
-                "cor": cores_existentes.get(str(tamanho)) or cores_padrao.get(str(tamanho)) or self._gerar_cor_aleatoria(),
-                "base": str(tamanho) == str(base),
+                "cor": (
+                    (cor_padrao if usar_cores_fixas else cor_existente)
+                    or cor_padrao
+                    or cor_existente
+                    or self._gerar_cor_aleatoria()
+                ),
+                "base": tamanho_str == str(base),
             })
         if self._graduacao_linhas and not any(l.get("base") for l in self._graduacao_linhas):
             self._graduacao_linhas[len(self._graduacao_linhas) // 2]["base"] = True
@@ -2309,6 +2344,9 @@ class PropriedadesMoldesDialog(QDialog):
 
     @staticmethod
     def _cores_padrao_grade(grade_texto: str) -> dict[str, str]:
+        cores_fixas = GRADES_TAMANHOS_CORES_FIXAS.get(str(grade_texto or "").strip())
+        if cores_fixas:
+            return dict(cores_fixas)
         for idioma in ("pt", "es"):
             grade_nome, linhas = grade_graduacao_padrao(idioma)
             if str(grade_texto or "").strip() == grade_nome:
@@ -2333,12 +2371,16 @@ class PropriedadesMoldesDialog(QDialog):
 
         if inicio.isdigit() and fim.isdigit():
             n1, n2 = int(inicio), int(fim)
-            passo = 2 if (n2 - n1) % 2 == 0 and abs(n2 - n1) >= 2 else 1
+            if n1 >= 30 and n2 >= 30 and (n2 - n1) % 2 == 0 and abs(n2 - n1) >= 2:
+                passo = 2
+            else:
+                passo = 1
             vals = list(range(n1, n2 + 1, passo))
             return [str(v) for v in vals], base
 
         escalas = [
             ["PP", "P", "M", "G", "GG", "XG", "XXG"],
+            ["PP", "P", "M", "G", "GG", "G1", "G2"],
             ["XS", "S", "M", "L", "XL", "XXL"],
         ]
         for escala in escalas:
@@ -2597,11 +2639,12 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _elementos_rascunho_visualizacao(self) -> list[dict]:
         elementos = []
-        for el in self._elementos_edicao():
+        for idx, el in enumerate(self._elementos_edicao()):
             if not isinstance(el, dict):
                 continue
             item = _elemento_limpo_para_edicao(el)
             item["_opacidade_visualizacao_temporaria"] = 0.92
+            item["_indice_visualizacao_rascunho"] = int(idx)
             elementos.append(item)
         return elementos
 
@@ -2712,10 +2755,6 @@ class PropriedadesMoldesDialog(QDialog):
         if not linhas_antigas or not novas_linhas:
             return []
         velho_base_idx = next((i for i, l in enumerate(linhas_antigas) if l.get("base")), len(linhas_antigas) // 2)
-        velho_abaixo = max(1, velho_base_idx)
-        velho_acima = max(1, (len(linhas_antigas) - 1) - velho_base_idx)
-        novo_abaixo = max(1, int(novo_base_idx))
-        novo_acima = max(1, (len(novas_linhas) - 1) - int(novo_base_idx))
         nomes_novos = {
             str(linha.get("tamanho") or linha.get("nome") or "").strip()
             for linha in novas_linhas
@@ -2730,12 +2769,7 @@ class PropriedadesMoldesDialog(QDialog):
             if not isinstance(item, dict):
                 continue
             deslocamento = idx - velho_base_idx
-            if deslocamento < 0:
-                alvo = float(novo_base_idx) + (float(deslocamento) * (float(novo_abaixo) / float(velho_abaixo)))
-            elif deslocamento > 0:
-                alvo = float(novo_base_idx) + (float(deslocamento) * (float(novo_acima) / float(velho_acima)))
-            else:
-                alvo = float(novo_base_idx)
+            alvo = float(novo_base_idx) + float(deslocamento)
             anchors.append((
                 alvo,
                 self._float_campo(item.get("dx"), 0.0),
@@ -4197,37 +4231,55 @@ class PropriedadesMoldesDialog(QDialog):
         if not isinstance(identidade, dict):
             return None
 
+        nome = str(identidade.get("nome_molde") or "").strip()
+        origem = str(identidade.get("origem_extracao") or "").strip()
+        tamanho = str(identidade.get("tamanho_extraido") or "").strip()
+
+        def _combina_campos_contexto(el: dict) -> bool:
+            if nome and self._valor_texto_identidade(el, "nome_molde") != nome:
+                return False
+            if origem and self._valor_texto_identidade(el, "origem_extracao") != origem:
+                return False
+            if tamanho and self._valor_texto_identidade(el, "tamanho_extraido") != tamanho:
+                return False
+            return True
+
         for chave in ("molde_id", "shape_id", "id", "uuid"):
             valor = str(identidade.get(chave) or "").strip()
             if not valor:
                 continue
+            candidatos: list[int] = []
             for idx, el in enumerate(elementos):
                 if (
                     isinstance(el, dict)
                     and el.get("molde")
                     and self._valor_texto_identidade(el, chave) == valor
                 ):
-                    return int(idx)
+                    candidatos.append(int(idx))
+            if len(candidatos) == 1 and _combina_campos_contexto(elementos[candidatos[0]]):
+                return candidatos[0]
+            candidatos_contexto = [
+                idx
+                for idx in candidatos
+                if isinstance(elementos[idx], dict) and _combina_campos_contexto(elementos[idx])
+            ]
+            if len(candidatos_contexto) == 1:
+                return candidatos_contexto[0]
 
-        nome = str(identidade.get("nome_molde") or "").strip()
         if not nome:
             return None
-        origem = str(identidade.get("origem_extracao") or "").strip()
-        tamanho = str(identidade.get("tamanho_extraido") or "").strip()
         candidatos: list[int] = []
         for idx, el in enumerate(elementos):
             if not isinstance(el, dict) or not el.get("molde"):
                 continue
-            if self._valor_texto_identidade(el, "nome_molde") != nome:
-                continue
-            if origem and self._valor_texto_identidade(el, "origem_extracao") != origem:
-                continue
-            if tamanho and self._valor_texto_identidade(el, "tamanho_extraido") != tamanho:
+            if not _combina_campos_contexto(el):
                 continue
             candidatos.append(int(idx))
         return candidatos[0] if len(candidatos) == 1 else None
 
     def _tem_preferencia_molde_forcada(self) -> bool:
+        if isinstance(getattr(self.canvas, "_propriedades_molde_objeto_preferido", None), dict):
+            return True
         identidade = getattr(self.canvas, "_propriedades_molde_identidade_preferida", None)
         if isinstance(identidade, dict) and any(str(valor or "").strip() for valor in identidade.values()):
             return True
@@ -4237,6 +4289,14 @@ class PropriedadesMoldesDialog(QDialog):
         elementos = self._elementos_edicao()
         if not isinstance(elementos, list):
             return None
+
+        objeto_preferido = getattr(self.canvas, "_propriedades_molde_objeto_preferido", None)
+        if isinstance(objeto_preferido, dict):
+            for idx, el_real in enumerate(self._elementos_canvas_reais()):
+                if el_real is objeto_preferido and 0 <= idx < len(elementos):
+                    el_edicao = elementos[idx]
+                    if isinstance(el_edicao, dict) and el_edicao.get("molde"):
+                        return int(idx)
 
         idx_identidade = self._indice_por_identidade_preferida(
             elementos,
@@ -4268,6 +4328,25 @@ class PropriedadesMoldesDialog(QDialog):
                 if isinstance(el, dict) and el.get("molde"):
                     return idx
         return None
+
+    def _aplicar_indice_preferencial_forcado(self) -> bool:
+        if not self._tem_preferencia_molde_forcada():
+            return False
+        idx = self._indice_molde_preferencial()
+        if idx is None:
+            return False
+        item = getattr(self, "_itens_molde_por_indice", {}).get(int(idx))
+        if item is None:
+            return False
+        with QSignalBlocker(self.arvore):
+            for item_iter in self._iter_items(self.arvore.invisibleRootItem()):
+                item_iter.setSelected(False)
+            self.arvore.setCurrentItem(item)
+            item.setSelected(True)
+        self._indice_atual = int(idx)
+        self._atualizar_combo_moldes()
+        self._preencher_campos(self._molde_atual())
+        return True
 
     def _quando_troca_selecao(self):
         item = self.arvore.currentItem()
@@ -5461,34 +5540,48 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         _log_propriedades_debug(f"on_activate() chamado. canvas={type(canvas).__name__}; window={type(canvas.window()).__name__ if hasattr(canvas, 'window') and canvas.window() is not None else None}")
-        try:
-            dialog = self._obter_dialog(canvas)
-            _log_propriedades_debug(f"Dialog obtido: {dialog}; visível_antes={dialog.isVisible() if dialog is not None else None}")
-            dialog._iniciar_sessao_edicao()
-            dialog._indice_atual = dialog._indice_molde_preferencial()
-            dialog.recarregar_lista()
-            tab_preferida = str(getattr(canvas, "_propriedades_tab_preferida", "") or "").strip().lower()
-            if tab_preferida in {"graduacao", "graduação"} and hasattr(dialog, "tabs"):
-                try:
-                    dialog.tabs.setCurrentIndex(1)
-                except Exception:
-                    pass
+
+        def _limpar_preferencias_temporarias():
             if hasattr(canvas, "_propriedades_tab_preferida"):
                 canvas._propriedades_tab_preferida = None
             if hasattr(canvas, "_indice_propriedades_preferido"):
                 canvas._indice_propriedades_preferido = None
             if hasattr(canvas, "_propriedades_molde_identidade_preferida"):
                 canvas._propriedades_molde_identidade_preferida = None
+            if hasattr(canvas, "_propriedades_molde_objeto_preferido"):
+                canvas._propriedades_molde_objeto_preferido = None
+
+        try:
+            dialog = self._obter_dialog(canvas)
+            _log_propriedades_debug(f"Dialog obtido: {dialog}; visível_antes={dialog.isVisible() if dialog is not None else None}")
+            dialog._iniciar_sessao_edicao()
+            dialog._indice_atual = dialog._indice_molde_preferencial()
+            dialog.recarregar_lista()
+            reaplicar_preferencia = getattr(dialog, "_aplicar_indice_preferencial_forcado", None)
+            if callable(reaplicar_preferencia):
+                reaplicar_preferencia()
+            tab_preferida = str(getattr(canvas, "_propriedades_tab_preferida", "") or "").strip().lower()
+            if tab_preferida in {"graduacao", "graduação"} and hasattr(dialog, "tabs"):
+                try:
+                    dialog.tabs.setCurrentIndex(1)
+                except Exception:
+                    pass
             _log_propriedades_debug(f"Após recarregar_lista: indice_atual={dialog._indice_atual}; refs={len(getattr(dialog, '_refs', []))}")
             if dialog._indice_atual is None:
                 try:
                     dialog.hide()
                 except Exception:
                     pass
+                _limpar_preferencias_temporarias()
                 self.set_status("Nenhum molde disponível. Crie ou extraia um molde primeiro.")
                 return
             dialog.show()
             dialog.centralizar_na_tela()
+            if callable(reaplicar_preferencia):
+                QTimer.singleShot(0, reaplicar_preferencia)
+                QTimer.singleShot(0, _limpar_preferencias_temporarias)
+            else:
+                _limpar_preferencias_temporarias()
             QTimer.singleShot(0, dialog.centralizar_na_tela)
             dialog.raise_()
             dialog.activateWindow()

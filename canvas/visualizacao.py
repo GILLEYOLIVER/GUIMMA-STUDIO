@@ -2391,10 +2391,11 @@ class VisualizacaoCanvas(QWidget):
 
         elementos_visiveis: set[int] = set()
         elementos = getattr(self.cena, "elementos", []) or []
+        rascunho_por_indice = self._visualizacao_rascunho_por_indice(len(elementos))
         for idx in self._indices_elementos_visiveis_viewport():
             if not (0 <= idx < len(elementos)):
                 continue
-            elemento = elementos[idx]
+            elemento = rascunho_por_indice.get(idx, elementos[idx])
             if not self._elemento_visivel_no_viewport(elemento):
                 continue
             if self._elemento_oculto_por_visualizacao_molde(elemento):
@@ -2464,6 +2465,27 @@ class VisualizacaoCanvas(QWidget):
             self._runtime_tool.on_paint_overlay(self, painter)
         self._desenhar_overlay_snap_ativo(painter)
         self._perf_fim("paint", perf_inicio)
+
+    def _indices_ocultos_por_visualizacao_rascunho(self, total_elementos: int | None = None) -> set[int]:
+        return set(self._visualizacao_rascunho_por_indice(total_elementos).keys())
+
+    def _visualizacao_rascunho_por_indice(self, total_elementos: int | None = None) -> dict[int, dict]:
+        elementos = getattr(self, "_visualizacao_rascunho_elementos", []) or []
+        if not elementos:
+            return {}
+        total = len(getattr(self.cena, "elementos", []) or []) if total_elementos is None else int(total_elementos)
+        por_indice: dict[int, dict] = {}
+        for idx, elemento in enumerate(elementos):
+            if not isinstance(elemento, dict):
+                continue
+            indice = elemento.get("_indice_visualizacao_rascunho", idx)
+            try:
+                indice_int = int(indice)
+            except (TypeError, ValueError):
+                indice_int = idx
+            if 0 <= indice_int < total:
+                por_indice[indice_int] = elemento
+        return por_indice
 
     def _desenhar_grade_canvas(self, painter: QPainter):
         """Desenha uma grade leve no canvas, respeitando zoom/origem."""
@@ -2650,7 +2672,19 @@ class VisualizacaoCanvas(QWidget):
 
     def _desenhar_visualizacao_rascunho(self, painter: QPainter):
         elementos = getattr(self, "_visualizacao_rascunho_elementos", []) or []
-        self._desenhar_elementos_visualizacao_temporaria(painter, elementos, opacidade_padrao=0.9)
+        total = len(getattr(self.cena, "elementos", []) or [])
+        extras: list[dict] = []
+        for idx, elemento in enumerate(elementos):
+            if not isinstance(elemento, dict):
+                continue
+            indice = elemento.get("_indice_visualizacao_rascunho", idx)
+            try:
+                indice_int = int(indice)
+            except (TypeError, ValueError):
+                indice_int = idx
+            if not (0 <= indice_int < total):
+                extras.append(elemento)
+        self._desenhar_elementos_visualizacao_temporaria(painter, extras, opacidade_padrao=0.9)
 
     def _desenhar_elementos_visualizacao_temporaria(
             self,
@@ -2897,8 +2931,10 @@ class VisualizacaoCanvas(QWidget):
         return False
 
     def _desenhar_overlays_moldes(self, painter: QPainter, elementos_visiveis: set[int] | None = None):
+        rascunho_por_indice = self._visualizacao_rascunho_por_indice(len(getattr(self.cena, "elementos", []) or []))
         for idx, el in enumerate(self.cena.elementos):
-            if not el.get("molde"):
+            el = rascunho_por_indice.get(idx, el)
+            if not isinstance(el, dict) or not el.get("molde"):
                 continue
             if elementos_visiveis is not None and idx not in elementos_visiveis:
                 continue

@@ -203,6 +203,7 @@
           "title": "Graduar",
           "tools": [
             "tabela",
+            "auto_graduacao",
             "mouse",
             "regras",
             "criar_regra"
@@ -212,6 +213,7 @@
           "title": "Manipular graduação",
           "tools": [
             "remover_graduacao",
+            "copiar_graduacao",
             "separar",
             "agrupar",
             "graduar_curva"
@@ -648,6 +650,12 @@
       "class": "Ferramenta",
       "icon": "tabela.svg"
     },
+    "auto_graduacao": {
+      "title": "Auto Graduação",
+      "module": "tools/auto_graduacao_tool.py",
+      "class": "Ferramenta",
+      "icon": "auto_graduacao.svg"
+    },
     "mouse": {
       "title": "Mouse",
       "module": "tools/mouse_tool.py",
@@ -671,6 +679,12 @@
       "module": "tools/remover_graduacao_tool.py",
       "class": "Ferramenta",
       "icon": "remover_graduacao.svg"
+    },
+    "copiar_graduacao": {
+      "title": "Copiar Graduação",
+      "module": "tools/copiar_graduacao_tool.py",
+      "class": "Ferramenta",
+      "icon": "copiar_graduacao.svg"
     },
     "separar": {
       "title": "Separar Tamanhos",

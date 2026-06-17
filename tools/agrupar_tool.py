@@ -7,6 +7,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from canvas.visualizacao import VisualizacaoCanvas
+from tools.elemento_runtime_utils import copiar_elemento_sem_runtime
 from tools.tool_base import FerramentaBase
 
 
@@ -135,7 +136,7 @@ class Ferramenta(FerramentaBase):
             return False
         self._preview_original = {
             "molde_idx": alvo[0],
-            "elemento": deepcopy(canvas.cena.elementos[alvo[0]]),
+            "elemento": copiar_elemento_sem_runtime(canvas.cena.elementos[alvo[0]]),
             "selecionados": set(getattr(canvas, "_selecionados", set()) or set()),
         }
         self._preview_alvo = alvo
@@ -159,7 +160,9 @@ class Ferramenta(FerramentaBase):
             return False
         molde_idx = int(original.get("molde_idx", -1))
         if 0 <= molde_idx < len(canvas.cena.elementos):
-            canvas.cena.elementos[molde_idx] = deepcopy(original.get("elemento", canvas.cena.elementos[molde_idx]))
+            canvas.cena.elementos[molde_idx] = copiar_elemento_sem_runtime(
+                original.get("elemento", canvas.cena.elementos[molde_idx])
+            )
         if hasattr(canvas, "_selecionados"):
             canvas._selecionados = set(original.get("selecionados", set()) or set())
         if atualizar and hasattr(canvas, "update"):

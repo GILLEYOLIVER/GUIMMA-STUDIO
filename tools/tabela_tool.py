@@ -643,6 +643,8 @@ class Ferramenta(FerramentaBase):
     def on_activate(self, canvas):
         super().on_activate(canvas)
         molde_inicial = self._molde_selecionado(canvas)
+        if molde_inicial is None:
+            molde_inicial = self._molde_referencia_inicial(canvas)
         bloquear_tabela = False
         if molde_inicial is not None and not self._preparar_molde_para_tabela(canvas, molde_inicial, permitir_propriedades=False):
             bloquear_tabela = self._molde_precisa_definir_grade(canvas, molde_inicial)
@@ -1239,6 +1241,32 @@ class Ferramenta(FerramentaBase):
                 return int(idx)
         return None
 
+    def _molde_referencia_inicial(self, canvas) -> int | None:
+        elementos = getattr(getattr(canvas, "cena", None), "elementos", []) or []
+        for exigir_valores in (True, False):
+            for idx, elemento in enumerate(elementos):
+                if not self._eh_molde_graduavel(elemento):
+                    continue
+                if self._molde_precisa_definir_grade(canvas, int(idx)):
+                    continue
+                if not self._molde_tem_grade(elemento):
+                    continue
+                if exigir_valores and not self._tem_valores_graduacao(elemento):
+                    continue
+                return int(idx)
+        return None
+
+    @staticmethod
+    def _molde_tem_grade(molde: dict) -> bool:
+        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        if not isinstance(linhas, list):
+            return False
+        return any(
+            isinstance(linha, dict)
+            and str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            for linha in linhas
+        )
+
     def _molde_em_posicao(self, canvas, pos: QPointF) -> int | None:
         alvo = self._molde_e_ponto_em_posicao(canvas, pos)
         if alvo is not None:
@@ -1341,10 +1369,10 @@ class Ferramenta(FerramentaBase):
         for chave in (
             "pontos_controle_principais",
             "controle_cantos",
-            "pontos_graduacao",
             "pontos_controle_curva",
             "pontos_controle",
             "pontos",
+            "pontos_graduacao",
         ):
             valor = molde.get(chave)
             pontos = self._pontos_de_origem(valor)
@@ -1393,6 +1421,8 @@ class Ferramenta(FerramentaBase):
         return min(self._distancia_ponto_segmento(ponto, a, b) for a, b in segmentos)
 
     def _tamanhos_molde(self, molde: dict | None) -> list[dict]:
+        if not isinstance(molde, dict):
+            return []
         linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
         if isinstance(linhas, list) and linhas:
             return [dict(l) for l in linhas if isinstance(l, dict) and l.get("ativo", True)]
@@ -1475,6 +1505,8 @@ class Ferramenta(FerramentaBase):
         identidade = self._identidade_molde_para_propriedades(molde)
         if identidade:
             setattr(canvas, "_propriedades_molde_identidade_preferida", identidade)
+        if isinstance(molde, dict):
+            setattr(canvas, "_propriedades_molde_objeto_preferido", molde)
         setattr(canvas, "_indice_propriedades_preferido", int(molde_idx))
         setattr(canvas, "_propriedades_tab_preferida", "graduacao")
         if hasattr(canvas, "update"):

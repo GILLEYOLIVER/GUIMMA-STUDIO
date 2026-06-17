@@ -1039,6 +1039,28 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(len(chamadas), 1)
         self.assertIs(chamadas[0][0], canvas.cena.elementos[0])
 
+    def test_rascunho_propriedades_oculta_elemento_real_correspondente(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.cena.elementos.extend(
+            [
+                {"tipo": "polyline", "molde": True, "nome_molde": "K1"},
+                {"tipo": "polyline", "molde": True, "nome_molde": "K1 - G"},
+            ]
+        )
+        canvas.set_visualizacao_rascunho(
+            [
+                {
+                    "tipo": "polyline",
+                    "molde": True,
+                    "nome_molde": "K1 - G",
+                    "_indice_visualizacao_rascunho": 1,
+                }
+            ]
+        )
+
+        self.assertEqual(canvas._indices_ocultos_por_visualizacao_rascunho(), {1})
+        self.assertIs(canvas._visualizacao_rascunho_por_indice()[1], canvas._visualizacao_rascunho_elementos[0])
+
     def test_caminho_grade_liga_ponto_base_ao_tamanho_graduado(self):
         base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)]
         molde = {

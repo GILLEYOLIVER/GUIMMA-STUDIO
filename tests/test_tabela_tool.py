@@ -298,6 +298,32 @@ class TabelaToolTestCase(unittest.TestCase):
 
         self.assertEqual(pontos, [QPointF(0.0, 0.0), QPointF(8.0, 0.0)])
 
+    def test_pontos_contorno_nao_limita_a_pontos_ja_graduados(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)],
+            "pontos_graduacao": [
+                {"x": 10.0, "y": 0.0},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {"G": {"dx": 1.0, "dy": 0.0}},
+                    }
+                }
+            },
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(
+            pontos,
+            [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0), QPointF(0.0, 5.0)],
+        )
+
     def test_pontos_contorno_ignora_controles_desalinhados_do_molde_movido(self):
         ferramenta = FerramentaTabela()
         molde = {
@@ -769,15 +795,68 @@ class TabelaToolTestCase(unittest.TestCase):
         ferramenta.on_activate(canvas)
         dialog = ferramenta._obter_dialog(canvas)
 
-        self.assertIsNone(ferramenta._molde_idx)
-        self.assertEqual(canvas._selecionados, set())
-        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeMouseEvent(QPointF(5.0, 2.5))))
         self.assertEqual(ferramenta._molde_idx, 0)
         self.assertEqual(canvas._selecionados, {0})
         self.assertIsNone(ferramenta._ponto_idx)
         self.assertEqual(dialog.cmb_ponto.currentText(), "1")
         self.assertEqual([dialog.tbl.item(row, 0).text() for row in range(dialog.tbl.rowCount())], ["36", "38", "40", "42"])
         self.assertEqual(dialog.tbl.item(2, 0).background().color().name().lower(), "#ffff00")
+
+    def test_abrir_tabela_sem_selecao_prefere_molde_com_tabela_graduada(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados.clear()
+        canvas.cena.elementos[0].pop("graduacao_tamanhos", None)
+        canvas.cena.elementos[0].pop("graduacao_tamanhos_ativos", None)
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0), (20.0, 0.0)],
+                "controle_cantos": [(20.0, 0.0), (30.0, 0.0), (30.0, 5.0)],
+                "graduacao_grade_nome": "36-40(38)",
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "36", "cor": "#00ff00", "base": False},
+                    {"ativo": True, "tamanho": "38", "cor": "#ffff00", "base": True},
+                    {"ativo": True, "tamanho": "40", "cor": "#2b7cd3", "base": False},
+                ],
+                "graduacao_tabela": {
+                    "modo": "dx_dy",
+                    "pontos": {
+                        "0": {
+                            "valores": {
+                                "36": {"dx": -1.0, "dy": 0.0},
+                                "38": {"dx": 0.0, "dy": 0.0},
+                                "40": {"dx": 1.0, "dy": 0.0},
+                            }
+                        }
+                    },
+                },
+            }
+        )
+
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+
+        self.assertEqual(ferramenta._molde_idx, 1)
+        self.assertEqual(canvas._selecionados, {1})
+        self.assertEqual([dialog.tbl.item(row, 0).text() for row in range(dialog.tbl.rowCount())], ["36", "38", "40"])
+        self.assertEqual(dialog.tbl.item(1, 0).background().color().name().lower(), "#ffff00")
+
+    def test_abrir_tabela_sem_molde_referencia_nao_exibe_pmg_automatico(self):
+        canvas = _FakeCanvas()
+        canvas._selecionados.clear()
+        canvas.cena.elementos[0].pop("graduacao_tamanhos", None)
+        canvas.cena.elementos[0].pop("graduacao_tamanhos_ativos", None)
+        canvas.cena.elementos[0].pop("graduacao_grade_nome", None)
+
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+
+        self.assertIsNone(ferramenta._molde_idx)
+        self.assertEqual(canvas._selecionados, set())
+        self.assertEqual(dialog.tbl.rowCount(), 0)
 
     def test_visualizacao_nao_propaga_um_ponto_para_o_contorno_todo(self):
         pontos_cfg = {

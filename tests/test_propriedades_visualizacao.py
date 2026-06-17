@@ -240,6 +240,7 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertNotIn("graduacao_grade_nome", real)
         self.assertEqual(dialog.canvas.elementos_alterados.emissoes, 0)
         self.assertEqual(dialog.canvas.rascunho_visualizacao[0]["graduacao_grade_nome"], "P-G(M)")
+        self.assertEqual(dialog.canvas.rascunho_visualizacao[0]["_indice_visualizacao_rascunho"], 0)
 
     def test_flags_visualizacao_sao_lidos_e_aplicados_no_molde(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
@@ -343,6 +344,62 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         dialog._elementos_edicao = lambda: elementos
 
         self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 2)
+
+    def test_indice_molde_preferencial_nao_usa_base_quando_separado_herda_molde_id(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        elementos = [
+            {"molde": True, "nome_molde": "K1", "molde_id": "k1"},
+            {
+                "molde": True,
+                "nome_molde": "K1 - G",
+                "molde_id": "k1",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "G",
+            },
+            {
+                "molde": True,
+                "nome_molde": "K1 - P",
+                "molde_id": "k1",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "P",
+            },
+        ]
+        dialog.canvas = SimpleNamespace(
+            _selecionados={0},
+            _indice_propriedades_preferido=1,
+            _propriedades_molde_identidade_preferida={
+                "molde_id": "k1",
+                "nome_molde": "K1 - G",
+                "origem_extracao": "separar_tamanho",
+                "tamanho_extraido": "G",
+            },
+        )
+        dialog._elementos_edicao = lambda: elementos
+
+        self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 1)
+
+    def test_indice_molde_preferencial_usa_objeto_real_do_molde_separado(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        base = {"molde": True, "nome_molde": "1", "molde_id": "k1"}
+        separado = {
+            "molde": True,
+            "nome_molde": "K1 - G",
+            "molde_id": "k1",
+            "origem_extracao": "separar_tamanho",
+            "tamanho_extraido": "G",
+        }
+        elementos_reais = [base, separado]
+        elementos_rascunho = [dict(base), dict(separado)]
+        dialog.canvas = SimpleNamespace(
+            _selecionados={0},
+            _indice_propriedades_preferido=0,
+            _propriedades_molde_objeto_preferido=separado,
+            _propriedades_molde_identidade_preferida={"molde_id": "k1"},
+        )
+        dialog._elementos_canvas_reais = lambda: elementos_reais
+        dialog._elementos_edicao = lambda: elementos_rascunho
+
+        self.assertEqual(PropriedadesMoldesDialog._indice_molde_preferencial(dialog), 1)
 
     def test_recarregar_lista_marca_molde_redirecionado_por_identidade(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
@@ -759,6 +816,57 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertEqual(valores["S"], {"dx": -1.0, "dy": 1.0})
         self.assertEqual(valores["L"], {"dx": 1.0, "dy": -1.0})
 
+    def test_trocar_para_grade_maior_mantem_distancia_da_regra_existente(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        linhas_antigas = [
+            {"ativo": True, "tamanho": "PP", "base": False},
+            {"ativo": True, "tamanho": "P", "base": False},
+            {"ativo": True, "tamanho": "M", "base": True},
+            {"ativo": True, "tamanho": "G", "base": False},
+            {"ativo": True, "tamanho": "GG", "base": False},
+        ]
+        molde = {
+            "graduacao_tamanhos": linhas_antigas,
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "valores": {
+                            "PP": {"dx": -4.0, "dy": 0.0},
+                            "P": {"dx": -2.0, "dy": 0.0},
+                            "M": {"dx": 0.0, "dy": 0.0},
+                            "G": {"dx": 2.0, "dy": 0.0},
+                            "GG": {"dx": 4.0, "dy": 0.0},
+                        }
+                    }
+                }
+            },
+        }
+        novas_linhas = [
+            {"ativo": True, "tamanho": "36", "base": False},
+            {"ativo": True, "tamanho": "38", "base": False},
+            {"ativo": True, "tamanho": "40", "base": True},
+            {"ativo": True, "tamanho": "42", "base": False},
+            {"ativo": True, "tamanho": "44", "base": False},
+            {"ativo": True, "tamanho": "46", "base": False},
+            {"ativo": True, "tamanho": "48", "base": False},
+            {"ativo": True, "tamanho": "50", "base": False},
+        ]
+
+        PropriedadesMoldesDialog._sincronizar_valores_graduacao_tamanhos(
+            dialog,
+            molde,
+            novas_linhas,
+            linhas_antigas=linhas_antigas,
+        )
+
+        valores = molde["graduacao_tabela"]["pontos"]["0"]["valores"]
+        self.assertEqual(valores["36"], {"dx": -4.0, "dy": 0.0})
+        self.assertEqual(valores["38"], {"dx": -2.0, "dy": 0.0})
+        self.assertEqual(valores["42"], {"dx": 2.0, "dy": 0.0})
+        self.assertEqual(valores["44"], {"dx": 4.0, "dy": 0.0})
+        self.assertEqual(valores["46"], {"dx": 6.0, "dy": 0.0})
+        self.assertEqual(valores["50"], {"dx": 10.0, "dy": 0.0})
+
     def test_aplicar_grade_preserva_cores_dos_tamanhos_existentes(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         dialog._graduacao_linhas = [
@@ -774,6 +882,72 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
 
         cores = {linha["tamanho"]: linha["cor"] for linha in dialog._graduacao_linhas}
         self.assertEqual(cores, {"P": "#c87575", "M": "#d60b0b", "G": "#5d95b7"})
+
+    def test_grade_numerica_curta_inclui_tamanho_base(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+
+        tamanhos, base = PropriedadesMoldesDialog._extrair_tamanhos_grade(dialog, "1-3(2)")
+
+        self.assertEqual(tamanhos, ["1", "2", "3"])
+        self.assertEqual(base, "2")
+
+    def test_grade_numerica_adulta_mantem_passo_dois(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+
+        tamanhos, base = PropriedadesMoldesDialog._extrair_tamanhos_grade(dialog, "36-50(40)")
+
+        self.assertEqual(tamanhos, ["36", "38", "40", "42", "44", "46", "48", "50"])
+        self.assertEqual(base, "40")
+
+    def test_grade_pp_g2_com_base_p_extrai_tamanhos_padrao(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+
+        tamanhos, base = PropriedadesMoldesDialog._extrair_tamanhos_grade(dialog, "PP-G2(P)")
+
+        self.assertEqual(tamanhos, ["PP", "P", "M", "G", "GG", "G1", "G2"])
+        self.assertEqual(base, "P")
+
+    def test_grade_pp_xg_nao_recebe_tamanhos_g1_g2(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+
+        tamanhos, base = PropriedadesMoldesDialog._extrair_tamanhos_grade(dialog, "PP-XG(M)")
+
+        self.assertEqual(tamanhos, ["PP", "P", "M", "G", "GG", "XG"])
+        self.assertEqual(base, "M")
+
+    def test_aplicar_grade_pp_g2_usa_cores_padrao_do_preset(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog._graduacao_linhas = [
+            {"ativo": True, "tamanho": "P", "cor": "#111111", "base": False},
+            {"ativo": True, "tamanho": "M", "cor": "#222222", "base": True},
+            {"ativo": True, "tamanho": "G", "cor": "#333333", "base": False},
+        ]
+        dialog._renderizar_tabela_graduacao = lambda: None
+        dialog._sincronizar_gradacao_no_molde = lambda: None
+        dialog._gerar_cor_aleatoria = lambda: "#123456"
+
+        PropriedadesMoldesDialog._aplicar_grade_tamanhos(dialog, "PP-G2(P)")
+
+        self.assertEqual(
+            [linha["tamanho"] for linha in dialog._graduacao_linhas],
+            ["PP", "P", "M", "G", "GG", "G1", "G2"],
+        )
+        self.assertEqual(
+            {linha["tamanho"]: linha["cor"] for linha in dialog._graduacao_linhas},
+            {
+                "PP": "#00ff00",
+                "P": "#ffff00",
+                "M": "#2b7cd3",
+                "G": "#ffffff",
+                "GG": "#ff00ff",
+                "G1": "#ff8c00",
+                "G2": "#7b1fff",
+            },
+        )
+        self.assertEqual(
+            [linha["tamanho"] for linha in dialog._graduacao_linhas if linha.get("base")],
+            ["P"],
+        )
 
     def test_carregar_graduacao_do_molde_respeita_linhas_reais_sem_impor_pmg(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)

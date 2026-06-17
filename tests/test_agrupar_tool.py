@@ -16,6 +16,7 @@ if find_spec("PySide6") is None:
     FerramentaAgrupar = None
 else:
     from PySide6.QtCore import QPointF, Qt, Signal
+    from PySide6.QtGui import QPainterPath
     from PySide6.QtWidgets import QApplication, QWidget
 
     from tools.agrupar_tool import Ferramenta as FerramentaAgrupar
@@ -184,6 +185,22 @@ class AgruparToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas.historico, 1)
         self.assertIsNone(ferramenta._preview_original)
+
+    def test_preview_ignora_cache_runtime_qpainterpath_do_molde(self):
+        canvas = _FakeCanvas()
+        path = QPainterPath(QPointF(0.0, 0.0))
+        path.lineTo(QPointF(1.0, 1.0))
+        canvas.cena.elementos[0]["_runtime_path_polilinha_tela_cache"] = {"path": path}
+        ferramenta = FerramentaAgrupar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(QPointF(12.0, 1.0))))
+
+        self.assertIsNotNone(ferramenta._preview_original)
+        self.assertNotIn(
+            "_runtime_path_polilinha_tela_cache",
+            ferramenta._preview_original["elemento"],
+        )
 
     def test_hover_depois_de_confirmar_restaura_ultimo_ponto_confirmado_ao_sair(self):
         canvas = _FakeCanvas()
