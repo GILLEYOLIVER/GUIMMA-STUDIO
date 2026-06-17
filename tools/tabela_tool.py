@@ -1066,7 +1066,6 @@ class Ferramenta(FerramentaBase):
         self._modo_copia_graduacao = False
         self._graduacao_copiada: dict | None = None
         self._origem_copia: tuple[int, int] | None = None
-        self._dialog_propriedades_observados: set[tuple[int, int]] = set()
         self._atualizacoes_canvas_agendadas: set[int] = set()
 
     def on_activate(self, canvas):
@@ -1414,20 +1413,6 @@ class Ferramenta(FerramentaBase):
 
         self._dialog_propriedades_observados.add(chave_dialog)
 
-    def _dialog_propriedades_aberta(self, canvas):
-        if canvas is None:
-            return None
-
-        try:
-            from tools.propriedades_tool import Ferramenta as FerramentaPropriedades
-
-            dialog_por_canvas = getattr(FerramentaPropriedades, "_dialog_por_canvas", {})
-            if isinstance(dialog_por_canvas, dict):
-                return dialog_por_canvas.get(id(canvas))
-        except Exception:
-            return None
-
-        return None
 
     def _agendar_atualizacao_canvas(self, canvas) -> None:
         if canvas is None:
@@ -2548,5 +2533,3 @@ class Ferramenta(FerramentaBase):
         proj_x = ax + t * dx
         proj_y = ay + t * dy
         return hypot(px - proj_x, py - proj_y)
-
-#ok 17/06/2026
