@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+
 from copy import deepcopy
+from importlib import import_module
 from math import atan2, cos, degrees, hypot, isfinite, radians, sin
 
-from PySide6.QtCore import QLocale, QPoint, QPointF, Qt
+from PySide6.QtCore import QLocale, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainterPath, QPen, QValidator
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -16,6 +19,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QStyledItemDelegate,
+    QStyle,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -28,6 +33,66 @@ from core.formatacao import normalizar_decimal_ponto, numero_decimal_ponto
 from tools.tool_base import FerramentaBase
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_cena_para_unidade, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+
+
+CORES_TAMANHOS_PADRAO_TABELA = {
+    "PP": "#00ff00",
+    "P": "#ffff00",
+    "M": "#2b7cd3",
+    "G": "#ffffff",
+    "GG": "#ff00ff",
+    "EXG": "#ff8c00",
+    "XG": "#ff8c00",
+    "EG": "#ff8c00",
+    "G1": "#ff8c00",
+    "G2": "#7b1fff",
+}
+
+GRADES_TAMANHOS_CORES_FIXAS = {
+    "PP-G2(P)": {
+        "PP": "#00ff00",
+        "P": "#ffff00",
+        "M": "#2b7cd3",
+        "G": "#ffffff",
+        "GG": "#ff00ff",
+        "EXG": "#ff8c00",
+        "G1": "#ff8c00",
+        "G2": "#7b1fff",
+    },
+}
+
+
+class TamanhoColorDelegate(QStyledItemDelegate):
+    """Desenha a coluna Tamanho com a cor real da grade, sem a QSS apagar o fundo."""
+
+    def paint(self, painter, option, index):  # noqa: N802
+        if index.column() != 0:
+            super().paint(painter, option, index)
+            return
+
+        cor = QColor(str(index.data(Qt.UserRole) or ""))
+        if not cor.isValid():
+            cor = QColor("#ffffff")
+
+        painter.save()
+        painter.fillRect(option.rect, cor)
+
+        # Mantém uma borda leve para a coluna continuar legível.
+        painter.setPen(QColor("#d2dbe5"))
+        painter.drawLine(option.rect.topRight(), option.rect.bottomRight())
+        painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+
+        fonte = index.data(Qt.FontRole)
+        if isinstance(fonte, QFont):
+            painter.setFont(fonte)
+        painter.setPen(QColor("#000000"))
+        painter.drawText(option.rect.adjusted(4, 0, -4, 0), Qt.AlignCenter, str(index.data(Qt.DisplayRole) or ""))
+
+        # Se a célula estiver selecionada, mostra só um contorno, sem trocar a cor do tamanho.
+        if option.state & QStyle.State_Selected:
+            painter.setPen(QPen(QColor("#1f7ed6"), 2))
+            painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
+        painter.restore()
 
 
 class MedidaCmSpinBox(QDoubleSpinBox):
@@ -56,8 +121,7 @@ class MedidaCmSpinBox(QDoubleSpinBox):
     def textFromValue(self, value: float) -> str:  # noqa: N802
         if abs(float(value or 0.0)) <= 1e-9:
             return ""
-        texto = f"{float(value):.3f}".rstrip("0").rstrip(".")
-        return f"{texto} {self._unidade_sigla}"
+        return f"{float(value):.3f}".rstrip("0").rstrip(".")
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
         texto = str(text or "").lower()
@@ -95,8 +159,12 @@ class GraduarTabelaDialog(QDialog):
         self.setWindowTitle("Graduar via tabela")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.resize(360, 520)
-        self.setMinimumSize(330, 470)
+        # Janela um pouco mais larga para a tabela respirar melhor e, na aba
+        # Perímetro, abrir num formato mais confortável.
+        self._largura_padrao = 460
+        self._largura_perimetro = 690
+        self.resize(self._largura_padrao, 585)
+        self.setMinimumSize(435, 540)
         self._ferramenta = None
         self._canvas = None
         self._unidade_sigla = "cm"
@@ -105,41 +173,146 @@ class GraduarTabelaDialog(QDialog):
         self._base_row = 0
         self.setStyleSheet(
             """
-            QDialog { background:#efefef; color:#111111; }
-            QLabel, QCheckBox { color:#111111; }
+            QDialog {
+                background:#f4f7fb;
+                color:#17202a;
+                font-family:"Segoe UI", Arial, sans-serif;
+                font-size:9pt;
+            }
+            QLabel, QCheckBox {
+                color:#17202a;
+            }
+            QLabel#labelCampo {
+                font-weight:600;
+                color:#233142;
+            }
+            QLabel#labelUnidade {
+                color:#5d6875;
+                font-weight:600;
+                padding-left:2px;
+            }
             QComboBox, QDoubleSpinBox {
                 background:#ffffff;
-                color:#111111;
-                border:1px solid #b5bcc3;
-                min-height:22px;
+                color:#17202a;
+                border:1px solid #bac6d3;
+                border-radius:3px;
+                min-height:24px;
+                padding:2px 6px;
+                selection-background-color:#2f7ed8;
+                selection-color:#ffffff;
+            }
+            QComboBox:hover, QDoubleSpinBox:hover {
+                border-color:#6aa9e9;
+            }
+            QComboBox:focus, QDoubleSpinBox:focus {
+                border:1px solid #2374c8;
+                background:#ffffff;
+            }
+            QTabWidget::pane {
+                background:#ffffff;
+                border:1px solid #b9c7d7;
+                border-radius:3px;
+                top:-1px;
+            }
+            QTabBar::tab {
+                background:#e8eef5;
+                color:#243447;
+                border:1px solid #bdc9d6;
+                padding:6px 10px;
+                min-width:78px;
+                font-weight:600;
+            }
+            QTabBar::tab:selected {
+                background:#ffffff;
+                color:#0078d4;
+                border-top:2px solid #0078d4;
+                border-bottom-color:#ffffff;
+            }
+            QTabBar::tab:hover:!selected {
+                background:#f5f9ff;
             }
             QTableWidget {
                 background:#ffffff;
-                color:#111111;
-                gridline-color:#d9dde2;
-                border:1px solid #b5bcc3;
+                alternate-background-color:#f7f9fc;
+                color:#111827;
+                border:1px solid #b9c7d7;
+                gridline-color:#dde4ec;
+                selection-background-color:#2f7ed8;
+                selection-color:#ffffff;
+                outline:0;
+            }
+            QTableWidget::item {
+                padding:3px 5px;
+                border:0;
+            }
+            QTableWidget::item:selected {
+                background:#2f7ed8;
+                color:#000000;
             }
             QHeaderView::section {
-                background:#f2f2f2;
-                color:#111111;
-                border:1px solid #c8cdd3;
-                padding:4px;
-                font-weight:600;
+                background:#f0f4f8;
+                color:#111827;
+                border:0;
+                border-right:1px solid #d2dbe5;
+                border-bottom:1px solid #c7d2de;
+                padding:5px 4px;
+                font-weight:700;
+            }
+            QWidget#painelComandos {
+                background:#eef3f8;
+                border:1px solid #cbd6e2;
+                border-radius:6px;
+            }
+            QWidget#painelSetas {
+                background:#e6edf5;
+                border:1px solid #c4d0dd;
+                border-radius:4px;
             }
             QPushButton {
-                background:#f8f8f8;
-                color:#111111;
-                border:1px solid #b8bec5;
-                min-height:24px;
-                padding:2px 6px;
+                background:#ffffff;
+                color:#17202a;
+                border:1px solid #b7c3d0;
+                border-radius:3px;
+                min-height:26px;
+                padding:3px 8px;
+                font-weight:500;
             }
-            QPushButton:hover { background:#ffffff; }
+            QPushButton:hover {
+                background:#eef6ff;
+                border-color:#6aa9e9;
+            }
             QPushButton:pressed {
-                background:#2b7cd3;
+                background:#2f7ed8;
                 color:#ffffff;
-                border:1px solid #0f5fae;
-                padding-top:3px;
-                padding-left:7px;
+                border-color:#1d63a9;
+                padding-top:4px;
+                padding-left:9px;
+            }
+            QPushButton#botaoPrincipal {
+                background:#0078d4;
+                color:#ffffff;
+                border-color:#006bbd;
+                font-weight:700;
+            }
+            QPushButton#botaoPrincipal:hover {
+                background:#0d86e4;
+            }
+            QPushButton#botaoSeta {
+                min-width:28px;
+                max-width:28px;
+                min-height:24px;
+                max-height:24px;
+                padding:0;
+                font-weight:800;
+            }
+            QPushButton#botaoCentro {
+                min-width:28px;
+                max-width:28px;
+                min-height:24px;
+                max-height:24px;
+                padding:0;
+                font-weight:700;
+                background:#f9fbfd;
             }
             """
         )
@@ -147,86 +320,124 @@ class GraduarTabelaDialog(QDialog):
 
     def _construir_ui(self):
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 8)
-        raiz.setSpacing(6)
+        raiz.setContentsMargins(10, 10, 10, 10)
+        raiz.setSpacing(8)
 
         linha_ponto = QHBoxLayout()
-        linha_ponto.addWidget(QLabel("Nº ponto"))
+        linha_ponto.setSpacing(8)
+        lbl_ponto = QLabel("Nº ponto")
+        lbl_ponto.setObjectName("labelCampo")
+        linha_ponto.addWidget(lbl_ponto)
         self.cmb_ponto = QComboBox()
+        self.cmb_ponto.setMinimumHeight(26)
         self.cmb_ponto.currentIndexChanged.connect(self._ponto_alterado)
         linha_ponto.addWidget(self.cmb_ponto, 1)
         raiz.addLayout(linha_ponto)
 
         tabs = QTabWidget()
+        tabs.setDocumentMode(True)
         self.tabs = tabs
+
         pagina_dxdy = QWidget()
         lay_dxdy = QVBoxLayout(pagina_dxdy)
-        lay_dxdy.setContentsMargins(0, 0, 0, 0)
+        lay_dxdy.setContentsMargins(6, 6, 6, 6)
+        lay_dxdy.setSpacing(0)
         self.tbl = QTableWidget(0, 3)
         self.tbl.setHorizontalHeaderLabels(["Tamanho", "DX (cm)", "DY (cm)"])
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self._configurar_tabela_valores(self.tbl)
+        self._delegate_tamanho_dxdy = TamanhoColorDelegate(self.tbl)
+        self.tbl.setItemDelegateForColumn(0, self._delegate_tamanho_dxdy)
         self.tbl.itemChanged.connect(self._celula_alterada)
         lay_dxdy.addWidget(self.tbl)
         tabs.addTab(pagina_dxdy, "DX / DY")
 
         pagina_dist = QWidget()
         lay_dist = QVBoxLayout(pagina_dist)
-        lay_dist.setContentsMargins(0, 0, 0, 0)
+        lay_dist.setContentsMargins(6, 6, 6, 6)
+        lay_dist.setSpacing(0)
         self.tbl_polar = QTableWidget(0, 3)
         self.tbl_polar.setHorizontalHeaderLabels(["Tamanho", "Dist.(cm)", "Ang°"])
-        self.tbl_polar.verticalHeader().setVisible(False)
-        self.tbl_polar.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.tbl_polar.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tbl_polar.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self._configurar_tabela_valores(self.tbl_polar)
+        self._delegate_tamanho_polar = TamanhoColorDelegate(self.tbl_polar)
+        self.tbl_polar.setItemDelegateForColumn(0, self._delegate_tamanho_polar)
         self.tbl_polar.itemChanged.connect(self._celula_polar_alterada)
         lay_dist.addWidget(self.tbl_polar)
         tabs.addTab(pagina_dist, "Distância / Ângulo")
 
         pagina_perimetro = QWidget()
         lay_perimetro = QVBoxLayout(pagina_perimetro)
-        lay_perimetro.setContentsMargins(0, 0, 0, 0)
+        lay_perimetro.setContentsMargins(6, 6, 6, 6)
+        lay_perimetro.setSpacing(0)
         self.tbl_perimetro = QTableWidget(0, 7)
         self.tbl_perimetro.setHorizontalHeaderLabels(
             ["Tamanho", "Perim. X", "Dif. X", "Perim. Y", "Dif. Y", "Total", "Dif. total"]
         )
-        self.tbl_perimetro.verticalHeader().setVisible(False)
-        self.tbl_perimetro.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        for col in range(1, 7):
-            self.tbl_perimetro.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+        self._configurar_tabela_valores(self.tbl_perimetro, leitura=True)
+        self._delegate_tamanho_perimetro = TamanhoColorDelegate(self.tbl_perimetro)
+        self.tbl_perimetro.setItemDelegateForColumn(0, self._delegate_tamanho_perimetro)
+        self._configurar_tabela_perimetro()
         lay_perimetro.addWidget(self.tbl_perimetro)
         tabs.addTab(pagina_perimetro, "Perímetro")
         raiz.addWidget(tabs, 1)
 
+        painel = QWidget()
+        painel.setObjectName("painelComandos")
+        painel_lay = QVBoxLayout(painel)
+        painel_lay.setContentsMargins(8, 8, 8, 8)
+        painel_lay.setSpacing(6)
+
         botoes_topo = QGridLayout()
-        self.btn_aplicar = QPushButton("Aplicar")
-        self.btn_zerar_dx = QPushButton("DX = 0")
-        self.btn_zerar_dy = QPushButton("DY = 0")
+        botoes_topo.setHorizontalSpacing(5)
+        botoes_topo.setVerticalSpacing(5)
+        self.btn_aplicar = self._criar_botao("Aplicar", destaque=True)
+        self.btn_zerar_dx = self._criar_botao("DX")
+        self.btn_zerar_dy = self._criar_botao("DY")
+        self.btn_aplicar.setToolTip("Aplicar a graduação do ponto selecionado")
+        self.btn_zerar_dx.setToolTip("Zerar a coluna DX da aba atual")
+        self.btn_zerar_dy.setToolTip("Zerar a coluna DY da aba atual")
         self.btn_aplicar.clicked.connect(self._aplicar)
         self.btn_zerar_dx.clicked.connect(lambda: self._preencher_coluna_atual(1, 0.0))
         self.btn_zerar_dy.clicked.connect(lambda: self._preencher_coluna_atual(2, 0.0))
         botoes_topo.addWidget(self.btn_aplicar, 0, 0)
         botoes_topo.addWidget(self.btn_zerar_dx, 0, 1)
         botoes_topo.addWidget(self.btn_zerar_dy, 0, 2)
-        raiz.addLayout(botoes_topo)
+        botoes_topo.setColumnStretch(0, 1)
+        botoes_topo.setColumnStretch(1, 1)
+        botoes_topo.setColumnStretch(2, 1)
+        painel_lay.addLayout(botoes_topo)
         tabs.currentChanged.connect(self._aba_alterada)
 
         linha_inc = QHBoxLayout()
+        linha_inc.setSpacing(6)
         self.chk_incremental = QCheckBox("Incremental")
         self.chk_incremental.setChecked(True)
+        self.chk_incremental.setToolTip("Quando marcado, distribui o valor por tamanho a partir do tamanho base")
         self.sp_incremento = MedidaCmSpinBox()
+        self.sp_incremento.setMinimumHeight(26)
+        self.sp_incremento.setMinimumWidth(128)
+        self.sp_incremento.setToolTip("Valor usado pelas setas de incremento")
+        self.lbl_unidade_incremento = QLabel("(cm)")
+        self.lbl_unidade_incremento.setObjectName("labelUnidade")
         linha_inc.addWidget(self.chk_incremental)
         linha_inc.addWidget(self.sp_incremento, 1)
-        raiz.addLayout(linha_inc)
+        linha_inc.addWidget(self.lbl_unidade_incremento)
 
-        grade_setas = QGridLayout()
-        self.btn_cima = QPushButton("▲")
-        self.btn_baixo = QPushButton("▼")
-        self.btn_esq = QPushButton("◀")
-        self.btn_dir = QPushButton("▶")
-        self.btn_zero = QPushButton("0")
+        painel_setas = QWidget()
+        painel_setas.setObjectName("painelSetas")
+        grade_setas = QGridLayout(painel_setas)
+        grade_setas.setContentsMargins(4, 4, 4, 4)
+        grade_setas.setHorizontalSpacing(3)
+        grade_setas.setVerticalSpacing(3)
+        self.btn_cima = self._criar_botao_seta("▲")
+        self.btn_baixo = self._criar_botao_seta("▼")
+        self.btn_esq = self._criar_botao_seta("◀")
+        self.btn_dir = self._criar_botao_seta("▶")
+        self.btn_zero = self._criar_botao_seta("0", centro=True)
+        self.btn_cima.setToolTip("Aplicar incremento para cima")
+        self.btn_baixo.setToolTip("Aplicar incremento para baixo")
+        self.btn_esq.setToolTip("Aplicar incremento para a esquerda")
+        self.btn_dir.setToolTip("Aplicar incremento para a direita")
+        self.btn_zero.setToolTip("Zerar DX e DY")
         self.btn_cima.pressed.connect(lambda: self._aplicar_incremento(0.0, -1.0))
         self.btn_baixo.pressed.connect(lambda: self._aplicar_incremento(0.0, 1.0))
         self.btn_esq.pressed.connect(lambda: self._aplicar_incremento(-1.0, 0.0))
@@ -237,27 +448,141 @@ class GraduarTabelaDialog(QDialog):
         grade_setas.addWidget(self.btn_zero, 1, 1)
         grade_setas.addWidget(self.btn_dir, 1, 2)
         grade_setas.addWidget(self.btn_baixo, 2, 1)
-        raiz.addLayout(grade_setas)
+        linha_inc.addWidget(painel_setas, 0, Qt.AlignRight)
+        painel_lay.addLayout(linha_inc)
+
+        botoes_igual = QGridLayout()
+        botoes_igual.setHorizontalSpacing(5)
+        botoes_igual.setVerticalSpacing(5)
+        self.btn_igual_dx = self._criar_botao("= DX")
+        self.btn_igual_dy = self._criar_botao("= DY")
+        self.btn_igual_dxdy = self._criar_botao("= DX = DY")
+        self.btn_igual_dx.setToolTip("Usar o valor incremental para preencher DX")
+        self.btn_igual_dy.setToolTip("Usar o valor incremental para preencher DY")
+        self.btn_igual_dxdy.setToolTip("Usar o valor incremental para preencher DX e DY")
+        self.btn_igual_dx.clicked.connect(lambda: self._aplicar_incremento_direto(1))
+        self.btn_igual_dy.clicked.connect(lambda: self._aplicar_incremento_direto(2))
+        self.btn_igual_dxdy.clicked.connect(lambda: self._aplicar_incremento_direto(None))
+        botoes_igual.addWidget(self.btn_igual_dx, 0, 0)
+        botoes_igual.addWidget(self.btn_igual_dy, 0, 1)
+        botoes_igual.addWidget(self.btn_igual_dxdy, 0, 2)
+        for col in range(3):
+            botoes_igual.setColumnStretch(col, 1)
+        painel_lay.addLayout(botoes_igual)
 
         botoes_copia = QGridLayout()
-        self.btn_copiar_graduacao = QPushButton("Copiar graduação")
+        botoes_copia.setHorizontalSpacing(5)
+        botoes_copia.setVerticalSpacing(5)
+        self.btn_copiar_graduacao = self._criar_botao("Copiar")
+        self.btn_copiar_graduacao.setToolTip("Copiar graduação do ponto atual")
         self.btn_copiar_graduacao.clicked.connect(self._copiar)
-        self.btn_colar_graduacao = QPushButton("Colar graduação")
+        self.btn_colar_graduacao = self._criar_botao("Colar")
+        self.btn_colar_graduacao.setToolTip("Colar graduação copiada")
         self.btn_colar_graduacao.clicked.connect(self._colar)
+        self.btn_colar_relativo = self._criar_botao("Colar rel.")
+        self.btn_colar_relativo.setToolTip("Somar a graduação copiada aos valores atuais")
+        self.btn_colar_relativo.clicked.connect(self._colar_relativo)
         botoes_copia.addWidget(self.btn_copiar_graduacao, 0, 0)
         botoes_copia.addWidget(self.btn_colar_graduacao, 1, 0)
-        for texto, slot, linha, col in (
-            ("Inverte DX", lambda: self._inverter_coluna(1), 0, 1),
-            ("Inverte DY", lambda: self._inverter_coluna(2), 0, 2),
-            ("Colar DX", lambda: self._colar_coluna(1), 1, 1),
-            ("Colar DY", lambda: self._colar_coluna(2), 1, 2),
+        botoes_copia.addWidget(self.btn_colar_relativo, 2, 0)
+        for texto, dica, slot, linha, col in (
+            ("Inverte DX", "Inverter o sinal da coluna DX", lambda: self._inverter_coluna(1), 0, 1),
+            ("Inverte DY", "Inverter o sinal da coluna DY", lambda: self._inverter_coluna(2), 0, 2),
+            ("Colar DX", "Colar apenas a coluna DX", lambda: self._colar_coluna(1), 1, 1),
+            ("Colar DY", "Colar apenas a coluna DY", lambda: self._colar_coluna(2), 1, 2),
+            ("Colar rel. DX", "Somar apenas a coluna DX copiada", lambda: self._colar_coluna_relativa(1), 2, 1),
+            ("Colar rel. DY", "Somar apenas a coluna DY copiada", lambda: self._colar_coluna_relativa(2), 2, 2),
         ):
-            btn = QPushButton(texto)
+            btn = self._criar_botao(texto)
+            btn.setToolTip(dica)
             btn.clicked.connect(slot)
             botoes_copia.addWidget(btn, linha, col)
-        raiz.addLayout(botoes_copia)
+        for col in range(3):
+            botoes_copia.setColumnStretch(col, 1)
+        painel_lay.addLayout(botoes_copia)
+        raiz.addWidget(painel)
+
         self._aba_alterada(0)
         self._atualizar_cabecalhos_unidade()
+
+    def _configurar_tabela_valores(self, tabela: QTableWidget, *, leitura: bool = False) -> None:
+        tabela.verticalHeader().setVisible(False)
+        tabela.verticalHeader().setDefaultSectionSize(28)
+        tabela.verticalHeader().setMinimumSectionSize(26)
+        tabela.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        tabela.horizontalHeader().setHighlightSections(False)
+        tabela.setAlternatingRowColors(True)
+        tabela.setShowGrid(True)
+        tabela.setWordWrap(False)
+        tabela.setCornerButtonEnabled(False)
+        tabela.setSelectionMode(QAbstractItemView.SingleSelection)
+        tabela.setSelectionBehavior(QAbstractItemView.SelectItems)
+        tabela.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        tabela.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        tabela.setItemDelegateForColumn(0, TamanhoColorDelegate(tabela))
+        if leitura:
+            tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        else:
+            tabela.setEditTriggers(
+                QAbstractItemView.DoubleClicked
+                | QAbstractItemView.SelectedClicked
+                | QAbstractItemView.EditKeyPressed
+            )
+        tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for col in range(1, tabela.columnCount()):
+            tabela.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+
+    @staticmethod
+    def _cor_tamanho_dialog(dados: dict | None, nome: str) -> str:
+        nome_txt = str(nome or "").strip()
+        nome_upper = nome_txt.upper()
+        cor_atual = QColor()
+        if isinstance(dados, dict):
+            for chave in ("cor", "color", "cor_tamanho", "cor_grade", "cor_fundo", "background"):
+                cor_tentativa = QColor(str(dados.get(chave) or ""))
+                if cor_tentativa.isValid():
+                    cor_atual = cor_tentativa
+                    break
+        cor_padrao_txt = (
+            CORES_TAMANHOS_PADRAO_TABELA.get(nome_txt)
+            or CORES_TAMANHOS_PADRAO_TABELA.get(nome_upper)
+            or CORES_TAMANHOS_PADRAO_TABELA.get(nome_upper.replace("XG", "EXG"))
+            or CORES_TAMANHOS_PADRAO_TABELA.get(nome_upper.replace("G1", "EXG"))
+            or ""
+        )
+        cor_padrao = QColor(str(cor_padrao_txt or ""))
+
+        # Se veio uma cor real das propriedades, preserva.
+        # Se veio branco/vazio para um tamanho que tem cor oficial, aplica a cor oficial.
+        if cor_atual.isValid() and cor_atual.name().lower() != "#ffffff":
+            return cor_atual.name()
+        if cor_padrao.isValid():
+            return cor_padrao.name()
+        return cor_atual.name() if cor_atual.isValid() else ""
+
+    def _configurar_tabela_perimetro(self) -> None:
+        tabela = self.tbl_perimetro
+        header = tabela.horizontalHeader()
+        header.setMinimumSectionSize(64)
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        larguras = {0: 84, 1: 92, 2: 92, 3: 92, 4: 92, 5: 96, 6: 108}
+        for col, largura in larguras.items():
+            tabela.setColumnWidth(col, largura)
+
+    def _criar_botao(self, texto: str, *, destaque: bool = False) -> QPushButton:
+        btn = QPushButton(texto)
+        btn.setMinimumHeight(28)
+        btn.setCursor(Qt.PointingHandCursor)
+        if destaque:
+            btn.setObjectName("botaoPrincipal")
+        return btn
+
+    def _criar_botao_seta(self, texto: str, *, centro: bool = False) -> QPushButton:
+        btn = QPushButton(texto)
+        btn.setObjectName("botaoCentro" if centro else "botaoSeta")
+        btn.setFixedSize(28, 24)
+        btn.setCursor(Qt.PointingHandCursor)
+        return btn
 
     def conectar(self, ferramenta, canvas):
         self._ferramenta = ferramenta
@@ -273,7 +598,7 @@ class GraduarTabelaDialog(QDialog):
     def _atualizar_cabecalhos_unidade(self) -> None:
         unidade = self._unidade_sigla
         self.tbl.setHorizontalHeaderLabels(["Tamanho", f"DX ({unidade})", f"DY ({unidade})"])
-        self.tbl_polar.setHorizontalHeaderLabels(["Tamanho", f"Dist.({unidade})", "Ang°"])
+        self.tbl_polar.setHorizontalHeaderLabels(["Tamanho", f"Dist. ({unidade})", "Ang°"])
         self.tbl_perimetro.setHorizontalHeaderLabels(
             [
                 "Tamanho",
@@ -285,6 +610,8 @@ class GraduarTabelaDialog(QDialog):
                 f"Dif. total ({unidade})",
             ]
         )
+        if hasattr(self, "lbl_unidade_incremento"):
+            self.lbl_unidade_incremento.setText(f"({unidade})")
 
     def _para_unidade(self, valor_cena: float) -> float:
         if self._canvas is not None:
@@ -319,17 +646,21 @@ class GraduarTabelaDialog(QDialog):
             item_t = QTableWidgetItem(nome)
             item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             item_t.setTextAlignment(Qt.AlignCenter)
-            cor = str(tamanho.get("cor") or "")
+            cor = self._cor_tamanho_dialog(tamanho, nome)
+            item_t.setData(Qt.UserRole, cor)
+            item_t.setData(Qt.UserRole + 1, row == base_row)
             if cor:
-                item_t.setBackground(QColor(cor))
+                self._aplicar_cor_tamanho(item_t, cor)
             if row == base_row:
                 self._destacar_item_tamanho_base(item_t, cor)
             self.tbl.setItem(row, 0, item_t)
             item_polar_t = QTableWidgetItem(nome)
             item_polar_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             item_polar_t.setTextAlignment(Qt.AlignCenter)
+            item_polar_t.setData(Qt.UserRole, cor)
+            item_polar_t.setData(Qt.UserRole + 1, row == base_row)
             if cor:
-                item_polar_t.setBackground(QColor(cor))
+                self._aplicar_cor_tamanho(item_polar_t, cor)
             if row == base_row:
                 self._destacar_item_tamanho_base(item_polar_t, cor)
             self.tbl_polar.setItem(row, 0, item_polar_t)
@@ -364,13 +695,15 @@ class GraduarTabelaDialog(QDialog):
         self._bloquear_eventos = True
         self.tbl_perimetro.setRowCount(len(linhas))
         for row, linha in enumerate(linhas):
-            cor = str(linha.get("cor") or "")
+            cor = self._cor_tamanho_dialog(linha, str(linha.get("tamanho") or ""))
             base = bool(linha.get("base", False))
             item_t = QTableWidgetItem(str(linha.get("tamanho") or ""))
             item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             item_t.setTextAlignment(Qt.AlignCenter)
+            item_t.setData(Qt.UserRole, cor)
+            item_t.setData(Qt.UserRole + 1, base)
             if cor:
-                item_t.setBackground(QColor(cor))
+                self._aplicar_cor_tamanho(item_t, cor)
             if base:
                 self._destacar_item_tamanho_base(item_t, cor)
             self.tbl_perimetro.setItem(row, 0, item_t)
@@ -461,6 +794,28 @@ class GraduarTabelaDialog(QDialog):
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
+    def _aplicar_incremento_direto(self, col: int | None):
+        row_atual = self.tbl.currentRow()
+        if row_atual < 0:
+            row_atual = self._linha_base()
+        base_row = self._linha_base()
+        incremento = float(self.sp_incremento.valor_atual())
+        self._bloquear_eventos = True
+        for row in range(self.tbl.rowCount()):
+            if self.chk_incremental.isChecked():
+                valor = incremento * (row - base_row)
+            elif row == row_atual:
+                valor = incremento
+            else:
+                continue
+            if col in (None, 1):
+                self._set_valor(row, 1, valor)
+            if col in (None, 2):
+                self._set_valor(row, 2, valor)
+            self._sincronizar_polar_linha(row)
+        self._bloquear_eventos = False
+        self._celula_alterada(None)
+
     def _copiar(self):
         self._copiado = self.valores()
         if self._ferramenta is not None and self._canvas is not None:
@@ -489,6 +844,50 @@ class GraduarTabelaDialog(QDialog):
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
+    def _colar_relativo(self):
+        dados = getattr(self, "_copiado", None)
+        if not isinstance(dados, dict):
+            return
+        self._bloquear_eventos = True
+        for row in range(self.tbl.rowCount()):
+            nome_item = self.tbl.item(row, 0)
+            if nome_item is None:
+                continue
+            nome = nome_item.text().strip()
+            origem = dados.get(nome, {})
+            if not isinstance(origem, dict):
+                origem = {}
+            self._set_valor(row, 1, self._valor_item(row, 1) + self._float_item_graduacao(origem.get("dx", 0.0)))
+            self._set_valor(row, 2, self._valor_item(row, 2) + self._float_item_graduacao(origem.get("dy", 0.0)))
+            self._sincronizar_polar_linha(row)
+        self._bloquear_eventos = False
+        self._celula_alterada(None)
+
+    def _colar_coluna_relativa(self, col: int):
+        dados = getattr(self, "_copiado", None)
+        if not isinstance(dados, dict):
+            return
+        chave = "dx" if col == 1 else "dy"
+        self._bloquear_eventos = True
+        for row in range(self.tbl.rowCount()):
+            nome_item = self.tbl.item(row, 0)
+            if nome_item is None:
+                continue
+            origem = dados.get(nome_item.text().strip(), {})
+            if not isinstance(origem, dict):
+                origem = {}
+            self._set_valor(row, col, self._valor_item(row, col) + self._float_item_graduacao(origem.get(chave, 0.0)))
+            self._sincronizar_polar_linha(row)
+        self._bloquear_eventos = False
+        self._celula_alterada(None)
+
+    @staticmethod
+    def _float_item_graduacao(valor) -> float:
+        try:
+            return float(valor or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _preencher_coluna_atual(self, col: int, valor: float):
         if self._aba_polar_ativa():
             self._bloquear_eventos = True
@@ -505,8 +904,14 @@ class GraduarTabelaDialog(QDialog):
 
     def _aba_alterada(self, idx: int):
         polar = int(idx) == 1
-        self.btn_zerar_dx.setText("dist" if polar else "DX = 0")
-        self.btn_zerar_dy.setText("âng" if polar else "DY = 0")
+        perimetro = int(idx) == 2
+        self.btn_zerar_dx.setText("Dist." if polar else "DX")
+        self.btn_zerar_dy.setText("Âng." if polar else "DY")
+        self.btn_zerar_dx.setToolTip("Zerar a distância" if polar else "Zerar a coluna DX")
+        self.btn_zerar_dy.setToolTip("Zerar o ângulo" if polar else "Zerar a coluna DY")
+        largura_alvo = self._largura_perimetro if perimetro else self._largura_padrao
+        if self.width() != largura_alvo:
+            self.resize(largura_alvo, self.height())
 
     def _inverter_coluna(self, col: int):
         self._bloquear_eventos = True
@@ -522,9 +927,11 @@ class GraduarTabelaDialog(QDialog):
         for row in range(self.tbl.rowCount()):
             item = self.tbl.item(row, 0)
             if item is not None:
+                cor_item = item.data(Qt.UserRole)
+                cor_texto = str(cor_item or "").strip() or item.background().color().name()
                 saida.append({
                     "tamanho": item.text().strip(),
-                    "cor": item.background().color().name(),
+                    "cor": cor_texto,
                     "base": row == base_row,
                 })
         return saida
@@ -593,23 +1000,42 @@ class GraduarTabelaDialog(QDialog):
         return self._para_cena(valor) if col == 1 else valor
 
     @staticmethod
+    def _aplicar_cor_tamanho(item: QTableWidgetItem, cor: str):
+        cor_base = QColor(str(cor or ""))
+        if not cor_base.isValid():
+            cor_base = QColor("#ffffff")
+        item.setData(Qt.UserRole, cor_base.name())
+        item.setData(Qt.BackgroundRole, cor_base)
+        item.setData(Qt.ForegroundRole, QColor("#000000"))
+        item.setBackground(cor_base)
+        item.setForeground(QColor("#000000"))
+
+    @staticmethod
     def _destacar_item_tamanho_base(item: QTableWidgetItem, cor: str):
         fonte = item.font()
         fonte.setBold(True)
+        fonte.setUnderline(True)
         item.setFont(fonte)
-        cor_base = QColor(str(cor or ""))
-        if cor_base.isValid():
-            item.setBackground(cor_base)
-            luminosidade = (0.299 * cor_base.red()) + (0.587 * cor_base.green()) + (0.114 * cor_base.blue())
-            item.setForeground(QColor("#111111" if luminosidade >= 150 else "#ffffff"))
+        item.setData(Qt.UserRole + 1, True)
+        cor_base = QColor(str(cor or item.data(Qt.UserRole) or ""))
+        if not cor_base.isValid():
+            cor_base = QColor("#ffffff")
+        item.setData(Qt.UserRole, cor_base.name())
+        item.setData(Qt.BackgroundRole, cor_base)
+        item.setData(Qt.ForegroundRole, QColor("#000000"))
+        item.setBackground(cor_base)
+        item.setForeground(QColor("#000000"))
 
     @staticmethod
     def _destacar_item_valor_base(item: QTableWidgetItem):
         fonte = item.font()
         fonte.setBold(True)
         item.setFont(fonte)
-        item.setForeground(QColor("#ffffff"))
-        item.setBackground(QColor("#2b7cd3"))
+        item.setForeground(QColor("#000000"))
+        item.setData(Qt.ForegroundRole, QColor("#000000"))
+        cor_base = QColor("#d9ecff")
+        item.setBackground(cor_base)
+        item.setData(Qt.BackgroundRole, cor_base)
 
     @staticmethod
     def _formatar_float(valor, casas: int = 3) -> str:
@@ -636,9 +1062,12 @@ class Ferramenta(FerramentaBase):
         self._hover_ponto_idx: int | None = None
         self._pontos_selecionados: set[int] = set()
         self._canvas_observados: set[int] = set()
+        self._dialog_propriedades_observados: set[tuple[int, int]] = set()
         self._modo_copia_graduacao = False
         self._graduacao_copiada: dict | None = None
         self._origem_copia: tuple[int, int] | None = None
+        self._dialog_propriedades_observados: set[tuple[int, int]] = set()
+        self._atualizacoes_canvas_agendadas: set[int] = set()
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -920,29 +1349,138 @@ class Ferramenta(FerramentaBase):
     def _observar_canvas(self, canvas) -> None:
         if canvas is None:
             return
+
+        if not hasattr(self, "_canvas_observados"):
+            self._canvas_observados = set()
+        if not hasattr(self, "_dialog_propriedades_observados"):
+            self._dialog_propriedades_observados = set()
+        if not hasattr(self, "_atualizacoes_canvas_agendadas"):
+            self._atualizacoes_canvas_agendadas = set()
+
         chave = id(canvas)
-        if chave in self._canvas_observados:
-            return
-        sinal = getattr(canvas, "elementos_alterados", None)
-        if sinal is None:
-            return
-        try:
-            sinal.connect(lambda *_args, canvas=canvas: self._quando_canvas_elementos_alterados(canvas))
+
+        # Observa alterações reais no canvas.
+        # Não pode retornar cedo demais, porque mesmo sem esse sinal
+        # ainda precisamos tentar observar a janela de Propriedades.
+        if chave not in self._canvas_observados:
+            sinal = getattr(canvas, "elementos_alterados", None)
+
+            if sinal is not None and hasattr(sinal, "connect"):
+                try:
+                    sinal.connect(
+                        lambda *_args, canvas=canvas: self._agendar_atualizacao_canvas(canvas)
+                    )
+                except Exception:
+                    pass
+
             self._canvas_observados.add(chave)
-        except Exception:
+
+        # Observa também a janela Propriedades, quando ela estiver aberta.
+        self._observar_dialog_propriedades(canvas)
+
+    def _observar_dialog_propriedades(self, canvas) -> None:
+        if canvas is None:
             return
 
+        if not hasattr(self, "_dialog_propriedades_observados"):
+            self._dialog_propriedades_observados = set()
+
+        dialog = self._dialog_propriedades_aberta(canvas)
+        if dialog is None:
+            return
+
+        chave_dialog = (id(canvas), id(dialog))
+        if chave_dialog in self._dialog_propriedades_observados:
+            return
+
+        # A janela Propriedades emite dados_aplicados quando o usuário confirma.
+        sinal = getattr(dialog, "dados_aplicados", None)
+        if sinal is not None and hasattr(sinal, "connect"):
+            try:
+                sinal.connect(
+                    lambda *_args, canvas=canvas: self._agendar_atualizacao_canvas(canvas)
+                )
+            except Exception:
+                pass
+
+        # Quando a janela fechar/destruir, libera a chave para poder conectar novamente
+        # numa próxima abertura.
+        try:
+            dialog.destroyed.connect(
+                lambda *_args, chave_dialog=chave_dialog: self._dialog_propriedades_observados.discard(chave_dialog)
+            )
+        except Exception:
+            pass
+
+        self._dialog_propriedades_observados.add(chave_dialog)
+
+    def _dialog_propriedades_aberta(self, canvas):
+        if canvas is None:
+            return None
+
+        try:
+            from tools.propriedades_tool import Ferramenta as FerramentaPropriedades
+
+            dialog_por_canvas = getattr(FerramentaPropriedades, "_dialog_por_canvas", {})
+            if isinstance(dialog_por_canvas, dict):
+                return dialog_por_canvas.get(id(canvas))
+        except Exception:
+            return None
+
+        return None
+
+    def _agendar_atualizacao_canvas(self, canvas) -> None:
+        if canvas is None:
+            return
+
+        if not hasattr(self, "_atualizacoes_canvas_agendadas"):
+            self._atualizacoes_canvas_agendadas = set()
+
+        chave = id(canvas)
+
+        # Evita várias atualizações seguidas no mesmo ciclo do Qt.
+        if chave in self._atualizacoes_canvas_agendadas:
+            return
+
+        self._atualizacoes_canvas_agendadas.add(chave)
+
+        def executar():
+            try:
+                self._atualizacoes_canvas_agendadas.discard(chave)
+            except Exception:
+                pass
+
+            try:
+                self._quando_canvas_elementos_alterados(canvas)
+            except Exception:
+                pass
+
+        try:
+            QTimer.singleShot(0, executar)
+        except Exception:
+            executar()
+
     def _quando_canvas_elementos_alterados(self, canvas) -> None:
+        if canvas is None:
+            return
+
+        # Tenta capturar a janela Propriedades sempre que houver alteração,
+        # porque ela pode ter sido aberta depois da Tabela.
+        self._observar_dialog_propriedades(canvas)
+
         dialog = self._dialog_por_canvas.get(id(canvas))
         if dialog is None:
             return
+
         visivel = bool(dialog.isVisible())
+
         selecionado = self._molde_selecionado(canvas)
         if selecionado is not None and selecionado != self._molde_idx:
             self._definir_molde_idx(canvas, selecionado)
             self._ponto_idx = None
             self._hover_ponto_idx = None
             self._pontos_selecionados.clear()
+
         if not self._molde_atual_corresponde(canvas):
             if visivel:
                 self._fechar_dialog_molde_indisponivel(canvas)
@@ -953,15 +1491,19 @@ class Ferramenta(FerramentaBase):
                 self._hover_ponto_idx = None
                 self._pontos_selecionados.clear()
             return
+
         pontos = self._pontos_contorno(self._molde_atual(canvas))
         if not pontos:
             if visivel:
                 self._fechar_dialog_molde_indisponivel(canvas)
             return
+
         if self._ponto_idx is not None and not (0 <= self._ponto_idx < len(pontos)):
             self._ponto_idx = None
+
         self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos))
         self._atualizar_dialog(canvas)
+
         if visivel:
             self._repintar_canvas_agora(canvas)
 
@@ -979,18 +1521,19 @@ class Ferramenta(FerramentaBase):
             canvas.update()
 
     def _atualizar_dialog(self, canvas):
+        self._observar_dialog_propriedades(canvas)
         dialog = self._obter_dialog(canvas)
         dialog.conectar(self, canvas)
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
         if molde is not None:
-            self._garantir_tamanhos_no_molde(molde)
+            self._garantir_tamanhos_no_molde(molde, canvas=canvas)
         if self._ponto_idx is not None and not self._pontos_selecionados:
             self._pontos_selecionados = {int(self._ponto_idx)}
         if pontos:
             self._pontos_selecionados = self._pontos_validos_selecionados(len(pontos))
         dialog.definir_pontos(len(pontos), self._ponto_idx)
-        tamanhos = self._tamanhos_molde(molde)
+        tamanhos = self._tamanhos_molde(molde, canvas=canvas)
         valores = self._valores_ponto(molde, self._ponto_idx)
         dialog.definir_tamanhos(tamanhos, valores)
         self._atualizar_perimetros_dialog(canvas)
@@ -1002,7 +1545,7 @@ class Ferramenta(FerramentaBase):
         dialog.set_unidade(*unidade_canvas(canvas))
         molde = self._molde_atual(canvas)
         pontos = self._pontos_contorno(molde) if molde else []
-        tamanhos = self._tamanhos_molde(molde)
+        tamanhos = self._tamanhos_molde(molde, canvas=canvas)
         dialog.definir_perimetros(self._linhas_perimetro_graduacao(molde, pontos, tamanhos))
 
     def _linhas_perimetro_graduacao(self, molde: dict | None, pontos: list[QPointF], tamanhos: list[dict]) -> list[dict]:
@@ -1158,7 +1701,7 @@ class Ferramenta(FerramentaBase):
         molde = canvas.cena.elementos[int(molde_idx)]
         self._garantir_tamanhos_no_molde(molde, dialog)
         dialog.definir_pontos(len(self._pontos_contorno(molde)), int(ponto_idx))
-        dialog.definir_tamanhos(self._tamanhos_molde(molde), deepcopy(self._graduacao_copiada))
+        dialog.definir_tamanhos(self._tamanhos_molde(molde, canvas=canvas), deepcopy(self._graduacao_copiada))
         self._salvar_valores_dialog(canvas, registrar_historico=True)
         self._atualizar_dialog(canvas)
         self._repintar_canvas_agora(canvas)
@@ -1420,33 +1963,313 @@ class Ferramenta(FerramentaBase):
             return min(self._dist(ponto, item) for item in base)
         return min(self._distancia_ponto_segmento(ponto, a, b) for a, b in segmentos)
 
-    def _tamanhos_molde(self, molde: dict | None) -> list[dict]:
+    def _tamanhos_molde(self, molde: dict | None, *, canvas=None) -> list[dict]:
         if not isinstance(molde, dict):
             return []
-        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
-        if isinstance(linhas, list) and linhas:
-            return [dict(l) for l in linhas if isinstance(l, dict) and l.get("ativo", True)]
-        _grade_nome, linhas_padrao = grade_graduacao_padrao()
-        return [dict(linha) for linha in linhas_padrao]
 
-    def _garantir_tamanhos_no_molde(self, molde: dict, dialog: GraduarTabelaDialog | None = None) -> None:
-        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
+        linhas_origem = molde.get("graduacao_tamanhos") if isinstance(molde.get("graduacao_tamanhos"), list) else []
+
+        if linhas_origem:
+            linhas = [dict(l) for l in linhas_origem if isinstance(l, dict) and l.get("ativo", True)]
+        else:
+            _grade_nome, linhas_padrao = grade_graduacao_padrao()
+            grade_nome = grade_nome or str(_grade_nome or "").strip()
+            linhas = [dict(linha) for linha in linhas_padrao]
+
+        if not grade_nome:
+            grade_nome = self._inferir_grade_pelos_tamanhos(linhas)
+
+        linhas_propriedades = self._linhas_graduacao_propriedades_aberta(canvas, molde)
+        cores_propriedades = self._mapa_cores_linhas(linhas_propriedades)
+        if linhas_propriedades:
+            base_props = next((str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas_propriedades if linha.get("base")), "")
+            if base_props:
+                for linha in linhas:
+                    if str(linha.get("tamanho") or linha.get("nome") or "").strip() == base_props:
+                        linha["base"] = True
+                    elif "base" in linha:
+                        linha["base"] = False
+
+        return self._normalizar_linhas_tamanhos_com_cores(
+            linhas,
+            grade_nome,
+            cores_prioritarias=cores_propriedades,
+        )
+
+    def _normalizar_linhas_tamanhos_com_cores(
+            self,
+            linhas: list[dict],
+            grade_nome: str,
+            *,
+            cores_prioritarias: dict[str, str] | None = None,
+    ) -> list[dict]:
+        grade_nome = str(grade_nome or "").strip()
+        cores_padrao = self._cores_padrao_grade_tabela(grade_nome)
+        cores_prioritarias = cores_prioritarias or {}
+        base_grade = self._base_grade_tabela(grade_nome)
+        resultado: list[dict] = []
+
+        for idx, linha in enumerate(linhas):
+            if not isinstance(linha, dict):
+                continue
+            nova = dict(linha)
+            nome = str(nova.get("tamanho") or nova.get("nome") or "").strip()
+            if not nome:
+                continue
+            nova["tamanho"] = nome
+
+            cor_prioritaria = self._cor_hex_valida(cores_prioritarias.get(nome))
+            cor_atual = self._cor_hex_valida(nova.get("cor"))
+            cor_grade = self._cor_hex_valida(cores_padrao.get(nome))
+            if cor_prioritaria:
+                cor = cor_prioritaria
+            elif cor_atual and not (cor_atual.lower() == "#ffffff" and cor_grade and cor_grade.lower() != "#ffffff"):
+                cor = cor_atual
+            else:
+                cor = cor_grade or cor_atual
+            if cor:
+                nova["cor"] = cor
+            else:
+                nova["cor"] = "#ffffff"
+
+            if base_grade and nome == base_grade and not any(bool(item.get("base", False)) for item in linhas if isinstance(item, dict)):
+                nova["base"] = True
+            resultado.append(nova)
+
+        if resultado and not any(bool(linha.get("base", False)) for linha in resultado):
+            resultado[min(len(resultado) // 2, len(resultado) - 1)]["base"] = True
+        return resultado
+
+    @staticmethod
+    def _cor_hex_valida(valor) -> str:
+        cor = QColor(str(valor or ""))
+        return cor.name() if cor.isValid() else ""
+
+    @staticmethod
+    def _base_grade_tabela(grade_nome: str) -> str:
+        texto = str(grade_nome or "").strip()
+        if "(" in texto and ")" in texto:
+            return texto[texto.find("(") + 1:texto.find(")")].strip()
+        return ""
+
+    @staticmethod
+    def _inferir_grade_pelos_tamanhos(linhas: list[dict]) -> str:
+        nomes = [
+            str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            for linha in linhas
+            if isinstance(linha, dict) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
+        ]
+        if not nomes:
+            return ""
+        for grade_nome, cores in GRADES_TAMANHOS_CORES_FIXAS.items():
+            ordem = list(cores.keys())
+            if nomes == ordem:
+                return grade_nome
+            pos = 0
+            corresponde = True
+            for nome in nomes:
+                try:
+                    encontrado = ordem.index(nome, pos)
+                except ValueError:
+                    corresponde = False
+                    break
+                pos = encontrado + 1
+            if corresponde:
+                return grade_nome
+        return ""
+
+    @staticmethod
+    def _cores_padrao_grade_tabela(grade_nome: str) -> dict[str, str]:
+        texto = str(grade_nome or "").strip()
+        cores_fixas = GRADES_TAMANHOS_CORES_FIXAS.get(texto)
+        if cores_fixas:
+            return dict(cores_fixas)
+        for idioma in ("pt", "es"):
+            try:
+                nome_padrao, linhas_padrao = grade_graduacao_padrao(idioma)
+            except TypeError:
+                if idioma != "pt":
+                    continue
+                nome_padrao, linhas_padrao = grade_graduacao_padrao()
+            if texto and texto != str(nome_padrao or "").strip():
+                continue
+            mapa = {}
+            for linha in linhas_padrao:
+                if isinstance(linha, dict):
+                    nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+                    cor_qt = QColor(str(linha.get("cor") or ""))
+                    cor = cor_qt.name() if cor_qt.isValid() else ""
+                    if nome and cor:
+                        mapa[nome] = cor
+            if mapa:
+                return mapa
+        return dict(CORES_TAMANHOS_PADRAO_TABELA)
+
+    @staticmethod
+    def _mapa_cores_linhas(linhas: list[dict]) -> dict[str, str]:
+        mapa: dict[str, str] = {}
+        for linha in linhas or []:
+            if not isinstance(linha, dict):
+                continue
+            nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            cor = Ferramenta._cor_hex_valida(linha.get("cor"))
+            if nome and cor:
+                mapa[nome] = cor
+        return mapa
+
+    def _linhas_graduacao_propriedades_aberta(self, canvas, molde: dict | None) -> list[dict]:
+        if canvas is None or not isinstance(molde, dict):
+            return []
+        dialog = self._dialog_propriedades_aberta(canvas)
+        if dialog is None:
+            return []
+        try:
+            indice_atual = getattr(dialog, "_indice_atual", None)
+            if indice_atual is not None and self._molde_idx is not None and int(indice_atual) != int(self._molde_idx):
+                return []
+        except Exception:
+            pass
+
+        # Preferência máxima: ler a tabela de Propriedades aberta, porque ela contém
+        # exatamente as cores que o usuário está vendo na coluna Cor.
+        linhas_ui = self._linhas_tabela_graduacao_dialog(dialog)
+        if linhas_ui:
+            return linhas_ui
+
+        linhas = getattr(dialog, "_graduacao_linhas", None)
         if isinstance(linhas, list) and linhas:
-            return
-        tamanhos = dialog._tamanhos_atuais() if dialog is not None else self._tamanhos_molde(molde)
-        linhas_normalizadas = [dict(linha) for linha in tamanhos if isinstance(linha, dict)]
+            return [dict(linha) for linha in linhas if isinstance(linha, dict) and linha.get("ativo", True)]
+        try:
+            rascunho = getattr(dialog, "_elementos_rascunho", None)
+            if isinstance(rascunho, list) and self._molde_idx is not None and 0 <= int(self._molde_idx) < len(rascunho):
+                molde_rascunho = rascunho[int(self._molde_idx)]
+                linhas_rascunho = molde_rascunho.get("graduacao_tamanhos") if isinstance(molde_rascunho, dict) else None
+                if isinstance(linhas_rascunho, list):
+                    return [dict(linha) for linha in linhas_rascunho if isinstance(linha, dict) and linha.get("ativo", True)]
+        except Exception:
+            pass
+        return []
+
+    @staticmethod
+    def _linhas_tabela_graduacao_dialog(dialog) -> list[dict]:
+        tabela = getattr(dialog, "tbl_graduacao", None)
+        if tabela is None or not all(hasattr(tabela, nome) for nome in ("rowCount", "item")):
+            return []
+        linhas: list[dict] = []
+        try:
+            total = int(tabela.rowCount())
+        except Exception:
+            return []
+        for row in range(total):
+            item_ativo = tabela.item(row, 0)
+            item_tamanho = tabela.item(row, 1)
+            item_cor = tabela.item(row, 2)
+            nome = str(item_tamanho.text() if item_tamanho is not None else "").strip()
+            if not nome:
+                continue
+            ativo_txt = str(item_ativo.text() if item_ativo is not None else "✓").strip()
+            cor = ""
+            if item_cor is not None:
+                try:
+                    cor = item_cor.background().color().name()
+                except Exception:
+                    cor = ""
+            if not QColor(str(cor or "")).isValid() and item_tamanho is not None:
+                try:
+                    cor = item_tamanho.background().color().name()
+                except Exception:
+                    cor = ""
+            linhas.append({
+                "ativo": bool(ativo_txt),
+                "tamanho": nome,
+                "cor": cor if QColor(str(cor or "")).isValid() else "#ffffff",
+                "base": bool(item_tamanho.font().bold()) if item_tamanho is not None else False,
+            })
+        if linhas and not any(linha.get("base") for linha in linhas):
+            base_idx = getattr(dialog, "_linha_gradacao_atual", None)
+            try:
+                base_idx = int(base_idx)
+            except Exception:
+                base_idx = -1
+            if 0 <= base_idx < len(linhas):
+                linhas[base_idx]["base"] = True
+        return [linha for linha in linhas if linha.get("ativo", True)]
+
+    @staticmethod
+    def _dialog_propriedades_aberta(canvas):
+        def dialog_valido(dialog) -> bool:
+            if dialog is None:
+                return False
+            nome_classe = type(dialog).__name__.lower()
+            return (
+                "propriedades" in nome_classe
+                or hasattr(dialog, "_graduacao_linhas")
+                or hasattr(dialog, "tbl_graduacao")
+            )
+
+        # Consulta primeiro a classe da ferramenta Propriedades. A ferramenta Tabela
+        # também possui _dialog_por_canvas, então buscar ferramentas sem filtrar pode
+        # retornar o próprio diálogo da tabela e perder as cores da graduação.
+        try:
+            modulo = import_module("tools.propriedades_tool")
+            ferramenta_cls = getattr(modulo, "Ferramenta", None)
+            mapa = getattr(ferramenta_cls, "_dialog_por_canvas", None)
+            if isinstance(mapa, dict):
+                dialog = mapa.get(id(canvas))
+                if dialog_valido(dialog):
+                    return dialog
+        except Exception:
+            pass
+
+        candidatos = []
+        runtime = getattr(canvas, "_runtime_tool", None)
+        if runtime is not None:
+            candidatos.append(runtime)
+        cache = getattr(canvas, "_runtime_tool_cache", None)
+        if isinstance(cache, dict):
+            candidatos.extend(obj for obj in cache.values() if obj is not None)
+
+        for ferramenta in candidatos:
+            classe = getattr(ferramenta, "__class__", None)
+            id_ferramenta = str(getattr(ferramenta, "id_ferramenta", "") or getattr(classe, "id_ferramenta", "")).strip().lower()
+            modulo_nome = str(getattr(classe, "__module__", "") or "").lower()
+            if id_ferramenta != "propriedades" and "propriedades_tool" not in modulo_nome:
+                continue
+            mapa = getattr(classe, "_dialog_por_canvas", None)
+            if isinstance(mapa, dict):
+                dialog = mapa.get(id(canvas))
+                if dialog_valido(dialog):
+                    return dialog
+        return None
+
+    def _garantir_tamanhos_no_molde(self, molde: dict, dialog: GraduarTabelaDialog | None = None, *, canvas=None) -> None:
+        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        if dialog is not None:
+            tamanhos = dialog._tamanhos_atuais()
+        elif isinstance(linhas, list) and linhas:
+            tamanhos = [dict(linha) for linha in linhas if isinstance(linha, dict)]
+        else:
+            tamanhos = self._tamanhos_molde(molde, canvas=canvas)
+        grade_nome_atual = str(molde.get("graduacao_grade_nome") or "").strip()
+        if not grade_nome_atual:
+            grade_nome_atual = self._inferir_grade_pelos_tamanhos([dict(linha) for linha in tamanhos if isinstance(linha, dict)])
+        linhas_normalizadas = self._normalizar_linhas_tamanhos_com_cores(
+            [dict(linha) for linha in tamanhos if isinstance(linha, dict)],
+            grade_nome_atual,
+        )
         if not linhas_normalizadas:
             return
-        if not any(linha.get("base") for linha in linhas_normalizadas):
-            linhas_normalizadas[len(linhas_normalizadas) // 2]["base"] = True
         molde["graduacao_tamanhos"] = linhas_normalizadas
         molde["graduacao_tamanhos_ativos"] = [
             str(linha.get("tamanho") or linha.get("nome") or "")
             for linha in linhas_normalizadas
             if linha.get("ativo", True) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
         ]
-        grade_nome, _linhas_padrao = grade_graduacao_padrao()
-        molde.setdefault("graduacao_grade_nome", grade_nome)
+        if not str(molde.get("graduacao_grade_nome") or "").strip():
+            if not grade_nome_atual:
+                grade_nome_atual, _linhas_padrao = grade_graduacao_padrao()
+            molde["graduacao_grade_nome"] = grade_nome_atual
 
     def _preparar_molde_para_tabela(self, canvas, molde_idx: int | None, *, permitir_propriedades: bool = True) -> bool:
         if molde_idx is None or not (0 <= int(molde_idx) < len(canvas.cena.elementos)):
@@ -1536,7 +2359,11 @@ class Ferramenta(FerramentaBase):
         if self._assinatura_grade_molde(molde) == self._assinatura_grade(grade_nome, linhas_ref):
             return
         molde["graduacao_grade_nome"] = grade_nome
-        molde["graduacao_tamanhos"] = [dict(linha) for linha in linhas_ref if isinstance(linha, dict)]
+        linhas_coloridas = self._normalizar_linhas_tamanhos_com_cores(
+            [dict(linha) for linha in linhas_ref if isinstance(linha, dict)],
+            str(grade_nome or ""),
+        )
+        molde["graduacao_tamanhos"] = linhas_coloridas
         molde["graduacao_tamanhos_ativos"] = list(ativos_ref)
 
     @staticmethod
