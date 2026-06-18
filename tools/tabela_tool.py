@@ -1338,12 +1338,31 @@ class Ferramenta(FerramentaBase):
 
     def _restaurar_dialog(self, canvas, dialog: GraduarTabelaDialog):
         fallback = None
-        if hasattr(canvas, "calcular_posicao_painel_auxiliar") and hasattr(canvas, "mapToGlobal"):
-            pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
-            fallback = canvas.mapToGlobal(pos_local)
-        elif hasattr(canvas, "mapToGlobal"):
-            fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
+        if hasattr(canvas, "mapToGlobal"):
+            pos_local = self._posicao_ao_lado_coordenadas(canvas, dialog.width(), dialog.height())
+            if pos_local is None and hasattr(canvas, "calcular_posicao_painel_auxiliar"):
+                pos_local = canvas.calcular_posicao_painel_auxiliar(dialog.width(), dialog.height(), abaixo_coordenadas=True)
+            if pos_local is not None:
+                fallback = canvas.mapToGlobal(pos_local)
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
+
+    @staticmethod
+    def _posicao_ao_lado_coordenadas(canvas, largura: int, altura: int) -> QPoint | None:
+        painel = getattr(canvas, "painel_coordenadas", None)
+        if painel is None:
+            return None
+        try:
+            if not painel.isVisible():
+                return None
+            x = int(painel.x()) - int(largura) - 8
+            y = int(painel.y())
+        except RuntimeError:
+            return None
+        if hasattr(canvas, "_limitar_posicao_painel_auxiliar"):
+            return canvas._limitar_posicao_painel_auxiliar(QPoint(x, y), int(largura), int(altura))
+        max_x = max(8, int(canvas.width()) - int(largura) - 8)
+        max_y = max(16, int(canvas.height()) - int(altura) - 8)
+        return QPoint(max(8, min(x, max_x)), max(16, min(y, max_y)))
 
     def _observar_canvas(self, canvas) -> None:
         if canvas is None:

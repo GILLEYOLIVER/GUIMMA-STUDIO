@@ -382,29 +382,19 @@ class Ferramenta(FerramentaBase):
         y2 = max(self._inicio_caixa.y(), self._fim_caixa.y())
 
         if sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) > (4.0 / max(canvas.zoom, 0.001)):
-            # Seleção estilo CAD/Audaces:
-            # - arraste da esquerda para a direita: seleciona somente o que ficou inteiro dentro da janela;
-            # - arraste da direita para a esquerda: seleciona qualquer elemento que toque/cruze a janela.
-            selecionar_por_toque = self._fim_caixa.x() < self._inicio_caixa.x()
-
             selecionados_area: set[int] = set()
             for idx, el in enumerate(canvas.cena.elementos):
                 pontos = self._pontos_elemento_para_selecao(canvas, el)
                 if not pontos:
                     continue
 
-                if selecionar_por_toque:
-                    if self._elemento_intersecta_retangulo(pontos, x1, y1, x2, y2):
-                        selecionados_area.add(idx)
-                else:
-                    if self._elemento_totalmente_dentro_retangulo(pontos, x1, y1, x2, y2):
-                        selecionados_area.add(idx)
+                if self._elemento_totalmente_dentro_retangulo(pontos, x1, y1, x2, y2):
+                    selecionados_area.add(idx)
             if event.modifiers() & Qt.ShiftModifier:
                 canvas._selecionados |= selecionados_area
             else:
                 canvas._selecionados = selecionados_area
-            modo = "por toque" if selecionar_por_toque else "contida"
-            self.set_status(f"Seleção por área ({modo}): {len(canvas._selecionados)} elemento(s).")
+            self.set_status(f"Seleção por área (contida): {len(canvas._selecionados)} elemento(s).")
 
         self._inicio_caixa = None
         self._fim_caixa = None

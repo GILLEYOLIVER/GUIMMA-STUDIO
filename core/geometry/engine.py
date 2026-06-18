@@ -6,9 +6,24 @@ from math import acos, sqrt
 from core.geometry.model import GeoNode, GeoSegment, GeoShape
 
 try:
-    import geometry_native as _geometry_native  # type: ignore
+    from core.geometry_cpp_bridge import modulo_cpp as _modulo_cpp
+
+    _geometry_cpp = _modulo_cpp()
 except Exception:  # pragma: no cover - backend opcional
-    _geometry_native = None
+    _geometry_cpp = None
+
+try:
+    import geometry_native as _legacy_geometry_native  # type: ignore
+except Exception:  # pragma: no cover - backend opcional
+    _legacy_geometry_native = None
+
+
+def native_backend_name() -> str:
+    if _geometry_cpp is not None:
+        return "guimma_geometry_cpp"
+    if _legacy_geometry_native is not None:
+        return "geometry_native"
+    return "python"
 
 
 @dataclass(slots=True)
@@ -29,13 +44,31 @@ def polygon_signed_area(points: list[tuple[float, float]]) -> float:
 
 
 def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+    if _geometry_cpp is not None:
+        try:
+            return float(_geometry_cpp.distance(float(a[0]), float(a[1]), float(b[0]), float(b[1])))
+        except Exception:
+            pass
     return sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
 
 def point_segment_distance(point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
-    if _geometry_native is not None:
+    if _geometry_cpp is not None:
         try:
-            return float(_geometry_native.point_segment_distance(point, a, b))
+            qx, qy = _geometry_cpp.project_on_segment(
+                float(point[0]),
+                float(point[1]),
+                float(a[0]),
+                float(a[1]),
+                float(b[0]),
+                float(b[1]),
+            )
+            return float(_geometry_cpp.distance(float(point[0]), float(point[1]), float(qx), float(qy)))
+        except Exception:
+            pass
+    if _legacy_geometry_native is not None:
+        try:
+            return float(_legacy_geometry_native.point_segment_distance(point, a, b))
         except Exception:
             pass
     px, py = point
@@ -53,9 +86,14 @@ def point_segment_distance(point: tuple[float, float], a: tuple[float, float], b
 
 
 def polyline_perimeter(points: list[tuple[float, float]]) -> float:
-    if _geometry_native is not None:
+    if _geometry_cpp is not None:
         try:
-            return float(_geometry_native.polyline_perimeter(points))
+            return float(_geometry_cpp.polyline_length(points))
+        except Exception:
+            pass
+    if _legacy_geometry_native is not None:
+        try:
+            return float(_legacy_geometry_native.polyline_perimeter(points))
         except Exception:
             pass
     if len(points) < 2:
@@ -68,9 +106,9 @@ def quadratic_bezier_parameter_for_point(
     p_mid: tuple[float, float],
     p2: tuple[float, float],
 ) -> float:
-    if _geometry_native is not None:
+    if _legacy_geometry_native is not None:
         try:
-            return float(_geometry_native.quadratic_bezier_parameter_for_point(p0, p_mid, p2))
+            return float(_legacy_geometry_native.quadratic_bezier_parameter_for_point(p0, p_mid, p2))
         except Exception:
             pass
     vx = p2[0] - p0[0]
@@ -87,9 +125,9 @@ def quadratic_bezier_control_for_point(
     p_mid: tuple[float, float],
     p2: tuple[float, float],
 ) -> tuple[float, float]:
-    if _geometry_native is not None:
+    if _legacy_geometry_native is not None:
         try:
-            cx, cy = _geometry_native.quadratic_bezier_control_for_point(p0, p_mid, p2)
+            cx, cy = _legacy_geometry_native.quadratic_bezier_control_for_point(p0, p_mid, p2)
             return float(cx), float(cy)
         except Exception:
             pass
@@ -108,9 +146,14 @@ def sample_quadratic_bezier(
     p2: tuple[float, float],
     segments: int,
 ) -> list[tuple[float, float]]:
-    if _geometry_native is not None:
+    if _geometry_cpp is not None:
         try:
-            return [(float(x), float(y)) for x, y in _geometry_native.sample_quadratic_bezier(p0, control, p2, int(segments))]
+            return [(float(x), float(y)) for x, y in _geometry_cpp.sample_quadratic_bezier(p0, control, p2, int(segments))]
+        except Exception:
+            pass
+    if _legacy_geometry_native is not None:
+        try:
+            return [(float(x), float(y)) for x, y in _legacy_geometry_native.sample_quadratic_bezier(p0, control, p2, int(segments))]
         except Exception:
             pass
     n = max(2, int(segments))
@@ -169,9 +212,14 @@ def ensure_closed_polyline(points: list[tuple[float, float]], eps: float = 0.001
 
 
 def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
-    if _geometry_native is not None:
+    if _geometry_cpp is not None:
         try:
-            return bool(_geometry_native.point_in_polygon(point, polygon))
+            return bool(_geometry_cpp.point_in_polygon_or_boundary(float(point[0]), float(point[1]), polygon, 1e-9))
+        except Exception:
+            pass
+    if _legacy_geometry_native is not None:
+        try:
+            return bool(_legacy_geometry_native.point_in_polygon(point, polygon))
         except Exception:
             pass
 
@@ -202,6 +250,11 @@ def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, floa
 
 
 def normalize_closed_polyline(points: list[tuple[float, float]], clockwise: bool = True) -> list[tuple[float, float]]:
+    if _geometry_cpp is not None:
+        try:
+            return [(float(x), float(y)) for x, y in _geometry_cpp.normalize_closed_polyline(points, bool(clockwise), 0.001)]
+        except Exception:
+            pass
     poly = ensure_closed_polyline(points)
     if len(poly) < 4:
         return poly
@@ -252,9 +305,9 @@ def build_mold_from_shape(shape: GeoShape) -> MoldResult:
 
 
 def internal_angle(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
-    if _geometry_native is not None:
+    if _legacy_geometry_native is not None:
         try:
-            return float(_geometry_native.internal_angle(a, b, c))
+            return float(_legacy_geometry_native.internal_angle(a, b, c))
         except Exception:
             pass
     bax, bay = a[0] - b[0], a[1] - b[1]

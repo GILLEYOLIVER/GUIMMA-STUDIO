@@ -15,7 +15,20 @@ class ADSDecoderTestCase(unittest.TestCase):
         self.assertFalse(rel.get("geometria_convertida"))
 
     def test_analisar_com_bloco_zlib_float32(self):
-        pontos = [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0), (0.0, 0.0)]
+        pontos = [
+            (0.0, 0.0),
+            (4.0, 0.0),
+            (8.0, 0.0),
+            (10.0, 2.0),
+            (10.0, 6.0),
+            (8.0, 8.0),
+            (4.0, 8.0),
+            (0.0, 8.0),
+            (-1.0, 6.0),
+            (-1.0, 3.0),
+            (0.0, 1.0),
+            (0.0, 0.0),
+        ]
         payload = b"".join(struct.pack("<ff", x, y) for x, y in pontos)
         bruto = b"CADZ vs9.1" + zlib.compress(payload)
 
@@ -24,7 +37,7 @@ class ADSDecoderTestCase(unittest.TestCase):
         self.assertGreaterEqual(rel.get("blocos_comprimidos_detectados", 0), 1)
         self.assertIn(rel.get("geometry_confidence"), {"low", "medium"})
         self.assertFalse(rel.get("geometria_convertida"))
-        self.assertIn("Geometria rejeitada", rel.get("motivo", ""))
+        self.assertIn("parser estrutural", rel.get("motivo", ""))
 
 
 if __name__ == "__main__":

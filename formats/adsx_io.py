@@ -14,10 +14,29 @@ from zipfile import BadZipFile, ZipFile
 
 from core.projeto import Documento, Projeto
 from formats.ads_decoder import ADSGeometryDecoder
+from formats.adsx_image_trace import tamanho_preview_base64
 
 
 class ADSXImportError(Exception):
     pass
+
+
+def _safe_float(valor: Any) -> float | None:
+    if valor is None:
+        return None
+    try:
+        return float(str(valor).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _safe_int(valor: Any) -> int | None:
+    if valor is None:
+        return None
+    try:
+        return int(float(str(valor).strip().replace(",", ".")))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -44,9 +63,11 @@ class ADSXMoldInfo:
 class ADSXDocument:
     caminho_original: str
     nome_arquivo: str
+    tipo_pacote: str
     index_json: dict[str, Any]
     data_xml_texto: str
     data_xml_normalizado: dict[str, Any]
+    file_information_json: dict[str, Any]
     moldes: list[ADSXMoldInfo]
     arquivos_preservados: dict[str, ADSXArquivoPreservado]
     avisos: list[str]
@@ -74,17 +95,22 @@ class ADSXIO:
         avisos: list[str] = []
         arquivos_preservados: dict[str, ADSXArquivoPreservado] = {}
         diagnostico_file_ads: dict[str, Any] = {}
+        file_information_json: dict[str, Any] = {}
+        tipo_pacote = origem.suffix.lower().lstrip(".") or "adsx"
         try:
             with ZipFile(origem, mode="r") as pacote:
                 nomes_no_zip = set(pacote.namelist())
 
                 index_json = cls._ler_index_json(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 data_xml_texto, data_xml_normalizado = cls._ler_data_xml(pacote, nomes_no_zip, avisos, arquivos_preservados)
+                file_information_json = cls._ler_file_information_json(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 moldes = cls._extrair_moldes_do_xml(data_xml_normalizado.get("xml", {}))
-                diagnostico_file_ads = cls._ler_file_ads(
-                    pacote, nomes_no_zip, avisos, arquivos_preservados, data_xml_normalizado
+                if not moldes:
+                    moldes = cls._extrair_moldes_do_file_information(file_information_json)
+                diagnostico_file_ads = cls._ler_binario_audaces(
+                    pacote, nomes_no_zip, avisos, arquivos_preservados, data_xml_normalizado, index_json
                 )
-                cls._ler_preview_jpg(pacote, nomes_no_zip, avisos, arquivos_preservados)
+                cls._ler_previews(pacote, nomes_no_zip, avisos, arquivos_preservados)
                 cls._ler_ids_json(pacote, nomes_no_zip, avisos, arquivos_preservados)
         except BadZipFile as exc:
             raise ADSXImportError("Arquivo ADSX inválido: o arquivo não é um pacote ZIP reconhecido.") from exc
@@ -100,9 +126,11 @@ class ADSXIO:
         return ADSXDocument(
             caminho_original=str(origem),
             nome_arquivo=origem.name,
+            tipo_pacote=tipo_pacote,
             index_json=index_json,
             data_xml_texto=data_xml_texto,
             data_xml_normalizado=data_xml_normalizado,
+            file_information_json=file_information_json,
             moldes=moldes,
             arquivos_preservados=arquivos_preservados,
             avisos=avisos,
@@ -121,7 +149,7 @@ class ADSXIO:
                 {
                     "id": str(uuid4()),
                     "nome": molde_info.nome,
-                    "origem": "adsx",
+                    "origem": doc.tipo_pacote,
                     "tamanho": molde_info.tamanho,
                     "quantidade": molde_info.quantidade,
                     "area": molde_info.area,
@@ -133,16 +161,41 @@ class ADSXIO:
                     "metadados_adsx": dict(molde_info.metadados),
                 }
             )
-
+        previews = [
+            nome
+            for nome, arquivo in doc.arquivos_preservados.items()
+            if arquivo.tipo in {"preview_image_jpg", "preview_image_png"}
+        ]
+        preview_dimensoes = cls._dimensoes_previews(doc)
+        binario_nome = next(
+            (
+                nome
+                for nome, arquivo in doc.arquivos_preservados.items()
+                if arquivo.tipo in {"audaces_binary_ads", "audaces_binary_amk"}
+            ),
+            "",
+        )
+        diagnostico_ads = dict(doc.data_xml_normalizado.get("diagnostico_file_ads", {}))
+        elementos_canvas = list(diagnostico_ads.get("elementos_canvas", []) or [])
+        geometry_confidence = str(diagnostico_ads.get("geometry_confidence", "none"))
+        geometria_convertida = geometry_confidence == "high" and bool(elementos_canvas)
+        geometria_aproximada = False
         projeto.preferencias_usuario["adsx_importacao"] = {
+            "tipo_pacote": doc.tipo_pacote,
             "nome_projeto": projeto.nome,
             "tamanhos": tamanhos,
             "moldes": placeholders,
-            "preview_disponivel": "file.jpg" in doc.arquivos_preservados,
-            "diagnostico_file_ads": dict(doc.data_xml_normalizado.get("diagnostico_file_ads", {})),
-            "geometry_confidence": str(doc.data_xml_normalizado.get("diagnostico_file_ads", {}).get("geometry_confidence", "none")),
-            "geometria_convertida": str(doc.data_xml_normalizado.get("diagnostico_file_ads", {}).get("geometry_confidence", "none")) == "high",
-            "elementos_canvas": [],
+            "preview_disponivel": bool(previews),
+            "previews": previews,
+            "preview_dimensoes_px": preview_dimensoes,
+            "binario_audaces": binario_nome,
+            "diagnostico_file_ads": diagnostico_ads,
+            "geometry_confidence": geometry_confidence,
+            "geometria_convertida": geometria_convertida,
+            "geometria_aproximada": geometria_aproximada,
+            "preview_apenas_referencia": bool(previews) and not geometria_convertida,
+            "motivo_sem_geometria": str(diagnostico_ads.get("motivo") or ""),
+            "elementos_canvas": elementos_canvas,
         }
         if not projeto.documentos:
             projeto.documentos.append(Documento(nome="Documento 1"))
@@ -150,6 +203,17 @@ class ADSXIO:
 
         cls._preservar_pacote_original(doc, projeto)
         return projeto
+
+    @classmethod
+    def _dimensoes_previews(cls, doc: ADSXDocument) -> dict[str, dict[str, int]]:
+        dimensoes: dict[str, dict[str, int]] = {}
+        for nome, arquivo in doc.arquivos_preservados.items():
+            if arquivo.tipo not in {"preview_image_jpg", "preview_image_png"}:
+                continue
+            largura, altura = tamanho_preview_base64(arquivo.conteudo_base64)
+            if largura > 0 and altura > 0:
+                dimensoes[nome] = {"largura": largura, "altura": altura}
+        return dimensoes
 
     @classmethod
     def _ler_index_json(
@@ -202,6 +266,73 @@ class ADSXIO:
         except Exception:
             avisos.append("data.xml inválido ou ilegível.")
             return texto, {}
+
+    @classmethod
+    def _ler_file_information_json(
+        cls,
+        pacote: ZipFile,
+        nomes_no_zip: set[str],
+        avisos: list[str],
+        arquivos_preservados: dict[str, ADSXArquivoPreservado],
+    ) -> dict[str, Any]:
+        caminho_info = "fileInformation.json"
+        if caminho_info not in nomes_no_zip:
+            return {}
+        bruto = pacote.read(caminho_info)
+        cls._preservar_bytes(caminho_info, "metadata_json", bruto, arquivos_preservados)
+        for enc in ("utf-8", "latin-1", "iso-8859-1"):
+            try:
+                return json.loads(bruto.decode(enc))
+            except Exception:
+                continue
+        avisos.append("fileInformation.json invalido ou ilegivel.")
+        return {}
+
+    @classmethod
+    def _ler_binario_audaces(
+        cls,
+        pacote: ZipFile,
+        nomes_no_zip: set[str],
+        avisos: list[str],
+        arquivos_preservados: dict[str, ADSXArquivoPreservado],
+        data_xml_normalizado: dict[str, Any],
+        index_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        candidatos: list[str] = []
+        if isinstance(index_json, dict):
+            arquivos = index_json.get("files")
+            if isinstance(arquivos, dict):
+                nome = arquivos.get("file")
+                if isinstance(nome, str) and nome:
+                    candidatos.append(nome.replace("\\", "/"))
+        candidatos.extend(["file.ads", "file.amk"])
+        caminho_binario = next((nome for nome in candidatos if nome in nomes_no_zip), "")
+        if not caminho_binario:
+            avisos.append("O arquivo binario Audaces nao foi encontrado. A geometria original nao podera ser preservada.")
+            return {
+                "assinatura": None,
+                "tamanho_bytes": 0,
+                "blocos_comprimidos_detectados": 0,
+                "strings_encontradas": 0,
+                "possiveis_pontos_float32": 0,
+                "possiveis_pontos_float64": 0,
+                "contornos_candidatos": 0,
+                "geometria_convertida": False,
+                "motivo": "binario Audaces ausente",
+                "arquivo_binario": "",
+                "elementos_canvas": [],
+            }
+        conteudo = pacote.read(caminho_binario)
+        tipo_binario = "audaces_binary_amk" if caminho_binario.lower().endswith(".amk") else "audaces_binary_ads"
+        cls._preservar_bytes(caminho_binario, tipo_binario, conteudo, arquivos_preservados)
+        primeiros_bytes = conteudo[:64]
+        if b"CADZ" in primeiros_bytes:
+            data_xml_normalizado["ads_signature"] = "CADZ"
+        diagnostico = cls._tentar_extrair_geometria_file_ads(conteudo)
+        diagnostico["arquivo_binario"] = caminho_binario
+        if diagnostico.get("geometry_confidence") != "high":
+            avisos.append("O pacote Audaces foi importado e preservado, mas a geometria binaria ainda nao pode ser decodificada com seguranca.")
+        return diagnostico
 
     @classmethod
     def _ler_file_ads(
@@ -260,6 +391,24 @@ class ADSXIO:
         cls._preservar_bytes("file.jpg", "preview_image_jpg", conteudo, arquivos_preservados)
 
     @classmethod
+    def _ler_previews(
+        cls,
+        pacote: ZipFile,
+        nomes_no_zip: set[str],
+        avisos: list[str],
+        arquivos_preservados: dict[str, ADSXArquivoPreservado],
+    ):
+        encontrados = False
+        for nome in sorted(nomes_no_zip):
+            baixo = nome.lower()
+            if baixo.endswith(".jpg") or baixo.endswith(".jpeg") or baixo.endswith(".png"):
+                tipo = "preview_image_png" if baixo.endswith(".png") else "preview_image_jpg"
+                cls._preservar_bytes(nome, tipo, pacote.read(nome), arquivos_preservados)
+                encontrados = True
+        if not encontrados:
+            avisos.append("Preview de imagem nao encontrado no pacote Audaces.")
+
+    @classmethod
     def _ler_ids_json(
         cls,
         pacote: ZipFile,
@@ -309,10 +458,12 @@ class ADSXIO:
         projeto.audaces_adsx_original = {
             "origem": "Audaces ADSX",
             "nome_arquivo_original": doc.nome_arquivo,
+            "tipo_pacote": doc.tipo_pacote,
             "caminho_original": doc.caminho_original,
             "importado_em": datetime.now(timezone.utc).isoformat(),
             "index_json": doc.index_json,
             "data_xml_normalizado": doc.data_xml_normalizado,
+            "file_information_json": doc.file_information_json,
             "data_xml_texto_base64": base64.b64encode(doc.data_xml_texto.encode("utf-8")).decode("ascii") if doc.data_xml_texto else "",
             "arquivos_preservados": {nome: asdict(arquivo) for nome, arquivo in doc.arquivos_preservados.items()},
             "avisos": list(doc.avisos),
@@ -349,10 +500,142 @@ class ADSXIO:
         }
 
     @classmethod
+    def _extrair_padroes_audaces_xml(cls, xml_dict: dict[str, Any]) -> list[ADSXMoldInfo]:
+        padroes: list[ADSXMoldInfo] = []
+
+        def _float(valor: Any) -> float | None:
+            if valor is None:
+                return None
+            try:
+                return float(str(valor).strip().replace(",", "."))
+            except ValueError:
+                return None
+
+        def _int(valor: Any) -> int | None:
+            if valor is None:
+                return None
+            try:
+                return int(float(str(valor).strip().replace(",", ".")))
+            except ValueError:
+                return None
+
+        def _filhos(no: dict[str, Any], tag: str) -> list[dict[str, Any]]:
+            alvo = cls._normalizar_chave(tag)
+            return [
+                filho
+                for filho in no.get("filhos", [])
+                if isinstance(filho, dict) and cls._normalizar_chave(filho.get("tag", "")) == alvo
+            ]
+
+        def _texto_filho(no: dict[str, Any], tag: str) -> str:
+            filhos = _filhos(no, tag)
+            if not filhos:
+                return ""
+            return str(filhos[0].get("texto") or "").strip().strip('"')
+
+        def _varrer(no: Any):
+            if not isinstance(no, dict):
+                return
+            tag = cls._normalizar_chave(no.get("tag", ""))
+            if tag == "pattern":
+                attrs = no.get("atributos") or {}
+                nome = str(attrs.get("NAME_P") or attrs.get("name_p") or attrs.get("nome") or "").strip()
+                if nome:
+                    sizes_p = _filhos(no, "SIZES_P")
+                    size_base = ""
+                    medidas_base: dict[str, Any] = {}
+                    grade = ""
+                    if sizes_p:
+                        grade = str((sizes_p[0].get("atributos") or {}).get("NAME_GRAD") or "").strip()
+                        size_base = _texto_filho(sizes_p[0], "BASE_NAME")
+                        for size_node in _filhos(sizes_p[0], "SIZE_P"):
+                            sp = str((size_node.get("atributos") or {}).get("NAME_SP") or "").strip()
+                            if not size_base or sp.strip('"') == size_base.strip('"'):
+                                medidas_base = {
+                                    "perimetro": _float(_texto_filho(size_node, "PER_SP")),
+                                    "area": _float(_texto_filho(size_node, "AREA_SP")),
+                                    "largura": _float(_texto_filho(size_node, "WIDTH_SP")),
+                                    "altura": _float(_texto_filho(size_node, "HEIGHT_SP")),
+                                }
+                                if not size_base:
+                                    size_base = sp
+                                break
+                    padroes.append(
+                        ADSXMoldInfo(
+                            nome=nome,
+                            tamanho=size_base or None,
+                            quantidade=_int(_texto_filho(no, "QT_MOD")),
+                            area=medidas_base.get("area"),
+                            perimetro=medidas_base.get("perimetro"),
+                            largura=medidas_base.get("largura"),
+                            altura=medidas_base.get("altura"),
+                            metadados={
+                                "tag": no.get("tag"),
+                                "atributos": dict(attrs),
+                                "grade": grade,
+                                "tamanho_base": size_base,
+                                "tecido": _texto_filho(no, "NAME_FAB"),
+                            },
+                        )
+                    )
+            for filho in no.get("filhos", []):
+                _varrer(filho)
+
+        _varrer(xml_dict)
+        return padroes
+
+    @classmethod
+    def _extrair_moldes_do_file_information(cls, info: dict[str, Any]) -> list[ADSXMoldInfo]:
+        if not isinstance(info, dict):
+            return []
+        saida: list[ADSXMoldInfo] = []
+        modelos = info.get("models")
+        if isinstance(modelos, dict):
+            for nome, dados in modelos.items():
+                if not isinstance(dados, dict):
+                    dados = {}
+                tamanhos = dados.get("sizes")
+                tamanho_txt = ", ".join(str(t).strip() for t in tamanhos if str(t).strip()) if isinstance(tamanhos, list) else None
+                saida.append(
+                    ADSXMoldInfo(
+                        nome=str(nome),
+                        tamanho=tamanho_txt,
+                        quantidade=_safe_int(dados.get("patterns")),
+                        area=None,
+                        perimetro=None,
+                        largura=None,
+                        altura=None,
+                        metadados={"origem": "amkx_fileInformation", "tipo": "modelo_encaixe", **dict(dados)},
+                    )
+                )
+        marcadores = info.get("markers")
+        if isinstance(marcadores, dict):
+            for ident, dados in marcadores.items():
+                if not isinstance(dados, dict):
+                    continue
+                saida.append(
+                    ADSXMoldInfo(
+                        nome=f"Encaixe {ident}",
+                        tamanho=None,
+                        quantidade=_safe_int(dados.get("placed") or dados.get("toPlace")),
+                        area=_safe_float(dados.get("area")),
+                        perimetro=_safe_float(dados.get("cutPerimeter")),
+                        largura=_safe_float(dados.get("width")),
+                        altura=_safe_float(dados.get("length")),
+                        metadados={"origem": "amkx_fileInformation", "tipo": "marker", "id": str(ident), **dict(dados)},
+                    )
+                )
+        return saida
+
+    @classmethod
     def _extrair_moldes_do_xml(cls, xml_dict: dict[str, Any]) -> list[ADSXMoldInfo]:
         candidatos: list[ADSXMoldInfo] = []
         if not xml_dict:
             return candidatos
+
+        padroes_audaces = cls._extrair_padroes_audaces_xml(xml_dict)
+        if padroes_audaces:
+            return padroes_audaces
 
         nome_alias = {cls._normalizar_chave(v) for v in cls._ALIAS_CHAVES["nome"]}
 

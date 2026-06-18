@@ -32,7 +32,7 @@ if find_spec("PySide6") is None:
 
     Qt = _QtIndisponivel()
 else:
-    from PySide6.QtCore import QPointF, Qt, Signal
+    from PySide6.QtCore import QPoint, QPointF, Qt, Signal
     from PySide6.QtWidgets import QApplication, QWidget
 
     from canvas.visualizacao import VisualizacaoCanvas
@@ -57,6 +57,25 @@ class _FakeMouseEvent:
 
     def accept(self):
         self.accepted = True
+
+
+class _FakePainelCoordenadas:
+    def __init__(self, x: int, y: int, largura: int = 300):
+        self._x = int(x)
+        self._y = int(y)
+        self._largura = int(largura)
+
+    def isVisible(self):
+        return True
+
+    def x(self):
+        return self._x
+
+    def y(self):
+        return self._y
+
+    def width(self):
+        return self._largura
 
 
 class _FakeCanvas(QWidget):
@@ -110,6 +129,11 @@ class _FakeCanvas(QWidget):
         self.confirmacoes_definir_grade.append(molde)
         return self.resposta_definir_grade
 
+    def _limitar_posicao_painel_auxiliar(self, pos, largura, altura):
+        max_x = max(8, self.width() - int(largura) - 8)
+        max_y = max(16, self.height() - int(altura) - 8)
+        return QPoint(max(8, min(int(pos.x()), max_x)), max(16, min(int(pos.y()), max_y)))
+
 
 @unittest.skipIf(FerramentaTabela is None, "PySide6 não disponível neste ambiente")
 class TabelaToolTestCase(unittest.TestCase):
@@ -140,6 +164,15 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertTrue(molde["mostrar_graduacao"])
         self.assertTrue(canvas.atualizou)
         self.assertEqual(canvas.historico, 1)
+
+    def test_posiciona_tabela_ao_lado_esquerdo_das_coordenadas(self):
+        canvas = _FakeCanvas()
+        canvas.resize(1600, 900)
+        canvas.painel_coordenadas = _FakePainelCoordenadas(1300, 110)
+
+        pos = FerramentaTabela._posicao_ao_lado_coordenadas(canvas, 460, 615)
+
+        self.assertEqual(pos, QPoint(832, 110))
 
     def test_aplicar_tabela_reativa_graduacao_oculta_no_canvas(self):
         canvas = _FakeCanvas()

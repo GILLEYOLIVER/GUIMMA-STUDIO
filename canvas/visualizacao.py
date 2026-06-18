@@ -2396,6 +2396,7 @@ class VisualizacaoCanvas(QWidget):
             if not (0 <= idx < len(elementos)):
                 continue
             elemento = rascunho_por_indice.get(idx, elementos[idx])
+            elemento_eh_rascunho = idx in rascunho_por_indice
             if not self._elemento_visivel_no_viewport(elemento):
                 continue
             if self._elemento_oculto_por_visualizacao_molde(elemento):
@@ -2416,6 +2417,9 @@ class VisualizacaoCanvas(QWidget):
                     continue
                 if is_molde:
                     self._desenhar_preenchimento_molde(painter, elemento, pontos)
+                    if elemento_eh_rascunho and self._desenhar_rascunho_graduacao_colorida(painter, elemento, pontos, esp):
+                        self._desenhar_marcacoes_piques_elemento(painter, elemento, cor)
+                        continue
                 if elemento.get("pontos_tracado_real"):
                     self._desenhar_polilinha(painter, pontos, cor=cor, espessura=esp,
                                              estilo=estilo,
@@ -2716,6 +2720,8 @@ class VisualizacaoCanvas(QWidget):
                     esp = max(1.0, float(elemento.get("espessura", 1.0) or 1.0))
                     if elemento.get("tipo") == "polyline":
                         pontos = self._pontos_render_elemento(elemento)
+                        if elemento.get("molde") and self._desenhar_rascunho_graduacao_colorida(painter, elemento, pontos, esp):
+                            continue
                         if elemento.get("pontos_tracado_real") and len(pontos) >= 2:
                             self._desenhar_polilinha(
                                 painter,
@@ -2767,6 +2773,32 @@ class VisualizacaoCanvas(QWidget):
                     painter.restore()
         finally:
             painter.restore()
+
+    def _desenhar_rascunho_graduacao_colorida(self, painter: QPainter, elemento: dict, pontos: list[QPointF], esp: float) -> bool:
+        if not isinstance(elemento, dict) or not elemento.get("molde"):
+            return False
+        base = self._base_graduacao_elemento(elemento)
+        if len(base) < 3:
+            base = [QPointF(pt) for pt in pontos]
+        if len(base) < 3:
+            return False
+        contornos = self._contornos_graduacao_tabela(elemento, base)
+        if not contornos:
+            return False
+        if elemento.get("visual_caminho_grade", False):
+            self._desenhar_caminhos_graduacao_molde(painter, elemento, base)
+        for _nome, cor, contorno in contornos:
+            self._desenhar_polilinha(
+                painter,
+                contorno,
+                cor=str(cor),
+                espessura=max(1.0, esp),
+                estilo=str(elemento.get("estilo", "solid") or "solid"),
+                amplitude=float(elemento.get("amplitude", 1.0) or 1.0),
+                fase_inicial=float(elemento.get("fase_inicio", 0.0) or 0.0),
+                elemento=elemento,
+            )
+        return True
 
     def _desenhar_imagem_referencia(self, painter: QPainter, elemento: dict):
         imagem_b64 = str(elemento.get("imagem_base64") or "").strip()
@@ -3167,7 +3199,7 @@ class VisualizacaoCanvas(QWidget):
             self._desenhar_polilinha(
                 painter,
                 [origem, destino],
-                cor=self._cor_tamanho_graduacao(el, nome, cor),
+                cor=str(cor),
                 espessura=max(1.0, self._espessura_graduacao_molde(el) * 0.75),
                 estilo="dash",
             )

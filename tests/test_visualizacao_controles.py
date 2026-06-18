@@ -1094,6 +1094,114 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(caminhos[1][2], QPointF(10.0, 0.0))
         self.assertEqual(caminhos[1][3], QPointF(10.0, -1.0))
 
+    def test_sombra_local_anterior_usa_cor_de_cada_tamanho(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        chamadas = []
+        canvas._desenhar_polilinha = lambda _painter, _pontos, **kwargs: chamadas.append(kwargs)
+        canvas._config_cor_molde = lambda _chave, _padrao: "#999999"
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False, "cor": "#00ff00"},
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "1": {
+                        "ponto": (10.0, 0.0),
+                        "valores": {
+                            "P": {"dx": 0.0, "dy": 1.0},
+                            "G": {"dx": 0.0, "dy": -1.0},
+                        },
+                    }
+                }
+            },
+        }
+
+        canvas._desenhar_caminhos_graduacao_molde(None, molde, base)
+
+        self.assertEqual([chamada["cor"] for chamada in chamadas], ["#00ff00", "#ff0000"])
+        self.assertEqual({chamada["estilo"] for chamada in chamadas}, {"dash"})
+
+    def test_rascunho_temporario_graduado_usa_cores_dos_tamanhos(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        chamadas = []
+        canvas._desenhar_polilinha = lambda _painter, _pontos, **kwargs: chamadas.append(kwargs)
+        canvas._config_cor_molde = lambda _chave, padrao: padrao
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False, "cor": "#00ff00"},
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "ponto": (0.0, 0.0),
+                        "valores": {
+                            "P": {"dx": -1.0, "dy": 0.0},
+                            "G": {"dx": 1.0, "dy": 0.0},
+                        },
+                    }
+                }
+            },
+        }
+        pontos = [QPointF(x, y) for x, y in molde["pontos"]]
+
+        self.assertTrue(canvas._desenhar_rascunho_graduacao_colorida(None, molde, pontos, 1.0))
+
+        self.assertIn("#00ff00", [chamada["cor"] for chamada in chamadas])
+        self.assertIn("#ff0000", [chamada["cor"] for chamada in chamadas])
+        self.assertNotIn("#9a9a9a", [chamada["cor"] for chamada in chamadas])
+
+    def test_rascunho_por_indice_no_desenho_principal_nao_usa_contorno_branco(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        chamadas = []
+        canvas._desenhar_polilinha = lambda _painter, _pontos, **kwargs: chamadas.append(kwargs)
+        canvas._desenhar_preenchimento_molde = lambda *_args, **_kwargs: None
+        canvas._desenhar_marcacoes_piques_elemento = lambda *_args, **_kwargs: None
+        canvas._elemento_visivel_no_viewport = lambda _elemento: True
+        canvas._indices_elementos_visiveis_viewport = lambda: [0]
+        canvas._config_cor_molde = lambda _chave, padrao: padrao
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": False, "cor": "#00ff00"},
+                {"ativo": True, "tamanho": "M", "base": True, "cor": "#ffffff"},
+                {"ativo": True, "tamanho": "G", "base": False, "cor": "#ff0000"},
+            ],
+            "graduacao_tabela": {
+                "pontos": {
+                    "0": {
+                        "ponto": (0.0, 0.0),
+                        "valores": {
+                            "P": {"dx": -1.0, "dy": 0.0},
+                            "G": {"dx": 1.0, "dy": 0.0},
+                        },
+                    }
+                }
+            },
+        }
+        canvas.cena.elementos = [dict(molde)]
+        rascunho = dict(molde)
+        rascunho["_indice_visualizacao_rascunho"] = 0
+        canvas.set_visualizacao_rascunho([rascunho])
+
+        canvas.paintEvent(None)
+
+        cores = [chamada["cor"] for chamada in chamadas]
+        self.assertEqual(cores[:2], ["#00ff00", "#ff0000"])
+        self.assertNotIn("#9a9a9a", cores[:2])
+        self.assertNotIn("#ffffff", cores[:2])
+
     def test_cache_graduacao_reaproveita_e_invalida_quando_tabela_muda(self):
         base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 5.0)]
         molde = {

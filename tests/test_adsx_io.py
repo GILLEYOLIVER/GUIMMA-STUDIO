@@ -7,12 +7,27 @@ import unittest
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtGui import QColor, QImage
+
 from core.projeto import Projeto
 from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.gs_project import GSProjectIO
 
 
 class ADSXIOTestCase(unittest.TestCase):
+    def _preview_jpg_bytes(self) -> bytes:
+        img = QImage(120, 80, QImage.Format_RGB32)
+        img.fill(QColor("#000000"))
+        for y in range(15, 62):
+            for x in range(18, 88):
+                if x in {18, 19, 86, 87} or y in {15, 16, 60, 61}:
+                    img.setPixelColor(x, y, QColor("#00d084"))
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        img.save(buffer, "JPG")
+        return bytes(buffer.data())
+
     def _criar_adsx(self, pasta: Path, nome: str = "modelo.adsx", incluir_jpg: bool = True, incluir_ids: bool = True) -> Path:
         caminho = pasta / nome
         data_xml = (
@@ -26,9 +41,39 @@ class ADSXIOTestCase(unittest.TestCase):
             pacote.writestr("data.xml", data_xml.encode("utf-8"))
             pacote.writestr("file.ads", b"CADZ vs9.1\x00\x01\x02")
             if incluir_jpg:
-                pacote.writestr("file.jpg", b"\xff\xd8\xff\xe0fakejpg")
+                pacote.writestr("file.jpg", self._preview_jpg_bytes())
             if incluir_ids:
                 pacote.writestr("print/IDS.json", json.dumps({"ids": [1, 2]}))
+        return caminho
+
+    def _criar_amkx(self, pasta: Path, nome: str = "encaixe.amkx") -> Path:
+        caminho = pasta / nome
+        file_info = {
+            "name": "encaixe.amkx",
+            "models": {
+                "Modelo Teste": {
+                    "file": "modelo.adsx",
+                    "patterns": "3",
+                    "sizes": ["P", "M", "G"],
+                    "quantity": {"1": {"P": "1", "M": "1", "G": "1"}},
+                }
+            },
+            "markers": {
+                "1": {
+                    "placed": "3",
+                    "length": "120.5",
+                    "width": "80",
+                    "area": "900",
+                    "cutPerimeter": "250.75",
+                }
+            },
+        }
+        with ZipFile(caminho, "w", compression=ZIP_DEFLATED) as pacote:
+            pacote.writestr("index.json", json.dumps({"files": {"file": "file.amk", "info": "fileInformation.json"}}, ensure_ascii=False))
+            pacote.writestr("fileInformation.json", json.dumps(file_info, ensure_ascii=False))
+            pacote.writestr("file.amk", b"AMK fake binary")
+            pacote.writestr("1.png", b"\x89PNG\r\n\x1a\nfakepng")
+            pacote.writestr("print/IDS.json", json.dumps({"ids": []}))
         return caminho
 
     def test_abrir_adsx_valido(self):
@@ -36,9 +81,27 @@ class ADSXIOTestCase(unittest.TestCase):
             caminho = self._criar_adsx(Path(tmp))
             doc = ADSXIO.abrir(caminho)
             self.assertEqual(doc.nome_arquivo, "modelo.adsx")
+            self.assertEqual(doc.tipo_pacote, "adsx")
             self.assertIn("file.ads", doc.arquivos_preservados)
             self.assertEqual(doc.data_xml_normalizado.get("ads_signature"), "CADZ")
             self.assertGreaterEqual(len(doc.moldes), 2)
+
+    def test_abrir_amkx_preserva_binario_preview_e_metadados(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = self._criar_amkx(Path(tmp))
+            doc = ADSXIO.abrir(caminho)
+            self.assertEqual(doc.tipo_pacote, "amkx")
+            self.assertIn("file.amk", doc.arquivos_preservados)
+            self.assertIn("1.png", doc.arquivos_preservados)
+            self.assertEqual(doc.arquivos_preservados["file.amk"].tipo, "audaces_binary_amk")
+            self.assertEqual(doc.arquivos_preservados["1.png"].tipo, "preview_image_png")
+            self.assertGreaterEqual(len(doc.moldes), 2)
+
+            projeto = ADSXIO.importar_para_projeto(caminho, Projeto())
+            info = projeto.preferencias_usuario.get("adsx_importacao", {})
+            self.assertEqual(info.get("tipo_pacote"), "amkx")
+            self.assertEqual(info.get("binario_audaces"), "file.amk")
+            self.assertEqual(info.get("previews"), ["1.png"])
 
     def test_importar_e_persistir_em_gs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -52,10 +115,14 @@ class ADSXIOTestCase(unittest.TestCase):
             self.assertTrue(projeto.audaces_adsx_original.get("arquivos_preservados", {}).get("file.jpg"))
             adsx_info = projeto.preferencias_usuario.get("adsx_importacao", {})
             self.assertIn("diagnostico_file_ads", adsx_info)
-            self.assertIn(adsx_info.get("geometry_confidence"), {"none", "low", "medium", "high"})
+            self.assertIn(adsx_info.get("geometry_confidence"), {"none", "low", "medium", "high", "preview_trace"})
             self.assertTrue(adsx_info.get("preview_disponivel"))
-            self.assertFalse(adsx_info.get("geometria_convertida", True))
-            self.assertFalse(adsx_info.get("elementos_canvas", []))
+            self.assertFalse(adsx_info.get("geometria_convertida"))
+            self.assertFalse(adsx_info.get("geometria_aproximada"))
+            self.assertTrue(adsx_info.get("preview_apenas_referencia"))
+            self.assertIn("motivo_sem_geometria", adsx_info)
+            elementos = adsx_info.get("elementos_canvas", [])
+            self.assertEqual(elementos, [])
             self.assertFalse(projeto.documentos[0].moldes)
 
             caminho_gs = pasta / "teste.gs"

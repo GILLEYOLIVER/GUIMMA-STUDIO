@@ -61,6 +61,7 @@ from core.line_styles import LINE_STYLES, dash_pattern_for_line, is_geometric_li
 from core.projeto import Projeto
 from formats.gs_project import GSProjectIO
 from formats.adsx_io import ADSXIO, ADSXImportError
+from formats.adsx_image_trace import vetorizar_preview_adsx
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
 from formats.dxf_import import importar_dxf_para_elementos
@@ -1380,7 +1381,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             if tipo_evento in (QEvent.Enter, QEvent.MouseMove):
                 self._cancelar_fechamento_submenu_backstage()
             elif tipo_evento == QEvent.Leave:
-                self._agendar_fechamento_submenu_backstage(70)
+                self._cancelar_fechamento_submenu_backstage()
             elif tipo_evento in (QEvent.Hide, QEvent.Close):
                 self._limpar_menu_backstage_hover_se_necessario(watched)
 
@@ -1390,9 +1391,9 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if texto and self._item_backstage_tem_submenu(texto):
                     self._abrir_submenu_backstage_hover(texto)
                 elif getattr(self, "_menu_backstage_hover_aberto", None) is not None:
-                    self._agendar_fechamento_submenu_backstage(70)
+                    self._cancelar_fechamento_submenu_backstage()
             elif tipo_evento == QEvent.Leave and getattr(self, "_menu_backstage_hover_aberto", None) is not None:
-                self._agendar_fechamento_submenu_backstage(70)
+                self._cancelar_fechamento_submenu_backstage()
 
         if (
             hasattr(self, "backstage")
@@ -1886,6 +1887,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not area:
             return
         canvas = area.canvas
+        janela.adjustSize()
         gx = canvas.mapToGlobal(canvas.rect().topLeft()).x()
         gy = canvas.mapToGlobal(canvas.rect().topLeft()).y()
         min_x = gx + 8
@@ -2026,8 +2028,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         # Se o cursor está em um botão comum, destaque somente ele e feche submenu.
         if botao_texto and botao and not self._item_backstage_tem_submenu(botao_texto):
             self._limpar_hover_botoes_backstage(botao)
-            if self._qt_widget_visivel(menu_atual):
-                self._fechar_submenu_backstage_hover(forcar=True)
+            self._cancelar_fechamento_submenu_backstage()
             return
 
         # Se o cursor está em um botão com submenu, abre imediatamente no hover.
@@ -2040,17 +2041,18 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         # Cursor fora dos botões: se está dentro do menu/corredor, mantém só o botão de origem destacado.
-        if self._cursor_sobre_algum_menu_backstage(cursor_pos) or self._cursor_sobre_corredor_entre_botao_e_menu(cursor_pos):
+        if (
+            self._cursor_sobre_algum_menu_backstage(cursor_pos)
+            or self._cursor_sobre_corredor_entre_botao_e_menu(cursor_pos)
+            or self._cursor_sobre_corredor_entre_menus_backstage(cursor_pos)
+        ):
             self._limpar_hover_botoes_backstage(botao_atual if self._qt_widget_vivo(botao_atual) else None)
             self._cancelar_fechamento_submenu_backstage()
             return
 
         # Cursor saiu da área útil: remove destaque e fecha.
         self._limpar_hover_botoes_backstage()
-        if self._qt_widget_visivel(menu_atual):
-            self._agendar_fechamento_submenu_backstage(40)
-        else:
-            self._cancelar_fechamento_submenu_backstage()
+        self._cancelar_fechamento_submenu_backstage()
 
     def _abrir_submenu_backstage_hover(self, item_texto: str, botao: QWidget = None):
         """Abre o submenu referente ao botão (hover)."""
@@ -2158,7 +2160,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         """Verifica se o cursor está sobre qualquer um dos menus abertos."""
         self._limpar_referencias_menus_backstage_invalidos()
         for menu in list(getattr(self, "_menus_backstage_hover", [])):
-            if self._cursor_sobre_widget_global(menu, pos, margem=1):
+            if self._cursor_sobre_widget_global(menu, pos, margem=18):
                 return True
         return False
 
@@ -2181,6 +2183,41 @@ class GuimmaStudioMainWindow(QMainWindow):
             return False
         except Exception:
             return False
+
+    def _cursor_sobre_corredor_entre_menus_backstage(self, pos: QPoint) -> bool:
+        """Mantem menu aberto ao mover do menu principal para um submenu lateral."""
+        self._limpar_referencias_menus_backstage_invalidos()
+        menus_visiveis: list[QMenu] = []
+        for menu in list(getattr(self, "_menus_backstage_hover", [])):
+            if self._qt_widget_visivel(menu):
+                menus_visiveis.append(menu)
+        if len(menus_visiveis) < 2:
+            return False
+        try:
+            retangulos = [menu.rect().translated(menu.mapToGlobal(QPoint(0, 0))) for menu in menus_visiveis]
+            for i, a in enumerate(retangulos):
+                for b in retangulos[i + 1 :]:
+                    if a.intersects(b.adjusted(-10, -10, 10, 10)):
+                        continue
+                    if a.right() <= b.left():
+                        left = a.right()
+                        right = b.left()
+                    elif b.right() <= a.left():
+                        left = b.right()
+                        right = a.left()
+                    else:
+                        left = min(a.left(), b.left())
+                        right = max(a.right(), b.right())
+                    top = min(a.top(), b.top()) - 36
+                    bottom = max(a.bottom(), b.bottom()) + 36
+                    corredor = QRectF(left - 16, top, max(32, right - left + 32), max(1, bottom - top))
+                    if corredor.contains(pos):
+                        return True
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+        return False
 
     def _botao_backstage_sob_cursor(self, pos: QPoint) -> tuple[str | None, QWidget | None]:
         """Retorna qualquer botão do backstage sob o cursor."""
@@ -2227,6 +2264,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             pass
         except Exception:
             pass
+        try:
+            menu.hovered.connect(lambda acao, m=menu: self._ao_hover_acao_menu_backstage(m, acao))
+        except RuntimeError:
+            pass
+        except Exception:
+            pass
 
     def _registrar_menus_hover_backstage(self, menu: QMenu):
         """Registra o menu e seus submenus para monitoramento de hover."""
@@ -2240,7 +2283,31 @@ class GuimmaStudioMainWindow(QMainWindow):
             for acao in menu.actions():
                 sub = acao.menu()
                 if sub:
+                    sub.setStyleSheet(self._estilo_menu_backstage())
+                    sub._menu_hover_backstage = True  # type: ignore[attr-defined]
+                    try:
+                        sub.aboutToShow.connect(lambda s=sub: self._registrar_menus_hover_backstage(s))
+                    except RuntimeError:
+                        pass
+                    except Exception:
+                        pass
                     self._registrar_menus_hover_backstage(sub)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+        except Exception:
+            pass
+
+    def _ao_hover_acao_menu_backstage(self, menu: QMenu, acao):
+        """Mantem menus de importacao abertos durante a navegacao por submenus."""
+        if not self._qt_widget_vivo(menu):
+            return
+        self._cancelar_fechamento_submenu_backstage()
+        try:
+            sub = acao.menu() if acao is not None else None
+            if sub:
+                sub.setStyleSheet(self._estilo_menu_backstage())
+                sub._menu_hover_backstage = True  # type: ignore[attr-defined]
+                self._registrar_menus_hover_backstage(sub)
         except RuntimeError:
             self._limpar_referencias_menus_backstage_invalidos()
         except Exception:
@@ -2272,7 +2339,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         texto, _ = self._botao_backstage_sob_cursor(pos)
         if texto:
             return True
-        return self._cursor_sobre_algum_menu_backstage(pos) or self._cursor_sobre_corredor_entre_botao_e_menu(pos)
+        return (
+            self._cursor_sobre_algum_menu_backstage(pos)
+            or self._cursor_sobre_corredor_entre_botao_e_menu(pos)
+            or self._cursor_sobre_corredor_entre_menus_backstage(pos)
+        )
 
     # ========== FIM DAS CORREÇÕES DE HOVER ==========
 
@@ -2306,17 +2377,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
         menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
         menu.addSeparator()
-        menu.addAction("Audaces (*.emf *.xml *.adsx)", lambda: self._importar_por_tipo("audaces"))
-        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
-        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
-        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
-        sub_adv = menu.addMenu("Audaces Avançado")
-        sub_adv.addAction("EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
-        sub_adv.addAction("XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
-        sub_adv.addAction("ADSX (*.adsx)", lambda: self._importar_por_tipo("adsx"))
-        sub_adv.addAction("EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
+        sub_lectra = menu.addMenu("Lectra")
+        sub_lectra.addAction("Arquivo Lectra", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Lectra"))
+        menu.addAction("Investronica", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Investronica"))
+        menu.addAction("Gerber", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Gerber"))
+        menu.addAction("Assyst", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Assyst"))
         menu.addSeparator()
+        menu.addAction("Arquivos EMF/XML/ADSX/AMKX", lambda: self._importar_por_tipo("audaces"))
         menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
+        sub_adv = menu.addMenu("Arquivos avancados")
+        sub_adv.addAction("Arquivos EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
+        sub_adv.addAction("Arquivos XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
+        sub_adv.addAction("Arquivos ADSX/AMKX (*.adsx *.amkx)", lambda: self._importar_por_tipo("adsx"))
+        sub_adv.addAction("Arquivos EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
         return menu
 
     def _abrir_menu_exportar(self, modo_hover: bool = False):
@@ -3498,6 +3571,179 @@ class GuimmaStudioMainWindow(QMainWindow):
         self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter()
 
+    def _filtros_importacao_moldes(self) -> list[str]:
+        return [
+            "Arquivos DXF (*.dxf)",
+            "Arquivos AMA (*.ama)",
+            "Arquivos AAM (*.aam)",
+            "Arquivos ASM (*.asm)",
+            "Arquivos AST (*.ast)",
+            "Todos (*.*)",
+        ]
+
+    def _origens_importacao_moldes(self) -> list[str]:
+        return [
+            "Padrao (ASTM)",
+            "Gerber",
+            "Investronica",
+            "Ioline vs 4.x",
+            "Lectra",
+            "Pad System",
+            "Polytropon",
+            "OptiTex",
+            "AutoCad",
+            "Assyst",
+        ]
+
+    def _opcoes_importacao_moldes_padrao(self, origem_inicial: str | None = None) -> dict:
+        prefs = self.projeto_atual.preferencias_usuario.get("importacao_moldes", {})
+        if not isinstance(prefs, dict):
+            prefs = {}
+        unidade = str(prefs.get("unidade", "cm")).lower()
+        if unidade not in {"mm", "cm", "pol"}:
+            unidade = "cm"
+        origem = str(prefs.get("origem", "Padrao (ASTM)"))
+        if origem_inicial:
+            origem = str(origem_inicial)
+        if origem not in self._origens_importacao_moldes():
+            origem = "Padrao (ASTM)"
+        return {
+            "unidade": unidade,
+            "origem": origem,
+            "importar_mesmo_arquivo": bool(prefs.get("importar_mesmo_arquivo", False)),
+            "importar_linha_costura": bool(prefs.get("importar_linha_costura", False)),
+            "usar_contorno_corte_como_base": bool(prefs.get("usar_contorno_corte_como_base", True)),
+        }
+
+    def _abrir_dialogo_importacao_moldes(self, tipo: str, origem_inicial: str | None = None) -> tuple[str, str, dict]:
+        filtros = self._filtros_importacao_moldes()
+        filtro_inicial = filtros[0]
+        titulo = "Importar AAMA-292/1993 | ASTM D6673-01/2001" if tipo == "aama_astm" else "Importar DXF"
+        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro_inicial)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        dialog.setNameFilters(filtros)
+        dialog.selectNameFilter(filtro_inicial)
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Abrir")
+        self._forcar_dialogo_arquivo_claro(dialog, texto_acao="Abrir")
+        self._dimensionar_dialogo_para_tela(dialog, 900, 620, 640, 480)
+        controles = self._anexar_opcoes_importacao_moldes(dialog, origem_inicial=origem_inicial)
+        self._centralizar_dialogo_na_janela(dialog)
+        if dialog.exec() != QDialog.Accepted:
+            self._agendar_reencaixe_janela_canvas()
+            return "", "", {}
+        arquivos = dialog.selectedFiles()
+        caminho = arquivos[0] if arquivos else ""
+        if caminho:
+            self._memorizar_diretorio_arquivo(Path(caminho))
+        opcoes = {
+            "unidade": "mm" if controles["rb_mm"].isChecked() else ("pol" if controles["rb_pol"].isChecked() else "cm"),
+            "origem": controles["cmb_origem"].currentText(),
+            "importar_mesmo_arquivo": controles["chk_mesmo"].isChecked(),
+            "importar_linha_costura": controles["chk_costura"].isChecked(),
+            "usar_contorno_corte_como_base": controles["chk_contorno_base"].isChecked(),
+            "tipo_filtro": dialog.selectedNameFilter(),
+        }
+        self.projeto_atual.preferencias_usuario["importacao_moldes"] = dict(opcoes)
+        self._salvar_preferencias_app()
+        self._agendar_reencaixe_janela_canvas()
+        return caminho, dialog.selectedNameFilter(), opcoes
+
+    def _anexar_opcoes_importacao_moldes(self, dialog: QFileDialog, origem_inicial: str | None = None) -> dict:
+        layout = dialog.layout()
+        opcoes = self._opcoes_importacao_moldes_padrao(origem_inicial=origem_inicial)
+        painel = QFrame(dialog)
+        painel.setObjectName("ImportacaoMoldesOptionsPanel")
+        painel.setStyleSheet(
+            """
+            QFrame#ImportacaoMoldesOptionsPanel {
+                border-top: 1px solid #b7c4cf;
+                background: transparent;
+            }
+            """
+        )
+        grid = QGridLayout(painel)
+        grid.setContentsMargins(4, 8, 4, 4)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+
+        gb_unidade = QGroupBox("Unidade", painel)
+        lay_unidade = QHBoxLayout(gb_unidade)
+        rb_mm = QRadioButton("mm", gb_unidade)
+        rb_cm = QRadioButton("cm", gb_unidade)
+        rb_pol = QRadioButton("pol", gb_unidade)
+        for rb in (rb_mm, rb_cm, rb_pol):
+            lay_unidade.addWidget(rb)
+        lay_unidade.addStretch(1)
+        {"mm": rb_mm, "cm": rb_cm, "pol": rb_pol}.get(opcoes["unidade"], rb_cm).setChecked(True)
+
+        gb_origem = QGroupBox("Origem", painel)
+        lay_origem = QVBoxLayout(gb_origem)
+        cmb_origem = QComboBox(gb_origem)
+        cmb_origem.addItems(self._origens_importacao_moldes())
+        cmb_origem.setCurrentText(opcoes["origem"])
+        lay_origem.addWidget(cmb_origem)
+        chk_mesmo = QCheckBox("Importar no mesmo arquivo", gb_origem)
+        chk_mesmo.setChecked(bool(opcoes["importar_mesmo_arquivo"]))
+        lay_origem.addWidget(chk_mesmo)
+
+        chk_costura = QCheckBox("Importar linha de costura", painel)
+        chk_costura.setChecked(bool(opcoes["importar_linha_costura"]))
+        chk_contorno_base = QCheckBox("Use contorno de corte como contorno base", painel)
+        chk_contorno_base.setChecked(bool(opcoes["usar_contorno_corte_como_base"]))
+
+        grid.addWidget(gb_unidade, 0, 0)
+        grid.addWidget(gb_origem, 0, 1, 1, 2)
+        grid.addWidget(chk_costura, 1, 0, 1, 3)
+        grid.addWidget(chk_contorno_base, 2, 0, 1, 3)
+        grid.setColumnStretch(1, 1)
+
+        if isinstance(layout, QGridLayout):
+            linha = layout.rowCount()
+            layout.addWidget(painel, linha, 0, 1, layout.columnCount())
+        elif layout is not None:
+            layout.addWidget(painel)
+
+        return {
+            "rb_mm": rb_mm,
+            "rb_cm": rb_cm,
+            "rb_pol": rb_pol,
+            "cmb_origem": cmb_origem,
+            "chk_mesmo": chk_mesmo,
+            "chk_costura": chk_costura,
+            "chk_contorno_base": chk_contorno_base,
+        }
+
+    def _preparar_elementos_importacao_moldes(self, elementos: list[dict], opcoes: dict) -> list[dict]:
+        unidade = str(opcoes.get("unidade", "cm")).lower()
+        fator = {"mm": 0.1, "cm": 1.0, "pol": 2.54}.get(unidade, 1.0)
+        preparados: list[dict] = []
+        for el in elementos:
+            if not isinstance(el, dict):
+                continue
+            novo = deepcopy(el)
+            pontos = novo.get("pontos")
+            if isinstance(pontos, list) and fator != 1.0:
+                novo["pontos"] = [self._escalar_ponto_importado(pt, fator) for pt in pontos]
+            novo["unidade_origem"] = unidade
+            novo["origem_importacao"] = str(opcoes.get("origem", "Padrao (ASTM)"))
+            novo["tipo_filtro_importacao"] = str(opcoes.get("tipo_filtro", ""))
+            novo["importar_linha_costura"] = bool(opcoes.get("importar_linha_costura", False))
+            novo["usar_contorno_corte_como_base"] = bool(opcoes.get("usar_contorno_corte_como_base", True))
+            novo["subtipo_importacao"] = "costura" if novo["importar_linha_costura"] else "contorno_corte"
+            preparados.append(novo)
+        return preparados
+
+    @staticmethod
+    def _escalar_ponto_importado(ponto, fator: float):
+        try:
+            x, y = ponto
+            return (float(x) * fator, float(y) * fator)
+        except Exception:
+            return ponto
+
     def _aplicar_filtro_extensao_dialogo_arquivo(
         self,
         dialog: QFileDialog,
@@ -4517,24 +4763,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         btn_cancelar.clicked.connect(dialog.reject)
         dialog.exec()
 
-    def _importar_por_tipo(self, tipo: str):
+    def _importar_por_tipo(self, tipo: str, origem_inicial: str | None = None):
         filtros = {
-            "audaces": "Audaces (*.emf *.xml *.adsx)",
-            "adsx": "Audaces ADSX (*.adsx)",
-            "audaces_emf": "Metafile EMF (*.emf)",
-            "audaces_xml": "Arquivo de dados XML (*.xml)",
+            "audaces": "Arquivos EMF/XML/ADSX/AMKX (*.emf *.xml *.adsx *.amkx)",
+            "adsx": "Arquivos ADSX/AMKX (*.adsx *.amkx)",
+            "audaces_emf": "Arquivos EMF (*.emf)",
+            "audaces_xml": "Arquivos XML (*.xml)",
             "dxf": "Arquivo DXF (*.dxf)",
             "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
             "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
         if tipo == "audaces":
-            caminho, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces", filtros["audaces"])
+            caminho, _ = self._abrir_dialogo_arquivo_claro("Importar arquivos EMF/XML/ADSX/AMKX", filtros["audaces"])
             if not caminho:
                 return
             p = Path(caminho)
             ext = p.suffix.lower()
-            if ext == ".adsx":
-                return self._importar_por_tipo("adsx")
+            if ext in {".adsx", ".amkx"}:
+                return self._importar_pacote_audaces(caminho)
             if ext not in {".emf", ".xml"}:
                 return
             pasta = p.parent
@@ -4556,22 +4802,22 @@ class GuimmaStudioMainWindow(QMainWindow):
                 elif len(xmls) == 1:
                     xml_path = str(xmls[0])
             if not emf_path and xml_path:
-                emf_path, _ = self._abrir_dialogo_arquivo_claro("Deseja selecionar o arquivo EMF do Audaces?", filtros["audaces_emf"])
+                emf_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar arquivo EMF", filtros["audaces_emf"])
             if not xml_path and emf_path:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro("Deseja selecionar o arquivo XML de dados do Audaces?", filtros["audaces_xml"])
+                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar arquivo XML", filtros["audaces_xml"])
             if emf_path and xml_path:
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
                 info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
                 self._arquivo_atual = None
                 self._limpar_abas_documentos()
-                self._adicionar_aba_documento("Audaces", emf_path)
+                self._adicionar_aba_documento("EMF + XML", emf_path)
                 area = self._area_documento_atual()
                 moldes = self.projeto_atual.documentos[0].moldes if self.projeto_atual.documentos else []
                 if area and moldes:
                     self._carregar_moldes_reais_no_canvas(area, moldes)
                 else:
-                    self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces", emf_path)
-                self.lbl_status.setText(f"Audaces importado com sucesso: {len(moldes)} moldes criados.")
+                    self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF + XML", emf_path)
+                self.lbl_status.setText(f"EMF + XML importado com sucesso: {len(moldes)} moldes criados.")
                 return
             if emf_path:
                 return self._importar_por_tipo("audaces_emf")
@@ -4580,28 +4826,28 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         if tipo == "audaces_emf_xml":
-            emf_path, _ = self._abrir_dialogo_arquivo_claro("Importar Audaces EMF + XML (EMF)", filtros["audaces_emf"])
+            emf_path, _ = self._abrir_dialogo_arquivo_claro("Importar EMF + XML (EMF)", filtros["audaces_emf"])
             if not emf_path:
                 return
             pergunta = QMessageBox(self)
             self._estilizar_message_box(pergunta)
-            pergunta.setWindowTitle("Importação Audaces EMF + XML")
+            pergunta.setWindowTitle("Importacao EMF + XML")
             pergunta.setIcon(QMessageBox.Question)
-            pergunta.setText("Deseja selecionar o XML correspondente do Audaces?")
+            pergunta.setText("Deseja selecionar o XML correspondente?")
             pergunta.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
             self._traduzir_botoes_padrao_message_box(pergunta)
             resp = pergunta.exec()
             if resp == QMessageBox.Cancel:
                 return
             if resp == QMessageBox.Yes:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar XML Audaces", filtros["audaces_xml"])
+                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar XML", filtros["audaces_xml"])
                 if not xml_path:
                     return
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
                 info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
                 self._arquivo_atual = None
                 self._limpar_abas_documentos()
-                self._adicionar_aba_documento("Audaces EMF + XML", emf_path)
+                self._adicionar_aba_documento("EMF + XML", emf_path)
                 area = self._area_documento_atual()
                 moldes_doc = []
                 if self.projeto_atual.documentos:
@@ -4634,11 +4880,11 @@ class GuimmaStudioMainWindow(QMainWindow):
                     f"Metadados XML aplicados: {int(info.get('metadados_xml_aplicados', 0))}."
                 )
                 if moldes_reais == 0:
-                    msg += " O EMF foi lido, mas nenhum contorno fechado confiável foi encontrado. Verifique o relatório técnico."
+                    msg += " O EMF foi lido, mas nenhum contorno fechado confiavel foi encontrado. Verifique o relatorio tecnico."
                 self.lbl_status.setText(msg)
                 caixa = QMessageBox(self)
                 self._estilizar_message_box(caixa)
-                caixa.setWindowTitle("Importação Audaces")
+                caixa.setWindowTitle("Importacao EMF + XML")
                 caixa.setIcon(QMessageBox.Information)
                 caixa.setText(msg)
                 caixa.setStandardButtons(QMessageBox.Ok)
@@ -4647,16 +4893,21 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return
             self.projeto_atual = AudacesPairImport.importar_apenas_emf(emf_path, self.projeto_atual)
             info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
-            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF", emf_path)
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF", emf_path)
             msg = "EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas."
             self.lbl_status.setText(msg)
             return
 
-        caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
+        opcoes_importacao_moldes: dict = {}
+        if tipo in {"dxf", "aama_astm"}:
+            caminho, _, opcoes_importacao_moldes = self._abrir_dialogo_importacao_moldes(tipo, origem_inicial=origem_inicial)
+        else:
+            caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
         if not caminho:
             return
 
         if tipo == "adsx":
+            return self._importar_pacote_audaces(caminho)
             opcoes_adsx = self._dialogo_opcoes_importacao_adsx()
             if opcoes_adsx is None:
                 return
@@ -4703,7 +4954,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tipo == "audaces_emf":
             self.projeto_atual = AudacesPairImport.importar_apenas_emf(caminho, self.projeto_atual)
             info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
-            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "Audaces EMF", caminho)
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF", caminho)
             self.lbl_status.setText("EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas.")
             return
 
@@ -4721,8 +4972,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 "XML carregado como metadado técnico (sem contorno geométrico).",
             ]
             elementos = [{"tipo": "texto", "texto": l, "pos": (6.0, 6.0 + (i * 3.0)), "cor": "#111111", "tamanho": 0.95} for i, l in enumerate(linhas)]
-            self._aplicar_elementos_importados_canvas(elementos, "Audaces XML", caminho)
-            self.lbl_status.setText("XML Audaces importado como metadado técnico. Use EMF + XML para vetor editável.")
+            self._aplicar_elementos_importados_canvas(elementos, "XML", caminho)
+            self.lbl_status.setText("XML importado como metadado tecnico. Use EMF + XML para vetor editavel.")
             return
 
         if tipo in {"dxf", "aama_astm"}:
@@ -4730,9 +4981,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             if not elementos:
                 self.lbl_status.setText("Nenhum elemento vetorial encontrado no arquivo.")
                 return
+            elementos = self._preparar_elementos_importacao_moldes(elementos, opcoes_importacao_moldes)
             nome_doc = "DXF" if tipo == "dxf" else "AAMA/ASTM"
-            self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho)
-            self.lbl_status.setText(f"{nome_doc} importado com sucesso: {len(elementos)} segmentos.")
+            anexar = bool(opcoes_importacao_moldes.get("importar_mesmo_arquivo", False))
+            self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho, anexar=anexar)
+            unidade = str(opcoes_importacao_moldes.get("unidade", "cm"))
+            origem = str(opcoes_importacao_moldes.get("origem", "Padrao (ASTM)"))
+            modo = "adicionado ao arquivo atual" if anexar else "importado"
+            self.lbl_status.setText(f"{nome_doc} {modo}: {len(elementos)} segmentos. Unidade {unidade}, origem {origem}.")
             return
 
         if tipo == "plotagem":
@@ -4749,7 +5005,80 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         self.lbl_status.setText(f"Importação registrada ({tipo}). Suporte completo em evolução.")
 
-    def _aplicar_elementos_importados_canvas(self, elementos: list[dict], titulo_aba: str, caminho_origem: str):
+    def _importar_pacote_audaces(self, caminho: str):
+        opcoes_adsx = self._dialogo_opcoes_importacao_adsx()
+        if opcoes_adsx is None:
+            return
+        tipo_pacote = Path(caminho).suffix.lower().lstrip(".") or "adsx"
+        try:
+            self.projeto_atual = ADSXIO.importar_para_projeto(caminho, self.projeto_atual)
+            self.projeto_atual.preferencias_usuario["adsx_modo_importacao"] = dict(opcoes_adsx)
+            self._arquivo_atual = None
+            self._atualizar_interface_pos_importacao_adsx(caminho)
+        except ADSXImportError as exc:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("Importacao ADSX/AMKX")
+            caixa.setIcon(QMessageBox.Warning)
+            caixa.setText(str(exc))
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            self.lbl_status.setText(str(exc))
+            return
+        except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("Importacao ADSX/AMKX")
+            caixa.setIcon(QMessageBox.Critical)
+            caixa.setText(f"Nao foi possivel importar o pacote ADSX/AMKX.\n\n{type(exc).__name__}: {exc}")
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            self.lbl_status.setText("Falha ao importar pacote ADSX/AMKX.")
+            return
+        self._arquivo_atual = None
+        self._atualizar_titulo()
+        self.backstage.hide()
+        self._agendar_salvar_estado_silencioso()
+        info = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
+        if bool(info.get("geometria_convertida")):
+            self.lbl_status.setText(
+                f"{tipo_pacote.upper()} importado como vetor editavel."
+            )
+        else:
+            motivo = str(info.get("motivo_sem_geometria") or "contorno interno ainda nao decodificado")
+            self.lbl_status.setText(
+                f"{tipo_pacote.upper()} importado apenas como referencia visual. "
+                f"Metadados e binario original preservados; sem molde editavel confirmado. {motivo}"
+            )
+
+    def _aplicar_elementos_importados_canvas(
+        self,
+        elementos: list[dict],
+        titulo_aba: str,
+        caminho_origem: str,
+        *,
+        anexar: bool = False,
+    ):
+        if anexar:
+            area = self._area_documento_atual()
+            if area:
+                novos = [dict(el) for el in elementos if isinstance(el, dict)]
+                area.canvas.cena.elementos.extend(novos)
+                if hasattr(area.canvas, "_registrar_historico"):
+                    area.canvas._registrar_historico()
+                self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
+                if hasattr(area, "_on_zoom_changed"):
+                    area._on_zoom_changed(area.canvas.zoom)
+                area.canvas.update()
+                self.backstage.hide()
+                self._agendar_salvar_estado_silencioso()
+                self._agendar_reencaixe_janela_canvas()
+                return
         self._arquivo_atual = None
         self._limpar_abas_documentos()
         self._adicionar_aba_documento(titulo_aba, caminho_origem)
@@ -4877,7 +5206,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         )
         info.setWordWrap(True)
 
-        dica = QLabel("Para importar moldes editáveis reais, use Audaces EMF + XML.")
+        dica = QLabel("Para importar moldes editaveis reais, use EMF + XML.")
         dica.setWordWrap(True)
         dica.setStyleSheet("color:#4a5568; font-size:12px;")
 
@@ -4947,7 +5276,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         Caso contrário, mostra apenas informações textuais e diagnóstico.
         """
         self._limpar_abas_documentos()
-        self._adicionar_aba_documento("ADSX importado", caminho_adsx)
+        titulo_pacote = Path(caminho_adsx).suffix.lower().lstrip(".").upper() or "ADSX/AMKX"
+        self._adicionar_aba_documento(f"{titulo_pacote} importado", caminho_adsx)
 
         area = self._area_documento_atual()
         if not area:
@@ -4955,22 +5285,72 @@ class GuimmaStudioMainWindow(QMainWindow):
         canvas = area.canvas
         info = self.projeto_atual.preferencias_usuario.get("adsx_importacao", {})
         modo_adsx = self.projeto_atual.preferencias_usuario.get("adsx_modo_importacao", {})
+        tipo_pacote = str(info.get("tipo_pacote") or self.projeto_atual.audaces_adsx_original.get("tipo_pacote") or "adsx").upper()
         moldes = info.get("moldes", [])
         if not isinstance(moldes, list):
             moldes = []
         elementos_reais = info.get("elementos_canvas", [])
         confianca = str(info.get("geometry_confidence", "none")).lower().strip()
+        confiancas_vetoriais = {"high"}
         geometria_convertida = (
-            confianca == "high" and bool(info.get("geometria_convertida")) and isinstance(elementos_reais, list) and bool(elementos_reais)
+            confianca in confiancas_vetoriais
+            and bool(info.get("geometria_convertida"))
+            and isinstance(elementos_reais, list)
+            and bool(elementos_reais)
         )
         diagnostico = info.get("diagnostico_file_ads", {})
         elementos: list[dict] = []
-        preview_info = self.projeto_atual.audaces_adsx_original.get("arquivos_preservados", {}).get("file.jpg", {})
+        preview_largura_cena = 0.0
+        preview_altura_cena = 0.0
+        arquivos_preservados = self.projeto_atual.audaces_adsx_original.get("arquivos_preservados", {})
+        preview_nome = ""
+        preview_info = {}
+        if isinstance(arquivos_preservados, dict):
+            for nome, arquivo in arquivos_preservados.items():
+                if isinstance(arquivo, dict) and arquivo.get("tipo") in {"preview_image_jpg", "preview_image_png"}:
+                    preview_nome = str(nome)
+                    preview_info = arquivo
+                    break
         preview_b64 = ""
         if isinstance(preview_info, dict):
             preview_b64 = str(preview_info.get("conteudo_base64") or "").strip()
         preview_ok = False
-        mostrar_preview = bool(modo_adsx.get("mostrar_preview_jpg", True))
+        fallback_vetorizado = False
+        if tipo_pacote == "AMKX" and preview_b64:
+            escala_x, escala_y = self._escala_preview_amkx_cm_por_px(moldes, preview_b64)
+            trace = vetorizar_preview_adsx(preview_b64, escala_x=escala_x, escala_y=escala_y)
+            elementos_trace = trace.get("elementos", [])
+            if isinstance(elementos_trace, list) and elementos_trace:
+                elementos.extend([dict(el) for el in elementos_trace if isinstance(el, dict)])
+                geometria_convertida = True
+                fallback_vetorizado = True
+                diagnostico = {
+                    **dict(diagnostico if isinstance(diagnostico, dict) else {}),
+                    "motivo": f"AMKX vetorizado a partir do preview: {len(elementos_trace)} contornos editaveis.",
+                    "geometry_confidence": "preview_trace",
+                    "escala_x_cm_por_px": escala_x,
+                    "escala_y_cm_por_px": escala_y,
+                }
+        elif tipo_pacote == "ADSX" and preview_b64 and bool(modo_adsx.get("vetorizar_preview_adsx", False)):
+            escala = self._escala_preview_adsx_cm_por_px(moldes, preview_b64)
+            trace = vetorizar_preview_adsx(
+                preview_b64,
+                escala_x=escala,
+                escala_y=escala,
+                incluir_linhas_claras=True,
+            )
+            elementos_trace = trace.get("elementos", [])
+            if isinstance(elementos_trace, list) and elementos_trace:
+                elementos.extend([dict(el) for el in elementos_trace if isinstance(el, dict)])
+                geometria_convertida = True
+                fallback_vetorizado = True
+                diagnostico = {
+                    **dict(diagnostico if isinstance(diagnostico, dict) else {}),
+                    "motivo": f"ADSX vetorizado a partir do preview: {len(elementos_trace)} contornos editaveis.",
+                    "geometry_confidence": "preview_trace",
+                    "escala_cm_por_px": escala,
+                }
+        mostrar_preview = bool(modo_adsx.get("mostrar_preview_jpg", True)) and not fallback_vetorizado and not geometria_convertida
         if preview_b64 and mostrar_preview:
             pix = QPixmap()
             try:
@@ -4978,10 +5358,15 @@ class GuimmaStudioMainWindow(QMainWindow):
             except Exception:
                 pix = QPixmap()
             if not pix.isNull():
-                largura_visivel = max(canvas.width() / max(canvas.zoom, 0.001), 1.0)
-                altura_visivel = max(canvas.height() / max(canvas.zoom, 0.001), 1.0)
-                escala = min((largura_visivel * 0.82) / max(float(pix.width()), 1.0), (altura_visivel * 0.82) / max(float(pix.height()), 1.0))
-                escala = max(0.01, min(escala, 8.0))
+                if tipo_pacote == "ADSX":
+                    escala = self._escala_preview_adsx_cm_por_px(moldes, preview_b64)
+                elif tipo_pacote == "AMKX":
+                    escala, _escala_y = self._escala_preview_amkx_cm_por_px(moldes, preview_b64)
+                else:
+                    escala = 1.0
+                escala = max(0.01, min(float(escala or 1.0), 20.0))
+                preview_largura_cena = float(pix.width()) * float(escala)
+                preview_altura_cena = float(pix.height()) * float(escala)
                 elementos.append(
                     {
                         "tipo": "imagem",
@@ -4989,6 +5374,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                         "imagem_base64": preview_b64,
                         "pos": (0.0, 0.0),
                         "escala": float(escala),
+                        "largura_px": int(pix.width()),
+                        "altura_px": int(pix.height()),
                         "opacidade": float(modo_adsx.get("opacidade_preview", 0.72)),
                         "bloqueado": True,
                         "adsx_preview": True,
@@ -5000,59 +5387,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         if geometria_convertida:
             elementos.extend([dict(el) for el in elementos_reais if isinstance(el, dict)])
         else:
-            trace_msg = None
             total_moldes = len([m for m in moldes if isinstance(m, dict)])
-            elementos.append(
-                {
-                    "tipo": "texto",
-                    "texto": (
-                        "Arquivo ADSX reconhecido.\n"
-                        f"Moldes detectados no XML: {total_moldes}.\n"
-                        f"Preview visual: {'disponível' if preview_ok else 'não encontrado'}.\n"
-                        "Binário file.ads preservado.\n"
-                        "Conversão geométrica ainda pendente."
-                    ),
-                    "pos": (10.0, -18.0 if preview_ok else 10.0),
-                    "cor": "#111111",
-                    "tamanho": 1.0,
-                }
+            motivo = str(diagnostico.get("motivo", "parser file.ads pendente") if isinstance(diagnostico, dict) else "parser file.ads pendente")
+            self.lbl_status.setText(
+                f"{titulo_pacote} importado: {total_moldes} moldes no XML. "
+                f"Preview em escala de referencia; contorno file.ads ainda nao confirmado. {motivo}"
             )
-            elementos.append(
-                {
-                    "tipo": "texto",
-                    "texto": f"Diagnóstico file.ads: {diagnostico.get('motivo', 'sem detalhes')} (confiança: {confianca})",
-                    "pos": (10.0, -8.0 if preview_ok else 20.0),
-                    "cor": "#444444",
-                    "tamanho": 0.9,
-                }
-            )
-            for i, molde in enumerate(moldes, start=1):
-                if not isinstance(molde, dict):
-                    continue
-                nome = str(molde.get("nome") or f"Molde {i}")
-                tamanho = str(molde.get("tamanho") or "")
-                quantidade = molde.get("quantidade")
-                linha = f"- {nome}"
-                if tamanho:
-                    linha += f" — tamanho {tamanho}"
-                if quantidade is not None:
-                    linha += f" — quantidade {quantidade}"
+            if not preview_ok:
                 elementos.append(
                     {
                         "tipo": "texto",
-                        "texto": linha,
-                        "pos": (10.0, (i * 3.0) + (4.0 if preview_ok else 24.0)),
-                        "cor": "#333333",
-                        "tamanho": 0.85,
-                    }
-                )
-            if preview_ok:
-                elementos.append(
-                    {
-                        "tipo": "texto",
-                        "texto": "Pré-visualização ADSX. Não é molde editável.",
-                        "pos": (10.0, -28.0),
-                        "cor": "#ffb703",
+                        "texto": f"{titulo_pacote} importado. Preview nao encontrado; file.ads preservado para decodificacao.",
+                        "pos": (10.0, 10.0),
+                        "cor": "#ffffff",
                         "tamanho": 1.0,
                     }
                 )
@@ -5069,6 +5416,94 @@ class GuimmaStudioMainWindow(QMainWindow):
             area._on_zoom_changed(canvas.zoom)
         canvas.update()
         self._agendar_salvar_estado_silencioso()
+
+    def _escala_preview_adsx_cm_por_px(self, moldes: list, preview_b64: str) -> float:
+        trace_px = vetorizar_preview_adsx(preview_b64, incluir_linhas_claras=True)
+        elementos_px = trace_px.get("elementos", [])
+        if not isinstance(elementos_px, list) or not elementos_px:
+            return 1.0
+
+        areas_px: list[float] = []
+        for el in elementos_px:
+            if not isinstance(el, dict):
+                continue
+            pontos = el.get("pontos", [])
+            if not isinstance(pontos, list) or len(pontos) < 2:
+                continue
+            try:
+                xs = [float(x) for x, _ in pontos]
+                ys = [float(y) for _, y in pontos]
+            except Exception:
+                continue
+            area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+            if area > 0:
+                areas_px.append(area)
+
+        areas_cm: list[float] = []
+        for molde in moldes:
+            if not isinstance(molde, dict):
+                continue
+            try:
+                largura = float(molde.get("largura") or 0.0)
+                altura = float(molde.get("altura") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            area = largura * altura
+            if area > 0:
+                areas_cm.append(area)
+
+        if not areas_px or not areas_cm:
+            return 1.0
+        areas_px.sort(reverse=True)
+        areas_cm.sort(reverse=True)
+        razoes: list[float] = []
+        for area_cm, area_px in zip(areas_cm[:8], areas_px[:8]):
+            if area_px > 0 and area_cm > 0:
+                razoes.append((area_cm / area_px) ** 0.5)
+        if not razoes:
+            return 1.0
+        razoes.sort()
+        escala = float(razoes[len(razoes) // 2])
+        return max(0.05, min(escala, 20.0))
+
+    def _escala_preview_amkx_cm_por_px(self, moldes: list, preview_b64: str) -> tuple[float, float]:
+        pix = QPixmap()
+        try:
+            pix.loadFromData(base64.b64decode(preview_b64))
+        except Exception:
+            pix = QPixmap()
+        largura_px = float(pix.width()) if not pix.isNull() else 0.0
+        altura_px = float(pix.height()) if not pix.isNull() else 0.0
+        if largura_px <= 0.0 or altura_px <= 0.0:
+            return 1.0, 1.0
+
+        marcador = None
+        for molde in moldes:
+            if not isinstance(molde, dict):
+                continue
+            meta = molde.get("metadados")
+            if isinstance(meta, dict) and meta.get("tipo") == "marker":
+                marcador = molde
+                break
+            if str(molde.get("nome") or "").strip().lower().startswith("encaixe"):
+                marcador = molde
+                break
+        if not isinstance(marcador, dict):
+            return 1.0, 1.0
+
+        try:
+            largura_cm = float(marcador.get("largura") or 0.0)
+            comprimento_cm = float(marcador.get("altura") or 0.0)
+        except (TypeError, ValueError):
+            return 1.0, 1.0
+        if largura_cm <= 0.0 or comprimento_cm <= 0.0:
+            return 1.0, 1.0
+
+        escala_x = comprimento_cm / largura_px
+        escala_y = largura_cm / altura_px
+        if escala_x <= 0.0 or escala_y <= 0.0:
+            return 1.0, 1.0
+        return escala_x, escala_y
 
     def _centralizar_canvas_em_elementos(self, canvas, elementos: list[dict], zoom_max: float = 8.0):
         pontos: list[tuple[float, float]] = []

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import atan2, cos, pi, sin, sqrt
+from math import atan2, ceil, cos, pi, sin, sqrt
 import os
 from time import monotonic
 from uuid import uuid4
@@ -439,11 +439,16 @@ class Ferramenta(FerramentaBase):
 
     def on_mouse_move(self, canvas, event) -> bool:
         if not self._arrastando_molde:
+            if self._contornos_auto_coords:
+                event.accept()
+                return True
             pos_tela_exata = self._posicao_tela_exata_no_canvas(canvas, event.position())
             pos_cena = canvas._tela_para_cena(pos_tela_exata)
             self._ultima_pos_cena = QPointF(pos_cena)
             if self._deve_recalcular_hover(pos_cena):
-                if self._cfg.get("modo") == "Manual":
+                if self._deve_usar_hover_rapido(canvas):
+                    candidatos = []
+                elif self._cfg.get("modo") == "Manual":
                     candidatos = self._detectar_candidatos_linha_manual(canvas, pos_cena, leve=True)
                 else:
                     candidatos = self._detectar_candidatos_contorno(canvas, pos_cena, leve=True)
@@ -590,7 +595,15 @@ class Ferramenta(FerramentaBase):
         painter.restore()
 
     def _preview_de_contorno(self, contorno: list[tuple[float, float]]) -> list[QPointF]:
-        return [QPointF(float(x), float(y)) for x, y in contorno]
+        pontos = self._normalizar_pontos_contorno(contorno)
+        max_preview = 260
+        if len(pontos) > max_preview:
+            passo = max(1, int(ceil(len(pontos) / max_preview)))
+            base = pontos[:-1] if self._dist_tuple(pontos[0], pontos[-1]) <= 1e-6 else pontos
+            pontos = base[::passo]
+            if pontos and self._dist_tuple(pontos[0], pontos[-1]) > 1e-6:
+                pontos.append(pontos[0])
+        return [QPointF(float(x), float(y)) for x, y in pontos]
 
     def _fixar_contorno(self, canvas, contorno: list[tuple[float, float]], adicionar: bool) -> None:
         contorno = self._normalizar_pontos_contorno(contorno)
@@ -671,6 +684,13 @@ class Ferramenta(FerramentaBase):
         dx = pos.x() - self._ultimo_hover_pos.x()
         dy = pos.y() - self._ultimo_hover_pos.y()
         return sqrt((dx * dx) + (dy * dy)) >= 0.15
+
+    def _deve_usar_hover_rapido(self, canvas) -> bool:
+        total = len(getattr(getattr(canvas, "cena", None), "elementos", []) or [])
+        if total > 80:
+            return True
+        zoom = float(getattr(canvas, "zoom", 1.0) or 1.0)
+        return total > 40 and zoom < 0.45
 
     def _detectar_candidatos_contorno(
         self,
@@ -1443,7 +1463,36 @@ class Ferramenta(FerramentaBase):
                     continue
                 if self._ponto_no_contorno(pt, contorno, tol=0.08):
                     inters.append(pt)
-        return self._deduplicar_pontos(inters, tol=1e-4)
+        inters = self._deduplicar_pontos(inters, tol=1e-4)
+        return self._filtrar_referencias_colineares_no_contorno(inters, contorno)
+
+    def _filtrar_referencias_colineares_no_contorno(
+        self,
+        referencias: list[tuple[float, float]],
+        contorno: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        if not referencias:
+            return []
+        base = self._normalizar_pontos_contorno(contorno)
+        if len(base) >= 2 and self._dist_tuple(base[0], base[-1]) <= 1e-6:
+            base = base[:-1]
+        if len(base) < 3:
+            return referencias
+        saida: list[tuple[float, float]] = []
+        for ref in referencias:
+            idx = self._indice_mais_proximo_no_contorno(ref, base, tol=0.08)
+            if idx is None:
+                saida.append(ref)
+                continue
+            anterior = base[idx - 1]
+            atual = base[idx]
+            proximo = base[(idx + 1) % len(base)]
+            if self._dist_tuple(anterior, atual) <= 1e-7 or self._dist_tuple(atual, proximo) <= 1e-7:
+                continue
+            if self._desvio_angular_vertice(anterior, atual, proximo) < 6.0:
+                continue
+            saida.append(ref)
+        return self._deduplicar_pontos(saida, tol=1e-4)
 
     def _coletar_vertices_origem_no_contorno(self, canvas, contorno: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(contorno) < 2 or not hasattr(canvas, "cena"):
@@ -1569,10 +1618,7 @@ class Ferramenta(FerramentaBase):
             if not self._ponto_no_contorno(ponto, contorno, tol=0.08):
                 continue
             origens = {origem for _p, _vizinho, origem in itens if origem is not None}
-            if len(origens) >= 2:
-                encontros.append(ponto)
-                continue
-            if origens:
+            if len(origens) == 1:
                 continue
             direcoes: list[tuple[float, float]] = []
             for origem_ponto, vizinho, _origem_idx in itens:
@@ -1771,15 +1817,27 @@ class Ferramenta(FerramentaBase):
     ) -> list[list[tuple[float, float]]]:
         ponto = (pos.x(), pos.y())
         candidatos: list[list[tuple[float, float]]] = []
+        candidatos_rapidos = self._contornos_fechados_sob_cursor_rapido(canvas, ponto)
+        for cont in candidatos_rapidos:
+            self._adicionar_candidato_contorno(candidatos, ponto, cont)
+        if candidatos:
+            candidatos.sort(key=lambda c: (self._distancia_ponto_contorno(ponto, c), abs(self._area_contorno(c))))
+            return candidatos
+
+        total_elementos = len(getattr(canvas.cena, "elementos", []) or [])
         raio = max(12.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * (0.25 if leve else 0.45))
+        if total_elementos > 160:
+            raio = min(raio, 38.0 if leve else 55.0)
         elementos = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio * 1.8)
         if not elementos:
-            elementos = list(canvas.cena.elementos)
+            elementos = [] if total_elementos > 160 else list(canvas.cena.elementos)
+        if total_elementos > 160 and len(elementos) > 80:
+            elementos = sorted(elementos, key=lambda el: self._distancia_elemento_ao_ponto(el, ponto))[:80]
         tentativas = [
             lambda: extract_local_enclosing_contour(elementos, ponto, search_radius=raio, tol=0.01),
             lambda: extract_smallest_enclosing_contour(elementos, ponto, search_radius=raio, tol=0.01),
         ]
-        if not leve:
+        if not leve and total_elementos <= 160:
             tentativas.append(lambda: self._detectar_contorno_fechado(canvas, pos))
         for tentativa in tentativas:
             try:
@@ -1794,6 +1852,42 @@ class Ferramenta(FerramentaBase):
                 self._adicionar_candidato_contorno(candidatos, ponto, cont)
         candidatos.sort(key=lambda c: (abs(self._area_contorno(c)), self._perimetro_contorno(c)))
         return candidatos
+
+    def _contornos_fechados_sob_cursor_rapido(self, canvas, ponto: tuple[float, float]) -> list[list[tuple[float, float]]]:
+        tolerancia = self._tolerancia_clique_linha(canvas)
+        saida: list[list[tuple[float, float]]] = []
+        for el in reversed(getattr(canvas.cena, "elementos", []) or []):
+            if not isinstance(el, dict) or el.get("tipo") != "polyline":
+                continue
+            pontos = self._normalizar_pontos_contorno(el.get("pontos", []) or [])
+            if len(pontos) < 4:
+                continue
+            if self._dist_tuple(pontos[0], pontos[-1]) > 1e-6:
+                continue
+            xs = [x for x, _y in pontos]
+            ys = [y for _x, y in pontos]
+            if (
+                ponto[0] < min(xs) - tolerancia
+                or ponto[0] > max(xs) + tolerancia
+                or ponto[1] < min(ys) - tolerancia
+                or ponto[1] > max(ys) + tolerancia
+            ):
+                continue
+            if (
+                self._distancia_ponto_contorno(ponto, pontos) <= tolerancia
+                or self._ponto_dentro_poligono_coords(ponto, pontos)
+            ):
+                saida.append(pontos)
+        return saida[:8]
+
+    def _distancia_elemento_ao_ponto(self, el: dict, ponto: tuple[float, float]) -> float:
+        pts = polyline_from_element(el)
+        if len(pts) < 2:
+            return float("inf")
+        menor = float("inf")
+        for a, b in zip(pts, pts[1:]):
+            menor = min(menor, point_segment_distance(ponto, a, b))
+        return menor
 
     def _detectar_candidatos_linha_manual(
         self,

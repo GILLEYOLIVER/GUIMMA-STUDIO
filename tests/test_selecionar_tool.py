@@ -228,6 +228,31 @@ class SelecionarToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas._selecionados, {0, 2})
 
+    def test_caixa_de_selecao_invertida_tambem_exige_elemento_inteiro_dentro(self):
+        canvas = _FakeCanvas()
+        canvas._indices_elementos_em_ponto = lambda _pos: []
+        canvas.cena.elementos = []
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(-30.0, 2.0), (15.0, 2.0)],
+            }
+        )
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "pontos": [(-5.0, 2.0), (15.0, 2.0)],
+            }
+        )
+        ferramenta = FerramentaSelecionar()
+        ferramenta.on_activate(canvas)
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(20.0, 10.0))))
+        self.assertTrue(ferramenta.on_mouse_move(canvas, _FakeEvent(pos=QPointF(-20.0, -20.0))))
+        self.assertTrue(ferramenta.on_mouse_release(canvas, _FakeEvent(pos=QPointF(-20.0, -20.0))))
+
+        self.assertEqual(canvas._selecionados, {1})
+
     def test_arraste_sobre_elemento_nao_selecionado_move_o_elemento_sem_abrir_caixa(self):
         canvas = _FakeCanvas()
         canvas.cena.elementos.append(

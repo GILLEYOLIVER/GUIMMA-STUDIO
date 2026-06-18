@@ -31,6 +31,36 @@ class _FakeEvent:
         self.accepted = True
 
 
+class _FakeMoveCanvasPesado:
+    def __init__(self):
+        self.cena = SimpleNamespace(
+            elementos=[
+                {"tipo": "polyline", "pontos": [(1000.0 + i, 1000.0), (1000.5 + i, 1000.0)]}
+                for i in range(120)
+            ]
+        )
+        self.cena.elementos.append(
+            {"tipo": "polyline", "pontos": [(0.0, 0.0), (8.0, 0.0), (8.0, 4.0), (0.0, 4.0), (0.0, 0.0)]}
+        )
+        self.zoom = 0.2
+        self.atualizou = False
+
+    def width(self):
+        return 1600
+
+    def height(self):
+        return 900
+
+    def mapFromGlobal(self, _pos):
+        raise RuntimeError("sem cursor global no teste")
+
+    def _tela_para_cena(self, pos):
+        return QPointF(pos)
+
+    def update(self):
+        self.atualizou = True
+
+
 class _FakeCanvasExtracao:
     def __init__(self):
         self.cena = SimpleNamespace(
@@ -89,6 +119,55 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._app = QApplication.instance() or QApplication([])
+
+    def test_clique_em_polyline_fechada_dxf_usa_caminho_rapido_em_canvas_pesado(self):
+        ferramenta = FerramentaExtrairMolde()
+        contorno = [(0.0, 0.0), (12.0, 0.0), (12.0, 6.0), (0.0, 6.0), (0.0, 0.0)]
+        elementos = [
+            {"tipo": "polyline", "pontos": [(1000.0 + i, 1000.0), (1000.0 + i + 0.5, 1000.0)]}
+            for i in range(220)
+        ]
+        elementos.append({"tipo": "polyline", "pontos": contorno, "origem_importador": "dxf", "fechado": True})
+        canvas = SimpleNamespace(
+            cena=SimpleNamespace(elementos=elementos),
+            zoom=0.2,
+            width=lambda: 1600,
+            height=lambda: 900,
+        )
+
+        candidatos = ferramenta._detectar_candidatos_contorno(canvas, QPointF(6.0, 0.0))
+
+        self.assertEqual(candidatos, [contorno])
+
+    def test_preview_de_contorno_grande_e_limitado_para_nao_travar_pintura(self):
+        ferramenta = FerramentaExtrairMolde()
+        pontos = [
+            (cos((2.0 * pi * i) / 1200.0) * 10.0, sin((2.0 * pi * i) / 1200.0) * 5.0)
+            for i in range(1200)
+        ]
+        contorno = [*pontos, pontos[0]]
+
+        preview = ferramenta._preview_de_contorno(contorno)
+
+        self.assertLessEqual(len(preview), 262)
+        self.assertEqual(len(contorno), 1201)
+
+    def test_hover_em_canvas_dxf_pesado_nao_calcula_nem_previsualiza(self):
+        ferramenta = FerramentaExtrairMolde()
+        canvas = _FakeMoveCanvasPesado()
+        evento = _FakeEvent(QPointF(4.0, 0.0))
+
+        def falhar_detector(*_args, **_kwargs):
+            raise AssertionError("detector pesado nao deve rodar no hover pesado")
+
+        ferramenta._detectar_candidatos_contorno = falhar_detector
+        ferramenta._detectar_candidatos_linha_manual = falhar_detector
+
+        self.assertTrue(ferramenta.on_mouse_move(canvas, evento))
+
+        self.assertTrue(evento.accepted)
+        self.assertTrue(canvas.atualizou)
+        self.assertFalse(ferramenta._contorno_hover_preview)
 
     def test_enriquecer_molde_reto_insere_um_auxiliar_por_trecho(self):
         ferramenta = FerramentaExtrairMolde()
@@ -290,7 +369,7 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         ferramenta._enriquecer_metadados_molde(molde)
         self.assertIn((10.0, 0.0), molde["controle_cantos"])
 
-    def test_emenda_colinear_de_trechos_distintos_vira_principal_sem_vertices_internos(self):
+    def test_emenda_colinear_de_trechos_distintos_nao_vira_principal(self):
         ferramenta = FerramentaExtrairMolde()
         canvas = SimpleNamespace(
             cena=SimpleNamespace(
@@ -307,12 +386,12 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         molde = {"tipo": "molde", "pontos": contorno, "pontos_interseccao_referencia": encontros}
         ferramenta._enriquecer_metadados_molde(molde)
 
-        self.assertIn((5.0, 0.0), encontros)
+        self.assertNotIn((5.0, 0.0), encontros)
         self.assertEqual(
             molde["controle_cantos"],
-            [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)],
         )
-        self.assertIn((2.5, 0.0), molde["controle_auxiliares"])
+        self.assertIn((5.0, 0.0), molde["controle_auxiliares"])
 
     def test_vertices_reais_da_polyline_origem_viram_pontos_principais(self):
         ferramenta = FerramentaExtrairMolde()

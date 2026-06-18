@@ -21,13 +21,14 @@ class ADSGeometryDecoder:
         strings = self.extrair_strings()
         pontos32 = self.extrair_pontos_float32()
         pontos64 = self.extrair_pontos_float64()
-        polilinhas = self.detectar_polilinhas()
-        confianca = self._avaliar_confianca(assinatura, polilinhas, strings)
+        polilinhas_brutas = self.detectar_polilinhas()
+        confianca = self._avaliar_confianca(assinatura, polilinhas_brutas, strings)
         geometria_convertida = confianca == "high"
+        polilinhas = polilinhas_brutas if geometria_convertida else []
         motivo = (
             "Geometria aceita: contornos validados por regras estritas do decoder."
             if geometria_convertida
-            else "Geometria rejeitada: o decoder encontrou possíveis coordenadas no binário, mas elas não formam contornos confiáveis de moldes."
+            else "Dados internos preservados. O parser estrutural do file.ads ainda nao confirmou contornos editaveis; use o preview apenas como referencia."
         )
 
         self._relatorio = {
@@ -38,6 +39,7 @@ class ADSGeometryDecoder:
             "possiveis_pontos_float32": len(pontos32),
             "possiveis_pontos_float64": len(pontos64),
             "contornos_candidatos": len(polilinhas),
+            "contornos_brutos_candidatos": len(polilinhas_brutas),
             "geometria_convertida": geometria_convertida,
             "geometry_confidence": confianca,
             "motivo": motivo,
@@ -125,13 +127,14 @@ class ADSGeometryDecoder:
         step = size * 2
         if len(buf) < step:
             return pontos
-        for i in range(0, len(buf) - step + 1, size):
-            try:
-                x, y = struct.unpack_from(f"<{fmt}{fmt}", buf, i)
-            except Exception:
-                continue
-            if ADSGeometryDecoder._coord_valida(x) and ADSGeometryDecoder._coord_valida(y):
-                pontos.append((float(x), float(y)))
+        for offset in range(step):
+            for i in range(offset, len(buf) - step + 1, step):
+                try:
+                    x, y = struct.unpack_from(f"<{fmt}{fmt}", buf, i)
+                except Exception:
+                    continue
+                if ADSGeometryDecoder._coord_valida(x) and ADSGeometryDecoder._coord_valida(y):
+                    pontos.append((float(x), float(y)))
         return pontos
 
     @staticmethod
@@ -167,17 +170,47 @@ class ADSGeometryDecoder:
 
     @staticmethod
     def _sequencia_valida(seq: list[tuple[float, float]]) -> bool:
-        if len(seq) < 6:
+        if len(seq) < 12:
+            return False
+        pontos_unicos = {(round(x, 4), round(y, 4)) for x, y in seq}
+        if len(pontos_unicos) < 8:
             return False
         xs = [p[0] for p in seq]
         ys = [p[1] for p in seq]
         largura = max(xs) - min(xs)
         altura = max(ys) - min(ys)
-        if largura <= 0.001 or altura <= 0.001:
+        if largura <= 1.0 or altura <= 1.0:
             return False
-        if largura > 100000 or altura > 100000:
+        if largura > 10000 or altura > 10000:
             return False
-        return ADSGeometryDecoder._eh_fechado(seq)
+        razao = max(largura / max(altura, 1e-9), altura / max(largura, 1e-9))
+        if razao > 25.0:
+            return False
+        if not ADSGeometryDecoder._eh_fechado(seq):
+            return False
+        area = ADSGeometryDecoder._area_abs(seq)
+        perimetro = ADSGeometryDecoder._perimetro(seq)
+        if area <= 1.0 or perimetro <= 1.0:
+            return False
+        if (perimetro * perimetro) / max(area, 1e-9) > 10000.0:
+            return False
+        return True
+
+    @staticmethod
+    def _area_abs(seq: list[tuple[float, float]]) -> float:
+        if len(seq) < 3:
+            return 0.0
+        pontos = seq if seq[0] == seq[-1] else [*seq, seq[0]]
+        acc = 0.0
+        for a, b in zip(pontos, pontos[1:]):
+            acc += (a[0] * b[1]) - (b[0] * a[1])
+        return abs(acc) * 0.5
+
+    @staticmethod
+    def _perimetro(seq: list[tuple[float, float]]) -> float:
+        if len(seq) < 2:
+            return 0.0
+        return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(seq, seq[1:]))
 
     @staticmethod
     def _avaliar_confianca(assinatura: str | None, polilinhas: list[dict[str, Any]], strings: list[str]) -> str:
@@ -186,9 +219,9 @@ class ADSGeometryDecoder:
         if not polilinhas:
             return "none"
         if len(polilinhas) >= 3 and len(strings) >= 5:
-            # Ainda não há parser estrutural proprietário do ADS;
-            # portanto, a confiança não passa de "medium" nesta etapa.
-            return "medium"
+            # Ainda nao ha parser estrutural proprietario do ADS;
+            # portanto, candidatos brutos nao devem virar molde automaticamente.
+            return "low"
         return "low"
 
 

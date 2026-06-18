@@ -3,10 +3,12 @@ from __future__ import annotations
 import unittest
 
 from core.geometry.engine import (
+    native_backend_name,
     quadratic_bezier_control_for_point,
     quadratic_bezier_parameter_for_point,
     sample_quadratic_bezier_through_point,
 )
+from core.geometry_cpp_bridge import cpp_disponivel
 from core.geometry_bridge import polyline_from_element
 
 
@@ -19,6 +21,10 @@ def _bezier(p0, p1, p2, t: float) -> tuple[float, float]:
 
 
 class GeometryEngineTestCase(unittest.TestCase):
+    def test_motor_nativo_cpp_e_detectado_quando_disponivel(self):
+        if cpp_disponivel():
+            self.assertEqual(native_backend_name(), "guimma_geometry_cpp")
+
     def test_quadratic_control_passa_por_ponto_3p_assimetrico(self):
         p0 = (0.0, 0.0)
         p_meio = (3.0, -5.0)

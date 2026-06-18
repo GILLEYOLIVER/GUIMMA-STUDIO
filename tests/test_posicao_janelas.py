@@ -158,6 +158,23 @@ class PosicaoJanelasTestCase(unittest.TestCase):
         cfg.remove(_grupo(chave))
         cfg.remove(_grupo_estado(chave))
 
+    def test_restaurar_posicao_dialogo_de_ferramenta_sem_fallback_usa_canvas(self):
+        chave = "teste:dialogo_tool_sem_fallback_canvas"
+        cfg = QSettings("GUIMMA", "GUIMMA-STUDIO")
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+        canvas = QWidget()
+        canvas.resize(1000, 700)
+        canvas.calcular_posicao_painel_auxiliar = lambda largura, altura, abaixo_coordenadas=True: QPoint(720, 128)  # type: ignore[attr-defined]
+        dialog = QDialog(canvas)
+        dialog.resize(180, 90)
+
+        self.assertFalse(restaurar_posicao(dialog, chave))
+
+        self.assertEqual(dialog.pos(), canvas.mapToGlobal(QPoint(720, 128)))
+        cfg.remove(_grupo(chave))
+        cfg.remove(_grupo_estado(chave))
+
     def test_ajustar_para_area_prende_dialogo_tool_na_janela_parent(self):
         parent = QWidget()
         parent.resize(360, 240)
@@ -190,6 +207,29 @@ class PosicaoJanelasTestCase(unittest.TestCase):
 
         self.assertEqual(dialog.pos(), canvas.mapToGlobal(QPoint(700, 90)))
         self.assertFalse(getattr(dialog, "_guimma_posicao_movida_usuario", True))
+
+    def test_caixa_auxiliar_ferramenta_posiciona_com_tamanho_ajustado(self):
+        chamadas = []
+        canvas = QWidget()
+        canvas.resize(1000, 700)
+
+        def calcular(largura, altura, abaixo_coordenadas=True):
+            chamadas.append((largura, altura, abaixo_coordenadas))
+            return QPoint(1000 - largura - 12, 150)
+
+        canvas.calcular_posicao_painel_auxiliar = calcular  # type: ignore[attr-defined]
+        fake_main = SimpleNamespace(
+            _posicoes_caixas_aux={},
+            _area_documento_atual=lambda: SimpleNamespace(canvas=canvas),
+        )
+        dialog = QDialog(canvas)
+        dialog.setMinimumSize(260, 120)
+        dialog.resize(40, 30)
+
+        GuimmaStudioMainWindow._restaurar_posicao_caixa_aux(fake_main, dialog, "retangulo")
+
+        self.assertEqual(chamadas[-1], (260, 120, True))
+        self.assertEqual(dialog.pos(), canvas.mapToGlobal(QPoint(728, 150)))
 
 
 if __name__ == "__main__":

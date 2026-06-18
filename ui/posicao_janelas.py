@@ -267,6 +267,23 @@ def restaurar_posicao(
     preferir_fallback_inicial: bool = True,
 ) -> bool:
     restaurar_estado(widget, chave)
+    if fallback is None and isinstance(widget, QDialog):
+        parent = widget.parentWidget()
+        if (
+            parent is not None
+            and hasattr(parent, "calcular_posicao_painel_auxiliar")
+            and hasattr(parent, "mapToGlobal")
+        ):
+            try:
+                widget.adjustSize()
+                pos_local = parent.calcular_posicao_painel_auxiliar(
+                    widget.width(),
+                    widget.height(),
+                    abaixo_coordenadas=True,
+                )
+                fallback = parent.mapToGlobal(pos_local)
+            except Exception:
+                fallback = None
     if fallback is not None and preferir_fallback_inicial:
         _registrar_fallback_inicial(widget, fallback)
         _mover_widget(widget, ajustar_para_area(widget, fallback))
