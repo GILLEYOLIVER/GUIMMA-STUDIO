@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from math import ceil, floor, log10
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
 from canvas.visualizacao import VisualizacaoCanvas
@@ -61,6 +61,9 @@ class ReguaWidget(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(self._cores_tema["fundo"]))
         painter.setPen(QPen(QColor(self._cores_tema["linha"]), 1))
+        fonte = QFont(painter.font())
+        fonte.setPixelSize(9)
+        painter.setFont(fonte)
 
         pixel_step = max(25, int(40 * self.zoom))
         passo_unidade = self._passo_principal()
@@ -80,7 +83,12 @@ class ReguaWidget(QWidget):
                 px = int((valor - self.origem_x) * self.zoom)
                 if 0 <= px <= self.width():
                     painter.drawLine(px, self.height() - 12, px, self.height())
-                    painter.drawText(px + 2, 9, self._formatar_valor(valor, passo_unidade))
+                    texto = self._formatar_valor(valor, passo_unidade)
+                    painter.drawText(
+                        QRectF(px + 2, 1, max(20, self.width() - px - 2), self.height() - 8),
+                        Qt.AlignLeft | Qt.AlignTop,
+                        texto,
+                    )
                 valor += passo_unidade
         else:
             painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
@@ -98,10 +106,17 @@ class ReguaWidget(QWidget):
                 py = int((valor - self.origem_y) * self.zoom)
                 if 0 <= py <= self.height():
                     painter.drawLine(self.width() - 12, py, self.width(), py)
+                    texto = self._formatar_valor(valor, passo_unidade)
+                    largura_texto = painter.fontMetrics().horizontalAdvance(texto)
+                    altura_texto = painter.fontMetrics().height()
                     painter.save()
-                    painter.translate(9, py + 2)
+                    painter.translate(6, py + (largura_texto / 2.0))
                     painter.rotate(-90)
-                    painter.drawText(0, 0, self._formatar_valor(valor, passo_unidade))
+                    painter.drawText(
+                        QRectF(0, -altura_texto / 2.0, largura_texto + 4, altura_texto + 2),
+                        Qt.AlignLeft | Qt.AlignVCenter,
+                        texto,
+                    )
                     painter.restore()
                 valor += passo_unidade
 

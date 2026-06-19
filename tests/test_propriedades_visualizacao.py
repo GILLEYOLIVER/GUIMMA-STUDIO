@@ -23,11 +23,13 @@ if find_spec("PySide6") is None:
     QLabel = None
     QLineEdit = None
     QPointF = None
+    QTableWidget = None
     QTreeWidget = None
+    QTreeWidgetItem = None
 else:
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QIcon, QPainterPath
-    from PySide6.QtWidgets import QApplication, QComboBox, QGroupBox, QLabel, QLineEdit, QTreeWidget
+    from PySide6.QtWidgets import QApplication, QComboBox, QGroupBox, QLabel, QLineEdit, QTableWidget, QTreeWidget, QTreeWidgetItem
 
     from tools.propriedades_tool import (
         CHAVE_VISUALIZACAO_CUSTOMIZADA,
@@ -1028,6 +1030,185 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         )
         self.assertIn("Grade diferente", tooltip)
         self.assertIn("Referência: P-G(M)", tooltip)
+
+
+    def test_propriedades_alerta_quando_nome_do_tamanho_difere(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        com_exg = {
+            "molde_pronto": True,
+            "graduacao_grade_nome": "PP-G2(P)",
+            "graduacao_tamanhos": [
+                {"tamanho": "PP"},
+                {"tamanho": "P"},
+                {"tamanho": "M"},
+                {"tamanho": "G"},
+                {"tamanho": "GG"},
+                {"tamanho": "EXG"},
+                {"tamanho": "G2"},
+            ],
+        }
+        com_g1 = {
+            "molde_pronto": True,
+            "graduacao_grade_nome": "PP-G2(P)",
+            "graduacao_tamanhos": [
+                {"tamanho": "PP"},
+                {"tamanho": "P"},
+                {"tamanho": "M"},
+                {"tamanho": "G"},
+                {"tamanho": "GG"},
+                {"tamanho": "G1"},
+                {"tamanho": "G2"},
+            ],
+        }
+        dialog._refs = [
+            MoldeRef(indice=0, nome="FRENTE 2X", dados=com_exg),
+            MoldeRef(indice=1, nome="FORRO FRENTE 1X", dados=com_g1),
+        ]
+        dialog.lbl_alerta_grade = QLabel()
+
+        PropriedadesMoldesDialog._atualizar_conflitos_grade_modelo(dialog)
+
+        self.assertTrue(com_exg["conflito_nome_tamanho_modelo"])
+        self.assertTrue(com_g1["conflito_nome_tamanho_modelo"])
+        self.assertFalse(dialog.lbl_alerta_grade.isHidden())
+        self.assertIn("Erro de nome de tamanho", dialog.lbl_alerta_grade.text())
+        self.assertIn("EXG", dialog.lbl_alerta_grade.text())
+        self.assertIn("G1", dialog.lbl_alerta_grade.text())
+
+        tooltip = PropriedadesMoldesDialog._tooltip_grade_molde(
+            dialog,
+            dialog._refs[1],
+            "PP-G2(P)|PP/P/M/G/GG/EXG/G2",
+        )
+        self.assertIn("Nome de tamanho diferente", tooltip)
+        self.assertIn("EXG", tooltip)
+        self.assertIn("G1", tooltip)
+
+    def test_propriedades_alerta_quando_nome_do_molde_repete(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        grade = [
+            {"tamanho": "P"},
+            {"tamanho": "M", "base": True},
+            {"tamanho": "G"},
+        ]
+        primeiro = {"molde_pronto": True, "nome_molde": "K3", "graduacao_grade_nome": "P-G(M)", "graduacao_tamanhos": grade}
+        segundo = {"molde_pronto": True, "nome_molde": "K3", "graduacao_grade_nome": "P-G(M)", "graduacao_tamanhos": grade}
+        terceiro = {"molde_pronto": True, "nome_molde": "K4", "graduacao_grade_nome": "P-G(M)", "graduacao_tamanhos": grade}
+        dialog._refs = [
+            MoldeRef(indice=0, nome="K3", dados=primeiro),
+            MoldeRef(indice=1, nome="K3", dados=segundo),
+            MoldeRef(indice=2, nome="K4", dados=terceiro),
+        ]
+        dialog.lbl_alerta_grade = QLabel()
+
+        PropriedadesMoldesDialog._atualizar_conflitos_grade_modelo(dialog)
+
+        self.assertTrue(primeiro["conflito_nome_molde_modelo"])
+        self.assertTrue(segundo["conflito_nome_molde_modelo"])
+        self.assertFalse(terceiro["conflito_nome_molde_modelo"])
+        self.assertIn("Erro de nome de molde", dialog.lbl_alerta_grade.text())
+        tooltip = PropriedadesMoldesDialog._tooltip_grade_molde(dialog, dialog._refs[0], "P-G(M)|P/M/G")
+        self.assertIn("Nome de molde repetido", tooltip)
+        self.assertIn("K3", tooltip)
+
+    def test_alerta_nome_repetido_some_imediatamente_ao_renomear_molde(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        primeiro = {"molde": True, "molde_pronto": True, "nome_molde": "K3", "conflito_nome_molde_modelo": True}
+        segundo = {"molde": True, "molde_pronto": True, "nome_molde": "K3", "conflito_nome_molde_modelo": True}
+        elementos = [primeiro, segundo]
+        item_primeiro = QTreeWidgetItem(["K3"])
+        item_primeiro.setData(0, Qt.UserRole, 0)
+        item_segundo = QTreeWidgetItem(["K3"])
+        item_segundo.setData(0, Qt.UserRole, 1)
+        dialog._indice_atual = None
+        dialog._suspender_item_changed = False
+        dialog._refs = [
+            MoldeRef(indice=0, nome="K3", dados=primeiro),
+            MoldeRef(indice=1, nome="K3", dados=segundo),
+        ]
+        dialog._itens_molde_por_indice = {0: item_primeiro, 1: item_segundo}
+        dialog.lbl_alerta_grade = QLabel("Erro de nome de molde")
+        dialog.lbl_alerta_grade.setHidden(False)
+        dialog.preview = SimpleNamespace(set_molde=lambda _molde: None)
+        dialog._elementos_edicao = lambda: elementos
+        dialog._atualizar_combo_moldes = lambda: None
+
+        item_segundo.setText(0, "K4")
+        PropriedadesMoldesDialog._quando_item_editado(dialog, item_segundo, 0)
+
+        self.assertEqual(segundo["nome_molde"], "K4")
+        self.assertFalse(primeiro["conflito_nome_molde_modelo"])
+        self.assertFalse(segundo["conflito_nome_molde_modelo"])
+        self.assertTrue(dialog.lbl_alerta_grade.isHidden())
+        self.assertEqual(item_primeiro.toolTip(0), "")
+        self.assertEqual(item_segundo.toolTip(0), "")
+
+    def test_alerta_nome_repetido_atualiza_instantaneo_pelo_campo_molde(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        primeiro = {"molde": True, "molde_pronto": True, "nome_molde": "K2"}
+        segundo = {"molde": True, "molde_pronto": True, "nome_molde": "K3"}
+        elementos = [primeiro, segundo]
+        item_primeiro = QTreeWidgetItem(["K2"])
+        item_primeiro.setData(0, Qt.UserRole, 0)
+        item_segundo = QTreeWidgetItem(["K3"])
+        item_segundo.setData(0, Qt.UserRole, 1)
+        dialog._indice_atual = 1
+        dialog._suspender_auto_aplicar = False
+        dialog._suspender_item_changed = False
+        dialog._refs = [
+            MoldeRef(indice=0, nome="K2", dados=primeiro),
+            MoldeRef(indice=1, nome="K3", dados=segundo),
+        ]
+        dialog._itens_molde_por_indice = {0: item_primeiro, 1: item_segundo}
+        dialog.lbl_alerta_grade = QLabel()
+        dialog.preview = SimpleNamespace(set_molde=lambda _molde: None)
+        dialog._elementos_edicao = lambda: elementos
+
+        PropriedadesMoldesDialog._renomear_molde_atual_instantaneo(dialog, "K2")
+
+        self.assertTrue(primeiro["conflito_nome_molde_modelo"])
+        self.assertTrue(segundo["conflito_nome_molde_modelo"])
+        self.assertFalse(dialog.lbl_alerta_grade.isHidden())
+        self.assertIn("Erro de nome de molde", dialog.lbl_alerta_grade.text())
+        self.assertIn("Nome de molde repetido", item_segundo.toolTip(0))
+
+        PropriedadesMoldesDialog._renomear_molde_atual_instantaneo(dialog, "K4")
+
+        self.assertEqual(segundo["nome_molde"], "K4")
+        self.assertFalse(primeiro["conflito_nome_molde_modelo"])
+        self.assertFalse(segundo["conflito_nome_molde_modelo"])
+        self.assertTrue(dialog.lbl_alerta_grade.isHidden())
+        self.assertEqual(item_primeiro.toolTip(0), "")
+        self.assertEqual(item_segundo.toolTip(0), "")
+
+    def test_editar_nome_tamanho_na_tabela_atualiza_grade_do_molde(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        molde = {}
+        publicados = []
+        dialog._graduacao_linhas = [
+            {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": False},
+            {"ativo": True, "tamanho": "M", "cor": "#2d80d7", "base": True},
+            {"ativo": True, "tamanho": "G", "cor": "#ff8800", "base": False},
+        ]
+        dialog._linha_gradacao_atual = 1
+        dialog._suspender_auto_aplicar = False
+        dialog.tbl_graduacao = QTableWidget(0, 3)
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItem("P-G(M)")
+        dialog._moldes_alvo_graduacao = lambda: [molde]
+        dialog._sincronizar_valores_graduacao_tamanhos = lambda *_args, **_kwargs: None
+        dialog._publicar_rascunho_visualizacao = lambda: publicados.append(True)
+
+        PropriedadesMoldesDialog._renderizar_tabela_graduacao(dialog)
+        item = dialog.tbl_graduacao.item(1, 1)
+        item.setText("EXG")
+        PropriedadesMoldesDialog._quando_tamanho_graduacao_editado(dialog, item)
+
+        self.assertEqual(dialog._graduacao_linhas[1]["tamanho"], "EXG")
+        self.assertEqual(molde["graduacao_tamanhos"][1]["tamanho"], "EXG")
+        self.assertEqual(molde["graduacao_tamanhos_ativos"], ["P", "EXG", "G"])
+        self.assertIn("EXG", dialog.cmb_grade_tamanhos.currentText())
+        self.assertTrue(publicados)
 
 
 if __name__ == "__main__":

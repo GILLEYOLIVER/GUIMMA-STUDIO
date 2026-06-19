@@ -540,6 +540,70 @@ class TabelaToolTestCase(unittest.TestCase):
         self.assertEqual(valores["NOVO_INF_3"], {"dx": 2.0, "dy": 2.0})
         self.assertEqual(valores["NOVO_INF_4"], {"dx": 3.0, "dy": 3.0})
 
+    def test_tabela_exibe_degrau_digitado_sem_somar_tamanhos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.definir_tamanhos(
+            [
+                {"ativo": True, "tamanho": "PP", "cor": "#00ff00", "base": False},
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": True},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": False},
+                {"ativo": True, "tamanho": "G", "cor": "#ffffff", "base": False},
+                {"ativo": True, "tamanho": "GG", "cor": "#ff00ff", "base": False},
+                {"ativo": True, "tamanho": "EXG", "cor": "#ff8c00", "base": False},
+                {"ativo": True, "tamanho": "G2", "cor": "#7b1fff", "base": False},
+            ],
+            {},
+        )
+        dialog.sp_incremento.setValue(1.5)
+
+        dialog.btn_baixo.click()
+
+        self.assertEqual(dialog.tbl.item(0, 2).text(), "-1.5")
+        self.assertEqual(dialog.tbl.item(1, 2).text(), "0")
+        for row in range(2, dialog.tbl.rowCount()):
+            self.assertEqual(dialog.tbl.item(row, 2).text(), "1.5")
+
+        valores = dialog.valores()
+        self.assertEqual(valores["PP"]["dy"], -1.5)
+        self.assertEqual(valores["P"]["dy"], 0.0)
+        self.assertEqual(valores["M"]["dy"], 1.5)
+        self.assertEqual(valores["G"]["dy"], 3.0)
+        self.assertEqual(valores["GG"]["dy"], 4.5)
+        self.assertEqual(valores["EXG"]["dy"], 6.0)
+        self.assertEqual(valores["G2"]["dy"], 7.5)
+
+    def test_tabela_carrega_degrau_visual_a_partir_de_valores_acumulados(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaTabela()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+
+        dialog.definir_tamanhos(
+            [
+                {"ativo": True, "tamanho": "PP", "cor": "#00ff00", "base": False},
+                {"ativo": True, "tamanho": "P", "cor": "#ffff00", "base": True},
+                {"ativo": True, "tamanho": "M", "cor": "#2b7cd3", "base": False},
+                {"ativo": True, "tamanho": "G", "cor": "#ffffff", "base": False},
+                {"ativo": True, "tamanho": "GG", "cor": "#ff00ff", "base": False},
+            ],
+            {
+                "PP": {"dx": 0.0, "dy": -2.4},
+                "P": {"dx": 0.0, "dy": 0.0},
+                "M": {"dx": 0.0, "dy": 2.4},
+                "G": {"dx": 0.0, "dy": 4.8},
+                "GG": {"dx": 0.0, "dy": 7.2},
+            },
+        )
+
+        self.assertEqual(dialog.tbl.item(0, 2).text(), "-2.4")
+        self.assertEqual(dialog.tbl.item(1, 2).text(), "0")
+        self.assertEqual(dialog.tbl.item(2, 2).text(), "2.4")
+        self.assertEqual(dialog.tbl.item(3, 2).text(), "2.4")
+        self.assertEqual(dialog.tbl.item(4, 2).text(), "2.4")
+
     def test_aba_distancia_angulo_reflete_dx_dy_da_tabela(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaTabela()

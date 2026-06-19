@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from copy import copy, deepcopy
 from math import sqrt
 
 from PySide6.QtCore import QPointF, QSignalBlocker, Qt
+from PySide6.QtGui import QPainterPath
 from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from core.formatacao import numero_decimal_ponto
@@ -11,6 +12,28 @@ from tools.medicao_utils import selecionar_segmento_mais_proximo
 from tools.tool_base import FerramentaBase
 from tools.unidades import SUFIXOS_MEDIDA, unidade_canvas, valor_unidade_para_cena
 from ui.posicao_janelas import instalar_memoria_posicao, restaurar_posicao
+
+
+def _deepcopy_seguro(valor):
+    if isinstance(valor, QPainterPath):
+        return QPainterPath(valor)
+    if isinstance(valor, QPointF):
+        return QPointF(valor)
+    if isinstance(valor, dict):
+        return {_deepcopy_seguro(chave): _deepcopy_seguro(item) for chave, item in valor.items()}
+    if isinstance(valor, list):
+        return [_deepcopy_seguro(item) for item in valor]
+    if isinstance(valor, tuple):
+        return tuple(_deepcopy_seguro(item) for item in valor)
+    if isinstance(valor, set):
+        return {_deepcopy_seguro(item) for item in valor}
+    try:
+        return deepcopy(valor)
+    except Exception:
+        try:
+            return copy(valor)
+        except Exception:
+            return valor
 
 
 class RedefinirPerimetroDialog(QDialog):
@@ -71,6 +94,7 @@ class Ferramenta(FerramentaBase):
     id_ferramenta = "redefinir_perimetro"
     nome = "Redefinir Perimetro"
     usa_painel_auxiliar = False
+    gerencia_coordenadas_operacao = True
 
     _dialog_por_canvas: dict[int, RedefinirPerimetroDialog] = {}
     _idx_por_canvas: dict[int, int] = {}
@@ -115,6 +139,7 @@ class Ferramenta(FerramentaBase):
 
     def on_deactivate(self, canvas):
         dialog = self._dialog_por_canvas.get(id(canvas))
+        self._cancelar_preview(canvas)
         if dialog is not None:
             dialog.hide()
         self._preview_ativo_por_canvas.pop(id(canvas), None)
@@ -142,40 +167,29 @@ class Ferramenta(FerramentaBase):
         if event.button() != Qt.LeftButton:
             return False
         if self._preview_ativo_por_canvas.get(chave):
-            idx = self._idx_por_canvas.get(chave)
-            preview = self._elemento_preview_por_canvas.get(chave)
-            if idx is not None and preview is not None and 0 <= idx < len(canvas.cena.elementos):
-                canvas.cena.elementos[idx] = deepcopy(preview)
-            canvas._registrar_historico()
-            self._preview_ativo_por_canvas[chave] = False
-            self._idx_por_canvas.pop(chave, None)
-            self._snapshot_por_canvas.pop(chave, None)
-            self._segmentos_iguais_por_canvas.pop(chave, None)
-            self._segmento_alvo_por_canvas.pop(chave, None)
-            self._segmentos_originais_afetados_por_canvas.pop(chave, None)
-            self._confirmacao_pendente_por_canvas.pop(chave, None)
-            self._elemento_preview_por_canvas.pop(chave, None)
-            self._selecionados_snapshot_por_canvas.pop(chave, None)
-            self._limpar_selecao_fantasma(canvas, idx)
-            canvas.update()
-            if getattr(canvas, "lbl_status", None) is not None:
-                canvas.lbl_status.setText("Redefinição de perímetro aplicada.")
+            self._confirmar_preview(canvas)
             event.accept()
             return True
         pos = canvas._ponto_com_snap(event.position())
         info = selecionar_segmento_mais_proximo(canvas, pos)
         if info is None:
+            if getattr(canvas, "lbl_status", None) is not None:
+                canvas.lbl_status.setText("Redefinir perímetro: clique diretamente sobre uma linha ou contorno.")
+            event.accept()
             return True
         idx = int(info["elemento_idx"])
         alvo_segmento = self._segmento_alvo_para_posicao(canvas, idx, pos)
         if alvo_segmento is None:
+            if getattr(canvas, "lbl_status", None) is not None:
+                canvas.lbl_status.setText("Redefinir perímetro: este elemento não tem contorno editável.")
+            event.accept()
             return True
         self._idx_por_canvas[id(canvas)] = idx
         self._segmento_alvo_por_canvas[chave] = alvo_segmento
         per = float(alvo_segmento.get("comprimento", 0.0))
         dialog = self._obter_dialog(canvas)
         dialog.ed_de.setText(canvas.formatar_valor_unidade(per))
-        self._snapshot_por_canvas[chave] = deepcopy(canvas.cena.elementos[idx])
+        self._snapshot_por_canvas[chave] = _deepcopy_seguro(canvas.cena.elementos[idx])
         self._selecionados_snapshot_por_canvas[chave] = set(getattr(canvas, "_selecionados", set()) or set())
         self._preview_ativo_por_canvas[chave] = True
         self._aplicar_preview(canvas)
@@ -190,7 +204,7 @@ class Ferramenta(FerramentaBase):
         idx = self._idx_por_canvas.get(chave)
         snapshot = self._snapshot_por_canvas.get(chave)
         if snapshot is not None and idx is not None and 0 <= idx < len(canvas.cena.elementos):
-            canvas.cena.elementos[idx] = deepcopy(snapshot)
+            canvas.cena.elementos[idx] = _deepcopy_seguro(snapshot)
         self._preview_ativo_por_canvas.pop(chave, None)
         self._idx_por_canvas.pop(chave, None)
         self._snapshot_por_canvas.pop(chave, None)
@@ -244,6 +258,30 @@ class Ferramenta(FerramentaBase):
         self._aplicar_preview(canvas)
         if self._segmento_alvo_por_canvas.get(id(canvas)) is not None:
             self._preview_ativo_por_canvas[id(canvas)] = True
+            self._confirmar_preview(canvas)
+
+    def _confirmar_preview(self, canvas) -> bool:
+        chave = id(canvas)
+        idx = self._idx_por_canvas.get(chave)
+        preview = self._elemento_preview_por_canvas.get(chave)
+        if idx is None or preview is None or not (0 <= idx < len(canvas.cena.elementos)):
+            return False
+        canvas.cena.elementos[idx] = _deepcopy_seguro(preview)
+        canvas._registrar_historico()
+        self._preview_ativo_por_canvas[chave] = False
+        self._idx_por_canvas.pop(chave, None)
+        self._snapshot_por_canvas.pop(chave, None)
+        self._segmentos_iguais_por_canvas.pop(chave, None)
+        self._segmento_alvo_por_canvas.pop(chave, None)
+        self._segmentos_originais_afetados_por_canvas.pop(chave, None)
+        self._confirmacao_pendente_por_canvas.pop(chave, None)
+        self._elemento_preview_por_canvas.pop(chave, None)
+        self._selecionados_snapshot_por_canvas.pop(chave, None)
+        self._limpar_selecao_fantasma(canvas, idx)
+        canvas.update()
+        if getattr(canvas, "lbl_status", None) is not None:
+            canvas.lbl_status.setText("Redefinição de perímetro aplicada.")
+        return True
 
     def _aplicar_preview(self, canvas):
         chave = id(canvas)
@@ -251,8 +289,8 @@ class Ferramenta(FerramentaBase):
         if idx is None or not (0 <= idx < len(canvas.cena.elementos)):
             return
         snapshot = self._snapshot_por_canvas.get(chave)
-        if not snapshot:
-            self._snapshot_por_canvas[chave] = deepcopy(canvas.cena.elementos[idx])
+        if snapshot is None:
+            self._snapshot_por_canvas[chave] = _deepcopy_seguro(canvas.cena.elementos[idx])
             snapshot = self._snapshot_por_canvas[chave]
         alvo_segmento = self._segmento_alvo_por_canvas.get(chave)
         if alvo_segmento is None:
@@ -266,7 +304,7 @@ class Ferramenta(FerramentaBase):
         if alvo <= 1e-9:
             alvo = atual
         modo = dialog.cmb_modo.currentText().strip().lower()
-        el = deepcopy(snapshot)
+        el = _deepcopy_seguro(snapshot)
         segmento_preview: tuple[QPointF, QPointF] | None = None
         if el.get("tipo") == "polyline":
             segmento_preview = self._aplicar_preview_segmento_polyline(canvas, el, alvo_segmento, alvo, modo)
@@ -274,7 +312,7 @@ class Ferramenta(FerramentaBase):
             return
         self._invalidar_metadados_visuais_molde(el)
         self._elemento_preview_por_canvas[chave] = el
-        canvas.cena.elementos[idx] = deepcopy(el)
+        canvas.cena.elementos[idx] = _deepcopy_seguro(el)
         afetados = self._segmentos_originais_afetados(snapshot, el)
         if not afetados:
             afetados = [(QPointF(alvo_segmento["a"]), QPointF(alvo_segmento["b"]))]
@@ -299,7 +337,7 @@ class Ferramenta(FerramentaBase):
         if idx is None or preview is None or not (0 <= idx < len(canvas.cena.elementos)):
             return False
         if canvas.cena.elementos[idx] != preview:
-            canvas.cena.elementos[idx] = deepcopy(preview)
+            canvas.cena.elementos[idx] = _deepcopy_seguro(preview)
         if not self._segmentos_iguais_por_canvas.get(chave):
             self._aplicar_preview(canvas)
         return bool(self._segmentos_iguais_por_canvas.get(chave))

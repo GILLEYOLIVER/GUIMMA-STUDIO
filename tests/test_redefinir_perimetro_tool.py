@@ -16,6 +16,7 @@ if find_spec("PySide6") is None:
     FerramentaRedefinirPerimetro = None
 else:
     from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QPainterPath
     from PySide6.QtWidgets import QApplication, QWidget
 
     from core.formatacao import formatar_numero
@@ -155,6 +156,63 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertTrue(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
         self.assertEqual(canvas.historico, 0)
 
+    def test_botao_aplicar_confirma_previa_e_registra_historico(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        dialog.ed_para.setText("14")
+        ferramenta._aplicar(canvas)
+
+        self.assertEqual(canvas.historico, 1)
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (14.0, 0.0))
+        self.assertFalse(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
+        self.assertNotIn(id(canvas), ferramenta._elemento_preview_por_canvas)
+
+    def test_snapshot_com_qpainterpath_nao_quebra_previa_ou_aplicar(self):
+        canvas = _FakeCanvas()
+        caminho = QPainterPath()
+        caminho.moveTo(0.0, 0.0)
+        caminho.lineTo(10.0, 0.0)
+        canvas.cena.elementos[0]["cache_visual"] = {"caminho": caminho}
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        dialog.ed_para.setText("14")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0))))
+        snapshot = ferramenta._snapshot_por_canvas[id(canvas)]
+        self.assertIsInstance(snapshot["cache_visual"]["caminho"], QPainterPath)
+        self.assertIsNot(snapshot["cache_visual"]["caminho"], caminho)
+
+        dialog.ed_para.setText("18")
+        ferramenta._aplicar(canvas)
+
+        self.assertEqual(canvas.historico, 1)
+        self.assertEqual(canvas.cena.elementos[0]["controle_cantos"][1], (18.0, 0.0))
+
+    def test_desativar_ferramenta_cancela_previa_nao_confirmada(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Manter extremos")
+        original = deepcopy(canvas.cena.elementos[0])
+
+        ferramenta.on_mouse_press(canvas, _FakeEvent(QPointF(5.0, 0.0)))
+        dialog.ed_para.setText("14")
+        self.assertNotEqual(canvas.cena.elementos[0], original)
+
+        ferramenta.on_deactivate(canvas)
+
+        self.assertEqual(canvas.cena.elementos[0], original)
+        self.assertEqual(canvas.historico, 0)
+        self.assertFalse(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
+
     def test_abrir_ferramenta_zera_campos_e_estado(self):
         canvas = _FakeCanvas()
         ferramenta = FerramentaRedefinirPerimetro()
@@ -200,6 +258,23 @@ class RedefinirPerimetroToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.cena.elementos[0], original)
         self.assertFalse(ferramenta._preview_ativo_por_canvas.get(id(canvas), False))
         self.assertEqual(canvas.historico, 0)
+
+    def test_clique_sem_segmento_e_consumido_e_mostra_status(self):
+        canvas = _FakeCanvas()
+        canvas.cena.elementos = []
+        ferramenta = FerramentaRedefinirPerimetro()
+        ferramenta.on_activate(canvas)
+        evento = _FakeEvent(QPointF(99.0, 99.0))
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, evento))
+
+        self.assertTrue(evento.accepted)
+        self.assertIn("clique diretamente", canvas.lbl_status.texto)
+
+    def test_redefinir_perimetro_gerencia_proprio_fluxo_de_clique(self):
+        ferramenta = FerramentaRedefinirPerimetro()
+
+        self.assertTrue(ferramenta.gerencia_coordenadas_operacao)
 
     def test_primeiro_clique_com_para_zero_realca_linha_sem_alterar(self):
         canvas = _FakeCanvas()

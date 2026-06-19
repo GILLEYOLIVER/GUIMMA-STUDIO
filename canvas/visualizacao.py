@@ -2263,6 +2263,7 @@ class VisualizacaoCanvas(QWidget):
             "sentido_fio",
             "dobrar",
             "desdobrar",
+            "redefinir_perimetro",
         }
         runtime_ja_processado = False
         # Ferramentas ativas precisam receber o botão direito antes do canvas abrir
@@ -3272,6 +3273,56 @@ class VisualizacaoCanvas(QWidget):
             contornos_cache = cache.get("valor")
             if isinstance(contornos_cache, list):
                 return contornos_cache
+
+        contornos_importados = el.get("graduacao_contornos_importados")
+        if isinstance(contornos_importados, list) and contornos_importados:
+            tamanhos = el.get("graduacao_tamanhos")
+            linhas = [dict(linha) for linha in tamanhos if isinstance(linha, dict)] if isinstance(tamanhos, list) else []
+            ativos = {
+                str(linha.get("tamanho") or linha.get("nome") or "").strip()
+                for linha in linhas
+                if linha.get("ativo", True)
+            }
+            base_nome = ""
+            for linha in linhas:
+                if linha.get("base"):
+                    base_nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+                    break
+            if not base_nome:
+                for item in contornos_importados:
+                    if isinstance(item, dict) and item.get("base"):
+                        base_nome = str(item.get("tamanho") or item.get("nome") or "").strip()
+                        break
+            saida_importada: list[tuple[str, str, list[QPointF]]] = []
+            for item in contornos_importados:
+                if not isinstance(item, dict):
+                    continue
+                nome = str(item.get("tamanho") or item.get("nome") or "").strip()
+                if not nome or nome == base_nome or item.get("base"):
+                    continue
+                if ativos and nome not in ativos:
+                    continue
+                cor = str(item.get("cor") or "#ffcc00")
+                if not QColor(cor).isValid():
+                    cor = "#ffcc00"
+                pontos = [
+                    ponto
+                    for ponto in (VisualizacaoCanvas._qpoint_graduacao_cfg(valor) for valor in (item.get("pontos") or []))
+                    if ponto is not None
+                ]
+                if len(pontos) < 2:
+                    continue
+                if pontos[0] != pontos[-1]:
+                    pontos.append(QPointF(pontos[0]))
+                saida_importada.append((nome, cor, pontos))
+            el["_runtime_graduacao_contornos_cache"] = {
+                "assinatura": assinatura,
+                "assinatura_config": assinatura_config,
+                "base_id": id(base),
+                "valor": saida_importada,
+            }
+            return saida_importada
+
         pontos_cfg = VisualizacaoCanvas._pontos_cfg_graduacao(el)
         if not isinstance(pontos_cfg, dict) or not pontos_cfg:
             return []
@@ -3411,7 +3462,26 @@ class VisualizacaoCanvas(QWidget):
             VisualizacaoCanvas._assinatura_pontos_serializados(el.get("pontos_controle_curva") or []),
             VisualizacaoCanvas._assinatura_pontos_serializados(el.get("pontos_controle") or []),
             VisualizacaoCanvas._assinatura_pontos_serializados(el.get("controle_pontos") or []),
+            VisualizacaoCanvas._assinatura_contornos_importados_graduacao(el.get("graduacao_contornos_importados")),
         )
+
+    @staticmethod
+    def _assinatura_contornos_importados_graduacao(contornos) -> tuple:
+        if not isinstance(contornos, list):
+            return ()
+        assinatura = []
+        for item in contornos:
+            if not isinstance(item, dict):
+                continue
+            assinatura.append(
+                (
+                    str(item.get("tamanho") or item.get("nome") or ""),
+                    str(item.get("cor") or ""),
+                    bool(item.get("base", False)),
+                    VisualizacaoCanvas._assinatura_pontos_serializados(item.get("pontos") or []),
+                )
+            )
+        return tuple(assinatura)
 
     @staticmethod
     def _assinatura_graduacao_tabela(el: dict, base: list[QPointF], assinatura_config: tuple | None = None) -> tuple:

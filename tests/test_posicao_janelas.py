@@ -230,6 +230,31 @@ class PosicaoJanelasTestCase(unittest.TestCase):
 
         self.assertEqual(chamadas[-1], (260, 120, True))
         self.assertEqual(dialog.pos(), canvas.mapToGlobal(QPoint(728, 150)))
+        self.assertEqual(getattr(dialog, "_guimma_fallback_inicial", None), canvas.mapToGlobal(QPoint(728, 150)))
+
+    def test_caixa_auxiliar_retangulo_mantem_posicao_apos_show(self):
+        aplicar_patch_posicao_dialogos()
+        canvas = QWidget()
+        canvas.resize(1000, 700)
+        canvas.calcular_posicao_painel_auxiliar = lambda largura, altura, abaixo_coordenadas=True: QPoint(700, 90)  # type: ignore[attr-defined]
+        fake_main = SimpleNamespace(
+            _posicoes_caixas_aux={},
+            _area_documento_atual=lambda: SimpleNamespace(canvas=canvas),
+        )
+        parent_sem_posicionamento = QWidget()
+        parent_sem_posicionamento.resize(1200, 800)
+        dialog = QDialog(parent_sem_posicionamento)
+        dialog.setWindowTitle("Definir retangulos")
+        dialog.resize(260, 120)
+
+        GuimmaStudioMainWindow._restaurar_posicao_caixa_aux(fake_main, dialog, "retangulo")
+        esperado = canvas.mapToGlobal(QPoint(700, 90))
+        dialog.move(QPoint(300, 260))
+        dialog.show()
+        QApplication.processEvents()
+
+        self.assertEqual(dialog.pos(), esperado)
+        dialog.close()
 
 
 if __name__ == "__main__":

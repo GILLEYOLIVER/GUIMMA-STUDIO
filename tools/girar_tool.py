@@ -22,19 +22,36 @@ class GirarDialog(QDialog):
         self.setWindowTitle("Girar")
         self.setWindowFlag(Qt.Tool, True)
         self.setModal(False)
-        self.setFixedWidth(260)
+        self.setMinimumWidth(340)
         self.setStyleSheet(
             """
             QDialog { background:#efefef; color:#111111; }
             QLabel, QCheckBox { color:#111111; }
-            QComboBox, QDoubleSpinBox { background:#ffffff; color:#111111; border:1px solid #b5bcc3; min-height:22px; }
-            QPushButton { background:#f7f7f7; color:#111111; border:1px solid #b7bec5; min-height:24px; }
+            QComboBox, QDoubleSpinBox {
+                background:#ffffff;
+                color:#111111;
+                border:1px solid #b5bcc3;
+                min-height:24px;
+                padding:1px 22px 1px 6px;
+            }
+            QComboBox::drop-down { width:20px; }
+            QPushButton {
+                background:#f7f7f7;
+                color:#111111;
+                border:1px solid #b7bec5;
+                min-height:26px;
+                padding:3px 10px;
+            }
             QPushButton:hover { background:#ffffff; }
             """
         )
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(8, 8, 8, 8)
+        raiz.setContentsMargins(10, 10, 10, 10)
+        raiz.setSpacing(8)
         form = QFormLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(7)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.sp_angulo = QDoubleSpinBox()
         self.sp_angulo.setObjectName("angulo")
         self.sp_angulo.setRange(-3600.0, 3600.0)

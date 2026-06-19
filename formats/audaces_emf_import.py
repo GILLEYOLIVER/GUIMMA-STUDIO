@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import shutil
 import struct
+import subprocess
 from dataclasses import asdict, dataclass, field
 from math import acos, atan2, cos, pi, sin
 from pathlib import Path
@@ -25,6 +28,7 @@ EMR_SETWORLDTRANSFORM = 35
 EMR_MODIFYWORLDTRANSFORM = 36
 EMR_SELECTOBJECT = 37
 EMR_CREATEPEN = 38
+EMR_CREATEBRUSHINDIRECT = 39
 EMR_DELETEOBJECT = 40
 EMR_ELLIPSE = 42
 EMR_RECTANGLE = 43
@@ -47,6 +51,7 @@ EMR_POLYPOLYLINE16 = 90
 EMR_POLYPOLYGON16 = 91
 EMR_POLYDRAW = 56
 EMR_POLYDRAW16 = 92
+EMR_EXTCREATEPEN = 95
 
 
 @dataclass
@@ -73,6 +78,9 @@ class AudacesEMFDocument:
 
 
 class AudacesEMFImport:
+    _motor_cpp_exe: Path | None = None
+    _motor_cpp_compile_attempted = False
+
     def __init__(self, raw: bytes, caminho: str | Path):
         self.raw = raw
         self.caminho = str(caminho)
@@ -91,6 +99,9 @@ class AudacesEMFImport:
         self._viewport_ext = (1.0, 1.0)
         self._map_mode = 1
         self._frame_cm: tuple[float, float, float, float] | None = None
+        self._gdi_objects: dict[int, dict[str, Any]] = {}
+        self._current_pen_color: str | None = None
+        self._current_pen_width: float | None = None
         self._dedupe_stats: dict[str, int] = {"removidas": 0, "reclassificadas_costura": 0, "ignoradas": 0}
         self.suavizar_curvas_audaces = True
         self.reconstruir_curvas_audaces = True
@@ -104,12 +115,27 @@ class AudacesEMFImport:
             "trechos_rejeitados_perimetro": 0,
         }
         self.tolerancia_uniao_mm = 1.5
-        self._join_stats: dict[str, int] = {"segmentos_originais": 0, "segmentos_unidos": 0, "contornos_fechados": 0, "curvas_reconstruidas": 0}
+        self._join_stats: dict[str, int] = {
+            "segmentos_originais": 0,
+            "segmentos_unidos": 0,
+            "contornos_fechados": 0,
+            "curvas_reconstruidas": 0,
+            "motor_cpp_curvas": 0,
+            "motor_cpp_falhas": 0,
+        }
 
     @classmethod
-    def abrir(cls, caminho: str | Path) -> AudacesEMFDocument:
+    def abrir(
+        cls,
+        caminho: str | Path,
+        *,
+        reconstruir_curvas: bool = True,
+        suavizar_curvas: bool = True,
+    ) -> AudacesEMFDocument:
         raw = Path(caminho).read_bytes()
         parser = cls(raw, caminho)
+        parser.reconstruir_curvas_audaces = bool(reconstruir_curvas)
+        parser.suavizar_curvas_audaces = bool(suavizar_curvas)
         parser.parse_records()
         elementos, textos, bounds = parser.extrair_elementos_vetoriais()
         relatorio = parser.gerar_relatorio(elementos, textos, bounds)
@@ -240,8 +266,16 @@ class AudacesEMFImport:
                     x, y = txt.get("pos", (0.0, 0.0))
                     txt["pos"] = self._apply_transform_point((x, y))
                     textos.append(txt)
-            elif t in {EMR_CREATEPEN, EMR_SELECTOBJECT, EMR_DELETEOBJECT}:
-                continue
+            elif t == EMR_CREATEPEN:
+                self._process_create_pen_record(p)
+            elif t == EMR_EXTCREATEPEN:
+                self._process_ext_create_pen_record(p)
+            elif t == EMR_CREATEBRUSHINDIRECT:
+                self._process_create_brush_record(p)
+            elif t == EMR_SELECTOBJECT:
+                self._process_select_object_record(p)
+            elif t == EMR_DELETEOBJECT:
+                self._process_delete_object_record(p)
             else:
                 self._unsupported[t] = self._unsupported.get(t, 0) + 1
 
@@ -354,17 +388,18 @@ class AudacesEMFImport:
     def _unir_segmentos_em_contornos(self, elementos: list[EMFVectorElement]) -> list[EMFVectorElement]:
         tolerancia_cm = max(0.1, min(0.2, float(self.tolerancia_uniao_mm) / 10.0))
         self._join_stats["segmentos_originais"] = len(elementos)
-        agrupados: dict[str, list[EMFVectorElement]] = {}
+        agrupados: dict[tuple[str, str], list[EMFVectorElement]] = {}
         for el in elementos:
             subtipo = str(el.metadados.get("subtipo_audaces") or "")
             if subtipo in {"texto", "anotacao", "fio", "pique"}:
                 continue
             if len(el.pontos) < 2:
                 continue
-            agrupados.setdefault(subtipo, []).append(el)
+            cor_chave = str(el.cor or "").strip().lower()
+            agrupados.setdefault((subtipo, cor_chave), []).append(el)
         saida: list[EMFVectorElement] = []
         unidos = 0
-        for subtipo, grupo in agrupados.items():
+        for (subtipo, _cor_chave), grupo in agrupados.items():
             pendentes = [EMFVectorElement(**asdict(el)) for el in grupo]
             while pendentes:
                 base = pendentes.pop(0)
@@ -393,6 +428,8 @@ class AudacesEMFImport:
                 if fechado and pts[0] != pts[-1]:
                     pts.append(pts[0])
                 novo = self._mk_element(base.tipo, pts, fechado, base.raw_record_type)
+                novo.cor = base.cor
+                novo.espessura = base.espessura
                 novo.metadados.update(base.metadados)
                 novo.metadados["subtipo_audaces"] = subtipo
                 saida.append(novo)
@@ -404,15 +441,177 @@ class AudacesEMFImport:
     def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
         return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
+    @classmethod
+    def _motor_cpp_paths(cls) -> tuple[Path, Path]:
+        raiz = Path(__file__).resolve().parents[1]
+        fonte = raiz / "native" / "guimma_geometry_engine.cpp"
+        exe = raiz / "native" / "bin" / "guimma_geometry_engine.exe"
+        return fonte, exe
+
+    @staticmethod
+    def _localizar_vcvars64() -> Path | None:
+        candidatos: list[Path] = []
+        for raiz in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if not raiz:
+                continue
+            vs_root = Path(raiz) / "Microsoft Visual Studio"
+            if not vs_root.exists():
+                continue
+            candidatos.extend(vs_root.glob("*/*/VC/Auxiliary/Build/vcvars64.bat"))
+        return sorted(candidatos, reverse=True)[0] if candidatos else None
+
+    @classmethod
+    def _garantir_motor_cpp(cls) -> Path | None:
+        fonte, exe = cls._motor_cpp_paths()
+        if cls._motor_cpp_exe and cls._motor_cpp_exe.exists():
+            return cls._motor_cpp_exe
+        if exe.exists() and fonte.exists() and exe.stat().st_mtime >= fonte.stat().st_mtime:
+            cls._motor_cpp_exe = exe
+            return exe
+        if cls._motor_cpp_compile_attempted:
+            return exe if exe.exists() else None
+        cls._motor_cpp_compile_attempted = True
+        if not fonte.exists():
+            return None
+
+        raiz = fonte.parent.parent
+        fonte_rel = str(fonte.relative_to(raiz))
+        exe_rel = str(exe.relative_to(raiz))
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        compilador = shutil.which("g++") or shutil.which("clang++")
+        comandos: list[tuple[list[str], str | None]] = []
+        if compilador:
+            comandos.append(([compilador, "-O2", "-std=c++17", fonte_rel, "-o", exe_rel], None))
+        vcvars = cls._localizar_vcvars64()
+        if vcvars:
+            cmd = f'call "{vcvars}" >nul && cl /nologo /O2 /EHsc /std:c++17 /Fe:"{exe_rel}" "{fonte_rel}"'
+            comandos.append((["cmd", "/c", cmd], None))
+
+        for comando, entrada in comandos:
+            try:
+                proc = subprocess.run(
+                    comando,
+                    input=entrada,
+                    text=True,
+                    capture_output=True,
+                    cwd=raiz,
+                    timeout=45,
+                )
+            except Exception:
+                continue
+            if proc.returncode == 0 and exe.exists():
+                cls._motor_cpp_exe = exe
+                return exe
+        return exe if exe.exists() else None
+
+    def _reconstruir_curvas_cpp(self, contorno: EMFVectorElement) -> list[tuple[float, float]] | None:
+        exe = self._garantir_motor_cpp()
+        if not exe:
+            self._join_stats["motor_cpp_falhas"] += 1
+            return None
+
+        pontos = list(contorno.pontos)
+        if len(pontos) < 6:
+            return None
+        xs = [float(x) for x, _ in pontos]
+        ys = [float(y) for _, y in pontos]
+        diag = ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) ** 0.5
+        max_move = max(0.18, min(0.75, diag * 0.012))
+        linhas = [
+            f"closed {1 if contorno.fechado else 0}",
+            f"max_move {max_move:.12g}",
+            "corner_angle 132",
+            f"count {len(pontos)}",
+        ]
+        linhas.extend(f"{float(x):.17g} {float(y):.17g}" for x, y in pontos)
+        payload = "\n".join(linhas) + "\n"
+        try:
+            proc = subprocess.run(
+                [str(exe)],
+                input=payload,
+                text=True,
+                capture_output=True,
+                timeout=8,
+            )
+        except Exception:
+            self._join_stats["motor_cpp_falhas"] += 1
+            return None
+        if proc.returncode != 0:
+            self._join_stats["motor_cpp_falhas"] += 1
+            return None
+
+        saida = [linha.strip() for linha in proc.stdout.splitlines() if linha.strip()]
+        if not saida or saida[0] != "ok 1":
+            self._join_stats["motor_cpp_falhas"] += 1
+            return None
+        try:
+            qtd_linha = next(linha for linha in saida if linha.startswith("count "))
+            qtd = int(qtd_linha.split()[1])
+            inicio = saida.index(qtd_linha) + 1
+            novos = []
+            for linha in saida[inicio:inicio + qtd]:
+                x_str, y_str = linha.split()[:2]
+                novos.append((float(x_str), float(y_str)))
+        except Exception:
+            self._join_stats["motor_cpp_falhas"] += 1
+            return None
+        if len(novos) < 4 or novos == pontos:
+            return None
+        return novos
+
+    def _reconstrucao_curvas_aceitavel(
+        self,
+        antes_pts: list[tuple[float, float]],
+        depois_pts: list[tuple[float, float]],
+        *,
+        delta_perimetro_max: float,
+        delta_envelope_max: float = 0.012,
+    ) -> bool:
+        if len(antes_pts) < 2 or len(depois_pts) < 2:
+            return False
+        antes = self._comprimento_polyline(antes_pts)
+        depois = self._comprimento_polyline(depois_pts)
+        if antes > 1e-9 and abs(depois - antes) / antes > delta_perimetro_max:
+            return False
+        return self._reconstrucao_preserva_envelope(antes_pts, depois_pts, tolerancia=delta_envelope_max)
+
     def _reconstruir_curvas_do_contorno(self, contorno: EMFVectorElement) -> EMFVectorElement:
+        cpp_pts = self._reconstruir_curvas_cpp(contorno)
+        if cpp_pts and self._reconstrucao_curvas_aceitavel(
+            contorno.pontos,
+            cpp_pts,
+            delta_perimetro_max=0.08,
+            delta_envelope_max=0.018,
+        ):
+            antes = self._comprimento_polyline(contorno.pontos)
+            depois = self._comprimento_polyline(cpp_pts)
+            novo = self._mk_element(contorno.tipo, cpp_pts, contorno.fechado, contorno.raw_record_type)
+            novo.cor = contorno.cor
+            novo.espessura = contorno.espessura
+            novo.metadados.update(contorno.metadados)
+            novo.metadados["pontos_originais_emf"] = list(contorno.pontos)
+            novo.metadados["curva_reconstruida"] = True
+            novo.metadados["metodo_curva"] = "guimma_cpp_geometry_engine"
+            novo.metadados["perimetro_antes"] = antes
+            novo.metadados["perimetro_depois"] = depois
+            self._join_stats["curvas_reconstruidas"] += 1
+            self._join_stats["motor_cpp_curvas"] += 1
+            return novo
+
         antes = self._comprimento_polyline(contorno.pontos)
         novo = self._reconstruir_curvas_por_trechos(contorno)
         if isinstance(novo, list):
+            if novo == contorno.pontos:
+                return contorno
             contorno_novo = self._mk_element(contorno.tipo, novo, contorno.fechado, contorno.raw_record_type)
+            contorno_novo.cor = contorno.cor
+            contorno_novo.espessura = contorno.espessura
             contorno_novo.metadados.update(contorno.metadados)
             novo = contorno_novo
         depois = self._comprimento_polyline(novo.pontos)
         if antes > 0 and abs(depois - antes) / antes > 0.005:
+            return contorno
+        if not self._reconstrucao_preserva_envelope(contorno.pontos, novo.pontos):
             return contorno
         novo.metadados["curva_reconstruida"] = True
         novo.metadados["metodo_curva"] = "catmull_rom_centripeto"
@@ -420,6 +619,30 @@ class AudacesEMFImport:
         novo.metadados["perimetro_depois"] = depois
         self._join_stats["curvas_reconstruidas"] += 1
         return novo
+
+    @staticmethod
+    def _reconstrucao_preserva_envelope(
+        antes: list[tuple[float, float]],
+        depois: list[tuple[float, float]],
+        *,
+        tolerancia: float = 0.012,
+    ) -> bool:
+        if len(antes) < 2 or len(depois) < 2:
+            return False
+
+        def _dims(pontos: list[tuple[float, float]]) -> tuple[float, float]:
+            xs = [float(x) for x, _ in pontos]
+            ys = [float(y) for _, y in pontos]
+            return max(xs) - min(xs), max(ys) - min(ys)
+
+        largura_antes, altura_antes = _dims(antes)
+        largura_depois, altura_depois = _dims(depois)
+        for original, novo in ((largura_antes, largura_depois), (altura_antes, altura_depois)):
+            if original <= 1e-6:
+                continue
+            if abs(novo - original) / original > tolerancia:
+                return False
+        return True
 
     def gerar_relatorio(self, elementos: list[EMFVectorElement], textos: list[dict[str, Any]], bounds: tuple[float, float, float, float]) -> dict[str, Any]:
         return {
@@ -457,6 +680,8 @@ class AudacesEMFImport:
             "segmentos_unidos": int(self._join_stats.get("segmentos_unidos", 0)),
             "contornos_fechados_encontrados": int(self._join_stats.get("contornos_fechados", 0)),
             "curvas_reconstruidas": int(self._join_stats.get("curvas_reconstruidas", 0)),
+            "motor_cpp_curvas": int(self._join_stats.get("motor_cpp_curvas", 0)),
+            "motor_cpp_falhas": int(self._join_stats.get("motor_cpp_falhas", 0)),
             "map_mode": self._map_mode,
             "window_org": self._window_org,
             "window_ext": self._window_ext,
@@ -551,7 +776,67 @@ class AudacesEMFImport:
     def _mk_element(self, tipo: str, pontos: list[tuple[float, float]], fechado: bool, raw_type: int) -> EMFVectorElement:
         if fechado and pontos and pontos[0] != pontos[-1]:
             pontos = list(pontos) + [pontos[0]]
-        return EMFVectorElement(tipo=tipo, pontos=list(pontos), fechado=fechado, cor="#ff7b00", espessura=None, bbox=self._bbox(pontos), raw_record_type=raw_type)
+        return EMFVectorElement(
+            tipo=tipo,
+            pontos=list(pontos),
+            fechado=fechado,
+            cor=self._current_pen_color or "#ff7b00",
+            espessura=self._current_pen_width,
+            bbox=self._bbox(pontos),
+            raw_record_type=raw_type,
+        )
+
+    @staticmethod
+    def _colorref_para_hex(valor: int) -> str:
+        r = valor & 0xFF
+        g = (valor >> 8) & 0xFF
+        b = (valor >> 16) & 0xFF
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _process_create_pen_record(self, payload: bytes):
+        if len(payload) < 20:
+            return
+        handle = int(struct.unpack_from("<I", payload, 0)[0])
+        width = float(struct.unpack_from("<i", payload, 8)[0])
+        color = self._colorref_para_hex(int(struct.unpack_from("<I", payload, 16)[0]))
+        self._gdi_objects[handle] = {"tipo": "pen", "cor": color, "espessura": width}
+
+    def _process_ext_create_pen_record(self, payload: bytes):
+        if len(payload) < 36:
+            return
+        handle = int(struct.unpack_from("<I", payload, 0)[0])
+        width = float(struct.unpack_from("<I", payload, 24)[0])
+        color = self._colorref_para_hex(int(struct.unpack_from("<I", payload, 32)[0]))
+        self._gdi_objects[handle] = {"tipo": "pen", "cor": color, "espessura": width}
+
+    def _process_create_brush_record(self, payload: bytes):
+        if len(payload) < 12:
+            return
+        handle = int(struct.unpack_from("<I", payload, 0)[0])
+        color = self._colorref_para_hex(int(struct.unpack_from("<I", payload, 8)[0]))
+        self._gdi_objects[handle] = {"tipo": "brush", "cor": color}
+
+    def _process_select_object_record(self, payload: bytes):
+        if len(payload) < 4:
+            return
+        handle = int(struct.unpack_from("<I", payload, 0)[0])
+        obj = self._gdi_objects.get(handle)
+        if not obj or obj.get("tipo") != "pen":
+            return
+        self._current_pen_color = str(obj.get("cor") or "") or None
+        try:
+            self._current_pen_width = float(obj.get("espessura") or 0.0)
+        except Exception:
+            self._current_pen_width = None
+
+    def _process_delete_object_record(self, payload: bytes):
+        if len(payload) < 4:
+            return
+        handle = int(struct.unpack_from("<I", payload, 0)[0])
+        obj = self._gdi_objects.pop(handle, None)
+        if obj and obj.get("tipo") == "pen" and obj.get("cor") == self._current_pen_color:
+            self._current_pen_color = None
+            self._current_pen_width = None
 
     @staticmethod
     def _parse_bounds_header(payload: bytes) -> tuple[float, float, float, float] | None:
@@ -930,11 +1215,14 @@ class AudacesEMFImport:
                 continue
             if len(el.pontos) < 8:
                 continue
-            novos = self._reconstruir_curvas_por_trechos(el)
-            if novos and novos != el.pontos:
+            reconstruido = self._reconstruir_curvas_do_contorno(el)
+            if reconstruido is not el and reconstruido.pontos != el.pontos:
                 el.metadados["pontos_originais_emf"] = list(el.pontos)
-                el.pontos = novos
+                el.pontos = list(reconstruido.pontos)
                 el.bbox = self._bbox(el.pontos)
+                el.cor = reconstruido.cor
+                el.espessura = reconstruido.espessura
+                el.metadados.update(reconstruido.metadados)
 
     def _reconstruir_curvas_por_trechos(self, elemento: EMFVectorElement) -> list[tuple[float, float]]:
         pts = list(elemento.pontos)
@@ -943,7 +1231,7 @@ class AudacesEMFImport:
             pts = pts[:-1]
         if len(pts) < 6:
             return elemento.pontos
-        forte = 30.0
+        forte = 125.0
         cortes = [0]
         for i in range(1, len(pts) - 1):
             ang = self._angulo_interno_graus(pts[i - 1], pts[i], pts[i + 1])

@@ -2226,15 +2226,20 @@ class PropriedadesMoldesDialog(QDialog):
         self.tbl_graduacao.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.tbl_graduacao.setFixedWidth(230)
         self.tbl_graduacao.setFixedHeight(286)
-        self.tbl_graduacao.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tbl_graduacao.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
         self.tbl_graduacao.setSelectionBehavior(QTableWidget.SelectItems)
-        self.tbl_graduacao.setSelectionMode(QTableWidget.NoSelection)
+        self.tbl_graduacao.setSelectionMode(QTableWidget.SingleSelection)
         self.tbl_graduacao.setStyleSheet(
             "QTableWidget::item:selected { background: transparent; color:#111111; }"
             "QTableWidget::item:selected:active { background: transparent; color:#111111; }"
             "QTableWidget::item:selected:!active { background: transparent; color:#111111; }"
         )
         self.tbl_graduacao.cellClicked.connect(self._on_tabela_graduacao_clicada)
+        self.tbl_graduacao.itemChanged.connect(self._quando_tamanho_graduacao_editado)
         self._popular_tabela_graduacao()
         grid_esq.addWidget(self.tbl_graduacao)
 
@@ -2282,35 +2287,60 @@ class PropriedadesMoldesDialog(QDialog):
 
     def _renderizar_tabela_graduacao(self):
         linhas = self._graduacao_linhas
-        self.tbl_graduacao.setRowCount(len(linhas))
-        for linha, dado in enumerate(linhas):
-            item_v = QTableWidgetItem("✓" if dado.get("ativo", True) else "")
-            item_v.setTextAlignment(Qt.AlignCenter)
-            item_v.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            self.tbl_graduacao.setItem(linha, 0, item_v)
+        with QSignalBlocker(self.tbl_graduacao):
+            self.tbl_graduacao.setRowCount(len(linhas))
+            for linha, dado in enumerate(linhas):
+                item_v = QTableWidgetItem("✓" if dado.get("ativo", True) else "")
+                item_v.setTextAlignment(Qt.AlignCenter)
+                item_v.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.tbl_graduacao.setItem(linha, 0, item_v)
 
-            item_t = QTableWidgetItem(str(dado.get("tamanho") or ""))
-            item_t.setTextAlignment(Qt.AlignCenter)
-            item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            if dado.get("base", False):
-                cor_base = QColor(str(dado.get("cor") or "#ffffff"))
-                if cor_base.isValid():
-                    item_t.setBackground(cor_base)
-                    luminosidade = (0.299 * cor_base.red()) + (0.587 * cor_base.green()) + (0.114 * cor_base.blue())
-                    item_t.setForeground(QColor("#111111" if luminosidade >= 150 else "#ffffff"))
-                fonte = item_t.font()
-                fonte.setBold(True)
-                item_t.setFont(fonte)
-            self.tbl_graduacao.setItem(linha, 1, item_t)
+                item_t = QTableWidgetItem(str(dado.get("tamanho") or ""))
+                item_t.setTextAlignment(Qt.AlignCenter)
+                item_t.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                if dado.get("base", False):
+                    cor_base = QColor(str(dado.get("cor") or "#ffffff"))
+                    if cor_base.isValid():
+                        item_t.setBackground(cor_base)
+                        luminosidade = (0.299 * cor_base.red()) + (0.587 * cor_base.green()) + (0.114 * cor_base.blue())
+                        item_t.setForeground(QColor("#111111" if luminosidade >= 150 else "#ffffff"))
+                    fonte = item_t.font()
+                    fonte.setBold(True)
+                    item_t.setFont(fonte)
+                self.tbl_graduacao.setItem(linha, 1, item_t)
 
-            item_c = QTableWidgetItem("")
-            item_c.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            item_c.setBackground(QColor(str(dado.get("cor") or "#ffffff")))
-            self.tbl_graduacao.setItem(linha, 2, item_c)
+                item_c = QTableWidgetItem("")
+                item_c.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                item_c.setBackground(QColor(str(dado.get("cor") or "#ffffff")))
+                self.tbl_graduacao.setItem(linha, 2, item_c)
 
-        base_idx = next((i for i, d in enumerate(linhas) if d.get("base", False)), 0)
-        if linhas:
-            self.tbl_graduacao.setCurrentCell(base_idx, 1)
+            base_idx = next((i for i, d in enumerate(linhas) if d.get("base", False)), 0)
+            if linhas:
+                self.tbl_graduacao.setCurrentCell(base_idx, 1)
+
+    def _quando_tamanho_graduacao_editado(self, item: QTableWidgetItem):
+        if item is None or item.column() != 1:
+            return
+        linha = item.row()
+        if not (0 <= linha < len(self._graduacao_linhas)):
+            return
+        novo_nome = item.text().strip()
+        antigo_nome = str(self._graduacao_linhas[linha].get("tamanho") or "").strip()
+        if not novo_nome:
+            with QSignalBlocker(self.tbl_graduacao):
+                item.setText(antigo_nome)
+            return
+        if novo_nome == antigo_nome:
+            return
+        self._graduacao_linhas[linha]["tamanho"] = novo_nome
+        self._linha_gradacao_atual = linha
+        grade_nome = self._nome_grade_compativel_com_linhas(
+            self.cmb_grade_tamanhos.currentText() if hasattr(self, "cmb_grade_tamanhos") else "",
+            self._graduacao_linhas,
+        )
+        self._definir_combo_grade_sem_aplicar(grade_nome)
+        self._renderizar_tabela_graduacao()
+        self._sincronizar_gradacao_no_molde()
 
     def _aplicar_grade_tamanhos(self, grade_texto: str):
         tamanhos, base = self._extrair_tamanhos_grade(grade_texto)
@@ -2538,7 +2568,7 @@ class PropriedadesMoldesDialog(QDialog):
         if coluna == 0:
             item["ativo"] = not bool(item.get("ativo", True))
             self._renderizar_tabela_graduacao()
-        elif coluna == 2 or (coluna == 1 and item.get("base", False)):
+        elif coluna == 2:
             self._alterar_cor_tamanho_graduacao(linha)
             if hasattr(self, "tbl_graduacao"):
                 self.tbl_graduacao.clearSelection()
@@ -4059,6 +4089,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
         molde["nome_molde"] = novo_nome
         self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome)
+        self._atualizar_status_alertas_arvore_moldes()
         self.preview.set_molde(dict(molde))
 
     def _editar_texto_visualizacao_instantaneo(self, texto: str):
@@ -4076,6 +4107,7 @@ class PropriedadesMoldesDialog(QDialog):
                 return
             molde["nome_molde"] = valor
             self._sincronizar_nome_molde_atual_sem_recarregar(valor)
+            self._atualizar_status_alertas_arvore_moldes()
         elif elemento == "Descrição":
             molde["descricao"] = valor
             molde["visual_descricao"] = True
@@ -4129,6 +4161,98 @@ class PropriedadesMoldesDialog(QDialog):
         tags = [str(l.get("tamanho") or "") for l in linhas if isinstance(l, dict)]
         return f"{nome}|{'/'.join(tags)}"
 
+    @staticmethod
+    def _nomes_tamanhos_graduacao(molde: dict) -> list[str]:
+        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        nomes: list[str] = []
+        if isinstance(linhas, list):
+            for linha in linhas:
+                if not isinstance(linha, dict):
+                    continue
+                nome = str(linha.get("tamanho") or "").strip()
+                if nome:
+                    nomes.append(nome)
+        if nomes:
+            return nomes
+        ativos = molde.get("graduacao_tamanhos_ativos") if isinstance(molde, dict) else None
+        if isinstance(ativos, list):
+            return [str(nome).strip() for nome in ativos if str(nome).strip()]
+        return []
+
+    @staticmethod
+    def _chave_nome_tamanho_para_alerta(nome: str) -> str:
+        texto = "".join(ch for ch in str(nome or "").upper() if ch.isalnum())
+        aliases = {
+            "EXTRAG": "G1",
+            "EXG": "G1",
+            "XG": "G1",
+            "EXTRAGG": "G2",
+            "EXGG": "G2",
+            "XGG": "G2",
+        }
+        return aliases.get(texto, texto)
+
+    def _alertas_nomes_tamanhos_diferentes(self) -> list[tuple[str, list[str]]]:
+        nomes_por_chave: dict[str, dict[str, str]] = {}
+        for ref in self._refs:
+            dados = ref.dados if isinstance(ref.dados, dict) else {}
+            for nome in self._nomes_tamanhos_graduacao(dados):
+                chave = self._chave_nome_tamanho_para_alerta(nome)
+                if not chave:
+                    continue
+                nomes_por_chave.setdefault(chave, {}).setdefault(nome.casefold(), nome)
+        alertas: list[tuple[str, list[str]]] = []
+        for chave, nomes_map in nomes_por_chave.items():
+            nomes = list(nomes_map.values())
+            if len(nomes) > 1:
+                alertas.append((chave, nomes))
+        return alertas
+
+    @staticmethod
+    def _rotulo_alertas_nomes_tamanhos(alertas: list[tuple[str, list[str]]]) -> str:
+        partes = []
+        for _chave, nomes in alertas[:3]:
+            partes.append(" / ".join(nomes[:4]))
+        restante = len(alertas) - len(partes)
+        texto = "; ".join(partes)
+        if restante > 0:
+            texto = f"{texto}; e mais {restante}"
+        return texto
+
+    @staticmethod
+    def _chave_nome_molde_para_alerta(nome: str) -> str:
+        return " ".join(str(nome or "").strip().casefold().split())
+
+    def _alertas_nomes_moldes_repetidos(self) -> list[tuple[str, list[str]]]:
+        nomes_por_chave: dict[str, dict] = {}
+        for ref in self._refs:
+            dados = ref.dados if isinstance(ref.dados, dict) else {}
+            nome = str(ref.nome or dados.get("nome_molde") or "").strip()
+            if not nome:
+                continue
+            chave = self._chave_nome_molde_para_alerta(nome)
+            if not chave:
+                continue
+            grupo = nomes_por_chave.setdefault(chave, {"total": 0, "nomes": {}})
+            grupo["total"] += 1
+            grupo["nomes"].setdefault(nome.casefold(), nome)
+        alertas: list[tuple[str, list[str]]] = []
+        for chave, grupo in nomes_por_chave.items():
+            if int(grupo.get("total") or 0) > 1:
+                alertas.append((chave, list(grupo.get("nomes", {}).values())))
+        return alertas
+
+    @staticmethod
+    def _rotulo_alertas_nomes_moldes(alertas: list[tuple[str, list[str]]]) -> str:
+        partes = []
+        for _chave, nomes in alertas[:3]:
+            partes.append(" / ".join(nomes[:4]))
+        restante = len(alertas) - len(partes)
+        texto = "; ".join(partes)
+        if restante > 0:
+            texto = f"{texto}; e mais {restante}"
+        return texto
+
     def _assinatura_grade_referencia_global(self) -> str:
         for ref in sorted(self._refs, key=lambda r: r.indice):
             dados = ref.dados if isinstance(ref.dados, dict) else {}
@@ -4140,6 +4264,12 @@ class PropriedadesMoldesDialog(QDialog):
     def _atualizar_conflitos_grade_modelo(self) -> None:
         referencia = self._assinatura_grade_referencia_global()
         assinaturas_unicas: list[str] = []
+        alertas_nomes = self._alertas_nomes_tamanhos_diferentes()
+        chaves_nome_conflitantes = {chave for chave, _nomes in alertas_nomes}
+        rotulo_alerta_nomes = self._rotulo_alertas_nomes_tamanhos(alertas_nomes)
+        alertas_moldes = self._alertas_nomes_moldes_repetidos()
+        chaves_moldes_repetidas = {chave for chave, _nomes in alertas_moldes}
+        rotulo_alerta_moldes = self._rotulo_alertas_nomes_moldes(alertas_moldes)
         for ref in self._refs:
             dados = ref.dados if isinstance(ref.dados, dict) else None
             if not isinstance(dados, dict):
@@ -4153,22 +4283,72 @@ class PropriedadesMoldesDialog(QDialog):
                 dados["grade_modelo_referencia"] = referencia
             else:
                 dados.pop("grade_modelo_referencia", None)
-        self._atualizar_alerta_grade_lateral(assinaturas_unicas)
+            chaves_molde = {
+                self._chave_nome_tamanho_para_alerta(nome)
+                for nome in self._nomes_tamanhos_graduacao(dados)
+            }
+            conflito_nome = bool(chaves_molde & chaves_nome_conflitantes)
+            dados["conflito_nome_tamanho_modelo"] = conflito_nome
+            if conflito_nome and rotulo_alerta_nomes:
+                dados["nome_tamanho_modelo_alerta"] = rotulo_alerta_nomes
+            else:
+                dados.pop("nome_tamanho_modelo_alerta", None)
+            chave_nome_molde = self._chave_nome_molde_para_alerta(ref.nome or dados.get("nome_molde") or "")
+            conflito_nome_molde = bool(chave_nome_molde and chave_nome_molde in chaves_moldes_repetidas)
+            dados["conflito_nome_molde_modelo"] = conflito_nome_molde
+            if conflito_nome_molde and rotulo_alerta_moldes:
+                dados["nome_molde_modelo_alerta"] = rotulo_alerta_moldes
+            else:
+                dados.pop("nome_molde_modelo_alerta", None)
+        self._atualizar_alerta_grade_lateral(assinaturas_unicas, alertas_nomes, alertas_moldes)
 
-    def _atualizar_alerta_grade_lateral(self, assinaturas: list[str]) -> None:
+    def _atualizar_alerta_grade_lateral(
+        self,
+        assinaturas: list[str],
+        alertas_nomes: list[tuple[str, list[str]]] | None = None,
+        alertas_moldes: list[tuple[str, list[str]]] | None = None,
+    ) -> None:
         if not hasattr(self, "lbl_alerta_grade"):
             return
-        if len(assinaturas) <= 1:
+        alertas_nomes = alertas_nomes or []
+        alertas_moldes = alertas_moldes or []
+        mensagens: list[str] = []
+        if len(assinaturas) > 1:
+            rotulos = [self._rotulo_assinatura_grade(assinatura) for assinatura in assinaturas[:3]]
+            restante = len(assinaturas) - len(rotulos)
+            texto_rotulos = ", ".join(rotulos)
+            if restante > 0:
+                texto_rotulos = f"{texto_rotulos} e mais {restante}"
+            mensagens.append(f"Erro de grade: moldes com grades diferentes ({texto_rotulos}).")
+        if alertas_nomes:
+            texto_nomes = self._rotulo_alertas_nomes_tamanhos(alertas_nomes)
+            mensagens.append(f"Erro de nome de tamanho: nomes diferentes para o mesmo tamanho ({texto_nomes}).")
+        if alertas_moldes:
+            texto_moldes = self._rotulo_alertas_nomes_moldes(alertas_moldes)
+            mensagens.append(f"Erro de nome de molde: moldes com nomes repetidos ({texto_moldes}).")
+        if not mensagens:
             self.lbl_alerta_grade.setText("")
             self.lbl_alerta_grade.setHidden(True)
             return
-        rotulos = [self._rotulo_assinatura_grade(assinatura) for assinatura in assinaturas[:3]]
-        restante = len(assinaturas) - len(rotulos)
-        texto_rotulos = ", ".join(rotulos)
-        if restante > 0:
-            texto_rotulos = f"{texto_rotulos} e mais {restante}"
-        self.lbl_alerta_grade.setText(f"Erro de grade: moldes com grades diferentes ({texto_rotulos}).")
+        self.lbl_alerta_grade.setText("\n".join(mensagens))
         self.lbl_alerta_grade.setHidden(False)
+
+    def _atualizar_status_alertas_arvore_moldes(self) -> None:
+        self._refs = self._coletar_moldes()
+        self._atualizar_conflitos_grade_modelo()
+        referencia_global = self._assinatura_grade_referencia_global()
+        self._suspender_item_changed = True
+        try:
+            for ref in self._refs:
+                item = getattr(self, "_itens_molde_por_indice", {}).get(int(ref.indice))
+                if item is None:
+                    continue
+                item.setText(0, ref.nome or f"Molde {ref.indice + 1}")
+                item.setIcon(0, self._icone_status_molde(ref, referencia_grade=referencia_global))
+                tooltip_grade = self._tooltip_grade_molde(ref, referencia_global)
+                item.setToolTip(0, tooltip_grade)
+        finally:
+            self._suspender_item_changed = False
 
     @staticmethod
     def _rotulo_assinatura_grade(assinatura: str) -> str:
@@ -4186,6 +4366,36 @@ class PropriedadesMoldesDialog(QDialog):
         dados = ref.dados if isinstance(ref.dados, dict) else {}
         assinatura = self._assinatura_grade(dados)
         referencia = referencia_grade or str(dados.get("grade_modelo_referencia") or "")
+        alerta_nome = str(dados.get("nome_tamanho_modelo_alerta") or "").strip()
+        alerta_molde = str(dados.get("nome_molde_modelo_alerta") or "").strip()
+        if alerta_nome or alerta_molde:
+            linhas: list[str] = []
+            if assinatura and referencia and assinatura != referencia:
+                linhas.extend(
+                    [
+                        "Grade diferente do modelo.",
+                        f"Molde: {self._rotulo_assinatura_grade(assinatura)}",
+                        f"Referência: {self._rotulo_assinatura_grade(referencia)}",
+                        "",
+                    ]
+                )
+            if alerta_nome:
+                linhas.extend(
+                    [
+                        "Nome de tamanho diferente.",
+                        f"Tamanhos: {alerta_nome}",
+                    ]
+                )
+            if alerta_molde:
+                if linhas and linhas[-1] != "":
+                    linhas.append("")
+                linhas.extend(
+                    [
+                        "Nome de molde repetido.",
+                        f"Moldes: {alerta_molde}",
+                    ]
+                )
+            return "\n".join(linhas)
         if not assinatura or not referencia or assinatura == referencia:
             return ""
         return (
@@ -4200,7 +4410,14 @@ class PropriedadesMoldesDialog(QDialog):
         assinatura = self._assinatura_grade(dados)
         if not pronto:
             return QIcon(str(ICONS_DIR / "molde-nao-pronto.svg"))
-        if bool(dados.get("conflito_grade_modelo")) or (referencia_grade and assinatura and assinatura != referencia_grade):
+        if (
+            bool(dados.get("conflito_grade_modelo"))
+            or bool(dados.get("conflito_nome_tamanho_modelo"))
+            or bool(dados.get("conflito_nome_molde_modelo"))
+            or (referencia_grade and assinatura and assinatura != referencia_grade)
+        ):
+            if bool(dados.get("conflito_nome_molde_modelo")) and (ICONS_DIR / "nome-molde-repetido.svg").exists():
+                return QIcon(str(ICONS_DIR / "nome-molde-repetido.svg"))
             return QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
         return QIcon(str(ICONS_DIR / "molde-pronto.svg"))
 
@@ -4378,6 +4595,7 @@ class PropriedadesMoldesDialog(QDialog):
                             self.cmb_molde.setCurrentText(novo_nome)
                     self._sincronizar_nome_molde_atual_sem_recarregar(novo_nome if int(idx) == self._indice_atual else None)
                     self._atualizar_combo_moldes()
+                    self._atualizar_status_alertas_arvore_moldes()
                     self.preview.set_molde(dict(el))
             return
         parent = item.parent()

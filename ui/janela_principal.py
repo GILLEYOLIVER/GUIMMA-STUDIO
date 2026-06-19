@@ -13,7 +13,7 @@ from time import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPageSize, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
@@ -46,6 +47,8 @@ from PySide6.QtWidgets import (
     QTabBar,
     QTabWidget,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -418,6 +421,17 @@ class GuimmaStudioMainWindow(QMainWindow):
         prefs_app = self._carregar_preferencias_app()
         if prefs_app:
             self.projeto_atual.preferencias_usuario.update(prefs_app)
+        locais_dialogos = prefs_app.get("locais_dialogos_arquivo", {}) if isinstance(prefs_app, dict) else {}
+        if not isinstance(locais_dialogos, dict):
+            locais_dialogos = {}
+        ultimo_diretorio = prefs_app.get("ultimo_diretorio_arquivo", "") if isinstance(prefs_app, dict) else ""
+        if isinstance(ultimo_diretorio, str) and ultimo_diretorio.strip():
+            locais_dialogos.setdefault("geral", ultimo_diretorio)
+        self._memoria_dialogos_arquivo: dict[str, str] = {
+            str(chave): str(valor)
+            for chave, valor in locais_dialogos.items()
+            if isinstance(chave, str) and isinstance(valor, str) and valor.strip()
+        }
         self.projeto_atual.preferencias_usuario["menu_moldes_visivel"] = False
         self._arquivo_atual: Path | None = None
         self._contador_sem_nome = 0
@@ -576,8 +590,15 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _salvar_preferencias_app(self):
         try:
+            preferencias = dict(self.projeto_atual.preferencias_usuario)
+            memoria_dialogos = getattr(self, "_memoria_dialogos_arquivo", None)
+            if isinstance(memoria_dialogos, dict):
+                preferencias["locais_dialogos_arquivo"] = dict(memoria_dialogos)
+                geral = memoria_dialogos.get("geral")
+                if isinstance(geral, str) and geral.strip():
+                    preferencias["ultimo_diretorio_arquivo"] = geral
             self.ARQUIVO_PREFS_APP.write_text(
-                json.dumps(self.projeto_atual.preferencias_usuario, ensure_ascii=False, indent=2),
+                json.dumps(preferencias, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception:
@@ -1908,6 +1929,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             max(min_x, min(pos_padrao.x(), max_x)),
             max(min_y, min(pos_padrao.y(), max_y)),
         )
+        janela._guimma_fallback_inicial = QPoint(destino)  # type: ignore[attr-defined]
         janela._guimma_ultima_posicao_programatica = QPoint(destino)  # type: ignore[attr-defined]
         janela.move(destino)
         janela._guimma_posicao_inicial_aplicada = True  # type: ignore[attr-defined]
@@ -2617,12 +2639,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         edt_backup = QLineEdit(self._opcoes_app.get("caminho_backup", ""))
         btn_backup = QPushButton("Alterar")
         def _escolher_backup():
-            caminho, _ = QFileDialog.getSaveFileName(
-                dialog,
+            caminho, _ = self._abrir_dialogo_arquivo_claro(
                 "Arquivo de backup",
-                edt_backup.text().strip() or str(Path.home() / "guimma_backup.bak"),
                 "Backup (*.bak);;Todos (*.*)",
-                options=QFileDialog.Option.DontUseNativeDialog,
+                modo_salvar=True,
+                memoria_chave="exportacao",
+                caminho_inicial=edt_backup.text().strip() or str(Path.home() / "guimma_backup.bak"),
             )
             if caminho:
                 edt_backup.setText(caminho)
@@ -3431,15 +3453,44 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, texto_acao or "Abrir")
 
     def _melhorar_coluna_nome_dialogo_arquivo(self, dialog: QFileDialog):
-        for arvore in dialog.findChildren(QTreeView):
+        def aplicar():
             try:
-                arvore.setColumnWidth(0, 420)
-                header = arvore.header()
-                if header is not None:
-                    header.setStretchLastSection(False)
-                    header.resizeSection(0, 420)
+                if not _qt_objeto_valido(dialog):
+                    return
+            except Exception:
+                return
+            try:
+                dialog.setMinimumWidth(max(dialog.minimumWidth(), 760))
             except Exception:
                 pass
+            for arvore in dialog.findChildren(QTreeView):
+                try:
+                    arvore.setMinimumWidth(max(arvore.minimumWidth(), 520))
+                    arvore.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                    header = arvore.header()
+                    if header is not None:
+                        header.setStretchLastSection(False)
+                        header.setMinimumSectionSize(80)
+                        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+                        header.resizeSection(0, max(header.sectionSize(0), 520))
+                        if header.count() > 1:
+                            header.resizeSection(1, max(header.sectionSize(1), 90))
+                        if header.count() > 2:
+                            header.resizeSection(2, max(header.sectionSize(2), 150))
+                        if header.count() > 3:
+                            header.resizeSection(3, max(header.sectionSize(3), 170))
+                except Exception:
+                    pass
+            for lista in dialog.findChildren(QListView):
+                try:
+                    lista.setMinimumWidth(max(lista.minimumWidth(), 420))
+                    lista.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                except Exception:
+                    pass
+
+        aplicar()
+        QTimer.singleShot(0, aplicar)
+        QTimer.singleShot(120, aplicar)
 
     def _traduzir_textos_internos_dialogo_arquivo(self, dialog: QFileDialog):
         mapa_botoes = {
@@ -3518,13 +3569,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         *,
         modo_salvar: bool = False,
         com_preview_projeto: bool = False,
+        memoria_chave: str | None = None,
+        caminho_inicial: str | Path | None = None,
     ) -> tuple[str, str]:
         filtros = [parte.strip() for parte in str(filtro or "").split(";;") if parte.strip()]
         filtro_eh_projeto = any(f"*{EXTENSAO_PROJETO}" in parte for parte in filtros)
         if filtro_eh_projeto:
             filtros = [f"Projeto GUIMMA (*{EXTENSAO_PROJETO})"]
         filtro_inicial = filtros[0] if filtros else filtro
-        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro_inicial)
+        chave_memoria = self._normalizar_chave_local_dialogo(memoria_chave, modo_salvar=modo_salvar)
+        diretorio_inicial = self._diretorio_memorizado_dialogo(
+            chave_memoria,
+            fallback=caminho_inicial,
+            modo_salvar=modo_salvar,
+        )
+        dialog = QFileDialog(self, titulo, diretorio_inicial, filtro_inicial)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         if filtros:
@@ -3536,6 +3595,10 @@ class GuimmaStudioMainWindow(QMainWindow):
         if modo_salvar:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
             dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+            if caminho_inicial:
+                nome_inicial = Path(caminho_inicial).name
+                if nome_inicial:
+                    dialog.selectFile(nome_inicial)
             self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Salvar")
         else:
             dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
@@ -3567,7 +3630,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._agendar_reencaixe_janela_canvas()
             return "", ""
         if caminho:
-            self._memorizar_diretorio_arquivo(Path(caminho))
+            self._memorizar_local_dialogo(chave_memoria, Path(caminho), modo_salvar=modo_salvar)
         self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter()
 
@@ -3619,7 +3682,13 @@ class GuimmaStudioMainWindow(QMainWindow):
         filtros = self._filtros_importacao_moldes()
         filtro_inicial = filtros[0]
         titulo = "Importar AAMA-292/1993 | ASTM D6673-01/2001" if tipo == "aama_astm" else "Importar DXF"
-        dialog = QFileDialog(self, titulo, self._diretorio_arquivo_inicial(), filtro_inicial)
+        pasta_importacao = self.projeto_atual.preferencias_usuario.get("ultima_pasta_importacao", "")
+        dialog = QFileDialog(
+            self,
+            titulo,
+            self._diretorio_memorizado_dialogo("importacao", fallback=pasta_importacao),
+            filtro_inicial,
+        )
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         dialog.setViewMode(QFileDialog.ViewMode.Detail)
         dialog.setNameFilters(filtros)
@@ -3637,7 +3706,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         arquivos = dialog.selectedFiles()
         caminho = arquivos[0] if arquivos else ""
         if caminho:
-            self._memorizar_diretorio_arquivo(Path(caminho))
+            self._memorizar_local_dialogo("importacao", Path(caminho))
+            self.projeto_atual.preferencias_usuario["ultima_pasta_importacao"] = str(Path(caminho).parent)
         opcoes = {
             "unidade": "mm" if controles["rb_mm"].isChecked() else ("pol" if controles["rb_pol"].isChecked() else "cm"),
             "origem": controles["cmb_origem"].currentText(),
@@ -3826,18 +3896,119 @@ class GuimmaStudioMainWindow(QMainWindow):
             except Exception:
                 return None
 
-    def _diretorio_arquivo_inicial(self) -> str:
-        ultimo = self.projeto_atual.preferencias_usuario.get("ultimo_diretorio_arquivo", "")
+    def _preferencias_usuario_atuais(self) -> dict:
+        projeto = getattr(self, "projeto_atual", None)
+        prefs = getattr(projeto, "preferencias_usuario", None)
+        return prefs if isinstance(prefs, dict) else {}
+
+    def _normalizar_chave_local_dialogo(self, chave: str | None = None, *, modo_salvar: bool = False) -> str:
+        texto = str(chave or "").strip().lower()
+        if not texto:
+            return "salvamento" if modo_salvar else "abertura"
+        aliases = {
+            "abrir": "abertura",
+            "abertura": "abertura",
+            "open": "abertura",
+            "salvar": "salvamento",
+            "salvamento": "salvamento",
+            "save": "salvamento",
+            "importar": "importacao",
+            "importação": "importacao",
+            "importacao": "importacao",
+            "exportar": "exportacao",
+            "exportação": "exportacao",
+            "exportacao": "exportacao",
+            "plotar": "plotagem",
+            "plotagem": "plotagem",
+            "imprimir": "impressao",
+            "impressão": "impressao",
+            "impressao": "impressao",
+        }
+        return aliases.get(texto, texto)
+
+    def _locais_dialogos_memorizados(self) -> dict[str, str]:
+        locais = getattr(self, "_memoria_dialogos_arquivo", None)
+        if not isinstance(locais, dict):
+            prefs = self._preferencias_usuario_atuais()
+            bruto = prefs.get("locais_dialogos_arquivo", {}) if isinstance(prefs, dict) else {}
+            locais = dict(bruto) if isinstance(bruto, dict) else {}
+            self._memoria_dialogos_arquivo = locais
+        prefs = self._preferencias_usuario_atuais()
+        if isinstance(prefs, dict):
+            prefs["locais_dialogos_arquivo"] = locais
+        return locais
+
+    def _pasta_dialogo_valida(self, valor: object) -> Path | None:
+        if valor is None:
+            return None
+        texto = str(valor).strip()
+        if not texto:
+            return None
+        try:
+            caminho = Path(texto).expanduser()
+        except Exception:
+            return None
+        if caminho.exists():
+            return caminho if caminho.is_dir() else caminho.parent
+        if caminho.suffix and caminho.parent.exists():
+            return caminho.parent
+        return None
+
+    def _diretorio_memorizado_dialogo(
+        self,
+        chave: str | None = None,
+        *,
+        fallback: str | Path | None = None,
+        modo_salvar: bool = False,
+    ) -> str:
+        chave_normalizada = self._normalizar_chave_local_dialogo(chave, modo_salvar=modo_salvar)
+        locais = self._locais_dialogos_memorizados()
+        prefs = self._preferencias_usuario_atuais()
+        candidatos: list[object] = []
+        for chave_busca in (chave_normalizada, "geral"):
+            valor = locais.get(chave_busca)
+            if isinstance(valor, str) and valor.strip():
+                candidatos.append(valor)
+        if fallback is not None:
+            candidatos.append(fallback)
+        ultimo = prefs.get("ultimo_diretorio_arquivo", "")
         if isinstance(ultimo, str) and ultimo.strip():
-            return ultimo
-        if self._arquivo_atual is not None:
-            return str(self._arquivo_atual.parent)
+            candidatos.append(ultimo)
+        arquivo_atual = getattr(self, "_arquivo_atual", None)
+        if arquivo_atual is not None:
+            candidatos.append(Path(arquivo_atual).parent)
+        candidatos.append(Path.home())
+        for candidato in candidatos:
+            pasta = self._pasta_dialogo_valida(candidato)
+            if pasta is not None:
+                return str(pasta)
         return str(Path.home())
 
+    def _memorizar_local_dialogo(self, chave: str | None, caminho: str | Path | None, *, modo_salvar: bool = False):
+        if caminho is None:
+            return
+        chave_normalizada = self._normalizar_chave_local_dialogo(chave, modo_salvar=modo_salvar)
+        try:
+            caminho_path = Path(caminho).expanduser()
+        except Exception:
+            return
+        pasta = caminho_path if caminho_path.exists() and caminho_path.is_dir() else caminho_path.parent
+        if not str(pasta).strip():
+            return
+        locais = self._locais_dialogos_memorizados()
+        pasta_txt = str(pasta)
+        locais[chave_normalizada] = pasta_txt
+        locais["geral"] = pasta_txt
+        prefs = self._preferencias_usuario_atuais()
+        prefs["locais_dialogos_arquivo"] = locais
+        prefs["ultimo_diretorio_arquivo"] = pasta_txt
+        self._agendar_salvar_preferencias_app()
+
+    def _diretorio_arquivo_inicial(self) -> str:
+        return self._diretorio_memorizado_dialogo("geral")
+
     def _memorizar_diretorio_arquivo(self, caminho: Path):
-        pasta = caminho if caminho.is_dir() else caminho.parent
-        self.projeto_atual.preferencias_usuario["ultimo_diretorio_arquivo"] = str(pasta)
-        self._salvar_preferencias_app()
+        self._memorizar_local_dialogo("geral", caminho)
 
     def _anexar_preview_dialogo_arquivo(self, dialog: QFileDialog):
         layout = dialog.layout()
@@ -4003,9 +4174,20 @@ class GuimmaStudioMainWindow(QMainWindow):
         area = self._area_documento_atual()
         if not area:
             return []
-        elementos = list(getattr(area.canvas.cena, 'elementos', []) or [])
+        canvas = area.canvas
+        elementos = list(getattr(canvas.cena, 'elementos', []) or [])
         if not apenas_selecionados:
             return [dict(el) for el in elementos]
+        indices = []
+        for idx in sorted(getattr(canvas, "_selecionados", set()) or set()):
+            try:
+                idx_int = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx_int < len(elementos):
+                indices.append(idx_int)
+        if indices:
+            return [dict(elementos[idx]) for idx in indices]
         selecionados = [
             dict(el)
             for el in elementos
@@ -4070,6 +4252,21 @@ class GuimmaStudioMainWindow(QMainWindow):
         ajustado.adjust(px_esq, px_sup, -px_dir, -px_inf)
         return ajustado
 
+    def _pixels_por_cm_dispositivo(self, device, rect: QRectF) -> tuple[float, float]:
+        try:
+            page_px = QRectF(device.pageRect(QPrinter.Unit.DevicePixel))
+            page_mm = QRectF(device.pageRect(QPrinter.Unit.Millimeter))
+            if page_px.width() > 0 and page_px.height() > 0 and page_mm.width() > 0 and page_mm.height() > 0:
+                return page_px.width() / (page_mm.width() / 10.0), page_px.height() / (page_mm.height() / 10.0)
+        except Exception:
+            pass
+        dpi_x = float(getattr(device, "physicalDpiX", lambda: 0)() or 0)
+        dpi_y = float(getattr(device, "physicalDpiY", lambda: 0)() or 0)
+        if dpi_x <= 0 or dpi_y <= 0:
+            dpi_x = float(getattr(device, "logicalDpiX", lambda: 96)() or 96)
+            dpi_y = float(getattr(device, "logicalDpiY", lambda: 96)() or 96)
+        return max(dpi_x / 2.54, rect.width() / 100.0, 1.0), max(dpi_y / 2.54, rect.height() / 100.0, 1.0)
+
     def _desenhar_elementos_em_painter(self, painter: QPainter, rect: QRectF, elementos: list[dict], config: dict):
         bbox = self._bbox_elementos_saida(elementos)
         if bbox is None:
@@ -4082,8 +4279,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         margem_sup = float(config.get('margem_sup', 0.0))
         margem_dir = float(config.get('margem_dir', 0.0))
         margem_inf = float(config.get('margem_inf', 0.0))
-        dpi_x = float(getattr(painter.device(), 'logicalDpiX', lambda: 96)())
-        dpi_y = float(getattr(painter.device(), 'logicalDpiY', lambda: 96)())
+        if bool(config.get('margem_segura_a4', False)):
+            margem_esq = max(1.0, margem_esq)
+            margem_sup = max(1.0, margem_sup)
+            margem_dir = max(1.0, margem_dir)
+            margem_inf = max(1.0, margem_inf)
+        px_por_cm_x, px_por_cm_y = self._pixels_por_cm_dispositivo(painter.device(), area)
+        dpi_x = px_por_cm_x * 2.54
+        dpi_y = px_por_cm_y * 2.54
         area = self._ajustar_retangulo_margens_cm(area, margem_esq, margem_sup, margem_dir, margem_inf, dpi_x, dpi_y)
         if area.width() <= 1 or area.height() <= 1:
             area = QRectF(rect)
@@ -4093,19 +4296,29 @@ class GuimmaStudioMainWindow(QMainWindow):
         fator_y = max(0.01, float(config.get('escala_y', 1.0)))
         usar_percent = bool(config.get('usar_percentual', False))
         percentual = max(0.01, float(config.get('percentual', 100.0))) / 100.0
-        escala_base = min(area.width() / (altura if girar_90 else largura), area.height() / (largura if girar_90 else altura))
-        escala = escala_base * (percentual if usar_percent else 1.0)
-        centro_x = (min_x + max_x) / 2.0
-        centro_y = (min_y + max_y) / 2.0
+        if usar_percent:
+            escala_x = px_por_cm_x * percentual * fator_x
+            escala_y = px_por_cm_y * percentual * fator_y
+        else:
+            largura_saida = altura if girar_90 else largura
+            altura_saida = largura if girar_90 else altura
+            escala_base = min(
+                area.width() / max(largura_saida * fator_x, 1.0),
+                area.height() / max(altura_saida * fator_y, 1.0),
+            )
+            escala_x = escala_base * fator_x
+            escala_y = escala_base * fator_y
         cor_unica = not bool(config.get('em_cores', False))
+
+        def _mapear_ponto(pt: tuple[float, float]) -> QPointF:
+            x = float(pt[0]) - min_x
+            y = float(pt[1]) - min_y
+            if girar_90:
+                x, y = y, largura - x
+            return QPointF(area.left() + (x * escala_x), area.top() + (y * escala_y))
 
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.translate(area.center())
-        if girar_90:
-            painter.rotate(90)
-        painter.scale(escala * fator_x, -(escala * fator_y))
-        painter.translate(-centro_x, -centro_y)
 
         for el in elementos:
             cor = '#000000'
@@ -4118,9 +4331,10 @@ class GuimmaStudioMainWindow(QMainWindow):
                 if len(linha) < 2:
                     continue
                 path = QPainterPath()
-                path.moveTo(linha[0][0], linha[0][1])
-                for x, y in linha[1:]:
-                    path.lineTo(x, y)
+                primeiro = _mapear_ponto(linha[0])
+                path.moveTo(primeiro)
+                for pt in linha[1:]:
+                    path.lineTo(_mapear_ponto(pt))
                 painter.drawPath(path)
         painter.restore()
 
@@ -4158,6 +4372,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         finally:
             painter.end()
 
+    def _criar_printer_impressao(self) -> QPrinter:
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        return printer
+
     def _executar_impressao(self, config: dict, visualizar: bool):
         elementos = self._obter_elementos_saida(bool(config.get('apenas_selecionados', False)))
         if not elementos:
@@ -4168,9 +4387,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             caixa.setText('Não há elementos disponíveis para impressão.')
             caixa.exec()
             return
-        printer = QPrinter(QPrinter.HighResolution)
+        printer = self._criar_printer_impressao()
         if visualizar:
             preview = QPrintPreviewDialog(printer, self)
+            preview.setMinimumSize(900, 620)
+            preview.resize(1100, 720)
             preview.setWindowTitle('Visualizar impressão')
             preview.paintRequested.connect(lambda pr: self._desenhar_documento_impressao(pr, config))
             preview.exec()
@@ -4178,6 +4399,9 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog = QPrintDialog(printer, self)
         dialog.setWindowTitle('Imprimir')
         if dialog.exec() == QDialog.Accepted:
+            arquivo_saida = printer.outputFileName()
+            if arquivo_saida:
+                self._memorizar_local_dialogo("impressao", arquivo_saida, modo_salvar=True)
             self._desenhar_documento_impressao(printer, config)
             self.lbl_status.setText('Impressão enviada.')
 
@@ -4205,10 +4429,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         gb_impressao = QGroupBox('Impressão')
         g_imp = QVBoxLayout(gb_impressao)
         rb_tudo = QRadioButton('Tudo')
-        rb_tudo.setChecked(True)
         rb_sel = QRadioButton('Selecionados')
         tem_sel = bool(self._obter_elementos_saida(True))
+        rb_tudo.setChecked(not tem_sel)
         rb_sel.setEnabled(tem_sel)
+        rb_sel.setChecked(tem_sel)
         g_imp.addWidget(rb_tudo)
         g_imp.addWidget(rb_sel)
         topo.addWidget(gb_impressao)
@@ -4268,19 +4493,19 @@ class GuimmaStudioMainWindow(QMainWindow):
         edt_sup = QDoubleSpinBox()
         edt_sup.setRange(0.0, 99.0)
         edt_sup.setDecimals(2)
-        edt_sup.setValue(0.0)
+        edt_sup.setValue(1.0)
         edt_esq = QDoubleSpinBox()
         edt_esq.setRange(0.0, 99.0)
         edt_esq.setDecimals(2)
-        edt_esq.setValue(0.0)
+        edt_esq.setValue(1.0)
         edt_dir = QDoubleSpinBox()
         edt_dir.setRange(0.0, 99.0)
         edt_dir.setDecimals(2)
-        edt_dir.setValue(0.0)
+        edt_dir.setValue(1.0)
         edt_inf = QDoubleSpinBox()
         edt_inf.setRange(0.0, 99.0)
         edt_inf.setDecimals(2)
-        edt_inf.setValue(0.0)
+        edt_inf.setValue(1.0)
         area_pagina = QFrame()
         area_pagina.setFixedSize(86, 110)
         area_pagina.setStyleSheet('background:#ececec;border:1px solid #cfcfcf;')
@@ -4333,6 +4558,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 'margem_esq': float(edt_esq.value()),
                 'margem_dir': float(edt_dir.value()),
                 'margem_inf': float(edt_inf.value()),
+                'margem_segura_a4': rb_tamanho_folha.isChecked(),
                 'estilo_borda': estilo_borda,
                 'girar_90': False,
             }
@@ -4486,6 +4712,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         }
 
     def _gerar_hpgl2_do_molde(self, elementos: list[dict], config: dict) -> tuple[str, int, int]:
+        hpgl_unidades_por_cm = 400.0
         polilinhas: list[list[tuple[float, float]]] = []
         for el in elementos:
             polilinhas.extend(self._polilinhas_elemento_saida(el))
@@ -4506,27 +4733,24 @@ class GuimmaStudioMainWindow(QMainWindow):
         largura_papel = max(1.0, float(props.get("largura_papel_cm", 185.0)))
         altura_papel = max(1.0, float(props.get("tamanho_pagina_cm", 115.0)))
         margem_inf = max(0.0, float(props.get("margem_inferior_cm", 0.0)))
-        margem_u = int(round(margem_inf * 40.0))
-        largura_u_disp = max(400, int(round(largura_papel * 20.0)) - 2 * margem_u)
-        altura_u_disp = max(400, int(round(altura_papel * 20.0)) - 2 * margem_u)
+        margem_u = int(round(margem_inf * hpgl_unidades_por_cm))
+        x_inicial_u = int(round(max(0.0, float(config.get("x_inicial", 0.0))) * hpgl_unidades_por_cm))
         largura_base = altura if girar_90 else largura
         altura_base = largura if girar_90 else altura
-        escala_fit = min(largura_u_disp / max(largura_base, 1.0), altura_u_disp / max(altura_base, 1.0))
-        escala = max(0.1, escala_fit * percentual)
-        cx = (min_x + max_x) / 2.0
-        cy = (min_y + max_y) / 2.0
-        largura_plot = int(round(largura_base * escala * fator_x))
-        altura_plot = int(round(altura_base * escala * fator_y))
-        offset_x = margem_u
+        escala_x = hpgl_unidades_por_cm * percentual * fator_x
+        escala_y = hpgl_unidades_por_cm * percentual * fator_y
+        largura_plot = int(round(largura_base * escala_x))
+        altura_plot = int(round(altura_base * escala_y))
+        offset_x = margem_u + x_inicial_u
         offset_y = margem_u
 
         def _mapear(pt: tuple[float, float]) -> tuple[int, int]:
-            x = float(pt[0]) - cx
-            y = float(pt[1]) - cy
+            x = float(pt[0]) - min_x
+            y = float(pt[1]) - min_y
             if girar_90:
-                x, y = -y, x
-            hx = int(round(offset_x + (largura_plot / 2.0) + (x * escala * fator_x)))
-            hy = int(round(offset_y + (altura_plot / 2.0) + (y * escala * fator_y)))
+                x, y = y, largura - x
+            hx = int(round(offset_x + (x * escala_x)))
+            hy = int(round(offset_y + (y * escala_y)))
             return hx, hy
 
         linhas = []
@@ -4539,7 +4763,13 @@ class GuimmaStudioMainWindow(QMainWindow):
                 x, y = _mapear(pt)
                 coords.append(f"{x},{y}")
             linhas.append(f"PU{x0},{y0}PD " + " ".join(coords) + "PU")
-        return "".join(linhas), largura_plot + 2 * margem_u, altura_plot + 2 * margem_u
+        largura_pagina = int(round(largura_papel * hpgl_unidades_por_cm))
+        altura_pagina = int(round(altura_papel * hpgl_unidades_por_cm))
+        return (
+            "".join(linhas),
+            max(largura_pagina, largura_plot + offset_x + margem_u),
+            max(altura_pagina, altura_plot + offset_y + margem_u),
+        )
 
     def _gerar_hpgl2(self, elementos: list[dict], config: dict) -> str:
         corpo, largura_ps, altura_ps = self._gerar_hpgl2_do_molde(elementos, config)
@@ -4561,7 +4791,12 @@ class GuimmaStudioMainWindow(QMainWindow):
             caixa.setText('Não há elementos disponíveis para plotagem.')
             caixa.exec()
             return
-        caminho, _ = self._abrir_dialogo_arquivo_claro('HPGL/2', 'Arquivos de plotagem (*.plt);;Todos (*.*)', modo_salvar=True)
+        caminho, _ = self._abrir_dialogo_arquivo_claro(
+            'HPGL/2',
+            'Arquivos de plotagem (*.plt);;Todos (*.*)',
+            modo_salvar=True,
+            memoria_chave="plotagem",
+        )
         if not caminho:
             return
         destino = Path(caminho)
@@ -4774,7 +5009,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
         if tipo == "audaces":
-            caminho, _ = self._abrir_dialogo_arquivo_claro("Importar arquivos EMF/XML/ADSX/AMKX", filtros["audaces"])
+            caminho, _ = self._abrir_dialogo_arquivo_claro(
+                "Importar arquivos EMF/XML/ADSX/AMKX",
+                filtros["audaces"],
+                memoria_chave="importacao",
+            )
             if not caminho:
                 return
             p = Path(caminho)
@@ -4802,9 +5041,17 @@ class GuimmaStudioMainWindow(QMainWindow):
                 elif len(xmls) == 1:
                     xml_path = str(xmls[0])
             if not emf_path and xml_path:
-                emf_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar arquivo EMF", filtros["audaces_emf"])
+                emf_path, _ = self._abrir_dialogo_arquivo_claro(
+                    "Selecionar arquivo EMF",
+                    filtros["audaces_emf"],
+                    memoria_chave="importacao",
+                )
             if not xml_path and emf_path:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar arquivo XML", filtros["audaces_xml"])
+                xml_path, _ = self._abrir_dialogo_arquivo_claro(
+                    "Selecionar arquivo XML",
+                    filtros["audaces_xml"],
+                    memoria_chave="importacao",
+                )
             if emf_path and xml_path:
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
                 info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
@@ -4826,7 +5073,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         if tipo == "audaces_emf_xml":
-            emf_path, _ = self._abrir_dialogo_arquivo_claro("Importar EMF + XML (EMF)", filtros["audaces_emf"])
+            emf_path, _ = self._abrir_dialogo_arquivo_claro(
+                "Importar EMF + XML (EMF)",
+                filtros["audaces_emf"],
+                memoria_chave="importacao",
+            )
             if not emf_path:
                 return
             pergunta = QMessageBox(self)
@@ -4840,7 +5091,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             if resp == QMessageBox.Cancel:
                 return
             if resp == QMessageBox.Yes:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro("Selecionar XML", filtros["audaces_xml"])
+                xml_path, _ = self._abrir_dialogo_arquivo_claro(
+                    "Selecionar XML",
+                    filtros["audaces_xml"],
+                    memoria_chave="importacao",
+                )
                 if not xml_path:
                     return
                 self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
@@ -4893,8 +5148,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return
             self.projeto_atual = AudacesPairImport.importar_apenas_emf(emf_path, self.projeto_atual)
             info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
-            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF", emf_path)
-            msg = "EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas."
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), Path(emf_path).stem or "EMF", emf_path)
+            msg = info.get("mensagem_final") or "EMF importado."
             self.lbl_status.setText(msg)
             return
 
@@ -4902,7 +5157,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tipo in {"dxf", "aama_astm"}:
             caminho, _, opcoes_importacao_moldes = self._abrir_dialogo_importacao_moldes(tipo, origem_inicial=origem_inicial)
         else:
-            caminho, _ = self._abrir_dialogo_arquivo_claro(f"Importar {tipo.upper()}", filtros.get(tipo, "Todos (*.*)"))
+            chave_memoria = "plotagem" if tipo == "plotagem" else "importacao"
+            caminho, _ = self._abrir_dialogo_arquivo_claro(
+                f"Importar {tipo.upper()}",
+                filtros.get(tipo, "Todos (*.*)"),
+                memoria_chave=chave_memoria,
+            )
         if not caminho:
             return
 
@@ -4954,8 +5214,8 @@ class GuimmaStudioMainWindow(QMainWindow):
         if tipo == "audaces_emf":
             self.projeto_atual = AudacesPairImport.importar_apenas_emf(caminho, self.projeto_atual)
             info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
-            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF", caminho)
-            self.lbl_status.setText("EMF importado como vetor. Sem XML, os moldes podem ficar sem nomes e propriedades técnicas.")
+            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), Path(caminho).stem or "EMF", caminho)
+            self.lbl_status.setText(info.get("mensagem_final") or "EMF importado.")
             return
 
         if tipo == "audaces_xml":
@@ -6201,13 +6461,14 @@ class GuimmaStudioMainWindow(QMainWindow):
             "Abrir",
             f"Projeto GUIMMA (*{EXTENSAO_PROJETO})",
             com_preview_projeto=True,
+            memoria_chave="abertura",
         )
         if caminho:
             self._abrir_projeto_em_caminho(caminho)
 
     def _abrir_projeto_em_caminho(self, caminho: str):
         caminho_resolvido = str(Path(caminho).resolve())
-        self._memorizar_diretorio_arquivo(Path(caminho_resolvido))
+        self._memorizar_local_dialogo("abertura", Path(caminho_resolvido))
         for i in range(self.abas_documentos.count()):
             area = self.abas_documentos.widget(i)
             if isinstance(area, AreaDocumentoWidget) and area.property("arquivo_origem") == caminho_resolvido:
@@ -6248,11 +6509,302 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         self._agendar_reencaixe_janela_canvas()
 
+    @staticmethod
+    def _nome_molde_alerta_salvamento(molde: dict, indice: int) -> str:
+        nome = str(molde.get("nome_molde") or "").strip()
+        return nome or f"Molde {indice + 1}"
+
+    @staticmethod
+    def _chave_nome_molde_alerta_salvamento(nome: str) -> str:
+        return " ".join(str(nome or "").strip().casefold().split())
+
+    @staticmethod
+    def _chave_nome_tamanho_alerta_salvamento(nome: str) -> str:
+        texto = "".join(ch for ch in str(nome or "").upper() if ch.isalnum())
+        aliases = {
+            "EXTRAG": "G1",
+            "EXG": "G1",
+            "XG": "G1",
+            "EXTRAGG": "G2",
+            "EXGG": "G2",
+            "XGG": "G2",
+        }
+        return aliases.get(texto, texto)
+
+    @staticmethod
+    def _linhas_graduacao_alerta_salvamento(molde: dict) -> list[dict]:
+        linhas = molde.get("graduacao_tamanhos") if isinstance(molde, dict) else None
+        if not isinstance(linhas, list):
+            return []
+        saida: list[dict] = []
+        for linha in linhas:
+            if not isinstance(linha, dict):
+                continue
+            tamanho = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+            if not tamanho:
+                continue
+            item = dict(linha)
+            item["tamanho"] = tamanho
+            item["ativo"] = bool(item.get("ativo", True))
+            item["base"] = bool(item.get("base", False))
+            saida.append(item)
+        if saida and not any(linha.get("base") for linha in saida):
+            saida[len(saida) // 2]["base"] = True
+        return saida
+
+    @staticmethod
+    def _assinatura_grade_alerta_salvamento(molde: dict) -> str:
+        nome = str(molde.get("graduacao_grade_nome") or "").strip()
+        linhas = GuimmaStudioMainWindow._linhas_graduacao_alerta_salvamento(molde)
+        if not linhas:
+            return nome
+        tags = [str(linha.get("tamanho") or "") for linha in linhas]
+        return f"{nome}|{'/'.join(tags)}"
+
+    @staticmethod
+    def _nomes_tamanhos_alerta_salvamento(molde: dict) -> list[str]:
+        linhas = GuimmaStudioMainWindow._linhas_graduacao_alerta_salvamento(molde)
+        if linhas:
+            return [str(linha.get("tamanho") or "") for linha in linhas if str(linha.get("tamanho") or "").strip()]
+        ativos = molde.get("graduacao_tamanhos_ativos") if isinstance(molde, dict) else None
+        if isinstance(ativos, list):
+            return [str(nome).strip() for nome in ativos if str(nome).strip()]
+        return []
+
+    @staticmethod
+    def _pontos_graduacao_cfg_alerta_salvamento(molde: dict) -> dict:
+        tabela = molde.get("graduacao_tabela") if isinstance(molde.get("graduacao_tabela"), dict) else {}
+        pontos = tabela.get("pontos") if isinstance(tabela, dict) else None
+        if isinstance(pontos, dict):
+            return pontos
+        pontos = molde.get("graduacao_pontos")
+        return pontos if isinstance(pontos, dict) else {}
+
+    @staticmethod
+    def _float_alerta_salvamento(valor, padrao: float = 0.0) -> float:
+        try:
+            return float(str(valor).replace(",", "."))
+        except Exception:
+            return padrao
+
+    @staticmethod
+    def _molde_tem_ponto_cam_definido_alerta(molde: dict) -> bool:
+        chaves = (
+            "ponto_cam",
+            "ponto_cam_indice",
+            "ponto_cam_idx",
+            "indice_ponto_cam",
+            "cam_ponto",
+            "cam_indice",
+            "cam_posicao",
+            "ponto_came",
+        )
+        for chave in chaves:
+            if chave not in molde:
+                continue
+            valor = molde.get(chave)
+            if isinstance(valor, bool):
+                return valor
+            if isinstance(valor, (int, float)):
+                return valor >= 0
+            if isinstance(valor, dict):
+                return bool(valor)
+            if isinstance(valor, (list, tuple)):
+                return len(valor) > 0
+            if str(valor or "").strip():
+                return True
+        return False
+
+    @staticmethod
+    def _molde_tem_tamanhos_sem_graduacao_alerta(molde: dict) -> bool:
+        linhas = GuimmaStudioMainWindow._linhas_graduacao_alerta_salvamento(molde)
+        if len(linhas) <= 1:
+            return False
+        ativos = molde.get("graduacao_tamanhos_ativos")
+        if isinstance(ativos, list):
+            nomes_ativos = [str(nome).strip() for nome in ativos if str(nome).strip()]
+        else:
+            nomes_ativos = [str(linha.get("tamanho") or "") for linha in linhas if linha.get("ativo", True)]
+        if len(nomes_ativos) <= 1:
+            return False
+        base = next((str(linha.get("tamanho") or "") for linha in linhas if linha.get("base")), nomes_ativos[len(nomes_ativos) // 2])
+        tamanhos_alvo = [nome for nome in nomes_ativos if nome and nome != base]
+        if not tamanhos_alvo:
+            return False
+        pontos_cfg = GuimmaStudioMainWindow._pontos_graduacao_cfg_alerta_salvamento(molde)
+        if not pontos_cfg:
+            return True
+        for tamanho in tamanhos_alvo:
+            encontrou = False
+            for cfg in pontos_cfg.values():
+                if not isinstance(cfg, dict):
+                    continue
+                valores = cfg.get("valores")
+                valor_tamanho = valores.get(tamanho) if isinstance(valores, dict) else None
+                if not isinstance(valor_tamanho, dict):
+                    continue
+                dx = GuimmaStudioMainWindow._float_alerta_salvamento(valor_tamanho.get("dx"))
+                dy = GuimmaStudioMainWindow._float_alerta_salvamento(valor_tamanho.get("dy"))
+                if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                    encontrou = True
+                    break
+            if not encontrou:
+                return True
+        return False
+
+    @staticmethod
+    def _coletar_alertas_moldes_elementos(
+        elementos: list,
+        *,
+        validar_ponto_cam: bool = True,
+        documento_idx: int = 0,
+        documento_nome: str = "",
+    ) -> list[dict]:
+        moldes = [
+            (idx, el)
+            for idx, el in enumerate(elementos or [])
+            if isinstance(el, dict) and el.get("molde")
+        ]
+        if not moldes:
+            return []
+
+        nomes_moldes: dict[str, list[tuple[int, str]]] = {}
+        nomes_tamanhos: dict[str, dict[str, str]] = {}
+        assinatura_referencia = ""
+        for idx, molde in moldes:
+            nome = GuimmaStudioMainWindow._nome_molde_alerta_salvamento(molde, idx)
+            chave_nome = GuimmaStudioMainWindow._chave_nome_molde_alerta_salvamento(nome)
+            if chave_nome:
+                nomes_moldes.setdefault(chave_nome, []).append((idx, nome))
+            assinatura = GuimmaStudioMainWindow._assinatura_grade_alerta_salvamento(molde)
+            if assinatura and not assinatura_referencia:
+                assinatura_referencia = assinatura
+            for tamanho in GuimmaStudioMainWindow._nomes_tamanhos_alerta_salvamento(molde):
+                chave_tamanho = GuimmaStudioMainWindow._chave_nome_tamanho_alerta_salvamento(tamanho)
+                if chave_tamanho:
+                    nomes_tamanhos.setdefault(chave_tamanho, {}).setdefault(tamanho.casefold(), tamanho)
+
+        nomes_moldes_repetidos = {
+            chave: nomes for chave, nomes in nomes_moldes.items() if len(nomes) > 1
+        }
+        tamanhos_conflitantes = {
+            chave: list(nomes.values()) for chave, nomes in nomes_tamanhos.items() if len(nomes) > 1
+        }
+
+        alertas: list[dict] = []
+        for idx, molde in moldes:
+            nome_molde = GuimmaStudioMainWindow._nome_molde_alerta_salvamento(molde, idx)
+            problemas: list[str] = []
+
+            def adicionar(texto: str):
+                if texto and texto not in problemas:
+                    problemas.append(texto)
+
+            if validar_ponto_cam and not GuimmaStudioMainWindow._molde_tem_ponto_cam_definido_alerta(molde):
+                adicionar("Ponto de cam nao definido")
+            if GuimmaStudioMainWindow._molde_tem_tamanhos_sem_graduacao_alerta(molde):
+                adicionar("Tamanhos sem graduacao")
+            assinatura = GuimmaStudioMainWindow._assinatura_grade_alerta_salvamento(molde)
+            if assinatura_referencia and assinatura and assinatura != assinatura_referencia:
+                adicionar("Grade diferente do modelo")
+            chaves_tamanho_molde = {
+                GuimmaStudioMainWindow._chave_nome_tamanho_alerta_salvamento(nome)
+                for nome in GuimmaStudioMainWindow._nomes_tamanhos_alerta_salvamento(molde)
+            }
+            for chave in sorted(chaves_tamanho_molde & set(tamanhos_conflitantes)):
+                adicionar(f"Nome do tamanho diferente: {' / '.join(tamanhos_conflitantes[chave])}")
+            chave_molde = GuimmaStudioMainWindow._chave_nome_molde_alerta_salvamento(nome_molde)
+            if chave_molde in nomes_moldes_repetidos:
+                nomes_repetidos = []
+                for _idx, nome in nomes_moldes_repetidos[chave_molde]:
+                    if nome not in nomes_repetidos:
+                        nomes_repetidos.append(nome)
+                adicionar(f"Nome do molde repetido: {' / '.join(nomes_repetidos)}")
+
+            if problemas:
+                alertas.append(
+                    {
+                        "documento_idx": int(documento_idx),
+                        "documento_nome": str(documento_nome or ""),
+                        "molde_idx": int(idx),
+                        "nome": nome_molde,
+                        "problemas": problemas,
+                    }
+                )
+        return alertas
+
+    def _coletar_alertas_moldes_salvamento(self) -> list[dict]:
+        alertas: list[dict] = []
+        validar_cam = bool(self._opcoes_app.get("validar_ponto_cam", True))
+        for doc_idx in range(self.abas_documentos.count()):
+            area = self.abas_documentos.widget(doc_idx)
+            if not isinstance(area, AreaDocumentoWidget):
+                continue
+            alertas.extend(
+                self._coletar_alertas_moldes_elementos(
+                    area.canvas.cena.elementos,
+                    validar_ponto_cam=validar_cam,
+                    documento_idx=doc_idx,
+                    documento_nome=self.abas_documentos.tabText(doc_idx),
+                )
+            )
+        return alertas
+
+    def _mostrar_molde_alerta_salvamento(self, documento_idx: int, molde_idx: int):
+        if 0 <= int(documento_idx) < self.abas_documentos.count():
+            self.abas_documentos.setCurrentIndex(int(documento_idx))
+        self._selecionar_molde_menu(int(molde_idx), centralizar=True)
+
+    def _mostrar_alertas_moldes_salvamento(self, alertas: list[dict]):
+        if not alertas:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Atencao: Molde(s) com problema(s)")
+        dialog.setModal(True)
+        dialog.resize(540, 480)
+        self._aplicar_estilo_claro_dialogo(dialog)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(6, 6, 6, 6)
+        tree = QTreeWidget(dialog)
+        tree.setHeaderHidden(True)
+        tree.setRootIsDecorated(True)
+        tree.setAlternatingRowColors(True)
+        icone_molde = QIcon(str(ICONS_DIR / "nome-molde-repetido.svg"))
+        icone_alerta = QIcon(str(ICONS_DIR / "grade-diferente-modelo.svg"))
+        for alerta in alertas:
+            parent = QTreeWidgetItem([str(alerta.get("nome") or "Molde")])
+            parent.setIcon(0, icone_molde if not icone_molde.isNull() else icone_alerta)
+            parent.setData(0, Qt.UserRole, (int(alerta.get("documento_idx", 0)), int(alerta.get("molde_idx", -1))))
+            for problema in alerta.get("problemas", []):
+                child = QTreeWidgetItem([str(problema)])
+                child.setIcon(0, icone_alerta)
+                child.setData(0, Qt.UserRole, parent.data(0, Qt.UserRole))
+                parent.addChild(child)
+            tree.addTopLevelItem(parent)
+            parent.setExpanded(True)
+
+        def _abrir_item(item: QTreeWidgetItem, _coluna: int):
+            data = item.data(0, Qt.UserRole)
+            if isinstance(data, tuple) and len(data) == 2:
+                self._mostrar_molde_alerta_salvamento(int(data[0]), int(data[1]))
+
+        tree.itemDoubleClicked.connect(_abrir_item)
+        layout.addWidget(tree)
+        rodape = QLabel("Clique duas vezes em um item para mostra-lo.")
+        layout.addWidget(rodape)
+        dialog.exec()
+
+    def _avisar_alertas_moldes_antes_salvar(self):
+        alertas = self._coletar_alertas_moldes_salvamento()
+        if alertas:
+            self._mostrar_alertas_moldes_salvamento(alertas)
+
     def _salvar_projeto(self) -> bool:
         if self._arquivo_atual is None:
             return self._salvar_projeto_como()
         self._renomear_abas_sem_nome(self._arquivo_atual.stem)
         self._sincronizar_documentos_canvas_no_projeto()
+        self._avisar_alertas_moldes_antes_salvar()
         GSProjectIO.salvar(self.projeto_atual, self._arquivo_atual)
         self._salvar_thumbnail_projeto(self._arquivo_atual)
         self.backstage.adicionar_recente(str(self._arquivo_atual))
@@ -6266,16 +6818,18 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
 
     def _salvar_projeto_como(self) -> bool:
-        pasta_inicial = Path(self._diretorio_arquivo_inicial())
+        fallback = Path(self._arquivo_atual).parent if self._arquivo_atual else None
+        pasta_inicial = Path(self._diretorio_memorizado_dialogo("salvamento", fallback=fallback, modo_salvar=True))
         nome_inicial = self._arquivo_atual.stem if self._arquivo_atual else "novo_projeto"
         dlg = SalvarComoDialog(self, pasta_inicial=pasta_inicial, nome_inicial=nome_inicial)
         QTimer.singleShot(0, lambda: self._centralizar_dialogo_na_janela(dlg))
         if dlg.exec():
             destino = dlg.caminho_destino()
-            self._memorizar_diretorio_arquivo(destino)
+            self._memorizar_local_dialogo("salvamento", destino, modo_salvar=True)
             self.projeto_atual.preferencias_usuario["salvar_como_meta"] = dlg.metadados()
             self._renomear_abas_sem_nome(destino.stem)
             self._sincronizar_documentos_canvas_no_projeto()
+            self._avisar_alertas_moldes_antes_salvar()
             GSProjectIO.salvar(self.projeto_atual, destino)
             self._salvar_thumbnail_projeto(destino)
             self._arquivo_atual = destino

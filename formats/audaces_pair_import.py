@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from math import atan2, degrees
 from statistics import median
 from pathlib import Path
 
@@ -20,6 +21,10 @@ class AudacesPairImport:
     # Fator anterior fino: 19.2020894467
     # Fator final corrigido: 19.2020894467 * 0.7381310453 = 14.1736583552598
     ESCALA_CALIBRACAO_PADRAO = 14.1736583552598
+    # EMF sem XML vem com outra relacao de escala neste export do Audaces. O
+    # fator abaixo mantém a calibracao separada do par EMF+XML e inclui as
+    # conferencias visuais mais recentes: 41.7 -> 43 cm e 16.41 -> 17.22 cm.
+    ESCALA_CALIBRACAO_EMF_DIRETO = 8.782369373988214
 
     @staticmethod
     def _dimensoes_elemento(elemento) -> tuple[float, float, float, float]:
@@ -32,6 +37,544 @@ class AudacesPairImport:
         perimetro = AudacesEMFImport._comprimento_polyline(elemento.pontos)
         area = abs(AudacesEMFImport._area_assinada(elemento.pontos))
         return largura, altura, perimetro, area
+
+    @staticmethod
+    def _bbox_pontos(pontos: list[tuple[float, float]]) -> tuple[float, float, float, float] | None:
+        if not pontos:
+            return None
+        xs = [float(x) for x, _ in pontos]
+        ys = [float(y) for _, y in pontos]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    @classmethod
+    def _bbox_emf_doc(cls, emf_doc) -> tuple[float, float, float, float] | None:
+        pontos: list[tuple[float, float]] = []
+        for el in getattr(emf_doc, "elementos", []) or []:
+            pontos.extend((float(x), float(y)) for x, y in getattr(el, "pontos", []) or [])
+        for tx in getattr(emf_doc, "textos", []) or []:
+            pos = tx.get("pos") if isinstance(tx, dict) else None
+            if isinstance(pos, (tuple, list)) and len(pos) == 2:
+                pontos.append((float(pos[0]), float(pos[1])))
+        return cls._bbox_pontos(pontos)
+
+    @classmethod
+    def _transladar_emf_doc(cls, emf_doc, dx: float, dy: float) -> None:
+        if abs(dx) < 1e-12 and abs(dy) < 1e-12:
+            return
+        for el in getattr(emf_doc, "elementos", []) or []:
+            el.pontos = [(float(x) + dx, float(y) + dy) for x, y in getattr(el, "pontos", []) or []]
+            el.bbox = AudacesEMFImport._bbox(el.pontos)
+            el.metadados["deslocamento_importacao"] = (dx, dy)
+        for tx in getattr(emf_doc, "textos", []) or []:
+            pos = tx.get("pos") if isinstance(tx, dict) else None
+            if isinstance(pos, (tuple, list)) and len(pos) == 2:
+                tx["pos"] = (float(pos[0]) + dx, float(pos[1]) + dy)
+        bbox = cls._bbox_emf_doc(emf_doc)
+        if bbox:
+            emf_doc.bounds = bbox
+            emf_doc.largura = max(bbox[2] - bbox[0], 0.0)
+            emf_doc.altura = max(bbox[3] - bbox[1], 0.0)
+
+    @classmethod
+    def _centralizar_emf_doc_no_zero(cls, emf_doc) -> dict:
+        bbox = cls._bbox_emf_doc(emf_doc)
+        if not bbox:
+            return {"aplicado": False, "dx": 0.0, "dy": 0.0, "bbox_original": None}
+        minx, miny, maxx, maxy = bbox
+        dx = -((minx + maxx) / 2.0)
+        dy = -((miny + maxy) / 2.0)
+        cls._transladar_emf_doc(emf_doc, dx, dy)
+        return {
+            "aplicado": True,
+            "dx": dx,
+            "dy": dy,
+            "bbox_original": bbox,
+            "bbox_final": cls._bbox_emf_doc(emf_doc),
+        }
+
+    @classmethod
+    def _centralizar_elementos_canvas_no_zero(cls, elementos_canvas: list[dict], doc: Documento | None = None) -> dict:
+        pontos: list[tuple[float, float]] = []
+        for el in elementos_canvas or []:
+            if not isinstance(el, dict):
+                continue
+            pontos.extend((float(x), float(y)) for x, y in el.get("pontos", []) or [])
+            pos = el.get("pos")
+            if isinstance(pos, (tuple, list)) and len(pos) == 2:
+                pontos.append((float(pos[0]), float(pos[1])))
+            for item in el.get("graduacao_contornos_importados", []) or []:
+                if isinstance(item, dict):
+                    pontos.extend((float(x), float(y)) for x, y in item.get("pontos", []) or [])
+        bbox = cls._bbox_pontos(pontos)
+        if not bbox:
+            return {"aplicado": False, "dx": 0.0, "dy": 0.0, "bbox_original": None}
+        minx, miny, maxx, maxy = bbox
+        dx = -((minx + maxx) / 2.0)
+        dy = -((miny + maxy) / 2.0)
+        if abs(dx) < 1e-12 and abs(dy) < 1e-12:
+            return {"aplicado": False, "dx": 0.0, "dy": 0.0, "bbox_original": bbox, "bbox_final": bbox}
+
+        def mover_ponto(valor):
+            if isinstance(valor, (tuple, list)) and len(valor) >= 2:
+                return (float(valor[0]) + dx, float(valor[1]) + dy)
+            return valor
+
+        for el in elementos_canvas or []:
+            if not isinstance(el, dict):
+                continue
+            if el.get("pontos"):
+                el["pontos"] = [mover_ponto(pt) for pt in el.get("pontos", [])]
+            for chave in ("pos", "fio_origem", "fio_fim", "ponto_texto"):
+                if chave in el:
+                    el[chave] = mover_ponto(el.get(chave))
+            for item in el.get("graduacao_contornos_importados", []) or []:
+                if isinstance(item, dict) and item.get("pontos"):
+                    item["pontos"] = [mover_ponto(pt) for pt in item.get("pontos", [])]
+
+        if doc is not None:
+            for molde in getattr(doc, "moldes", []) or []:
+                for parte in getattr(molde, "partes", []) or []:
+                    for ponto in getattr(parte, "pontos", []) or []:
+                        ponto.x = float(ponto.x) + dx
+                        ponto.y = float(ponto.y) + dy
+
+        return {
+            "aplicado": True,
+            "dx": dx,
+            "dy": dy,
+            "bbox_original": bbox,
+            "bbox_final": (
+                bbox[0] + dx,
+                bbox[1] + dy,
+                bbox[2] + dx,
+                bbox[3] + dy,
+            ),
+        }
+
+    @staticmethod
+    def _assinatura_elemento(elemento) -> tuple | None:
+        pontos = getattr(elemento, "pontos", None)
+        if pontos is None and isinstance(elemento, dict):
+            pontos = elemento.get("pontos")
+        if not pontos:
+            return None
+        pts = [(float(x), float(y)) for x, y in pontos]
+        bbox = AudacesEMFImport._bbox(pts)
+        if not bbox:
+            return None
+        area = abs(AudacesEMFImport._area_assinada(pts))
+        return (
+            round(bbox[0], 3),
+            round(bbox[1], 3),
+            round(bbox[2], 3),
+            round(bbox[3], 3),
+            round(area, 3),
+        )
+
+    @staticmethod
+    def _rgb_hex(cor: str | None) -> tuple[int, int, int] | None:
+        texto = str(cor or "").strip()
+        if texto.startswith("#"):
+            texto = texto[1:]
+        if len(texto) != 6:
+            return None
+        try:
+            return int(texto[0:2], 16), int(texto[2:4], 16), int(texto[4:6], 16)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _dist_rgb(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
+
+    @classmethod
+    def _cor_proxima(cls, cor: str | None, alvo: tuple[int, int, int], tolerancia: float = 90.0) -> bool:
+        rgb = cls._rgb_hex(cor)
+        return bool(rgb and cls._dist_rgb(rgb, alvo) <= tolerancia)
+
+    @classmethod
+    def _tamanho_audaces_por_cor(cls, cor: str, tem_amarelo: bool) -> tuple[str, int] | None:
+        """Mapeia cores usuais de grade do Audaces para nomes de tamanho.
+
+        Alguns EMFs exportados sem XML nao carregam a linha amarela da grade.
+        Nesses casos a sequencia vem deslocada e o verde passa a representar o
+        tamanho base P, nao PP.
+        """
+        referencias = [
+            ("verde", (0, 208, 0)),
+            ("amarelo", (255, 255, 0)),
+            ("azul", (0, 128, 255)),
+            ("branco", (255, 255, 255)),
+            ("magenta", (255, 0, 255)),
+            ("laranja", (255, 128, 0)),
+            ("roxo", (170, 0, 255)),
+        ]
+        rgb = cls._rgb_hex(cor)
+        if not rgb:
+            return None
+        nome_cor, distancia = min(
+            ((nome, cls._dist_rgb(rgb, ref)) for nome, ref in referencias),
+            key=lambda item: item[1],
+        )
+        if distancia > 95.0:
+            return None
+        if nome_cor == "verde":
+            return ("PP", 0) if tem_amarelo else ("P", 1)
+        if nome_cor == "amarelo":
+            return "P", 1
+        if nome_cor == "azul":
+            return "M", 2
+        if nome_cor == "branco":
+            return "G", 3
+        if nome_cor == "magenta":
+            return "GG", 4
+        if nome_cor == "laranja":
+            return "EXG", 5
+        if nome_cor == "roxo":
+            return "G2", 6
+        return None
+
+    @classmethod
+    def _grade_detectada_por_cores(cls, elementos) -> tuple[str, list[dict], str | None] | None:
+        cores: list[str] = []
+        for el in elementos or []:
+            subtipo = str(getattr(el, "metadados", {}).get("subtipo_audaces") or "")
+            if subtipo not in {"contorno", "costura"}:
+                continue
+            cor = str(getattr(el, "cor", "") or "").strip().lower()
+            if not cor or cor == "#ff7b00":
+                continue
+            if cor not in cores:
+                cores.append(cor)
+        if len(cores) < 2:
+            return None
+
+        tem_amarelo = any(cls._cor_proxima(cor, (255, 255, 0), tolerancia=95.0) for cor in cores)
+        conhecidas: list[tuple[int, str, str]] = []
+        desconhecidas: list[tuple[int, str, str]] = []
+        labels_usados: set[str] = set()
+        for idx, cor in enumerate(cores):
+            info = cls._tamanho_audaces_por_cor(cor, tem_amarelo)
+            if info:
+                label, ordem = info
+                if label not in labels_usados:
+                    conhecidas.append((ordem, label, cor))
+                    labels_usados.add(label)
+                    continue
+            desconhecidas.append((100 + idx, f"T{len(desconhecidas) + 1}", cor))
+        ordenadas = sorted(conhecidas + desconhecidas, key=lambda item: (item[0], item[1]))
+        if len(ordenadas) < 2:
+            return None
+
+        labels = [label for _ordem, label, _cor in ordenadas]
+        if "P" in labels:
+            base = "P"
+        elif "G" in labels:
+            base = "G"
+        else:
+            base = labels[len(labels) // 2]
+
+        linhas: list[dict] = []
+        for _ordem, label, cor in ordenadas:
+            linhas.append({"ativo": True, "tamanho": label, "cor": cor, "base": label == base})
+        grade_nome = f"{labels[0]}-{labels[-1]}({base})" if base else f"{labels[0]}-{labels[-1]}"
+        return grade_nome, linhas, base
+
+    @staticmethod
+    def _nome_texto_contido(contorno, textos: list[dict], fallback: str) -> str:
+        candidatos: list[tuple[int, str]] = []
+        for tx in textos or []:
+            texto = " ".join(str(tx.get("texto") or "").strip().split())
+            if len(texto) < 2:
+                continue
+            pos = tx.get("pos")
+            if not isinstance(pos, (tuple, list)) or len(pos) != 2:
+                continue
+            if AudacesEMFImport._ponto_em_poligono((float(pos[0]), float(pos[1])), contorno.pontos):
+                limpo = texto.replace("\x00", "").strip()
+                if limpo and "quantidade" not in limpo.lower():
+                    candidatos.append((len(limpo), limpo[:60]))
+        if candidatos:
+            return max(candidatos, key=lambda item: item[0])[1]
+        return fallback
+
+    @classmethod
+    def _detectar_fio_do_contorno(cls, contorno, elementos) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        bbox = cls._bbox_pontos([(float(x), float(y)) for x, y in contorno.pontos])
+        if not bbox:
+            return None
+        minx, miny, maxx, maxy = bbox
+        cx = (minx + maxx) / 2.0
+        cy = (miny + maxy) / 2.0
+        diagonal = max(((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5, 1.0)
+        candidatos: list[tuple[float, tuple[tuple[float, float], tuple[float, float]]]] = []
+        for extra in elementos or []:
+            if extra is contorno or getattr(extra, "fechado", False):
+                continue
+            subtipo = str(getattr(extra, "metadados", {}).get("subtipo_audaces") or "")
+            if subtipo in {"texto", "anotacao", "pique"}:
+                continue
+            pontos = [(float(x), float(y)) for x, y in getattr(extra, "pontos", []) or []]
+            if len(pontos) < 2:
+                continue
+            p0, p1 = pontos[0], pontos[-1]
+            direto = AudacesEMFImport._dist(p0, p1)
+            if direto < max(1.2, diagonal * 0.15):
+                continue
+            total = AudacesEMFImport._comprimento_polyline(pontos)
+            if direto <= 1e-9:
+                continue
+            meio = ((p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0)
+            dentro_meio = AudacesEMFImport._ponto_em_poligono(meio, contorno.pontos)
+            dentro_inicio = AudacesEMFImport._ponto_em_poligono(p0, contorno.pontos)
+            dentro_fim = AudacesEMFImport._ponto_em_poligono(p1, contorno.pontos)
+            if not (dentro_meio or (dentro_inicio and dentro_fim)):
+                continue
+            ebbox = cls._bbox_pontos(pontos)
+            if not ebbox:
+                continue
+            ew = max(ebbox[2] - ebbox[0], 1e-9)
+            eh = max(ebbox[3] - ebbox[1], 1e-9)
+            eixo_dominante = max(ew, eh) / max(min(ew, eh), 1e-9)
+            # O EMF do Audaces pode fundir haste, seta e texto em uma mesma
+            # polyline; por isso aceitamos uma caixa fina mesmo quando o
+            # comprimento acumulado fica maior que a distancia ponta-a-ponta.
+            if total / direto > 1.2 and eixo_dominante < 3.0:
+                continue
+            distancia_centro = AudacesEMFImport._dist(meio, (cx, cy))
+            score = direto + (eixo_dominante * 0.25) - (distancia_centro * 0.25)
+            candidatos.append((score, (p0, p1)))
+        if not candidatos:
+            return None
+        return max(candidatos, key=lambda item: item[0])[1]
+
+    @staticmethod
+    def _area_bbox(bbox: tuple[float, float, float, float]) -> float:
+        return max(0.0, float(bbox[2]) - float(bbox[0])) * max(0.0, float(bbox[3]) - float(bbox[1]))
+
+    @classmethod
+    def _sobreposicao_bbox_menor(cls, a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+        ix1 = max(float(a[0]), float(b[0]))
+        iy1 = max(float(a[1]), float(b[1]))
+        ix2 = min(float(a[2]), float(b[2]))
+        iy2 = min(float(a[3]), float(b[3]))
+        inter = cls._area_bbox((ix1, iy1, ix2, iy2))
+        menor = min(cls._area_bbox(a), cls._area_bbox(b))
+        if menor <= 1e-9:
+            return 0.0
+        return inter / menor
+
+    @staticmethod
+    def _centro_bbox(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
+        return (float(bbox[0]) + float(bbox[2])) / 2.0, (float(bbox[1]) + float(bbox[3])) / 2.0
+
+    @staticmethod
+    def _diagonal_bbox(bbox: tuple[float, float, float, float]) -> float:
+        return max(
+            ((float(bbox[2]) - float(bbox[0])) ** 2 + (float(bbox[3]) - float(bbox[1])) ** 2) ** 0.5,
+            1e-9,
+        )
+
+    @classmethod
+    def _bboxes_mesma_familia(cls, a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+        if cls._sobreposicao_bbox_menor(a, b) >= 0.48:
+            return True
+        ca = cls._centro_bbox(a)
+        cb = cls._centro_bbox(b)
+        dist = AudacesEMFImport._dist(ca, cb)
+        diag = max(cls._diagonal_bbox(a), cls._diagonal_bbox(b))
+        aw, ah = max(float(a[2]) - float(a[0]), 1e-9), max(float(a[3]) - float(a[1]), 1e-9)
+        bw, bh = max(float(b[2]) - float(b[0]), 1e-9), max(float(b[3]) - float(b[1]), 1e-9)
+        proporcao_ok = 0.38 <= aw / bw <= 2.65 and 0.38 <= ah / bh <= 2.65
+        return proporcao_ok and dist <= diag * 0.28
+
+    @staticmethod
+    def _mapa_grade_por_cor(grade_detectada: tuple[str, list[dict], str | None] | None) -> dict[str, dict]:
+        if not grade_detectada:
+            return {}
+        _grade_nome, linhas, _base = grade_detectada
+        mapa: dict[str, dict] = {}
+        for idx, linha in enumerate(linhas or []):
+            cor = str(linha.get("cor") or "").strip().lower()
+            if not cor:
+                continue
+            mapa[cor] = {**dict(linha), "_ordem": idx}
+        return mapa
+
+    @classmethod
+    def _agrupar_contornos_graduados_emf(
+        cls,
+        elementos,
+        grade_detectada: tuple[str, list[dict], str | None] | None,
+    ) -> list[dict]:
+        mapa_cores = cls._mapa_grade_por_cor(grade_detectada)
+        fechados = []
+        for el in elementos or []:
+            if not getattr(el, "fechado", False) or len(getattr(el, "pontos", []) or []) < 4:
+                continue
+            subtipo = str(getattr(el, "metadados", {}).get("subtipo_audaces") or "")
+            if subtipo not in {"contorno", "costura"}:
+                continue
+            area = abs(AudacesEMFImport._area_assinada(el.pontos))
+            if area < 10.0:
+                continue
+            bbox = cls._bbox_pontos([(float(x), float(y)) for x, y in el.pontos])
+            if not bbox:
+                continue
+            fechados.append({"el": el, "bbox": bbox, "area": area, "cor": str(el.cor or "").strip().lower()})
+
+        grupos: list[dict] = []
+        for item in sorted(fechados, key=lambda it: (-it["area"], it["bbox"][1], it["bbox"][0])):
+            destino = None
+            for grupo in grupos:
+                if any(cls._bboxes_mesma_familia(item["bbox"], membro["bbox"]) for membro in grupo["membros"]):
+                    destino = grupo
+                    break
+            if destino is None:
+                destino = {"membros": [], "bbox": item["bbox"]}
+                grupos.append(destino)
+            destino["membros"].append(item)
+
+        saida: list[dict] = []
+        for grupo in grupos:
+            membros = grupo["membros"]
+            if not membros:
+                continue
+            base_item = None
+            for item in membros:
+                linha = mapa_cores.get(item["cor"])
+                if linha and linha.get("base"):
+                    base_item = item
+                    break
+            if base_item is None:
+                ordenados_area = sorted(membros, key=lambda it: it["area"])
+                base_item = ordenados_area[len(ordenados_area) // 2]
+
+            contornos = []
+            for item in sorted(membros, key=lambda it: int(mapa_cores.get(it["cor"], {}).get("_ordem", 999))):
+                linha = mapa_cores.get(item["cor"], {})
+                nome = str(linha.get("tamanho") or linha.get("nome") or "").strip()
+                if not nome:
+                    nome = f"T{len(contornos) + 1}"
+                pontos = [(float(x), float(y)) for x, y in item["el"].pontos]
+                if pontos and pontos[0] != pontos[-1]:
+                    pontos.append(pontos[0])
+                contornos.append({
+                    "tamanho": nome,
+                    "cor": item["el"].cor or linha.get("cor") or "#ffcc00",
+                    "base": item is base_item,
+                    "pontos": pontos,
+                    "assinatura": cls._assinatura_elemento(item["el"]),
+                })
+            base_item["el"].metadados["subtipo_audaces"] = "contorno"
+            for item in membros:
+                if item is not base_item:
+                    item["el"].metadados["subtipo_audaces"] = "graduacao_importada"
+            saida.append({
+                "base": base_item["el"],
+                "assinatura_base": cls._assinatura_elemento(base_item["el"]),
+                "assinaturas_membros": {
+                    assinatura
+                    for assinatura in (cls._assinatura_elemento(item["el"]) for item in membros)
+                    if assinatura
+                },
+                "contornos": contornos,
+                "quantidade_tamanhos": len(contornos),
+            })
+        return saida
+
+    @classmethod
+    def _aplicar_metadados_moldes_emf(
+        cls,
+        elementos_canvas: list[dict],
+        contornos,
+        emf_doc,
+        nome_arquivo: str,
+        grade_detectada: tuple[str, list[dict], str | None] | None,
+        grupos_graduados: list[dict] | None = None,
+    ) -> dict:
+        grupos_por_base = {
+            grupo.get("assinatura_base"): grupo
+            for grupo in (grupos_graduados or [])
+            if grupo.get("assinatura_base")
+        }
+        mapa: dict[tuple, dict] = {}
+        for idx, contorno in enumerate(contornos, start=1):
+            assinatura = cls._assinatura_elemento(contorno)
+            if not assinatura:
+                continue
+            nome_base = f"K{idx}"
+            nome_detectado = cls._nome_texto_contido(contorno, getattr(emf_doc, "textos", []), nome_base)
+            fio = cls._detectar_fio_do_contorno(contorno, getattr(emf_doc, "elementos", []))
+            bbox = cls._bbox_pontos([(float(x), float(y)) for x, y in contorno.pontos])
+            ponto_texto = None
+            if bbox:
+                ponto_texto = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+            mapa[assinatura] = {
+                "nome": nome_detectado,
+                "nome_origem_texto": nome_detectado != nome_base,
+                "molde_id": f"emf-{idx:03d}",
+                "fio": fio,
+                "ponto_texto": ponto_texto,
+                "grupo": grupos_por_base.get(assinatura),
+            }
+
+        aplicados = 0
+        fios = 0
+        grupos_aplicados = 0
+        for el in elementos_canvas:
+            if not isinstance(el, dict):
+                continue
+            if el.get("origem") == "audaces_emf":
+                el["render_smooth"] = bool(
+                    el.get("molde")
+                    or str(el.get("subtipo_audaces") or "").strip() in {"contorno", "costura"}
+                )
+            if not el.get("molde"):
+                continue
+            meta = mapa.get(cls._assinatura_elemento(el))
+            if not meta:
+                continue
+            el["nome_molde"] = meta["nome"]
+            el["molde_id"] = meta["molde_id"]
+            el["mostrar_nome"] = bool(meta.get("nome_origem_texto"))
+            if meta.get("ponto_texto"):
+                el["ponto_texto"] = meta["ponto_texto"]
+            if grade_detectada:
+                grade_nome, linhas, base = grade_detectada
+                el["graduacao_grade_nome"] = grade_nome
+                el["graduacao_tamanhos"] = [dict(linha) for linha in linhas]
+                el["graduacao_tamanhos_ativos"] = [
+                    str(linha.get("tamanho") or "")
+                    for linha in linhas
+                    if linha.get("ativo", True)
+                ]
+                el["tamanho_base_detectado"] = base
+            grupo = meta.get("grupo")
+            if isinstance(grupo, dict) and grupo.get("contornos"):
+                el["graduacao_contornos_importados"] = [
+                    {
+                        "tamanho": item.get("tamanho"),
+                        "cor": item.get("cor"),
+                        "base": bool(item.get("base")),
+                        "pontos": list(item.get("pontos") or []),
+                    }
+                    for item in grupo.get("contornos", [])
+                ]
+                el["mostrar_graduacao"] = True
+                el["metadados"].setdefault("graduacao_importada_origem", "emf_contornos_coloridos")
+                grupos_aplicados += 1
+            fio = meta.get("fio")
+            if fio:
+                p0, p1 = fio
+                el["fio_origem"] = p0
+                el["fio_fim"] = p1
+                el["fio_angulo"] = degrees(atan2(p1[1] - p0[1], p1[0] - p0[0]))
+                el["mostrar_fio"] = True
+                fios += 1
+            el.setdefault("metadados", {})["nome_arquivo_origem"] = nome_arquivo
+            aplicados += 1
+        return {"moldes_nomeados": aplicados, "fios_detectados": fios, "grupos_graduados": grupos_aplicados}
 
     @staticmethod
     def _dimensoes_peca_xml(peca) -> dict | None:
@@ -388,6 +931,8 @@ class AudacesPairImport:
             "contornos_ignorados": total_ignorados,
             "contornos_abertos_restantes": sum(1 for e in emf_doc.elementos if not e.fechado),
             "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "motor_cpp_curvas": parser_ops._join_stats.get("motor_cpp_curvas", 0),
+            "motor_cpp_falhas": parser_ops._join_stats.get("motor_cpp_falhas", 0),
             "elementos_canvas_final": len(elementos_canvas),
         }
         contornos = [el for el in emf_doc.elementos if el.fechado and len(el.pontos) >= 4 and el.metadados.get("subtipo_audaces") == "contorno"]
@@ -458,6 +1003,8 @@ class AudacesPairImport:
             "segmentos_originais_lidos_emf": parser_ops._join_stats.get("segmentos_originais", 0),
             "segmentos_unidos": parser_ops._join_stats.get("segmentos_unidos", 0),
             "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "motor_cpp_curvas": parser_ops._join_stats.get("motor_cpp_curvas", 0),
+            "motor_cpp_falhas": parser_ops._join_stats.get("motor_cpp_falhas", 0),
             "contornos_abertos_restantes": depois["contornos_abertos_restantes"],
             "bounds_emf": emf_doc.bounds,
             "escala": dict(emf_doc.relatorio.get("escala", {})),
@@ -548,28 +1095,178 @@ class AudacesPairImport:
 
     @classmethod
     def importar_apenas_emf(cls, emf_path: str | Path, projeto: Projeto) -> Projeto:
-        emf_doc = AudacesEMFImport.abrir(emf_path)
-        fator_escala_final = cls.ESCALA_CALIBRACAO_PADRAO
+        emf_path = Path(emf_path)
+        nome_arquivo = emf_path.stem or emf_path.name
+        emf_doc = AudacesEMFImport.abrir(emf_path, reconstruir_curvas=False, suavizar_curvas=False)
+        fator_escala_final = cls.ESCALA_CALIBRACAO_EMF_DIRETO
         cls._aplicar_escala_emf_doc(emf_doc, fator_escala_final)
+        parser_ops = AudacesEMFImport(b"", emf_path)
+        antes = {
+            "elementos_emf": len(emf_doc.elementos),
+            "segmentos_soltos": sum(1 for e in emf_doc.elementos if not e.fechado),
+            "contorno": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "contorno"),
+            "costura": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "costura"),
+            "linha_interna": sum(1 for e in emf_doc.elementos if e.metadados.get("subtipo_audaces") == "linha_interna"),
+        }
+        unidos = parser_ops._unir_segmentos_em_contornos(emf_doc.elementos)
+        unidos, total_contornos_principais, total_costuras, total_linhas_internas, total_ignorados = (
+            cls._classificar_contornos_unidos(unidos, None)
+        )
+        reconstruidos: list = []
+        for el in unidos:
+            subtipo = str(el.metadados.get("subtipo_audaces") or "")
+            if subtipo in {"contorno", "costura"} and len(el.pontos) >= 5:
+                reconstruidos.append(parser_ops._reconstruir_curvas_do_contorno(el))
+            else:
+                reconstruidos.append(el)
+        unidos = reconstruidos
+        emf_doc.elementos = unidos
+        centralizacao = cls._centralizar_emf_doc_no_zero(emf_doc)
+        grade_detectada = cls._grade_detectada_por_cores(emf_doc.elementos)
+        grupos_graduados = cls._agrupar_contornos_graduados_emf(emf_doc.elementos, grade_detectada)
+        assinaturas_graduacao_ocultas: set[tuple] = set()
+        assinaturas_grupos: set[tuple] = set()
+        for grupo in grupos_graduados:
+            assinatura_base = grupo.get("assinatura_base")
+            membros = {
+                assinatura
+                for assinatura in (grupo.get("assinaturas_membros") or set())
+                if assinatura
+            }
+            assinaturas_grupos.update(membros)
+            assinaturas_graduacao_ocultas.update(membros)
+            if assinatura_base in assinaturas_graduacao_ocultas:
+                assinaturas_graduacao_ocultas.remove(assinatura_base)
         elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
+        if assinaturas_graduacao_ocultas:
+            elementos_canvas = [
+                el
+                for el in elementos_canvas
+                if cls._assinatura_elemento(el) not in assinaturas_graduacao_ocultas
+            ]
         if not projeto.documentos:
-            projeto.documentos.append(Documento(nome="Documento 1"))
+            projeto.documentos.append(Documento(nome=nome_arquivo))
+        projeto.nome = nome_arquivo
         doc = projeto.documentos[0]
+        doc.nome = nome_arquivo
         doc.moldes = []
-        for idx, el in enumerate([e for e in emf_doc.elementos if e.fechado and len(e.pontos) >= 4], start=1):
-            parte = Parte(nome=f"Molde EMF {idx}", pontos=[Ponto(x=float(x), y=float(y)) for x, y in el.pontos])
-            doc.moldes.append(Molde(nome=f"Molde EMF {idx}", partes=[parte]))
+        contornos = [grupo["base"] for grupo in grupos_graduados if grupo.get("base") is not None]
+        contornos.extend(
+            e
+            for e in emf_doc.elementos
+            if (
+                e.fechado
+                and len(e.pontos) >= 4
+                and e.metadados.get("subtipo_audaces") == "contorno"
+                and cls._assinatura_elemento(e) not in assinaturas_grupos
+            )
+        )
+        contornos = sorted(
+            contornos,
+            key=lambda el: (
+                min((p[1] for p in el.pontos), default=0.0),
+                min((p[0] for p in el.pontos), default=0.0),
+                -abs(AudacesEMFImport._area_assinada(el.pontos)),
+            ),
+        )
+        for idx, el in enumerate(contornos, start=1):
+            nome_molde = cls._nome_texto_contido(el, emf_doc.textos, f"K{idx}")
+            parte = Parte(nome=nome_molde, pontos=[Ponto(x=float(x), y=float(y)) for x, y in el.pontos])
+            parte.marcacoes.extend(["origem:audaces_emf", "contorno"])
+            for extra in emf_doc.elementos:
+                if extra is el:
+                    continue
+                subtipo = str(extra.metadados.get("subtipo_audaces") or "")
+                if subtipo not in {"costura", "linha_interna", "fio", "pique"}:
+                    continue
+                if extra.pontos and el.pontos and AudacesEMFImport._ponto_em_poligono(extra.pontos[0], el.pontos):
+                    parte.marcacoes.append(subtipo)
+            if cls._detectar_fio_do_contorno(el, emf_doc.elementos):
+                parte.marcacoes.append("fio")
+            doc.moldes.append(Molde(nome=nome_molde, partes=[parte]))
+        metadados_moldes = cls._aplicar_metadados_moldes_emf(
+            elementos_canvas,
+            contornos,
+            emf_doc,
+            nome_arquivo,
+            grade_detectada,
+            grupos_graduados,
+        )
+        centralizacao_canvas = cls._centralizar_elementos_canvas_no_zero(elementos_canvas, doc)
+        depois = {
+            "segmentos_unidos": parser_ops._join_stats.get("segmentos_unidos", 0),
+            "contornos_fechados_encontrados": sum(1 for e in emf_doc.elementos if e.fechado),
+            "contornos_classificados_como_contorno": total_contornos_principais,
+            "contornos_classificados_como_costura": total_costuras,
+            "contornos_classificados_como_linha_interna": total_linhas_internas,
+            "contornos_ignorados": total_ignorados,
+            "contornos_abertos_restantes": sum(1 for e in emf_doc.elementos if not e.fechado),
+            "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "motor_cpp_curvas": parser_ops._join_stats.get("motor_cpp_curvas", 0),
+            "motor_cpp_falhas": parser_ops._join_stats.get("motor_cpp_falhas", 0),
+            "elementos_canvas_final": len(elementos_canvas),
+            "contornos_graduacao_ocultos": len(assinaturas_graduacao_ocultas),
+            "grupos_graduados_detectados": len(grupos_graduados),
+            **metadados_moldes,
+        }
 
         projeto.preferencias_usuario["audaces_emf_importacao"] = {
             "origem": "audaces_emf",
             "emf_path": str(emf_path),
+            "nome_arquivo": nome_arquivo,
             "elementos_canvas": elementos_canvas,
             "relatorio": dict(emf_doc.relatorio),
+            "vetores": len([el for el in elementos_canvas if el.get("tipo") == "polyline"]),
+            "elementos_canvas_antes_uniao": antes["elementos_emf"],
+            "moldes_detectados": len(contornos),
+            "contornos_fechados": len(contornos),
+            "moldes_reais": len(doc.moldes),
+            "segmentos_originais_lidos_emf": parser_ops._join_stats.get("segmentos_originais", 0),
+            "segmentos_unidos": parser_ops._join_stats.get("segmentos_unidos", 0),
+            "curvas_reconstruidas": parser_ops._join_stats.get("curvas_reconstruidas", 0),
+            "motor_cpp_curvas": parser_ops._join_stats.get("motor_cpp_curvas", 0),
+            "motor_cpp_falhas": parser_ops._join_stats.get("motor_cpp_falhas", 0),
+            "contornos_abertos_restantes": depois["contornos_abertos_restantes"],
+            "centralizacao_importacao": {
+                **centralizacao,
+                "canvas_visivel": centralizacao_canvas,
+            },
+            "diagnostico_antes": antes,
+            "diagnostico_depois": {
+                **depois,
+                "moldes_reais_criados": len(doc.moldes),
+            },
             "escala_manual_aplicada": fator_escala_final,
-            "medida_guimma_referencia_mm": 544.28,
-            "medida_audaces_referencia_mm": 400.17,
+            "medidas_calibracao": [
+                {"audaces_cm": 40.0, "guimma_cm_anterior": 65.54},
+                {"audaces_cm": 16.0, "guimma_cm_anterior": 27.54},
+                {"audaces_cm": 43.0, "guimma_cm_anterior": 41.7},
+                {"audaces_cm": 17.22, "guimma_cm_anterior": 16.41},
+            ],
+            "grade_detectada": {
+                "nome": grade_detectada[0],
+                "tamanho_base": grade_detectada[2],
+                "quantidade_tamanhos": len(grade_detectada[1]),
+            } if grade_detectada else None,
+            "fios_detectados": metadados_moldes.get("fios_detectados", 0),
+            "textos_emf_detectados": len(getattr(emf_doc, "textos", []) or []),
+            "nomes_moldes_origem": (
+                "texto_emf_decodificado"
+                if any(str(tx.get("texto") or "").strip() for tx in getattr(emf_doc, "textos", []) or [])
+                else "indice_temporario_sem_strings_texto_no_emf"
+            ),
             "fator_escala_final": fator_escala_final,
-            "unidade_resultado": "cm_calibrado_por_referencia_mm",
+            "unidade_resultado": "cm_calibrado_por_referencia_emf_direto",
+            "canvas_origem": "moldes_reais_processados" if doc.moldes else "elementos_emf",
+            "canvas_moldes_renderizados": len(doc.moldes),
+            "canvas_elementos_emf_renderizados": len(elementos_canvas),
+            "mensagem_final": (
+                f"EMF importado: {len(doc.moldes)} moldes reais detectados, "
+                f"{parser_ops._join_stats.get('segmentos_unidos', 0)} segmentos unidos, "
+                f"{metadados_moldes.get('fios_detectados', 0)} fios detectados."
+                if doc.moldes
+                else "Nenhum contorno fechado confiavel foi encontrado. O EMF foi importado como linhas tecnicas."
+            ),
         }
         projeto.preferencias_usuario.setdefault("audaces_importados_originais", {})["emf"] = {
             "nome": Path(emf_path).name,

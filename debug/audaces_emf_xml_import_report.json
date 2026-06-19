@@ -1,5 +1,5 @@
 {
-  "arquivo_emf": "C:\\Users\\User\\AppData\\Local\\Temp\\tmp_21ocd_d\\01.emf",
+  "arquivo_emf": "C:\\Users\\User\\AppData\\Local\\Temp\\tmpr7efew7u\\01.emf",
   "records_emf_total": 3,
   "records_emf_tipos": {
     "1": 1,
@@ -53,6 +53,8 @@
     "contornos_ignorados": 0,
     "contornos_abertos_restantes": 0,
     "curvas_reconstruidas": 0,
+    "motor_cpp_curvas": 0,
+    "motor_cpp_falhas": 0,
     "elementos_canvas_final": 1,
     "moldes_reais_criados": 1
   },

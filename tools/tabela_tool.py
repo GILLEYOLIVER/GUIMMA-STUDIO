@@ -112,6 +112,7 @@ class MedidaCmSpinBox(QDoubleSpinBox):
         self._unidade_sigla = str(sigla or "cm")
         self._unidade_fator = max(1e-9, float(fator or 1.0))
         self.blockSignals(True)
+        self.setSuffix("")
         self.setValue(valor_cena / self._unidade_fator)
         self.blockSignals(False)
         passo = 1.0 if self._unidade_sigla == "mm" else 0.05
@@ -121,7 +122,8 @@ class MedidaCmSpinBox(QDoubleSpinBox):
     def textFromValue(self, value: float) -> str:  # noqa: N802
         if abs(float(value or 0.0)) <= 1e-9:
             return ""
-        return f"{float(value):.3f}".rstrip("0").rstrip(".")
+        texto = f"{float(value):.3f}".rstrip("0").rstrip(".")
+        return f"{texto} {self._unidade_sigla}"
 
     def valueFromText(self, text: str) -> float:  # noqa: N802
         texto = str(text or "").lower()
@@ -473,7 +475,7 @@ class GraduarTabelaDialog(QDialog):
         botoes_copia = QGridLayout()
         botoes_copia.setHorizontalSpacing(5)
         botoes_copia.setVerticalSpacing(5)
-        self.btn_copiar_graduacao = self._criar_botao("Copiar")
+        self.btn_copiar_graduacao = self._criar_botao("Copiar graduação")
         self.btn_copiar_graduacao.setToolTip("Copiar graduação do ponto atual")
         self.btn_copiar_graduacao.clicked.connect(self._copiar)
         self.btn_colar_graduacao = self._criar_botao("Colar")
@@ -641,6 +643,18 @@ class GraduarTabelaDialog(QDialog):
         self.tbl_polar.setRowCount(len(tamanhos))
         base_row = next((i for i, t in enumerate(tamanhos) if t.get("base")), len(tamanhos) // 2 if tamanhos else 0)
         self._base_row = base_row
+        cumulativos_por_linha: list[dict[str, float]] = []
+        for row, tamanho in enumerate(tamanhos):
+            nome = str(tamanho.get("tamanho") or tamanho.get("nome") or f"T{row + 1}")
+            dados = valores.get(nome, {}) if isinstance(valores, dict) else {}
+            if not isinstance(dados, dict):
+                dados = {}
+            cumulativos_por_linha.append(
+                {
+                    "dx": self._float_item_graduacao(dados.get("dx", 0.0)),
+                    "dy": self._float_item_graduacao(dados.get("dy", 0.0)),
+                }
+            )
         for row, tamanho in enumerate(tamanhos):
             nome = str(tamanho.get("tamanho") or tamanho.get("nome") or f"T{row + 1}")
             item_t = QTableWidgetItem(nome)
@@ -665,9 +679,10 @@ class GraduarTabelaDialog(QDialog):
                 self._destacar_item_tamanho_base(item_polar_t, cor)
             self.tbl_polar.setItem(row, 0, item_polar_t)
 
-            dados = valores.get(nome, {}) if isinstance(valores, dict) else {}
             for col, chave in ((1, "dx"), (2, "dy")):
-                item = QTableWidgetItem(self._formatar_medida(dados.get(chave, 0.0)))
+                item = QTableWidgetItem(
+                    self._formatar_medida(self._valor_visual_de_cumulativos(cumulativos_por_linha, row, chave))
+                )
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
                 if row == base_row:
@@ -677,6 +692,8 @@ class GraduarTabelaDialog(QDialog):
         self._bloquear_eventos = False
 
     def valores(self) -> dict[str, dict]:
+        cumulativos_dx = self._valores_cumulativos_coluna(1)
+        cumulativos_dy = self._valores_cumulativos_coluna(2)
         saida: dict[str, dict] = {}
         for row in range(self.tbl.rowCount()):
             nome_item = self.tbl.item(row, 0)
@@ -686,8 +703,8 @@ class GraduarTabelaDialog(QDialog):
             if not nome:
                 continue
             saida[nome] = {
-                "dx": self._valor_item(row, 1),
-                "dy": self._valor_item(row, 2),
+                "dx": cumulativos_dx.get(row, 0.0),
+                "dy": cumulativos_dy.get(row, 0.0),
             }
         return saida
 
@@ -778,7 +795,7 @@ class GraduarTabelaDialog(QDialog):
                 self._sincronizar_polar_linha(row)
                 continue
             elif self.chk_incremental.isChecked():
-                fator = row - base_row
+                fator = self._sinal_linha_relativa_base(row)
                 dx = dx_dir * incremento * fator
                 dy = dy_dir * incremento * fator
             elif row == row_atual:
@@ -803,7 +820,7 @@ class GraduarTabelaDialog(QDialog):
         self._bloquear_eventos = True
         for row in range(self.tbl.rowCount()):
             if self.chk_incremental.isChecked():
-                valor = incremento * (row - base_row)
+                valor = incremento * self._sinal_linha_relativa_base(row)
             elif row == row_atual:
                 valor = incremento
             else:
@@ -834,13 +851,7 @@ class GraduarTabelaDialog(QDialog):
             return
         chave = "dx" if col == 1 else "dy"
         self._bloquear_eventos = True
-        for row in range(self.tbl.rowCount()):
-            nome_item = self.tbl.item(row, 0)
-            if nome_item is None:
-                continue
-            valor = dados.get(nome_item.text().strip(), {}).get(chave, 0.0)
-            self._set_valor(row, col, valor)
-            self._sincronizar_polar_linha(row)
+        self._aplicar_cumulativos_coluna(col, self._cumulativos_coluna_de_dados(dados, chave))
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
@@ -849,17 +860,12 @@ class GraduarTabelaDialog(QDialog):
         if not isinstance(dados, dict):
             return
         self._bloquear_eventos = True
-        for row in range(self.tbl.rowCount()):
-            nome_item = self.tbl.item(row, 0)
-            if nome_item is None:
-                continue
-            nome = nome_item.text().strip()
-            origem = dados.get(nome, {})
-            if not isinstance(origem, dict):
-                origem = {}
-            self._set_valor(row, 1, self._valor_item(row, 1) + self._float_item_graduacao(origem.get("dx", 0.0)))
-            self._set_valor(row, 2, self._valor_item(row, 2) + self._float_item_graduacao(origem.get("dy", 0.0)))
-            self._sincronizar_polar_linha(row)
+        atual_dx = self._valores_cumulativos_coluna(1)
+        atual_dy = self._valores_cumulativos_coluna(2)
+        copia_dx = self._cumulativos_coluna_de_dados(dados, "dx")
+        copia_dy = self._cumulativos_coluna_de_dados(dados, "dy")
+        self._aplicar_cumulativos_coluna(1, {row: atual_dx.get(row, 0.0) + copia_dx.get(row, 0.0) for row in range(self.tbl.rowCount())})
+        self._aplicar_cumulativos_coluna(2, {row: atual_dy.get(row, 0.0) + copia_dy.get(row, 0.0) for row in range(self.tbl.rowCount())})
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
@@ -869,15 +875,9 @@ class GraduarTabelaDialog(QDialog):
             return
         chave = "dx" if col == 1 else "dy"
         self._bloquear_eventos = True
-        for row in range(self.tbl.rowCount()):
-            nome_item = self.tbl.item(row, 0)
-            if nome_item is None:
-                continue
-            origem = dados.get(nome_item.text().strip(), {})
-            if not isinstance(origem, dict):
-                origem = {}
-            self._set_valor(row, col, self._valor_item(row, col) + self._float_item_graduacao(origem.get(chave, 0.0)))
-            self._sincronizar_polar_linha(row)
+        atual = self._valores_cumulativos_coluna(col)
+        copia = self._cumulativos_coluna_de_dados(dados, chave)
+        self._aplicar_cumulativos_coluna(col, {row: atual.get(row, 0.0) + copia.get(row, 0.0) for row in range(self.tbl.rowCount())})
         self._bloquear_eventos = False
         self._celula_alterada(None)
 
@@ -940,6 +940,63 @@ class GraduarTabelaDialog(QDialog):
         if 0 <= int(getattr(self, "_base_row", 0)) < self.tbl.rowCount():
             return int(self._base_row)
         return self.tbl.rowCount() // 2 if self.tbl.rowCount() else 0
+
+    def _sinal_linha_relativa_base(self, row: int) -> float:
+        base_row = self._linha_base()
+        if int(row) == base_row:
+            return 0.0
+        return -1.0 if int(row) < base_row else 1.0
+
+    def _nomes_linhas(self) -> list[str]:
+        nomes: list[str] = []
+        for row in range(self.tbl.rowCount()):
+            item = self.tbl.item(row, 0)
+            nomes.append(item.text().strip() if item is not None else "")
+        return nomes
+
+    def _valores_cumulativos_coluna(self, col: int) -> dict[int, float]:
+        total = self.tbl.rowCount()
+        if total <= 0:
+            return {}
+        base_row = self._linha_base()
+        cumulativos: dict[int, float] = {base_row: 0.0}
+        for row in range(base_row + 1, total):
+            cumulativos[row] = cumulativos.get(row - 1, 0.0) + self._valor_item(row, col)
+        for row in range(base_row - 1, -1, -1):
+            cumulativos[row] = cumulativos.get(row + 1, 0.0) + self._valor_item(row, col)
+        return cumulativos
+
+    def _cumulativos_coluna_de_dados(self, dados: dict, chave: str) -> dict[int, float]:
+        nomes = self._nomes_linhas()
+        saida: dict[int, float] = {}
+        for row, nome in enumerate(nomes):
+            origem = dados.get(nome, {}) if isinstance(dados, dict) else {}
+            if not isinstance(origem, dict):
+                origem = {}
+            saida[row] = self._float_item_graduacao(origem.get(chave, 0.0))
+        return saida
+
+    def _aplicar_cumulativos_coluna(self, col: int, cumulativos: dict[int, float]) -> None:
+        chave = "dx" if col == 1 else "dy"
+        dados = [{chave: float(cumulativos.get(row, 0.0))} for row in range(self.tbl.rowCount())]
+        for row in range(self.tbl.rowCount()):
+            self._set_valor(row, col, self._valor_visual_de_cumulativos(dados, row, chave))
+            self._sincronizar_polar_linha(row)
+
+    def _valor_visual_de_cumulativos(self, cumulativos_por_linha: list[dict[str, float]], row: int, chave: str) -> float:
+        total = len(cumulativos_por_linha)
+        if not (0 <= int(row) < total):
+            return 0.0
+        base_row = self._linha_base()
+        if int(row) == base_row:
+            return 0.0
+        atual = self._float_item_graduacao(cumulativos_por_linha[row].get(chave, 0.0))
+        vizinho = row - 1 if row > base_row else row + 1
+        if 0 <= vizinho < total:
+            referencia = self._float_item_graduacao(cumulativos_por_linha[vizinho].get(chave, 0.0))
+        else:
+            referencia = 0.0
+        return atual - referencia
 
     def _valor_item(self, row: int, col: int) -> float:
         item = self.tbl.item(row, col)
@@ -1006,9 +1063,9 @@ class GraduarTabelaDialog(QDialog):
             cor_base = QColor("#ffffff")
         item.setData(Qt.UserRole, cor_base.name())
         item.setData(Qt.BackgroundRole, cor_base)
-        item.setData(Qt.ForegroundRole, QColor("#000000"))
+        item.setData(Qt.ForegroundRole, QColor("#111111"))
         item.setBackground(cor_base)
-        item.setForeground(QColor("#000000"))
+        item.setForeground(QColor("#111111"))
 
     @staticmethod
     def _destacar_item_tamanho_base(item: QTableWidgetItem, cor: str):
@@ -1022,18 +1079,18 @@ class GraduarTabelaDialog(QDialog):
             cor_base = QColor("#ffffff")
         item.setData(Qt.UserRole, cor_base.name())
         item.setData(Qt.BackgroundRole, cor_base)
-        item.setData(Qt.ForegroundRole, QColor("#000000"))
+        item.setData(Qt.ForegroundRole, QColor("#111111"))
         item.setBackground(cor_base)
-        item.setForeground(QColor("#000000"))
+        item.setForeground(QColor("#111111"))
 
     @staticmethod
     def _destacar_item_valor_base(item: QTableWidgetItem):
         fonte = item.font()
         fonte.setBold(True)
         item.setFont(fonte)
-        item.setForeground(QColor("#000000"))
-        item.setData(Qt.ForegroundRole, QColor("#000000"))
-        cor_base = QColor("#d9ecff")
+        item.setForeground(QColor("#ffffff"))
+        item.setData(Qt.ForegroundRole, QColor("#ffffff"))
+        cor_base = QColor("#2b7cd3")
         item.setBackground(cor_base)
         item.setData(Qt.BackgroundRole, cor_base)
 
@@ -1382,7 +1439,7 @@ class Ferramenta(FerramentaBase):
 
             if sinal is not None and hasattr(sinal, "connect"):
                 def atualizar_por_canvas(*_args):
-                    self._agendar_atualizacao_canvas(canvas)
+                    self._quando_canvas_elementos_alterados(canvas)
 
                 try:
                     sinal.connect(atualizar_por_canvas)
