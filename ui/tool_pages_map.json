@@ -192,6 +192,12 @@
             "substituir",
             "alterar"
           ]
+        },
+        {
+          "title": "Linhas auxiliares",
+          "tools": [
+            "linhas_auxiliares"
+          ]
         }
       ]
     },
@@ -625,6 +631,12 @@
       "module": "tools/multiplos_tool.py",
       "class": "Ferramenta",
       "icon": "multiplos.svg"
+    },
+    "linhas_auxiliares": {
+      "title": "Inserir ou remover",
+      "module": "tools/linhas_auxiliares_tool.py",
+      "class": "Ferramenta",
+      "icon": "linha_simetria.svg"
     },
     "alinhar": {
       "title": "Alinhar",

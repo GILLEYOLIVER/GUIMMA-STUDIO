@@ -354,6 +354,85 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertTrue(next(item for item in grupos[0]['contornos'] if item['tamanho'] == 'M')['fechado_forcado'])
         self.assertEqual(tamanho_m.metadados.get('subtipo_audaces'), 'graduacao_importada')
 
+    def test_agrupar_graduacao_preserva_contornos_associados_ao_xml(self):
+        contorno_xml = EMFVectorElement(
+            tipo='polyline',
+            pontos=[(0.0, 0.0), (20.0, 0.0), (20.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+            fechado=True,
+            cor='#00d000',
+            espessura=1.0,
+            bbox=(0.0, 0.0, 20.0, 8.0),
+            raw_record_type=87,
+            metadados={'subtipo_audaces': 'contorno', 'xml_pattern_index': 0, 'xml_pattern_name': 'PECA GENERICA'},
+        )
+        contorno_sobreposto_xml = EMFVectorElement(
+            tipo='polyline',
+            pontos=[(0.5, 0.5), (20.5, 0.5), (20.5, 8.5), (0.5, 8.5), (0.5, 0.5)],
+            fechado=True,
+            cor='#0080ff',
+            espessura=1.0,
+            bbox=(0.5, 0.5, 20.5, 8.5),
+            raw_record_type=87,
+            metadados={'subtipo_audaces': 'contorno', 'xml_pattern_index': 1, 'xml_pattern_name': 'PECA GENERICA 2'},
+        )
+        linha_graduacao = EMFVectorElement(
+            tipo='polyline',
+            pontos=[(-1.0, -1.0), (21.0, -1.0), (21.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+            fechado=True,
+            cor='#ffffff',
+            espessura=1.0,
+            bbox=(-1.0, -1.0, 21.0, 9.0),
+            raw_record_type=87,
+            metadados={'subtipo_audaces': 'linha_interna'},
+        )
+        grade = (
+            'P-G(P)',
+            [
+                {'ativo': True, 'tamanho': 'P', 'cor': '#00d000', 'base': True},
+                {'ativo': True, 'tamanho': 'M', 'cor': '#0080ff', 'base': False},
+                {'ativo': True, 'tamanho': 'G', 'cor': '#ffffff', 'base': False},
+            ],
+            'P',
+        )
+
+        grupos = AudacesPairImport._agrupar_contornos_graduados_emf(
+            [contorno_xml, contorno_sobreposto_xml, linha_graduacao],
+            grade,
+            exigir_base_xml=True,
+        )
+
+        self.assertEqual(contorno_xml.metadados.get('subtipo_audaces'), 'contorno')
+        self.assertEqual(contorno_sobreposto_xml.metadados.get('subtipo_audaces'), 'contorno')
+        self.assertEqual(linha_graduacao.metadados.get('subtipo_audaces'), 'graduacao_importada')
+        self.assertEqual(len(grupos), 1)
+
+    def test_importacao_audaces_abre_sem_controles_e_numeros_por_padrao(self):
+        elementos = [
+            {
+                'tipo': 'polyline',
+                'origem': 'audaces_emf',
+                'molde': True,
+                'mostrar_controles': True,
+                'mostrar_numeros': True,
+                'pontos': [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)],
+            },
+            {
+                'tipo': 'polyline',
+                'origem': 'manual',
+                'molde': True,
+                'mostrar_controles': True,
+                'mostrar_numeros': True,
+                'pontos': [(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 0.0)],
+            },
+        ]
+
+        AudacesPairImport._desativar_overlays_importacao_inicial(elementos)
+
+        self.assertFalse(elementos[0].get('mostrar_controles'))
+        self.assertFalse(elementos[0].get('mostrar_numeros'))
+        self.assertTrue(elementos[1].get('mostrar_controles'))
+        self.assertTrue(elementos[1].get('mostrar_numeros'))
+
     def test_controles_importados_incluem_principais_e_auxiliares(self):
         elemento = {
             'tipo': 'polyline',
@@ -604,6 +683,49 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertTrue(any(el.get('controle_cantos') for el in moldes))
         self.assertTrue(any(el.get('pontos_controle_principais') for el in moldes))
         self.assertTrue(any(int(el.get('cantos_preservados_importacao') or 0) >= 2 for el in moldes))
+
+    @unittest.skipUnless(
+        (Path.home() / 'Desktop' / '6413 VESTIDO COM RENDA BARRADA SAIA PLISSADA.emf').exists()
+        and (Path.home() / 'Desktop' / '6413 VESTIDO COM RENDA BARRADA SAIA PLISSADA.xml').exists(),
+        'par EMF/XML real 6413 do usuario nao esta disponivel',
+    )
+    def test_emf_xml_real_6413_nao_renderiza_residuos_como_moldes(self):
+        emf = Path.home() / 'Desktop' / '6413 VESTIDO COM RENDA BARRADA SAIA PLISSADA.emf'
+        xml = emf.with_suffix('.xml')
+        projeto = AudacesPairImport.importar(emf, xml, Projeto())
+        info = projeto.preferencias_usuario.get('audaces_emf_xml_importacao', {})
+        elementos_canvas = [el for el in info.get('elementos_canvas', []) if isinstance(el, dict)]
+        moldes = [el for el in elementos_canvas if el.get('molde')]
+
+        self.assertEqual(info.get('pecas_xml'), 16)
+        self.assertEqual(info.get('moldes_reais'), 16)
+        self.assertEqual(info.get('pecas_xml_sem_associacao'), 0)
+        self.assertEqual(len(elementos_canvas), 16)
+        self.assertEqual(len(moldes), 16)
+        self.assertFalse([el for el in elementos_canvas if not el.get('molde')])
+        self.assertEqual(
+            sorted(int(el.get('audaces_xml_pattern_index')) for el in moldes),
+            list(range(16)),
+        )
+        self.assertFalse(any(str(el.get('nome_molde') or '').startswith('K') for el in moldes))
+        self.assertFalse(any(el.get('mostrar_controles', True) for el in moldes))
+        self.assertFalse(any(el.get('mostrar_numeros', True) for el in moldes))
+
+        for molde in moldes:
+            dimensoes_xml = molde.get('graduacao_dimensoes_xml') or {}
+            base_nome = str(molde.get('tamanho_base_detectado') or '').strip()
+            if not dimensoes_xml or not base_nome:
+                continue
+            base_dim = dimensoes_xml.get(base_nome) or dimensoes_xml.get(base_nome.upper())
+            if not base_dim:
+                continue
+            pontos = [(float(x), float(y)) for x, y in molde.get('pontos') or []]
+            if len(pontos) >= 2 and pontos[0] == pontos[-1]:
+                pontos = pontos[:-1]
+            xs = [x for x, _y in pontos]
+            ys = [y for _x, y in pontos]
+            self.assertAlmostEqual(max(xs) - min(xs), float(base_dim.get('largura')), places=2)
+            self.assertAlmostEqual(max(ys) - min(ys), float(base_dim.get('altura')), places=2)
 
     @unittest.skipUnless(
         (Path.home() / 'Desktop' / '6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf').exists(),

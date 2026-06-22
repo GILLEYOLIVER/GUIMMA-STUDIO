@@ -1,5 +1,5 @@
 {
-  "arquivo_emf": "/var/folders/yg/9wbblsc96sv1p9970_r38b_c0000gn/T/tmpu7gmo4c9/01.emf",
+  "arquivo_emf": "C:\\Users\\User\\AppData\\Local\\Temp\\tmp6_svc05j\\01.emf",
   "records_emf_total": 3,
   "records_emf_tipos": {
     "1": 1,
@@ -57,10 +57,10 @@
     "motor_cpp_falhas": 0,
     "elementos_canvas_final": 1,
     "contornos_graduacao_ocultos": 0,
-    "grupos_graduados_detectados": 1,
+    "grupos_graduados_detectados": 0,
     "moldes_nomeados": 1,
     "fios_detectados": 0,
-    "grupos_graduados": 1,
+    "grupos_graduados": 0,
     "calibracao_dimensoes_xml": {
       "aplicado": false,
       "moldes_calibrados": 0,

@@ -1576,6 +1576,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._indice_atual: int | None = self._indice_molde_preferencial()
         self._cor_visual = "#ffffff"
         self._graduacao_linhas: list[dict] = []
+        self._preservar_cores_importadas_graduacao = False
         self._contador_novos_tamanhos = 0
         self._snapshot_moldes: dict[int, dict] = self._criar_snapshot_moldes()
         self._snapshot_mostrar_cor_tecidos = bool(getattr(self.canvas, "_mostrar_cor_tecidos", False))
@@ -2351,20 +2352,25 @@ class PropriedadesMoldesDialog(QDialog):
         }
         cores_padrao = self._cores_padrao_grade(grade_texto)
         usar_cores_fixas = str(grade_texto or "").strip() in GRADES_TAMANHOS_CORES_FIXAS
+        preservar_importadas = bool(getattr(self, "_preservar_cores_importadas_graduacao", False))
         self._graduacao_linhas = []
         for tamanho in tamanhos:
             tamanho_str = str(tamanho)
             cor_padrao = cores_padrao.get(tamanho_str)
             cor_existente = cores_existentes.get(tamanho_str)
-            self._graduacao_linhas.append({
-                "ativo": True,
-                "tamanho": tamanho,
-                "cor": (
+            if preservar_importadas and QColor(str(cor_existente or "")).isValid():
+                cor_final = cor_existente
+            else:
+                cor_final = (
                     (cor_padrao if usar_cores_fixas else cor_existente)
                     or cor_padrao
                     or cor_existente
                     or self._gerar_cor_aleatoria()
-                ),
+                )
+            self._graduacao_linhas.append({
+                "ativo": True,
+                "tamanho": tamanho,
+                "cor": cor_final,
                 "base": tamanho_str == str(base),
             })
         if self._graduacao_linhas and not any(l.get("base") for l in self._graduacao_linhas):
@@ -2605,6 +2611,7 @@ class PropriedadesMoldesDialog(QDialog):
     def _carregar_graduacao_do_molde(self, molde: dict | None) -> None:
         grade_nome = ""
         linhas: list[dict] = []
+        self._preservar_cores_importadas_graduacao = self._molde_tem_cores_graduacao_importadas(molde)
         if isinstance(molde, dict):
             linhas = self._normalizar_linhas_graduacao(molde.get("graduacao_tamanhos"))
             grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
@@ -2632,6 +2639,24 @@ class PropriedadesMoldesDialog(QDialog):
         )
         self._definir_combo_grade_sem_aplicar(grade_nome)
         self._renderizar_tabela_graduacao()
+
+    @staticmethod
+    def _molde_tem_cores_graduacao_importadas(molde: dict | None) -> bool:
+        if not isinstance(molde, dict):
+            return False
+        metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
+        origem = str(
+            molde.get("origem_importador")
+            or molde.get("origem")
+            or metadados.get("origem")
+            or ""
+        ).strip().lower()
+        return bool(
+            origem.startswith("dxf")
+            or origem.startswith("audaces")
+            or metadados.get("matriz_tamanhos_dxf")
+            or molde.get("graduacao_contornos_importados")
+        )
 
     def _on_tabela_graduacao_clicada(self, linha: int, coluna: int):
         if not (0 <= linha < len(self._graduacao_linhas)):

@@ -951,6 +951,26 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
             ["P"],
         )
 
+    def test_aplicar_grade_preserva_cores_importadas_mesmo_em_preset_fixo(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog._preservar_cores_importadas_graduacao = True
+        dialog._graduacao_linhas = [
+            {"ativo": True, "tamanho": "P", "cor": "#d7df00", "base": True},
+            {"ativo": True, "tamanho": "M", "cor": "#0000ff", "base": False},
+            {"ativo": True, "tamanho": "G", "cor": "#ffffff", "base": False},
+        ]
+        dialog._renderizar_tabela_graduacao = lambda: None
+        dialog._sincronizar_gradacao_no_molde = lambda: None
+        dialog._gerar_cor_aleatoria = lambda: "#123456"
+
+        PropriedadesMoldesDialog._aplicar_grade_tamanhos(dialog, "PP-G2(P)")
+
+        cores = {linha["tamanho"]: linha["cor"] for linha in dialog._graduacao_linhas}
+        self.assertEqual(cores["P"], "#d7df00")
+        self.assertEqual(cores["M"], "#0000ff")
+        self.assertEqual(cores["G"], "#ffffff")
+        self.assertEqual(cores["PP"], "#00ff00")
+
     def test_carregar_graduacao_do_molde_respeita_linhas_reais_sem_impor_pmg(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         dialog.cmb_grade_tamanhos = QComboBox()

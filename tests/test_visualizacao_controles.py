@@ -1586,6 +1586,174 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(kwargs_grade.get("cache_key"), ("graduacao", "M"))
         self.assertIs(kwargs_grade.get("elemento"), molde)
 
+    def test_graduacao_importada_pode_preferir_tabela_editavel(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 8.0), QPointF(0.0, 8.0), QPointF(0.0, 0.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(p.x(), p.y()) for p in base],
+            "graduacao_preferir_tabela_dxdy": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_tabela": {
+                "modo": "dx_dy",
+                "pontos": {
+                    "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 1.0, "dy": 2.0}}},
+                    "1": {"indice": 1, "ponto": (10.0, 0.0), "valores": {"M": {"dx": 1.0, "dy": 2.0}}},
+                    "2": {"indice": 2, "ponto": (10.0, 8.0), "valores": {"M": {"dx": 1.0, "dy": 2.0}}},
+                    "3": {"indice": 3, "ponto": (0.0, 8.0), "valores": {"M": {"dx": 1.0, "dy": 2.0}}},
+                },
+            },
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(40.0, 0.0), (50.0, 0.0), (50.0, 8.0), (40.0, 8.0), (40.0, 0.0)],
+                }
+            ],
+        }
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        self.assertEqual(len(contornos), 1)
+        _nome, _cor, pontos = contornos[0]
+        self.assertEqual((pontos[0].x(), pontos[0].y()), (1.0, 2.0))
+        molde["graduacao_tabela"]["pontos"]["0"]["valores"]["M"]["dx"] = 3.0
+        contornos_editados = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        self.assertEqual((contornos_editados[0][2][0].x(), contornos_editados[0][2][0].y()), (3.0, 2.0))
+
+    def test_dxf_agrupado_filtra_tabela_antiga_para_pontos_principais(self):
+        base = [
+            QPointF(0.0, 0.0),
+            QPointF(2.0, 0.4),
+            QPointF(4.0, 0.8),
+            QPointF(6.0, 0.4),
+            QPointF(8.0, 0.0),
+            QPointF(8.0, 5.0),
+            QPointF(0.0, 5.0),
+            QPointF(0.0, 0.0),
+        ]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem": "dxf_matriz_graduada",
+            "pontos": [(p.x(), p.y()) for p in base],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 8.0, "y": 0.0},
+                {"x": 8.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+            "graduacao_preferir_tabela_dxdy": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_tabela": {
+                "modo": "dx_dy",
+                "pontos": {
+                    "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 0.0, "dy": 0.0}}},
+                    "1": {"indice": 1, "ponto": (2.0, 0.4), "valores": {"M": {"dx": 100.0, "dy": 100.0}}},
+                    "2": {"indice": 2, "ponto": (4.0, 0.8), "valores": {"M": {"dx": 100.0, "dy": 100.0}}},
+                    "3": {"indice": 3, "ponto": (6.0, 0.4), "valores": {"M": {"dx": 100.0, "dy": 100.0}}},
+                    "4": {"indice": 4, "ponto": (8.0, 0.0), "valores": {"M": {"dx": 1.0, "dy": 0.0}}},
+                    "5": {"indice": 5, "ponto": (8.0, 5.0), "valores": {"M": {"dx": 1.0, "dy": 1.0}}},
+                    "6": {"indice": 6, "ponto": (0.0, 5.0), "valores": {"M": {"dx": 0.0, "dy": 1.0}}},
+                },
+            },
+        }
+
+        referencias = VisualizacaoCanvas._pontos_referencia_graduacao(molde)
+        pontos_cfg = VisualizacaoCanvas._pontos_cfg_graduacao(molde)
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base[:-1])
+
+        self.assertEqual(referencias, [QPointF(0.0, 0.0), QPointF(8.0, 0.0), QPointF(8.0, 5.0), QPointF(0.0, 5.0)])
+        self.assertEqual(sorted(pontos_cfg), ["0", "1", "2", "3"])
+        self.assertEqual(len(contornos), 1)
+        _nome, _cor, pontos = contornos[0]
+        self.assertLess(max(p.x() for p in pontos), 12.0)
+        self.assertLess(max(p.y() for p in pontos), 8.0)
+
+    def test_graduacao_importada_com_tabela_nao_editada_preserva_contorno_real(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 8.0), QPointF(0.0, 8.0), QPointF(0.0, 0.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(p.x(), p.y()) for p in base],
+            "graduacao_preferir_tabela_dxdy": False,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_tabela": {
+                "modo": "dx_dy",
+                "pontos": {
+                    "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 99.0, "dy": 99.0}}},
+                    "1": {"indice": 1, "ponto": (10.0, 0.0), "valores": {"M": {"dx": 99.0, "dy": 99.0}}},
+                },
+            },
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+                }
+            ],
+        }
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        self.assertEqual(len(contornos), 1)
+        _nome, _cor, pontos = contornos[0]
+        self.assertEqual((pontos[0].x(), pontos[0].y()), (-1.0, -1.0))
+
+    def test_dxf_agrupado_preferindo_tabela_reflete_edicao_da_base(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 8.0), QPointF(0.0, 8.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem": "dxf_matriz_graduada",
+            "pontos": [(p.x(), p.y()) for p in base],
+            "controle_cantos": [(p.x(), p.y()) for p in base],
+            "graduacao_preferir_tabela_dxdy": True,
+            "graduacao_tabela_apenas_pontos_principais": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#ffff00"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0000ff"},
+            ],
+            "graduacao_tabela": {
+                "modo": "dx_dy",
+                "pontos": {
+                    str(idx): {
+                        "indice": idx,
+                        "ponto": (p.x(), p.y()),
+                        "valores": {"M": {"dx": 1.0, "dy": 0.5}},
+                    }
+                    for idx, p in enumerate(base)
+                },
+            },
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0000ff",
+                    "pontos": [(100.0, 100.0), (110.0, 100.0), (110.0, 108.0), (100.0, 108.0)],
+                }
+            ],
+        }
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+        self.assertEqual((contornos[0][2][0].x(), contornos[0][2][0].y()), (1.0, 0.5))
+
+        base_editada = [QPointF(0.5, 0.25), *base[1:]]
+        contornos_editados = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base_editada)
+
+        self.assertEqual((contornos_editados[0][2][0].x(), contornos_editados[0][2][0].y()), (1.5, 0.75))
+
     def test_graduacao_importada_simplifica_faixas_durante_zoom_interativo(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas._zoom_interativo = True

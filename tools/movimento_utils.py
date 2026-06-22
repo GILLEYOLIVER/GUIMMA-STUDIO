@@ -44,6 +44,7 @@ CHAVES_ESTRUTURAS_COM_PONTOS = (
     "graduacao_pontos_derivados",
     "graduacao_contornos_importados",
     "graduacao_contornos_regularizados_preview",
+    "linhas_auxiliares_base",
 )
 
 CHAVES_ROTACAO_LISTAS_TUPLAS = {

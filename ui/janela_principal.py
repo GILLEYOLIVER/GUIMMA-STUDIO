@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTabBar,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -67,7 +69,7 @@ from formats.adsx_io import ADSXIO, ADSXImportError
 from formats.adsx_image_trace import vetorizar_preview_adsx
 from formats.audaces_xml_import import AudacesXMLImport, xml_doc_para_dict
 from formats.audaces_pair_import import AudacesPairImport
-from formats.dxf_import import importar_dxf_para_elementos
+from formats.dxf_import import detectar_tamanhos_matriz_dxf, importar_dxf_para_elementos
 from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.hover_style import folha_estilo_hover_global
 from ui.ribbon import RibbonWidget, carregar_icone
@@ -2676,6 +2678,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
         menu.addAction("Arquivo DXF", lambda _=False: self._agendar_importacao_menu("dxf"))
+        menu.addAction("Arquivo DXF agrupado", lambda _=False: self._agendar_importacao_menu("dxf_agrupado"))
         menu.addAction("Arquivo AAMA/ASTM", lambda _=False: self._agendar_importacao_menu("aama_astm"))
         menu.addAction("Arquivo de Plotagem", lambda _=False: self._agendar_importacao_menu("plotagem"))
         menu.addSeparator()
@@ -3954,18 +3957,217 @@ class GuimmaStudioMainWindow(QMainWindow):
             origem = str(origem_inicial)
         if origem not in self._origens_importacao_moldes():
             origem = "Padrao (ASTM)"
+        grade_dxf = prefs.get("grade_dxf_agrupado")
+        if not isinstance(grade_dxf, list) or not grade_dxf:
+            grade_dxf = GuimmaStudioMainWindow._grade_dxf_agrupado_padrao()
         return {
             "unidade": unidade,
             "origem": origem,
             "importar_mesmo_arquivo": bool(prefs.get("importar_mesmo_arquivo", False)),
             "importar_linha_costura": bool(prefs.get("importar_linha_costura", False)),
             "usar_contorno_corte_como_base": bool(prefs.get("usar_contorno_corte_como_base", True)),
+            "tamanho_base_dxf_agrupado": str(prefs.get("tamanho_base_dxf_agrupado", "P") or "P"),
+            "grade_dxf_agrupado": grade_dxf,
+        }
+
+    @staticmethod
+    def _grade_dxf_agrupado_padrao() -> list[dict]:
+        return [
+            {"ativo": True, "tamanho": "PP", "cor": "#00e6d0"},
+            {"ativo": True, "tamanho": "P", "cor": "#d7df00"},
+            {"ativo": True, "tamanho": "M", "cor": "#0000ff"},
+            {"ativo": True, "tamanho": "G", "cor": "#ffffff"},
+            {"ativo": True, "tamanho": "GG", "cor": "#169bd5"},
+            {"ativo": True, "tamanho": "G1", "cor": "#008000"},
+            {"ativo": True, "tamanho": "G2", "cor": "#8cff00"},
+            {"ativo": True, "tamanho": "G3", "cor": "#ff5a00"},
+            {"ativo": True, "tamanho": "G4", "cor": "#b000ff"},
+            {"ativo": True, "tamanho": "G5", "cor": "#ff00a8"},
+        ]
+
+    @staticmethod
+    def _linhas_grade_dxf_do_controle(tabela: QTableWidget) -> list[dict]:
+        linhas: list[dict] = []
+        for row in range(tabela.rowCount()):
+            item_visao = tabela.item(row, 0)
+            item_tamanho = tabela.item(row, 1)
+            item_cor = tabela.item(row, 2)
+            tamanho = str(item_tamanho.text() if item_tamanho else "").strip()
+            if not tamanho:
+                continue
+            cor = str(item_cor.data(Qt.UserRole) if item_cor else "").strip() or "#ff5a00"
+            linhas.append({
+                "ativo": item_visao.checkState() == Qt.Checked if item_visao else True,
+                "tamanho": tamanho,
+                "cor": cor,
+            })
+        return linhas
+
+    @staticmethod
+    def _preencher_grade_dxf_agrupado(
+        tabela: QTableWidget,
+        combo_base: QComboBox,
+        grade: list[dict],
+        tamanho_preferido: str = "",
+    ):
+        tabela.blockSignals(True)
+        combo_base.blockSignals(True)
+        tabela.setRowCount(0)
+        combo_base.clear()
+        linhas = [linha for linha in (grade or []) if isinstance(linha, dict) and str(linha.get("tamanho") or "").strip()]
+        tabela.setRowCount(len(linhas))
+        for row, linha in enumerate(linhas):
+            item_visao = QTableWidgetItem("")
+            item_visao.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+            item_visao.setCheckState(Qt.Checked if bool(linha.get("ativo", True)) else Qt.Unchecked)
+            item_tamanho = QTableWidgetItem(str(linha.get("tamanho") or "").strip())
+            item_tamanho.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            cor = str(linha.get("cor") or "#ff5a00")
+            item_cor = QTableWidgetItem(cor)
+            item_cor.setData(Qt.UserRole, cor)
+            item_cor.setBackground(QColor(cor))
+            item_cor.setForeground(QColor("#111111" if QColor(cor).lightness() > 140 else "#ffffff"))
+            tabela.setItem(row, 0, item_visao)
+            tabela.setItem(row, 1, item_tamanho)
+            tabela.setItem(row, 2, item_cor)
+        nomes = [str(linha.get("tamanho") or "").strip() for linha in linhas]
+        combo_base.addItems(nomes)
+        combo_base.setEnabled(bool(nomes))
+        if nomes:
+            preferido = str(tamanho_preferido or "").strip()
+            combo_base.setCurrentText(preferido if preferido in nomes else nomes[0])
+        tabela.blockSignals(False)
+        combo_base.blockSignals(False)
+
+    def _configurar_tabela_grade_dxf_agrupado(self, tabela: QTableWidget):
+        tabela.setColumnCount(3)
+        tabela.setHorizontalHeaderLabels(["Visão", "Tamanho", "Cor"])
+        tabela.setRowCount(0)
+        tabela.verticalHeader().setVisible(False)
+        tabela.setSelectionMode(QAbstractItemView.SingleSelection)
+        tabela.setSelectionBehavior(QAbstractItemView.SelectItems)
+        tabela.setAlternatingRowColors(True)
+        tabela.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        tabela.verticalHeader().setDefaultSectionSize(25)
+        tabela.horizontalHeader().setMinimumHeight(28)
+        tabela.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        tabela.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        tabela.setColumnWidth(0, 78)
+        tabela.setColumnWidth(1, 190)
+        tabela.setColumnWidth(2, 360)
+
+    def _editar_cor_grade_dxf_agrupado(self, item: QTableWidgetItem, parent: QWidget):
+        if item.column() != 2:
+            return
+        cor_atual = QColor(str(item.data(Qt.UserRole) or item.text() or "#ff5a00"))
+        dialog_cor = QColorDialog(cor_atual, parent)
+        dialog_cor.setWindowTitle("Selecionar cor do tamanho")
+        if dialog_cor.exec() != QDialog.Accepted:
+            return
+        cor = dialog_cor.currentColor()
+        if not cor.isValid():
+            return
+        item.setText(cor.name())
+        item.setData(Qt.UserRole, cor.name())
+        item.setBackground(cor)
+        item.setForeground(QColor("#111111" if cor.lightness() > 140 else "#ffffff"))
+
+    def _abrir_dialogo_config_dxf_agrupado(self, caminho: str) -> dict | None:
+        opcoes = self._opcoes_importacao_moldes_padrao()
+        grade_preferida = [linha for linha in opcoes.get("grade_dxf_agrupado", []) if isinstance(linha, dict)]
+        try:
+            grade_detectada = detectar_tamanhos_matriz_dxf(caminho, grade_tamanhos=grade_preferida)
+        except Exception as exc:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("DXF agrupado")
+            caixa.setIcon(QMessageBox.Warning)
+            caixa.setText(f"Não foi possível analisar os tamanhos do DXF.\n\n{type(exc).__name__}: {exc}")
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            return None
+        if not grade_detectada:
+            caixa = QMessageBox(self)
+            self._estilizar_message_box(caixa)
+            caixa.setWindowTitle("DXF agrupado")
+            caixa.setIcon(QMessageBox.Warning)
+            caixa.setText("Não foi possível detectar tamanhos agrupáveis nesse DXF.")
+            caixa.setStandardButtons(QMessageBox.Ok)
+            self._traduzir_botoes_padrao_message_box(caixa)
+            caixa.exec()
+            return None
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configurar DXF agrupado")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+
+        lbl_arquivo = QLabel(Path(caminho).name, dialog)
+        lbl_arquivo.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(lbl_arquivo)
+
+        linha_base = QHBoxLayout()
+        linha_base.setSpacing(8)
+        linha_base.addWidget(QLabel("Tamanho base", dialog))
+        cmb_tamanho_base = QComboBox(dialog)
+        cmb_tamanho_base.setMinimumWidth(140)
+        linha_base.addWidget(cmb_tamanho_base)
+        linha_base.addStretch(1)
+        layout.addLayout(linha_base)
+
+        tbl_grade = QTableWidget(dialog)
+        self._configurar_tabela_grade_dxf_agrupado(tbl_grade)
+        tbl_grade.setMinimumHeight(310)
+        tamanho_base_detectado = next(
+            (
+                str(linha.get("tamanho") or "").strip()
+                for linha in grade_detectada
+                if isinstance(linha, dict) and linha.get("base") and str(linha.get("tamanho") or "").strip()
+            ),
+            "",
+        )
+        self._preencher_grade_dxf_agrupado(
+            tbl_grade,
+            cmb_tamanho_base,
+            grade_detectada,
+            tamanho_base_detectado or str(opcoes.get("tamanho_base_dxf_agrupado", "P") or "P"),
+        )
+        tbl_grade.itemDoubleClicked.connect(lambda item: self._editar_cor_grade_dxf_agrupado(item, dialog))
+        layout.addWidget(tbl_grade, 1)
+
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        botoes.accepted.connect(dialog.accept)
+        botoes.rejected.connect(dialog.reject)
+        layout.addWidget(botoes)
+
+        self._dimensionar_dialogo_para_tela(dialog, 720, 520, 620, 430)
+        self._centralizar_dialogo_na_janela(dialog)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        grade_final = self._linhas_grade_dxf_do_controle(tbl_grade)
+        nomes = [linha["tamanho"] for linha in grade_final]
+        tamanho_base = cmb_tamanho_base.currentText()
+        if nomes and tamanho_base not in nomes:
+            tamanho_base = nomes[0]
+        return {
+            "tamanho_base_dxf_agrupado": tamanho_base,
+            "grade_dxf_agrupado": grade_final,
         }
 
     def _abrir_dialogo_importacao_moldes(self, tipo: str, origem_inicial: str | None = None) -> tuple[str, str, dict]:
         filtros = self._filtros_importacao_moldes()
         filtro_inicial = filtros[0]
-        titulo = "Importar AAMA-292/1993 | ASTM D6673-01/2001" if tipo == "aama_astm" else "Importar DXF"
+        if tipo == "aama_astm":
+            titulo = "Importar AAMA-292/1993 | ASTM D6673-01/2001"
+        elif tipo == "dxf_agrupado":
+            titulo = "Importar DXF agrupado"
+        else:
+            titulo = "Importar DXF"
         pasta_importacao = self.projeto_atual.preferencias_usuario.get("ultima_pasta_importacao", "")
         dialog = QFileDialog(
             self,
@@ -3981,7 +4183,7 @@ class GuimmaStudioMainWindow(QMainWindow):
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
         self._traduzir_rotulos_dialogo_arquivo(dialog, texto_acao="Abrir")
         self._forcar_dialogo_arquivo_claro(dialog, texto_acao="Abrir")
-        self._dimensionar_dialogo_para_tela(dialog, 900, 620, 640, 480)
+        self._dimensionar_dialogo_para_tela(dialog, 1040, 680, 760, 540)
         controles = self._anexar_opcoes_importacao_moldes(dialog, origem_inicial=origem_inicial)
         self._centralizar_dialogo_na_janela(dialog)
         if dialog.exec() != QDialog.Accepted:
@@ -4000,12 +4202,25 @@ class GuimmaStudioMainWindow(QMainWindow):
             "usar_contorno_corte_como_base": controles["chk_contorno_base"].isChecked(),
             "tipo_filtro": dialog.selectedNameFilter(),
         }
+        opcoes_anteriores = self._opcoes_importacao_moldes_padrao()
+        opcoes["tamanho_base_dxf_agrupado"] = opcoes_anteriores.get("tamanho_base_dxf_agrupado", "P")
+        opcoes["grade_dxf_agrupado"] = opcoes_anteriores.get("grade_dxf_agrupado", [])
+        if tipo == "dxf_agrupado" and caminho:
+            config_grade = self._abrir_dialogo_config_dxf_agrupado(caminho)
+            if config_grade is None:
+                self._agendar_reencaixe_janela_canvas()
+                return "", "", {}
+            opcoes.update(config_grade)
         self.projeto_atual.preferencias_usuario["importacao_moldes"] = dict(opcoes)
         self._salvar_preferencias_app()
         self._agendar_reencaixe_janela_canvas()
         return caminho, dialog.selectedNameFilter(), opcoes
 
-    def _anexar_opcoes_importacao_moldes(self, dialog: QFileDialog, origem_inicial: str | None = None) -> dict:
+    def _anexar_opcoes_importacao_moldes(
+        self,
+        dialog: QFileDialog,
+        origem_inicial: str | None = None,
+    ) -> dict:
         layout = dialog.layout()
         opcoes = self._opcoes_importacao_moldes_padrao(origem_inicial=origem_inicial)
         painel = QFrame(dialog)
@@ -4081,12 +4296,21 @@ class GuimmaStudioMainWindow(QMainWindow):
             pontos = novo.get("pontos")
             if isinstance(pontos, list) and fator != 1.0:
                 novo["pontos"] = [self._escalar_ponto_importado(pt, fator) for pt in pontos]
+            if fator != 1.0 and str(novo.get("tipo") or "").lower() == "texto":
+                for chave in ("posicao", "ponto", "origem"):
+                    pt = novo.get(chave)
+                    if isinstance(pt, (tuple, list)) and len(pt) == 2:
+                        novo[chave] = self._escalar_ponto_importado(pt, fator)
             novo["unidade_origem"] = unidade
             novo["origem_importacao"] = str(opcoes.get("origem", "Padrao (ASTM)"))
             novo["tipo_filtro_importacao"] = str(opcoes.get("tipo_filtro", ""))
             novo["importar_linha_costura"] = bool(opcoes.get("importar_linha_costura", False))
             novo["usar_contorno_corte_como_base"] = bool(opcoes.get("usar_contorno_corte_como_base", True))
-            novo["subtipo_importacao"] = "costura" if novo["importar_linha_costura"] else "contorno_corte"
+            novo["subtipo_importacao"] = (
+                "texto" if str(novo.get("tipo") or "").lower() == "texto"
+                else "costura" if novo["importar_linha_costura"]
+                else "contorno_corte"
+            )
             preparados.append(novo)
         return preparados
 
@@ -5364,6 +5588,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             "audaces_xml": "Arquivos XML (*.xml)",
             "audaces_emf_xml": "Arquivos EMF/XML (*.emf *.xml)",
             "dxf": "Arquivo DXF (*.dxf)",
+            "dxf_agrupado": "Arquivo DXF (*.dxf)",
             "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
             "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
         }
@@ -5402,7 +5627,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         opcoes_importacao_moldes: dict = {}
-        if tipo in {"dxf", "aama_astm"}:
+        if tipo in {"dxf", "dxf_agrupado", "aama_astm"}:
             caminho, _, opcoes_importacao_moldes = self._abrir_dialogo_importacao_moldes(tipo, origem_inicial=origem_inicial)
         else:
             chave_memoria = "plotagem" if tipo == "plotagem" else "importacao"
@@ -5490,19 +5715,27 @@ class GuimmaStudioMainWindow(QMainWindow):
             self.lbl_status.setText("XML importado como metadado tecnico. Use EMF + XML para vetor editavel.")
             return
 
-        if tipo in {"dxf", "aama_astm"}:
-            elementos = importar_dxf_para_elementos(caminho)
+        if tipo in {"dxf", "dxf_agrupado", "aama_astm"}:
+            elementos = importar_dxf_para_elementos(
+                caminho,
+                agrupar_matriz=tipo == "dxf_agrupado",
+                tamanho_base=str(opcoes_importacao_moldes.get("tamanho_base_dxf_agrupado", "P") or "P"),
+                grade_tamanhos=opcoes_importacao_moldes.get("grade_dxf_agrupado"),
+            )
             if not elementos:
                 self.lbl_status.setText("Nenhum elemento vetorial encontrado no arquivo.")
                 return
             elementos = self._preparar_elementos_importacao_moldes(elementos, opcoes_importacao_moldes)
-            nome_doc = "DXF" if tipo == "dxf" else "AAMA/ASTM"
+            nome_doc = "DXF agrupado" if tipo == "dxf_agrupado" else ("DXF" if tipo == "dxf" else "AAMA/ASTM")
             anexar = bool(opcoes_importacao_moldes.get("importar_mesmo_arquivo", False))
             self._aplicar_elementos_importados_canvas(elementos, nome_doc, caminho, anexar=anexar)
             unidade = str(opcoes_importacao_moldes.get("unidade", "cm"))
             origem = str(opcoes_importacao_moldes.get("origem", "Padrao (ASTM)"))
             modo = "adicionado ao arquivo atual" if anexar else "importado"
-            self.lbl_status.setText(f"{nome_doc} {modo}: {len(elementos)} segmentos. Unidade {unidade}, origem {origem}.")
+            total_moldes = sum(1 for el in elementos if isinstance(el, dict) and el.get("molde"))
+            item_nome = "moldes graduados" if total_moldes else "segmentos"
+            total_itens = total_moldes or len(elementos)
+            self.lbl_status.setText(f"{nome_doc} {modo}: {total_itens} {item_nome}. Unidade {unidade}, origem {origem}.")
             return
 
         if tipo == "plotagem":

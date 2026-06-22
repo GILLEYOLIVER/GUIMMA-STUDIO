@@ -15,10 +15,22 @@ if find_spec("PySide6") is None:
     GuimmaStudioMainWindow = None
 else:
     from PySide6.QtCore import QPointF
-    from PySide6.QtWidgets import QApplication, QMenu
+    from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QGroupBox, QMenu
 
     import ui.janela_principal as janela_principal_module
     from ui.janela_principal import GuimmaStudioMainWindow
+
+
+def _dxf_entities(entidades: list[str]) -> str:
+    return "\n".join(["0", "SECTION", "2", "ENTITIES", *entidades, "0", "ENDSEC", "0", "EOF"])
+
+
+def _line(x1, y1, x2, y2) -> list[str]:
+    return ["0", "LINE", "10", str(x1), "20", str(y1), "11", str(x2), "21", str(y2)]
+
+
+def _text(texto, x, y) -> list[str]:
+    return ["0", "TEXT", "8", "0", "10", str(x), "20", str(y), "40", "1", "1", str(texto)]
 
 
 @unittest.skipIf(GuimmaStudioMainWindow is None, "PySide6 nao disponivel neste ambiente")
@@ -111,6 +123,76 @@ class ImportacaoMoldesDialogTestCase(unittest.TestCase):
         self.assertEqual(chamadas, [("dxf", None)])
         self.assertFalse(janela.backstage.isVisible())
 
+    def test_menu_importacao_tem_acao_dxf_agrupado_separada(self):
+        janela = GuimmaStudioMainWindow()
+        self.addCleanup(janela.close)
+        chamadas = []
+        janela._importar_por_tipo = lambda tipo, origem_inicial=None: chamadas.append((tipo, origem_inicial))
+
+        menu = janela._criar_menu_importar()
+        textos = [acao.text() for acao in menu.actions()]
+        self.assertLess(textos.index("Arquivo DXF"), textos.index("Arquivo DXF agrupado"))
+        acao_dxf_agrupado = next(acao for acao in menu.actions() if acao.text() == "Arquivo DXF agrupado")
+        with patch.object(janela_principal_module.sys, "platform", "linux"):
+            acao_dxf_agrupado.trigger()
+
+        QApplication.processEvents()
+        self.assertEqual(chamadas, [("dxf_agrupado", None)])
+
+    def test_seletor_importacao_nao_mostra_grade_dxf_agrupado(self):
+        janela = GuimmaStudioMainWindow()
+        self.addCleanup(janela.close)
+        dialog = QFileDialog(janela)
+        self.addCleanup(dialog.close)
+
+        controles = janela._anexar_opcoes_importacao_moldes(dialog)
+        grupos = {grupo.title(): grupo for grupo in dialog.findChildren(QGroupBox)}
+
+        self.assertNotIn("DXF agrupado", grupos)
+        self.assertNotIn("tbl_grade_dxf", controles)
+        self.assertNotIn("cmb_tamanho_base_dxf", controles)
+
+    def test_dialogo_config_dxf_agrupado_usa_tamanhos_detectados(self):
+        janela = GuimmaStudioMainWindow()
+        self.addCleanup(janela.close)
+        janela.projeto_atual.preferencias_usuario["importacao_moldes"] = {"tamanho_base_dxf_agrupado": "M"}
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "molde.dxf"
+            caminho.write_text(
+                _dxf_entities(
+                    [
+                        *_line(0, 0, 10, 0),
+                        *_line(10, 0, 10, 5),
+                        *_line(10, 5, 0, 5),
+                        *_line(0, 5, 0, 0),
+                        *_text("FRENTE 1X", 5, 2),
+                        *_line(20, 0, 32, 0),
+                        *_line(32, 0, 32, 6),
+                        *_line(32, 6, 20, 6),
+                        *_line(20, 6, 20, 0),
+                        *_text("FRENTE 1X", 26, 2),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(janela_principal_module.QDialog, "exec", return_value=QDialog.Accepted):
+                config = janela._abrir_dialogo_config_dxf_agrupado(str(caminho))
+
+        self.assertEqual(config["tamanho_base_dxf_agrupado"], "PP")
+        self.assertEqual([linha["tamanho"] for linha in config["grade_dxf_agrupado"]], ["PP", "P"])
+
+    def test_opcoes_dxf_padrao_ocultam_tamanho_base_agrupado(self):
+        janela = GuimmaStudioMainWindow()
+        self.addCleanup(janela.close)
+        dialog = QFileDialog(janela)
+        self.addCleanup(dialog.close)
+
+        janela._anexar_opcoes_importacao_moldes(dialog)
+        grupos = {grupo.title(): grupo for grupo in dialog.findChildren(QGroupBox)}
+
+        self.assertNotIn("DXF agrupado", grupos)
+
     def test_botao_importacao_continua_como_submenu_do_backstage(self):
         janela = GuimmaStudioMainWindow()
         self.addCleanup(janela.close)
@@ -120,7 +202,9 @@ class ImportacaoMoldesDialogTestCase(unittest.TestCase):
         self.assertIsNone(botao.menu())
         self.assertTrue(janela._item_backstage_tem_submenu("Importar ▸"))
         menu = janela._criar_menu_importar()
-        self.assertIn("Arquivos EMF/XML/ADSX/AMKX", [acao.text() for acao in menu.actions()])
+        acoes = [acao.text() for acao in menu.actions()]
+        self.assertIn("Arquivo DXF agrupado", acoes)
+        self.assertIn("Arquivos EMF/XML/ADSX/AMKX", acoes)
 
     def test_hover_nao_duplica_menu_durante_clique_importar(self):
         janela = GuimmaStudioMainWindow()

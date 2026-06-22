@@ -325,7 +325,7 @@ class AudacesPairImport:
                 continue
             cls._transformar_elemento_canvas_por_bbox(elemento, bbox=bbox, sx=sx, sy=sy)
             cls._aplicar_controles_cantos_canvas(elemento)
-            if elemento.get("graduacao_contornos_importados"):
+            if elemento.get("graduacao_contornos_importados") and not elemento.get("graduacao_regularizacao_bloqueada"):
                 cls._regularizar_graduacao_importada(elemento)
             novo_bbox = cls._bbox_pontos(cls._sem_fecho_repetido(cls._pontos_float(elemento.get("pontos"))))
             detalhe = {
@@ -1874,6 +1874,8 @@ class AudacesPairImport:
         cls,
         elementos,
         grade_detectada: tuple[str, list[dict], str | None] | None,
+        *,
+        exigir_base_xml: bool = False,
     ) -> list[dict]:
         mapa_cores = cls._mapa_grade_por_cor(grade_detectada)
         cores_grade = set(mapa_cores)
@@ -1936,10 +1938,20 @@ class AudacesPairImport:
                 continue
             base_item = None
             for item in membros:
-                linha = mapa_cores.get(item["cor"])
-                if linha and linha.get("base"):
+                if getattr(item["el"], "metadados", {}).get("xml_pattern_index") is not None:
                     base_item = item
                     break
+            if base_item is None:
+                for item in membros:
+                    linha = mapa_cores.get(item["cor"])
+                    if linha and linha.get("base"):
+                        base_item = item
+                        break
+            if exigir_base_xml and (
+                base_item is None
+                or getattr(base_item["el"], "metadados", {}).get("xml_pattern_index") is None
+            ):
+                continue
             if base_item is None:
                 ordenados_area = sorted(membros, key=lambda it: it["area"])
                 base_item = ordenados_area[len(ordenados_area) // 2]
@@ -1968,7 +1980,10 @@ class AudacesPairImport:
             base_item["el"].metadados["subtipo_audaces"] = "contorno"
             for item in membros:
                 if item is not base_item:
-                    item["el"].metadados["subtipo_audaces"] = "graduacao_importada"
+                    if item["el"].metadados.get("xml_pattern_index") is not None:
+                        item["el"].metadados["subtipo_audaces"] = "contorno"
+                    else:
+                        item["el"].metadados["subtipo_audaces"] = "graduacao_importada"
                     if item.get("fechado_forcado"):
                         item["el"].metadados["contorno_quase_fechado_graduacao"] = True
             saida.append({
@@ -1999,6 +2014,7 @@ class AudacesPairImport:
         grupos_graduados: list[dict] | None = None,
         diagnostico_file_ads: dict | None = None,
         xml_doc=None,
+        regularizar_graduacao_importada: bool = True,
     ) -> dict:
         regras_exatas = bool((diagnostico_file_ads or {}).get("regras_graduacao_decodificadas"))
         motivo_regras = str((diagnostico_file_ads or {}).get("motivo_regras_graduacao") or "")
@@ -2139,7 +2155,14 @@ class AudacesPairImport:
                     }
                     for item in grupo.get("contornos", [])
                 ]
-                cls._regularizar_graduacao_importada(el)
+                if regularizar_graduacao_importada:
+                    cls._regularizar_graduacao_importada(el)
+                else:
+                    el["graduacao_contornos_regularizados_preview"] = []
+                    el["graduacao_renderizar_regularizada"] = False
+                    el["graduacao_renderizar_por_tabela_derivada"] = False
+                    el["graduacao_preferir_tabela_dxdy"] = False
+                    el["graduacao_regularizacao_bloqueada"] = True
                 el["mostrar_graduacao"] = True
                 el["metadados"].setdefault("graduacao_importada_origem", "emf_contornos_coloridos")
                 el["metadados"].setdefault(
@@ -2158,6 +2181,28 @@ class AudacesPairImport:
             el.setdefault("metadados", {})["nome_arquivo_origem"] = nome_arquivo
             aplicados += 1
         return {"moldes_nomeados": aplicados, "fios_detectados": fios, "grupos_graduados": grupos_aplicados}
+
+    @staticmethod
+    @staticmethod
+    def _desativar_overlays_importacao_inicial(elementos_canvas: list[dict]) -> list[dict]:
+        for el in elementos_canvas or []:
+            if not isinstance(el, dict) or not bool(el.get("molde")):
+                continue
+            origem = str(el.get("origem") or el.get("metadados", {}).get("origem") or "")
+            if origem.startswith("audaces_"):
+                el["mostrar_controles"] = False
+                el["mostrar_numeros"] = False
+        return elementos_canvas
+
+    @classmethod
+    def _filtrar_canvas_para_moldes_reais(cls, elementos_canvas: list[dict]) -> list[dict]:
+        """Remove residuos soltos do EMF quando o XML ja definiu os moldes reais."""
+        moldes: list[dict] = []
+        for el in elementos_canvas or []:
+            if not isinstance(el, dict) or not bool(el.get("molde")):
+                continue
+            moldes.append(el)
+        return cls._desativar_overlays_importacao_inicial(moldes)
 
     @staticmethod
     def _dimensoes_peca_xml(peca) -> dict | None:
@@ -2620,11 +2665,26 @@ class AudacesPairImport:
             grade_labels=grade_labels,
             tamanho_base=grade_base_xml,
         )
-        grupos_graduados = cls._agrupar_contornos_graduados_emf(emf_doc.elementos, grade_detectada)
+        grupos_graduados = cls._agrupar_contornos_graduados_emf(
+            emf_doc.elementos,
+            grade_detectada,
+            exigir_base_xml=True,
+        )
+        assinaturas_contornos_xml = {
+            cls._assinatura_elemento(el)
+            for el in emf_doc.elementos
+            if (
+                getattr(el, "fechado", False)
+                and getattr(el, "metadados", {}).get("xml_pattern_index") is not None
+            )
+        }
+        assinaturas_bases_grupos: set[tuple] = set()
         assinaturas_graduacao_ocultas: set[tuple] = set()
         assinaturas_grupos: set[tuple] = set()
         for grupo in grupos_graduados:
             assinatura_base = grupo.get("assinatura_base")
+            if assinatura_base:
+                assinaturas_bases_grupos.add(assinatura_base)
             membros = {
                 assinatura
                 for assinatura in (grupo.get("assinaturas_membros") or set())
@@ -2634,6 +2694,9 @@ class AudacesPairImport:
             assinaturas_graduacao_ocultas.update(membros)
             if assinatura_base in assinaturas_graduacao_ocultas:
                 assinaturas_graduacao_ocultas.remove(assinatura_base)
+        assinaturas_graduacao_ocultas.difference_update(
+            assinatura for assinatura in assinaturas_contornos_xml if assinatura
+        )
         elementos_canvas = AudacesEMFImport(b"", emf_path).converter_para_elementos_guimma(emf_doc)
         if assinaturas_graduacao_ocultas:
             elementos_canvas = [
@@ -2665,7 +2728,7 @@ class AudacesPairImport:
                 el.fechado
                 and len(el.pontos) >= 4
                 and el.metadados.get("subtipo_audaces") == "contorno"
-                and cls._assinatura_elemento(el) not in assinaturas_grupos
+                and cls._assinatura_elemento(el) not in assinaturas_bases_grupos
             )
         )
         contornos = sorted(
@@ -2724,7 +2787,9 @@ class AudacesPairImport:
             grupos_graduados,
             diagnostico_file_ads,
             xml_doc,
+            regularizar_graduacao_importada=False,
         )
+        elementos_canvas = cls._filtrar_canvas_para_moldes_reais(elementos_canvas)
         calibracao_dimensoes = cls._calibrar_moldes_por_dimensoes_xml(elementos_canvas, doc)
         centralizacao_canvas = cls._centralizar_elementos_canvas_no_zero(elementos_canvas, doc)
         depois.update({
@@ -2981,6 +3046,7 @@ class AudacesPairImport:
             diagnostico_file_ads,
             xml_adj,
         )
+        cls._desativar_overlays_importacao_inicial(elementos_canvas)
         calibracao_dimensoes = cls._calibrar_moldes_por_dimensoes_xml(elementos_canvas, doc)
         centralizacao_canvas = cls._centralizar_elementos_canvas_no_zero(elementos_canvas, doc)
         depois = {
