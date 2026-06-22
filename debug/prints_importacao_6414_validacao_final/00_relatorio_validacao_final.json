@@ -1,0 +1,397 @@
+{
+  "emf": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "xml": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.xml",
+  "referencia": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/REFERENCIA 6414.png",
+  "prints": {
+    "overview": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_validacao_final/01_overview_regularizado_final.png",
+    "frente_2x": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_validacao_final/02_frente_2x_selecionado.png",
+    "manga_2x": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_validacao_final/02_manga_2x_selecionado.png",
+    "costas_2x": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_validacao_final/02_costas_2x_selecionado.png",
+    "forro_frente_1x": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_validacao_final/02_forro_frente_1x_selecionado.png"
+  },
+  "moldes": 9,
+  "grade": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "calibracao": {
+    "aplicado": true,
+    "moldes_calibrados": 9,
+    "detalhes": [
+      {
+        "molde": "GOLA 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 1.0078420619687416,
+        "sy": 0.9790462667901999,
+        "largura_antes": 6.078333333333333,
+        "altura_antes": 33.390658959537575,
+        "largura_xml": 6.126,
+        "altura_xml": 32.691,
+        "bbox_original": [
+          86.31233333333334,
+          108.01372254335257,
+          92.39066666666668,
+          141.40438150289015
+        ],
+        "bbox_final": [
+          86.28850000000001,
+          108.36355202312136,
+          92.4145,
+          141.05455202312135
+        ]
+      },
+      {
+        "molde": "FRENTE 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 1.0005870385372901,
+        "sy": 1.0008787200186136,
+        "largura_antes": 58.31776522440464,
+        "altura_antes": 55.651098265895925,
+        "largura_xml": 58.352,
+        "altura_xml": 55.7,
+        "bbox_original": [
+          103.57480000000001,
+          94.85982658959536,
+          161.89256522440465,
+          150.51092485549128
+        ],
+        "bbox_final": [
+          103.55768261220233,
+          94.83537572254332,
+          161.90968261220235,
+          150.5353757225433
+        ]
+      },
+      {
+        "molde": "FORRO FRENTE 1X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 1.0102133681745549,
+        "sy": 1.0072126159145514,
+        "largura_antes": 42.093087796728156,
+        "altura_antes": 53.88038150289016,
+        "largura_xml": 42.523,
+        "altura_xml": 54.269,
+        "bbox_original": [
+          197.91053333333335,
+          87.77695953757224,
+          240.0036211300615,
+          141.6573410404624
+        ],
+        "bbox_final": [
+          197.69557723169743,
+          87.58265028901732,
+          240.21857723169742,
+          141.85165028901733
+        ]
+      },
+      {
+        "molde": "MANGA 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 1.002295987012397,
+        "sy": 1.0,
+        "largura_antes": 34.60355069701682,
+        "altura_antes": 43.762,
+        "largura_xml": 34.683,
+        "altura_xml": 43.762,
+        "bbox_original": [
+          3.5683826363165143,
+          79.93521387283235,
+          38.171933333333335,
+          123.69721387283235
+        ],
+        "bbox_final": [
+          3.528657984824928,
+          79.93521387283235,
+          38.211657984824924,
+          123.69721387283235
+        ]
+      },
+      {
+        "molde": "COSTAS 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 0.9902534065657789,
+        "sy": 1.009264298762037,
+        "largura_antes": 47.15762620999176,
+        "altura_antes": 25.042994219653167,
+        "largura_xml": 46.698,
+        "altura_xml": 25.275,
+        "bbox_original": [
+          114.27266666666667,
+          38.955768786127166,
+          161.43029287665843,
+          63.99876300578033
+        ],
+        "bbox_final": [
+          114.50247977166255,
+          38.83976589595375,
+          161.20047977166254,
+          64.11476589595375
+        ]
+      },
+      {
+        "molde": "CHIMANGO COSTAS 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 1.0210278378366224,
+        "sy": 0.9989100468577359,
+        "largura_antes": 14.83113333333334,
+        "altura_antes": 34.40249710982659,
+        "largura_xml": 15.143,
+        "altura_xml": 34.365,
+        "bbox_original": [
+          93.84946666666666,
+          44.2679190751445,
+          108.6806,
+          78.67041618497109
+        ],
+        "bbox_final": [
+          93.69353333333333,
+          44.28666763005779,
+          108.83653333333334,
+          78.6516676300578
+        ]
+      },
+      {
+        "molde": "BABADIO MANG 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 0.9975399421480903,
+        "sy": 1.0201810084164933,
+        "largura_antes": 17.26246666666666,
+        "altura_antes": 70.57571098265896,
+        "largura_xml": 17.22,
+        "altura_xml": 72.0,
+        "bbox_original": [
+          49.5992,
+          66.52835838150287,
+          66.86166666666666,
+          137.10406936416183
+        ],
+        "bbox_final": [
+          49.62043333333334,
+          65.81621387283235,
+          66.84043333333334,
+          137.81621387283235
+        ]
+      },
+      {
+        "molde": "LEVANTA MAG 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 0.9794743233185785,
+        "sy": 0.9467742450819057,
+        "largura_antes": 10.211600000000004,
+        "altura_antes": 28.584427745664726,
+        "largura_xml": 10.002,
+        "altura_xml": 27.063,
+        "bbox_original": [
+          177.00106666666667,
+          123.19129479768785,
+          187.21266666666668,
+          151.77572254335257
+        ],
+        "bbox_final": [
+          177.10586666666669,
+          123.95200867052021,
+          187.10786666666667,
+          151.01500867052022
+        ]
+      },
+      {
+        "molde": "ROLITE GOLA 2X",
+        "base": "P",
+        "aplicado": true,
+        "sx": 0.9895925740737757,
+        "sy": 0.9480125787347068,
+        "largura_antes": 33.066133333333326,
+        "altura_antes": 34.402497109826584,
+        "largura_xml": 32.722,
+        "altura_xml": 32.614,
+        "bbox_original": [
+          76.34386666666667,
+          0.7588786127167628,
+          109.41,
+          35.16137572254335
+        ],
+        "bbox_final": [
+          76.51593333333334,
+          1.653127167630057,
+          109.23793333333333,
+          34.26712716763005
+        ]
+      }
+    ]
+  },
+  "motor_cpp_curvas": 9,
+  "motor_cpp_falhas": 0,
+  "moldes_resumo": [
+    {
+      "nome": "GOLA 2X",
+      "pontos": 61,
+      "controles_principais": 6,
+      "controles_auxiliares": 53,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "FRENTE 2X",
+      "pontos": 46,
+      "controles_principais": 13,
+      "controles_auxiliares": 32,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "FORRO FRENTE 1X",
+      "pontos": 49,
+      "controles_principais": 12,
+      "controles_auxiliares": 36,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "MANGA 2X",
+      "pontos": 21,
+      "controles_principais": 4,
+      "controles_auxiliares": 16,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "COSTAS 2X",
+      "pontos": 25,
+      "controles_principais": 5,
+      "controles_auxiliares": 19,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "CHIMANGO COSTAS 2X",
+      "pontos": 19,
+      "controles_principais": 6,
+      "controles_auxiliares": 12,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "BABADIO MANG 2X",
+      "pontos": 5,
+      "controles_principais": 4,
+      "controles_auxiliares": 0,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "LEVANTA MAG 2X",
+      "pontos": 21,
+      "controles_principais": 4,
+      "controles_auxiliares": 16,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "ROLITE GOLA 2X",
+      "pontos": 5,
+      "controles_principais": 4,
+      "controles_auxiliares": 0,
+      "base": [
+        "P"
+      ],
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    }
+  ]
+}

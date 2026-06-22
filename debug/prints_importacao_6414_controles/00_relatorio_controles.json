@@ -1,0 +1,63 @@
+{
+  "emf": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "xml": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.xml",
+  "grade": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "prints": {
+    "overview": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_controles/06_importado_controles_visao_geral.png",
+    "frente": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_controles/07_frente_controles_principais_auxiliares.png",
+    "manga": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_controles/08_manga_controles_principais_auxiliares.png",
+    "levanta": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_controles/09_levanta_controles_principais_auxiliares.png",
+    "mapa_frente": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_controles/10_mapa_controles_frente.png"
+  },
+  "moldes": [
+    {
+      "nome": "GOLA 2X",
+      "principais": 2,
+      "auxiliares": 57
+    },
+    {
+      "nome": "FRENTE 2X",
+      "principais": 11,
+      "auxiliares": 34
+    },
+    {
+      "nome": "FORRO FRENTE 1X",
+      "principais": 11,
+      "auxiliares": 37
+    },
+    {
+      "nome": "MANGA 2X",
+      "principais": 4,
+      "auxiliares": 16
+    },
+    {
+      "nome": "COSTAS 2X",
+      "principais": 5,
+      "auxiliares": 19
+    },
+    {
+      "nome": "CHIMANGO COSTAS 2X",
+      "principais": 6,
+      "auxiliares": 12
+    },
+    {
+      "nome": "BABADIO MANG 2X",
+      "principais": 4,
+      "auxiliares": 0
+    },
+    {
+      "nome": "LEVANTA MAG 2X",
+      "principais": 4,
+      "auxiliares": 16
+    },
+    {
+      "nome": "ROLITE GOLA 2X",
+      "principais": 4,
+      "auxiliares": 0
+    }
+  ]
+}

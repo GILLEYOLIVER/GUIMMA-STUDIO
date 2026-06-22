@@ -72,6 +72,7 @@ from ui.backstage_arquivo import BackstageArquivoPanel
 from ui.hover_style import folha_estilo_hover_global
 from ui.ribbon import RibbonWidget, carregar_icone
 from ui.salvar_como_dialog import SalvarComoDialog
+from tools.movimento_utils import mover_valor_estruturado_por_delta
 from tools.propriedades_tool import ConfigurarCoresTecidosDialog
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog, QPrinter
 from shiboken6 import isValid as _qt_objeto_valido
@@ -1406,6 +1407,23 @@ class GuimmaStudioMainWindow(QMainWindow):
             elif tipo_evento in (QEvent.Hide, QEvent.Close):
                 self._limpar_menu_backstage_hover_se_necessario(watched)
 
+        if isinstance(watched, QMenu) and getattr(watched, "_menu_backstage", False):
+            if tipo_evento in (QEvent.Enter, QEvent.MouseMove):
+                self._atualizar_hover_menus_backstage_por_cursor()
+            elif tipo_evento == QEvent.MouseButtonRelease and hasattr(event, "button"):
+                acao = None
+                try:
+                    if event.button() == Qt.LeftButton:
+                        acao = watched.actionAt(event.position().toPoint())
+                except Exception:
+                    acao = None
+                if acao is not None and getattr(acao, "_guimma_tipo_importacao", None):
+                    self._executar_acao_importacao_avancada(acao)
+                    event.accept()
+                    return True
+            elif tipo_evento in (QEvent.Hide, QEvent.Close):
+                self._fechar_submenu_backstage_exec()
+
         if getattr(watched, "_backstage_hover_monitor", False):
             if tipo_evento in (QEvent.Enter, QEvent.MouseMove):
                 texto = getattr(watched, "_backstage_item_texto", None)
@@ -1427,7 +1445,11 @@ class GuimmaStudioMainWindow(QMainWindow):
             backstage_rect = self.backstage.rect().translated(backstage_topo)
             botao_topo = self.botao_arquivo.mapToGlobal(QPoint(0, 0))
             botao_rect = self.botao_arquivo.rect().translated(botao_topo)
-            if not backstage_rect.contains(pos) and not botao_rect.contains(pos):
+            clique_em_menu_backstage = any(
+                self._cursor_sobre_widget_global(menu, pos, margem=2)
+                for menu in self._menus_backstage_visiveis()
+            )
+            if not backstage_rect.contains(pos) and not botao_rect.contains(pos) and not clique_em_menu_backstage:
                 self._fechar_submenu_backstage_hover(forcar=True)
                 self.backstage.hide()
         if isinstance(watched, QDialog) and self._eh_caixa_auxiliar_ferramenta(watched) and tipo_evento == QEvent.Move:
@@ -2039,8 +2061,12 @@ class GuimmaStudioMainWindow(QMainWindow):
         if not hasattr(self, "backstage") or not self._qt_widget_visivel(self.backstage):
             self._limpar_hover_botoes_backstage()
             return
+        if getattr(self, "_menu_backstage_exec_aberto", False):
+            self._atualizar_hover_menus_backstage_por_cursor()
+            return
 
         self._limpar_referencias_menus_backstage_invalidos()
+        self._atualizar_hover_menus_backstage_por_cursor()
         cursor_pos = QCursor.pos()
         botao_texto, botao = self._botao_backstage_sob_cursor(cursor_pos)
         menu_atual = getattr(self, "_menu_backstage_hover_aberto", None)
@@ -2124,6 +2150,208 @@ class GuimmaStudioMainWindow(QMainWindow):
         except RuntimeError:
             self._limpar_referencias_menus_backstage_invalidos()
 
+    def _marcar_menu_backstage(self, menu: QMenu, origem: str):
+        """Marca menus criados pelo backstage para evitar popups duplicados."""
+        if not self._qt_widget_vivo(menu):
+            return
+        try:
+            menu.setMouseTracking(True)
+            menu.setAttribute(Qt.WA_Hover, True)
+            try:
+                menu.installEventFilter(self)
+            except Exception:
+                pass
+            menu._menu_backstage = True  # type: ignore[attr-defined]
+            menu._origem_backstage = origem  # type: ignore[attr-defined]
+            for acao in menu.actions():
+                sub = acao.menu()
+                if sub:
+                    self._marcar_menu_backstage(sub, origem)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+        except Exception:
+            pass
+
+    def _fechar_menus_backstage_marcados(self):
+        app = QApplication.instance()
+        if app is None:
+            return
+        for widget in list(app.topLevelWidgets()):
+            if not isinstance(widget, QMenu):
+                continue
+            try:
+                if getattr(widget, "_menu_backstage", False) and widget.isVisible():
+                    widget.close()
+            except RuntimeError:
+                continue
+            except Exception:
+                continue
+
+    def _menus_backstage_visiveis(self) -> list[QMenu]:
+        app = QApplication.instance()
+        if app is None:
+            return []
+        menus: list[QMenu] = []
+        for widget in list(app.topLevelWidgets()):
+            if not isinstance(widget, QMenu):
+                continue
+            try:
+                if getattr(widget, "_menu_backstage", False) and widget.isVisible():
+                    menus.append(widget)
+            except RuntimeError:
+                continue
+            except Exception:
+                continue
+        return menus
+
+    def _definir_acao_ativa_menu_backstage(self, menu: QMenu, acao: QAction):
+        if not self._qt_widget_vivo(menu) or acao is None:
+            return
+        try:
+            if menu.activeAction() is not acao:
+                menu.setActiveAction(acao)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+        except Exception:
+            pass
+
+    def _fechar_submenu_backstage_exec(self):
+        submenu = getattr(self, "_menu_backstage_exec_submenu_atual", None)
+        if self._qt_widget_visivel(submenu):
+            try:
+                submenu.close()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+        self._menu_backstage_exec_submenu_atual = None
+        self._menu_backstage_exec_acao_atual = None
+
+    def _mostrar_submenu_backstage_exec(self, menu: QMenu, acao: QAction):
+        if not self._qt_widget_vivo(menu) or acao is None:
+            return
+        submenu = acao.menu()
+        if not self._qt_widget_vivo(submenu):
+            self._fechar_submenu_backstage_exec()
+            return
+
+        submenu_atual = getattr(self, "_menu_backstage_exec_submenu_atual", None)
+        if self._qt_widget_visivel(submenu_atual) and submenu_atual is not submenu:
+            try:
+                submenu_atual.close()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+
+        origem = getattr(menu, "_origem_backstage", "")
+        self._marcar_menu_backstage(submenu, origem)
+        submenu.setStyleSheet(self._estilo_menu_backstage())
+        self._menu_backstage_exec_submenu_atual = submenu
+        self._menu_backstage_exec_acao_atual = acao
+        try:
+            pos = menu.mapToGlobal(menu.actionGeometry(acao).topRight())
+            submenu.popup(pos)
+            submenu.raise_()
+        except RuntimeError:
+            self._fechar_submenu_backstage_exec()
+        except Exception:
+            self._fechar_submenu_backstage_exec()
+
+    def _preparar_submenus_backstage_exec(self, menu: QMenu, origem: str):
+        self._marcar_menu_backstage(menu, origem)
+        try:
+            for acao in menu.actions():
+                submenu = acao.menu()
+                if submenu:
+                    self._marcar_menu_backstage(submenu, origem)
+                    submenu.setStyleSheet(self._estilo_menu_backstage())
+            menu.hovered.connect(lambda acao, m=menu: self._mostrar_submenu_backstage_exec(m, acao))
+            menu.triggered.connect(lambda acao, m=menu: self._mostrar_submenu_backstage_exec(m, acao) if acao.menu() else None)
+            menu.aboutToHide.connect(self._fechar_submenu_backstage_exec)
+        except RuntimeError:
+            self._limpar_referencias_menus_backstage_invalidos()
+        except Exception:
+            pass
+
+    def _atualizar_hover_menus_backstage_por_cursor(self):
+        menus = self._menus_backstage_visiveis()
+        if not menus:
+            return
+
+        pos_global = QCursor.pos()
+        menu_sob_cursor = None
+        acao_sob_cursor = None
+        for menu in reversed(menus):
+            if not self._cursor_sobre_widget_global(menu, pos_global, margem=0):
+                continue
+            try:
+                acao = menu.actionAt(menu.mapFromGlobal(pos_global))
+            except RuntimeError:
+                continue
+            except Exception:
+                continue
+            menu_sob_cursor = menu
+            acao_sob_cursor = acao
+            break
+
+        if menu_sob_cursor is None or acao_sob_cursor is None:
+            return
+
+        self._cancelar_fechamento_submenu_backstage()
+        self._definir_acao_ativa_menu_backstage(menu_sob_cursor, acao_sob_cursor)
+        if acao_sob_cursor.menu():
+            self._mostrar_submenu_backstage_exec(menu_sob_cursor, acao_sob_cursor)
+            return
+
+        submenu_atual = getattr(self, "_menu_backstage_exec_submenu_atual", None)
+        if submenu_atual is not None and menu_sob_cursor is not submenu_atual:
+            self._fechar_submenu_backstage_exec()
+
+    def _atualizar_submenu_backstage_exec_por_cursor(self, menu: QMenu):
+        if not self._qt_widget_visivel(menu) or not getattr(self, "_menu_backstage_exec_aberto", False):
+            return
+        self._atualizar_hover_menus_backstage_por_cursor()
+        pos_global = QCursor.pos()
+        try:
+            acao = menu.actionAt(menu.mapFromGlobal(pos_global))
+        except RuntimeError:
+            return
+        except Exception:
+            return
+        if acao is not None and acao.menu():
+            self._mostrar_submenu_backstage_exec(menu, acao)
+            return
+        submenu = getattr(self, "_menu_backstage_exec_submenu_atual", None)
+        if self._cursor_sobre_widget_global(submenu, pos_global, margem=8):
+            return
+        if acao is not None:
+            self._fechar_submenu_backstage_exec()
+
+    def _iniciar_vigilancia_submenu_backstage_exec(self, menu: QMenu):
+        self._parar_vigilancia_submenu_backstage_exec()
+        try:
+            timer = QTimer(menu)
+            timer.setInterval(80)
+            timer.timeout.connect(lambda m=menu: self._atualizar_submenu_backstage_exec_por_cursor(m))
+            timer.start()
+            self._timer_vigiar_submenu_backstage_exec = timer
+        except RuntimeError:
+            self._timer_vigiar_submenu_backstage_exec = None
+        except Exception:
+            self._timer_vigiar_submenu_backstage_exec = None
+
+    def _parar_vigilancia_submenu_backstage_exec(self):
+        timer = getattr(self, "_timer_vigiar_submenu_backstage_exec", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+        self._timer_vigiar_submenu_backstage_exec = None
+
     def _fechar_submenu_backstage_hover(self, _item_texto: str = None, forcar: bool = False):
         """Fecha o submenu atualmente aberto sem acessar QMenu já destruído."""
         self._cancelar_fechamento_submenu_backstage()
@@ -2131,6 +2359,8 @@ class GuimmaStudioMainWindow(QMainWindow):
 
         if not forcar and self._cursor_sobre_area_backstage_ou_menus():
             return
+
+        self._fechar_menus_backstage_marcados()
 
         for menu in list(getattr(self, "_menus_backstage_hover", [])):
             if self._qt_widget_visivel(menu):
@@ -2269,14 +2499,64 @@ class GuimmaStudioMainWindow(QMainWindow):
             self._fechar_submenu_backstage_hover(forcar=True)
             if self._qt_widget_vivo(menu) and self._qt_widget_vivo(botao):
                 try:
+                    self._preparar_submenus_backstage_exec(menu, origem)
+                    self._menu_backstage_exec_aberto = True
+                    self._iniciar_vigilancia_submenu_backstage_exec(menu)
                     menu.exec(self._posicao_submenu_backstage(botao))
                 except RuntimeError:
                     pass
+                finally:
+                    self._parar_vigilancia_submenu_backstage_exec()
+                    self._fechar_submenu_backstage_exec()
+                    self._menu_backstage_exec_aberto = False
+
+    def _executar_apos_menu_backstage(self, callback):
+        self._fechar_submenu_backstage_hover(forcar=True)
+        if hasattr(self, "backstage") and self._qt_widget_vivo(self.backstage):
+            self.backstage.hide()
+        if hasattr(self, "_timer_vigiar_submenu_backstage"):
+            self._timer_vigiar_submenu_backstage.stop()
+        if self.isVisible():
+            self.raise_()
+            self.activateWindow()
+        QTimer.singleShot(180 if sys.platform == "darwin" else 0, callback)
+
+    def _agendar_importacao_menu(self, tipo: str, origem_inicial: str | None = None):
+        self._executar_apos_menu_backstage(
+            lambda t=tipo, o=origem_inicial: self._importar_por_tipo(t, origem_inicial=o)
+        )
+
+    def _executar_acao_importacao_avancada(self, acao: QAction):
+        tipo = getattr(acao, "_guimma_tipo_importacao", None)
+        if not tipo:
+            return
+        origem = getattr(acao, "_guimma_origem_importacao", None)
+        chave = (id(acao), str(tipo), str(origem or ""))
+        agora = time()
+        ultimo = getattr(self, "_ultima_acao_importacao_menu", None)
+        if ultimo and ultimo[0] == chave and (agora - float(ultimo[1])) < 0.35:
+            return
+        self._ultima_acao_importacao_menu = (chave, agora)
+        self._agendar_importacao_menu(str(tipo), origem_inicial=origem)
+
+    def _adicionar_acao_importacao_avancada(
+        self,
+        menu: QMenu,
+        texto: str,
+        tipo: str,
+        origem_inicial: str | None = None,
+    ) -> QAction:
+        acao = menu.addAction(texto)
+        acao._guimma_tipo_importacao = tipo  # type: ignore[attr-defined]
+        acao._guimma_origem_importacao = origem_inicial  # type: ignore[attr-defined]
+        acao.triggered.connect(lambda _=False, a=acao: self._executar_acao_importacao_avancada(a))
+        return acao
 
     def _preparar_menu_backstage_hover(self, menu: QMenu, origem: str):
         """Prepara o menu para funcionar com hover (eventos e rastreamento)."""
         if not self._qt_widget_vivo(menu):
             return
+        self._marcar_menu_backstage(menu, origem)
         menu._menu_hover_backstage = True  # type: ignore[attr-defined]
         menu._origem_backstage = origem  # type: ignore[attr-defined]
         self._registrar_menus_hover_backstage(menu)
@@ -2395,23 +2675,27 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _criar_menu_importar(self) -> QMenu:
         menu = QMenu(self)
         menu.setStyleSheet(self._estilo_menu_backstage())
-        menu.addAction("Arquivo DXF", lambda: self._importar_por_tipo("dxf"))
-        menu.addAction("Arquivo AAMA/ASTM", lambda: self._importar_por_tipo("aama_astm"))
-        menu.addAction("Arquivo de Plotagem", lambda: self._importar_por_tipo("plotagem"))
+        menu.addAction("Arquivo DXF", lambda _=False: self._agendar_importacao_menu("dxf"))
+        menu.addAction("Arquivo AAMA/ASTM", lambda _=False: self._agendar_importacao_menu("aama_astm"))
+        menu.addAction("Arquivo de Plotagem", lambda _=False: self._agendar_importacao_menu("plotagem"))
         menu.addSeparator()
         sub_lectra = menu.addMenu("Lectra")
-        sub_lectra.addAction("Arquivo Lectra", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Lectra"))
-        menu.addAction("Investronica", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Investronica"))
-        menu.addAction("Gerber", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Gerber"))
-        menu.addAction("Assyst", lambda: self._importar_por_tipo("aama_astm", origem_inicial="Assyst"))
+        sub_lectra.addAction("Arquivo Lectra", lambda _=False: self._agendar_importacao_menu("aama_astm", origem_inicial="Lectra"))
+        menu.addAction("Investronica", lambda _=False: self._agendar_importacao_menu("aama_astm", origem_inicial="Investronica"))
+        menu.addAction("Gerber", lambda _=False: self._agendar_importacao_menu("aama_astm", origem_inicial="Gerber"))
+        menu.addAction("Assyst", lambda _=False: self._agendar_importacao_menu("aama_astm", origem_inicial="Assyst"))
         menu.addSeparator()
-        menu.addAction("Arquivos EMF/XML/ADSX/AMKX", lambda: self._importar_por_tipo("audaces"))
-        menu.addAction("Converter manualmente por traçado", self._acao_converter_manual_tracado_adsx)
+        menu.addAction("Arquivos EMF/XML/ADSX/AMKX", lambda _=False: self._agendar_importacao_menu("audaces"))
+        menu.addAction(
+            "Converter manualmente por traçado",
+            lambda _=False: self._executar_apos_menu_backstage(self._acao_converter_manual_tracado_adsx),
+        )
         sub_adv = menu.addMenu("Arquivos avancados")
-        sub_adv.addAction("Arquivos EMF (*.emf)", lambda: self._importar_por_tipo("audaces_emf"))
-        sub_adv.addAction("Arquivos XML (*.xml)", lambda: self._importar_por_tipo("audaces_xml"))
-        sub_adv.addAction("Arquivos ADSX/AMKX (*.adsx *.amkx)", lambda: self._importar_por_tipo("adsx"))
-        sub_adv.addAction("Arquivos EMF + XML", lambda: self._importar_por_tipo("audaces_emf_xml"))
+        self._adicionar_acao_importacao_avancada(sub_adv, "Arquivos EMF (*.emf)", "audaces_emf")
+        self._adicionar_acao_importacao_avancada(sub_adv, "Arquivos XML (*.xml)", "audaces_xml")
+        self._adicionar_acao_importacao_avancada(sub_adv, "Arquivos ADSX/AMKX (*.adsx *.amkx)", "adsx")
+        self._adicionar_acao_importacao_avancada(sub_adv, "Arquivos EMF + XML", "audaces_emf_xml")
+        sub_adv.triggered.connect(lambda acao: self._executar_acao_importacao_avancada(acao))
         return menu
 
     def _abrir_menu_exportar(self, modo_hover: bool = False):
@@ -4998,12 +5282,87 @@ class GuimmaStudioMainWindow(QMainWindow):
         btn_cancelar.clicked.connect(dialog.reject)
         dialog.exec()
 
+    def _resolver_par_audaces_emf_xml(self, caminho: str | Path) -> tuple[str | None, str | None]:
+        p = Path(caminho)
+        ext = p.suffix.lower()
+        if ext not in {".emf", ".xml"}:
+            return None, None
+
+        pasta = p.parent
+        stem = p.stem.lower()
+        emfs = sorted(pasta.glob("*.emf"))
+        xmls = sorted(pasta.glob("*.xml"))
+
+        def correspondente(candidatos: list[Path]) -> str | None:
+            exatos = [x for x in candidatos if x.stem.lower() == stem]
+            if len(exatos) == 1:
+                return str(exatos[0])
+            aproximados = [x for x in candidatos if stem in x.stem.lower() or x.stem.lower() in stem]
+            if len(aproximados) == 1:
+                return str(aproximados[0])
+            if len(candidatos) == 1:
+                return str(candidatos[0])
+            return None
+
+        emf_path = str(p) if ext == ".emf" else correspondente(emfs)
+        xml_path = str(p) if ext == ".xml" else correspondente(xmls)
+        return emf_path, xml_path
+
+    def _selecionar_complemento_par_audaces(self, emf_path: str | None, xml_path: str | None) -> tuple[str | None, str | None]:
+        filtros = {
+            "audaces_emf": "Arquivos EMF (*.emf)",
+            "audaces_xml": "Arquivos XML (*.xml)",
+        }
+        if not emf_path:
+            emf_path, _ = self._abrir_dialogo_arquivo_claro(
+                "Selecionar arquivo EMF",
+                filtros["audaces_emf"],
+                memoria_chave="importacao",
+            )
+        if not xml_path:
+            xml_path, _ = self._abrir_dialogo_arquivo_claro(
+                "Selecionar arquivo XML",
+                filtros["audaces_xml"],
+                memoria_chave="importacao",
+            )
+        return emf_path or None, xml_path or None
+
+    def _importar_audaces_emf_xml_para_canvas(self, emf_path: str, xml_path: str) -> bool:
+        self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
+        info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
+        self._arquivo_atual = None
+        self._limpar_abas_documentos()
+        self._adicionar_aba_documento("EMF + XML", emf_path)
+        area = self._area_documento_atual()
+        moldes_doc = self.projeto_atual.documentos[0].moldes if self.projeto_atual.documentos else []
+        elementos_canvas = info.get("elementos_canvas", [])
+        if area and elementos_canvas:
+            area.canvas.cena.elementos = [dict(el) for el in elementos_canvas if isinstance(el, dict)]
+            if hasattr(area.canvas, "_registrar_historico"):
+                area.canvas._registrar_historico()
+            self._reenquadrar_area_importada(area, area.canvas.cena.elementos)
+            info["canvas_origem"] = "elementos_processados_emf_xml"
+            info["canvas_moldes_renderizados"] = len(
+                [el for el in area.canvas.cena.elementos if isinstance(el, dict) and el.get("molde")]
+            )
+            info["canvas_elementos_emf_renderizados"] = len(area.canvas.cena.elementos)
+        elif area and moldes_doc:
+            carregados = self._carregar_moldes_reais_no_canvas(area, moldes_doc)
+            info["canvas_origem"] = "moldes_reais"
+            info["canvas_moldes_renderizados"] = carregados
+            info["canvas_elementos_emf_renderizados"] = 0
+        else:
+            self._aplicar_elementos_importados_canvas(elementos_canvas, "EMF + XML", emf_path)
+        self.lbl_status.setText(f"EMF + XML importado com sucesso: {len(moldes_doc)} moldes criados.")
+        return True
+
     def _importar_por_tipo(self, tipo: str, origem_inicial: str | None = None):
         filtros = {
             "audaces": "Arquivos EMF/XML/ADSX/AMKX (*.emf *.xml *.adsx *.amkx)",
             "adsx": "Arquivos ADSX/AMKX (*.adsx *.amkx)",
             "audaces_emf": "Arquivos EMF (*.emf)",
             "audaces_xml": "Arquivos XML (*.xml)",
+            "audaces_emf_xml": "Arquivos EMF/XML (*.emf *.xml)",
             "dxf": "Arquivo DXF (*.dxf)",
             "aama_astm": "Arquivo AAMA/ASTM (*.dxf *.aama *.astm *.rul *.zip)",
             "plotagem": "Arquivo de plotagem (*.plt *.hpgl *.hpgl2 *.hpg *.txt)",
@@ -5022,135 +5381,24 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return self._importar_pacote_audaces(caminho)
             if ext not in {".emf", ".xml"}:
                 return
-            pasta = p.parent
-            emfs = sorted(pasta.glob("*.emf"))
-            xmls = sorted(pasta.glob("*.xml"))
-            emf_path = str(p) if ext == ".emf" else None
-            xml_path = str(p) if ext == ".xml" else None
-            stem = p.stem.lower()
-            if not emf_path:
-                candidatos = [x for x in emfs if stem in x.stem.lower() or x.stem.lower() in stem]
-                if len(candidatos) == 1:
-                    emf_path = str(candidatos[0])
-                elif len(emfs) == 1:
-                    emf_path = str(emfs[0])
-            if not xml_path:
-                candidatos = [x for x in xmls if stem in x.stem.lower() or x.stem.lower() in stem]
-                if len(candidatos) == 1:
-                    xml_path = str(candidatos[0])
-                elif len(xmls) == 1:
-                    xml_path = str(xmls[0])
-            if not emf_path and xml_path:
-                emf_path, _ = self._abrir_dialogo_arquivo_claro(
-                    "Selecionar arquivo EMF",
-                    filtros["audaces_emf"],
-                    memoria_chave="importacao",
-                )
-            if not xml_path and emf_path:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro(
-                    "Selecionar arquivo XML",
-                    filtros["audaces_xml"],
-                    memoria_chave="importacao",
-                )
+            emf_path, xml_path = self._resolver_par_audaces_emf_xml(p)
+            emf_path, xml_path = self._selecionar_complemento_par_audaces(emf_path, xml_path)
             if emf_path and xml_path:
-                self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
-                info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
-                self._arquivo_atual = None
-                self._limpar_abas_documentos()
-                self._adicionar_aba_documento("EMF + XML", emf_path)
-                area = self._area_documento_atual()
-                moldes = self.projeto_atual.documentos[0].moldes if self.projeto_atual.documentos else []
-                if area and moldes:
-                    self._carregar_moldes_reais_no_canvas(area, moldes)
-                else:
-                    self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), "EMF + XML", emf_path)
-                self.lbl_status.setText(f"EMF + XML importado com sucesso: {len(moldes)} moldes criados.")
-                return
-            if emf_path:
-                return self._importar_por_tipo("audaces_emf")
-            if xml_path:
-                return self._importar_por_tipo("audaces_xml")
+                return self._importar_audaces_emf_xml_para_canvas(emf_path, xml_path)
             return
 
         if tipo == "audaces_emf_xml":
-            emf_path, _ = self._abrir_dialogo_arquivo_claro(
-                "Importar EMF + XML (EMF)",
-                filtros["audaces_emf"],
+            caminho, _ = self._abrir_dialogo_arquivo_claro(
+                "Importar EMF + XML",
+                filtros["audaces_emf_xml"],
                 memoria_chave="importacao",
             )
-            if not emf_path:
+            if not caminho:
                 return
-            pergunta = QMessageBox(self)
-            self._estilizar_message_box(pergunta)
-            pergunta.setWindowTitle("Importacao EMF + XML")
-            pergunta.setIcon(QMessageBox.Question)
-            pergunta.setText("Deseja selecionar o XML correspondente?")
-            pergunta.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
-            self._traduzir_botoes_padrao_message_box(pergunta)
-            resp = pergunta.exec()
-            if resp == QMessageBox.Cancel:
-                return
-            if resp == QMessageBox.Yes:
-                xml_path, _ = self._abrir_dialogo_arquivo_claro(
-                    "Selecionar XML",
-                    filtros["audaces_xml"],
-                    memoria_chave="importacao",
-                )
-                if not xml_path:
-                    return
-                self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
-                info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
-                self._arquivo_atual = None
-                self._limpar_abas_documentos()
-                self._adicionar_aba_documento("EMF + XML", emf_path)
-                area = self._area_documento_atual()
-                moldes_doc = []
-                if self.projeto_atual.documentos:
-                    moldes_doc = self.projeto_atual.documentos[0].moldes
-                print(f"[AUDACES_IMPORT] len(self.projeto_atual.documentos[0].moldes)={len(moldes_doc)}")
-                if area and len(moldes_doc) > 0:
-                    carregados = self._carregar_moldes_reais_no_canvas(area, moldes_doc)
-                    info["canvas_origem"] = "moldes_reais"
-                    info["canvas_moldes_renderizados"] = carregados
-                    info["canvas_elementos_emf_renderizados"] = 0
-                    print("[AUDACES_IMPORT] area.canvas.cena.elementos recebe moldes convertidos de projeto.documentos[0].moldes")
-                else:
-                    elementos_canvas = info.get("elementos_canvas", [])
-                    if area:
-                        area.canvas.cena.elementos = [dict(el) for el in elementos_canvas if isinstance(el, dict)]
-                        area.canvas.update()
-                    info["canvas_origem"] = "elementos_emf_fallback"
-                    info["canvas_moldes_renderizados"] = 0
-                    info["canvas_elementos_emf_renderizados"] = len(elementos_canvas)
-                    print("[AUDACES_IMPORT] area.canvas.cena.elementos recebe preferencias_usuario['audaces_emf_xml_importacao']['elementos_canvas']")
-                if area:
-                    print(f"[AUDACES_IMPORT] len(area.canvas.cena.elementos)={len(area.canvas.cena.elementos)}")
-                print(f"[AUDACES_IMPORT] canvas_origem={info.get('canvas_origem')}")
-                print(f"[AUDACES_IMPORT] moldes_carregados_no_canvas={info.get('canvas_moldes_renderizados', 0)}")
-                moldes_reais = int(info.get("moldes_reais", 0))
-                msg = (
-                    f"EMF+XML importado. Vetores: {int(info.get('vetores', 0))}. "
-                    f"Contornos fechados: {int(info.get('contornos_fechados', 0))}. "
-                    f"Moldes reais: {moldes_reais}. "
-                    f"Metadados XML aplicados: {int(info.get('metadados_xml_aplicados', 0))}."
-                )
-                if moldes_reais == 0:
-                    msg += " O EMF foi lido, mas nenhum contorno fechado confiavel foi encontrado. Verifique o relatorio tecnico."
-                self.lbl_status.setText(msg)
-                caixa = QMessageBox(self)
-                self._estilizar_message_box(caixa)
-                caixa.setWindowTitle("Importacao EMF + XML")
-                caixa.setIcon(QMessageBox.Information)
-                caixa.setText(msg)
-                caixa.setStandardButtons(QMessageBox.Ok)
-                self._traduzir_botoes_padrao_message_box(caixa)
-                caixa.exec()
-                return
-            self.projeto_atual = AudacesPairImport.importar_apenas_emf(emf_path, self.projeto_atual)
-            info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
-            self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), Path(emf_path).stem or "EMF", emf_path)
-            msg = info.get("mensagem_final") or "EMF importado."
-            self.lbl_status.setText(msg)
+            emf_path, xml_path = self._resolver_par_audaces_emf_xml(caminho)
+            emf_path, xml_path = self._selecionar_complemento_par_audaces(emf_path, xml_path)
+            if emf_path and xml_path:
+                return self._importar_audaces_emf_xml_para_canvas(emf_path, xml_path)
             return
 
         opcoes_importacao_moldes: dict = {}
@@ -5212,6 +5460,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         if tipo == "audaces_emf":
+            emf_path, xml_path = self._resolver_par_audaces_emf_xml(caminho)
+            if emf_path and xml_path:
+                return self._importar_audaces_emf_xml_para_canvas(emf_path, xml_path)
             self.projeto_atual = AudacesPairImport.importar_apenas_emf(caminho, self.projeto_atual)
             info = self.projeto_atual.preferencias_usuario.get("audaces_emf_importacao", {})
             self._aplicar_elementos_importados_canvas(info.get("elementos_canvas", []), Path(caminho).stem or "EMF", caminho)
@@ -5219,6 +5470,9 @@ class GuimmaStudioMainWindow(QMainWindow):
             return
 
         if tipo == "audaces_xml":
+            emf_path, xml_path = self._resolver_par_audaces_emf_xml(caminho)
+            if emf_path and xml_path:
+                return self._importar_audaces_emf_xml_para_canvas(emf_path, xml_path)
             xml_doc = AudacesXMLImport.abrir(caminho)
             self.projeto_atual.preferencias_usuario["audaces_xml_importacao"] = xml_doc_para_dict(xml_doc)
             self.projeto_atual.preferencias_usuario.setdefault("audaces_importados_originais", {})["xml"] = {
@@ -5331,10 +5585,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 area.canvas.cena.elementos.extend(novos)
                 if hasattr(area.canvas, "_registrar_historico"):
                     area.canvas._registrar_historico()
-                self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
-                if hasattr(area, "_on_zoom_changed"):
-                    area._on_zoom_changed(area.canvas.zoom)
-                area.canvas.update()
+                self._reenquadrar_area_importada(area, area.canvas.cena.elementos)
                 self.backstage.hide()
                 self._agendar_salvar_estado_silencioso()
                 self._agendar_reencaixe_janela_canvas()
@@ -5347,14 +5598,40 @@ class GuimmaStudioMainWindow(QMainWindow):
             area.canvas.cena.elementos = [dict(el) for el in elementos if isinstance(el, dict)]
             if hasattr(area.canvas, "_registrar_historico"):
                 area.canvas._registrar_historico()
-            self._centralizar_canvas_em_elementos(area.canvas, area.canvas.cena.elementos)
-            if hasattr(area, "_on_zoom_changed"):
-                area._on_zoom_changed(area.canvas.zoom)
-            area.canvas.update()
+            self._reenquadrar_area_importada(area, area.canvas.cena.elementos)
         self._atualizar_titulo()
         self.backstage.hide()
         self._agendar_salvar_estado_silencioso()
         self._agendar_reencaixe_janela_canvas()
+
+    def _reenquadrar_area_importada(self, area, elementos: list[dict], *, zoom_max: float = 8.0):
+        if not area or not elementos:
+            return
+        canvas = getattr(area, "canvas", None)
+        if canvas is None:
+            return
+        elementos_validos = [el for el in elementos if isinstance(el, dict)]
+        if not elementos_validos:
+            return
+
+        def aplicar():
+            try:
+                if hasattr(area, "metaObject") and not _qt_objeto_valido(area):
+                    return
+                if hasattr(canvas, "metaObject") and not _qt_objeto_valido(canvas):
+                    return
+            except RuntimeError:
+                return
+            except TypeError:
+                pass
+            self._centralizar_canvas_em_elementos(canvas, elementos_validos, zoom_max=zoom_max)
+            if hasattr(area, "_on_zoom_changed"):
+                area._on_zoom_changed(canvas.zoom)
+            canvas.update()
+
+        aplicar()
+        QTimer.singleShot(0, aplicar)
+        QTimer.singleShot(120, aplicar)
 
     def _carregar_moldes_reais_no_canvas(self, area, moldes):
         if not area:
@@ -5376,7 +5653,7 @@ class GuimmaStudioMainWindow(QMainWindow):
                 altura = max(ys) - min(ys)
                 margem = largura * 0.20
                 y_fio = min(max(ys) - max(0.15, altura * 0.06), cy + max(0.25, altura * 0.08))
-                elementos.append({
+                elemento = {
                     "tipo": "polyline",
                     "pontos": pts,
                     "molde": True,
@@ -5393,10 +5670,15 @@ class GuimmaStudioMainWindow(QMainWindow):
                     "mostrar_nome": True,
                     "mostrar_fio": True,
                     "mostrar_numeros": True,
+                    "render_smooth": True,
+                    "renderizacao": "curva_suave_importada",
                     "cor": "#ff7b00",
                     "bloqueado": False,
-                })
+                }
+                AudacesPairImport._aplicar_controles_cantos_canvas(elemento)
+                elementos.append(elemento)
         area.canvas.cena.elementos = elementos
+        self._reenquadrar_area_importada(area, elementos)
         area.canvas.update()
         return len(elementos)
 
@@ -5671,10 +5953,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         if hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
         if geometria_convertida and elementos:
-            self._centralizar_canvas_em_elementos(canvas, elementos)
-        if hasattr(area, "_on_zoom_changed"):
-            area._on_zoom_changed(canvas.zoom)
-        canvas.update()
+            self._reenquadrar_area_importada(area, elementos)
+        else:
+            if hasattr(area, "_on_zoom_changed"):
+                area._on_zoom_changed(canvas.zoom)
+            canvas.update()
         self._agendar_salvar_estado_silencioso()
 
     def _escala_preview_adsx_cm_por_px(self, moldes: list, preview_b64: str) -> float:
@@ -5838,6 +6121,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 for pt in arr:
                     if isinstance(pt, (tuple, list)) and len(pt) == 2:
                         pontos.append((float(pt[0]), float(pt[1])))
+                    elif isinstance(pt, dict) and {"x", "y"}.issubset(pt):
+                        pontos.append((float(pt["x"]), float(pt["y"])))
         for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
             pt = el.get(chave)
             if isinstance(pt, (tuple, list)) and len(pt) == 2:
@@ -5865,6 +6150,11 @@ class GuimmaStudioMainWindow(QMainWindow):
         def _shift_pt(pt):
             if isinstance(pt, (tuple, list)) and len(pt) == 2:
                 return (float(pt[0]) + dx, float(pt[1]) + dy)
+            if isinstance(pt, dict) and {"x", "y"}.issubset(pt):
+                novo = dict(pt)
+                novo["x"] = float(pt["x"]) + dx
+                novo["y"] = float(pt["y"]) + dy
+                return novo
             return pt
 
         for chave in (
@@ -5882,6 +6172,22 @@ class GuimmaStudioMainWindow(QMainWindow):
         for chave in ("fio_origem", "fio_fim", "ponto_texto", "seta_origem", "seta_fim"):
             if chave in el:
                 el[chave] = _shift_pt(el.get(chave))
+
+        for chave in (
+            "piques_config",
+            "graduacao_tabela",
+            "graduacao_pontos",
+            "graduacao_tabela_derivada",
+            "graduacao_pontos_derivados",
+            "graduacao_contornos_importados",
+            "graduacao_contornos_regularizados_preview",
+        ):
+            if chave in el:
+                el[chave] = mover_valor_estruturado_por_delta(el.get(chave), dx, dy)
+
+        for chave in list(el):
+            if str(chave).startswith("_runtime_"):
+                el.pop(chave, None)
 
     def _organizar_moldes_no_canvas_legado(self, canvas, variacao: int | None = None, registrar_historico: bool = True) -> int:
         moldes: list[dict] = []

@@ -1,0 +1,177 @@
+{
+  "emf": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "xml": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.xml",
+  "saida": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_interface_real",
+  "erro": null,
+  "status_texto": "EMF + XML importado com sucesso: 9 moldes criados.",
+  "info_importacao": {
+    "grade_detectada": {
+      "nome": "PP-G2(P)",
+      "tamanho_base": "P",
+      "quantidade_tamanhos": 7
+    },
+    "canvas_origem": "elementos_processados_emf_xml",
+    "canvas_moldes_renderizados": 9,
+    "canvas_elementos_emf_renderizados": 264,
+    "moldes_reais": 9
+  },
+  "canvas": {
+    "total_elementos": 264,
+    "total_moldes": 9,
+    "zoom": 4.089312594995842,
+    "origem_cena": {
+      "x": -228.24729435533746,
+      "y": -84.77533091328179
+    },
+    "moldes": [
+      {
+        "nome": "GOLA 2X",
+        "controles_base_principais": 6,
+        "controles_base_auxiliares": 53,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "FRENTE 2X",
+        "controles_base_principais": 13,
+        "controles_base_auxiliares": 32,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "FORRO FRENTE 1X",
+        "controles_base_principais": 12,
+        "controles_base_auxiliares": 36,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "MANGA 2X",
+        "controles_base_principais": 4,
+        "controles_base_auxiliares": 16,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "COSTAS 2X",
+        "controles_base_principais": 5,
+        "controles_base_auxiliares": 19,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "CHIMANGO COSTAS 2X",
+        "controles_base_principais": 6,
+        "controles_base_auxiliares": 12,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "BABADIO MANG 2X",
+        "controles_base_principais": 4,
+        "controles_base_auxiliares": 0,
+        "contornos_importados": [
+          "P",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ],
+        "contornos_preview": [
+          "PP"
+        ]
+      },
+      {
+        "nome": "LEVANTA MAG 2X",
+        "controles_base_principais": 4,
+        "controles_base_auxiliares": 16,
+        "contornos_importados": [
+          "G"
+        ],
+        "contornos_preview": [
+          "PP",
+          "M",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      },
+      {
+        "nome": "ROLITE GOLA 2X",
+        "controles_base_principais": 4,
+        "controles_base_auxiliares": 0,
+        "contornos_importados": [
+          "G"
+        ],
+        "contornos_preview": [
+          "PP",
+          "M",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    ]
+  },
+  "prints": {
+    "janela_real": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_interface_real/01_janela_real_pos_importacao.png",
+    "canvas_real": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_interface_real/02_canvas_real_pos_importacao.png",
+    "manga_janela_real": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_interface_real/03_manga_janela_real.png",
+    "manga_canvas_real": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_interface_real/04_manga_canvas_real.png"
+  }
+}

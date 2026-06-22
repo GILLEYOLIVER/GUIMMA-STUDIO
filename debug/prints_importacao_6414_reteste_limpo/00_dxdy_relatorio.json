@@ -1,0 +1,166 @@
+{
+  "grade_detectada": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "motor_cpp_falhas": 0,
+  "motor_cpp_curvas": 23,
+  "curvas_reconstruidas": 23,
+  "moldes": [
+    {
+      "nome": "K8",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 2,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 2,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K7",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 11,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 11,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K6",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 11,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 11,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K5",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 4,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 4,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K2",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 5,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 5,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K3",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 6,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 6,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K4",
+      "preferir_tabela": true,
+      "base": "P",
+      "pontos_dxdy": 4,
+      "resumo": {
+        "aplicado": true,
+        "origem": "audaces_emf_contornos_regularizados",
+        "base": "P",
+        "pontos": 4,
+        "tamanhos": [
+          "PP",
+          "M",
+          "G",
+          "GG",
+          "G1",
+          "G2"
+        ]
+      }
+    },
+    {
+      "nome": "K9",
+      "preferir_tabela": false,
+      "base": null,
+      "pontos_dxdy": 0,
+      "resumo": null
+    },
+    {
+      "nome": "K1",
+      "preferir_tabela": false,
+      "base": null,
+      "pontos_dxdy": 0,
+      "resumo": null
+    }
+  ]
+}

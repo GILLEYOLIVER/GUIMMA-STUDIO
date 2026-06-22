@@ -1,0 +1,41 @@
+{
+  "emf": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "prints": [
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_reinicio_limpo/01_importacao_real_visao_geral.png",
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_reinicio_limpo/02_importacao_real_detalhe_molde.png",
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_reinicio_limpo/03_diagnostico_raw_vs_preview_derivado.png"
+  ],
+  "grade_detectada": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "diagnostico_file_ads": {
+    "assinatura": "CADZ",
+    "arquivo_binario": "file.ads",
+    "regras_graduacao_decodificadas": false,
+    "pontos_controle_decodificados": false,
+    "motivo_regras_graduacao": "file.ads CADZ ainda sem parser estrutural para pontos de controle e deslocamentos dx/dy originais por tamanho."
+  },
+  "graduacao_regras_exatas": false,
+  "moldes": 9,
+  "molde_detalhe": {
+    "nome": "K8",
+    "tamanho_base_detectado": "P",
+    "raw_contornos": [
+      "P",
+      "G2"
+    ],
+    "preview_contornos": [
+      "PP",
+      "P",
+      "M",
+      "G",
+      "GG",
+      "G1",
+      "G2"
+    ],
+    "tem_tabela_real": false,
+    "tem_tabela_derivada": true
+  }
+}

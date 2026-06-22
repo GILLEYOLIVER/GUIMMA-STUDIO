@@ -2441,6 +2441,73 @@ class PropriedadesMoldesDialog(QDialog):
             normalizadas[len(normalizadas) // 2]["base"] = True
         return normalizadas
 
+    @staticmethod
+    def _normalizar_nome_tamanho_graduacao(nome: str | None) -> str:
+        return " ".join(str(nome or "").strip().split()).upper()
+
+    def _graduacao_importada_por_dimensoes_xml(self, molde: dict | None) -> tuple[str, list[dict]] | None:
+        if not isinstance(molde, dict):
+            return None
+        dimensoes = molde.get("graduacao_dimensoes_xml")
+        if not isinstance(dimensoes, dict) or not dimensoes:
+            return None
+        labels: list[str] = []
+        base = str(molde.get("tamanho_base_detectado") or molde.get("tamanho_base") or "").strip()
+        for label, dados in dimensoes.items():
+            nome = str(label or "").strip()
+            if not nome:
+                continue
+            if nome not in labels:
+                labels.append(nome)
+            if not base and isinstance(dados, dict) and dados.get("base"):
+                base = nome
+        if not labels:
+            return None
+        normalizados = {self._normalizar_nome_tamanho_graduacao(label): label for label in labels}
+        base = (
+            normalizados.get(self._normalizar_nome_tamanho_graduacao(base))
+            or normalizados.get("P")
+            or normalizados.get("M")
+            or labels[len(labels) // 2]
+        )
+        grade_nome = f"{labels[0]}-{labels[-1]}({base})"
+        cores = self._cores_padrao_grade(grade_nome)
+        cores_xml = molde.get("graduacao_cores_xml")
+        cores_xml = cores_xml if isinstance(cores_xml, dict) else {}
+        linhas = [
+            {
+                "ativo": True,
+                "tamanho": label,
+                "cor": cores.get(label) or str(cores_xml.get(label) or "#ffffff"),
+                "base": self._normalizar_nome_tamanho_graduacao(label) == self._normalizar_nome_tamanho_graduacao(base),
+            }
+            for label in labels
+        ]
+        return grade_nome, linhas
+
+    def _deve_usar_graduacao_xml_importada(
+        self,
+        linhas: list[dict],
+        grade_nome: str,
+        linhas_xml: list[dict],
+    ) -> bool:
+        nomes = [str(linha.get("tamanho") or "").strip() for linha in linhas if str(linha.get("tamanho") or "").strip()]
+        nomes_xml = [str(linha.get("tamanho") or "").strip() for linha in linhas_xml if str(linha.get("tamanho") or "").strip()]
+        if not nomes_xml:
+            return False
+        if not nomes:
+            return True
+        if [self._normalizar_nome_tamanho_graduacao(nome) for nome in nomes] == [
+            self._normalizar_nome_tamanho_graduacao(nome) for nome in nomes_xml
+        ]:
+            return False
+        if len(nomes) < len(nomes_xml):
+            return True
+        if all(nome.isdigit() for nome in nomes):
+            return True
+        texto_grade = str(grade_nome or "").strip()
+        return bool(texto_grade and texto_grade.startswith("1-") and any(not nome.isdigit() for nome in nomes_xml))
+
     def _nome_grade_compativel_com_linhas(self, grade_nome: str, linhas: list[dict]) -> str:
         nomes = [str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas]
         nomes = [nome for nome in nomes if nome]
@@ -2541,6 +2608,12 @@ class PropriedadesMoldesDialog(QDialog):
         if isinstance(molde, dict):
             linhas = self._normalizar_linhas_graduacao(molde.get("graduacao_tamanhos"))
             grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
+            importada_xml = self._graduacao_importada_por_dimensoes_xml(molde)
+            if importada_xml is not None:
+                grade_xml, linhas_xml = importada_xml
+                if self._deve_usar_graduacao_xml_importada(linhas, grade_nome, linhas_xml):
+                    grade_nome = grade_xml
+                    linhas = linhas_xml
 
         if not linhas:
             referencia = self._referencia_graduacao_dos_elementos(ignorar_molde=molde if isinstance(molde, dict) else None)

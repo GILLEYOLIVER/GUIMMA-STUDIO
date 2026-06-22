@@ -116,6 +116,39 @@ class MovimentoUtilsTestCase(unittest.TestCase):
         self.assertEqual(molde["graduacao_tabela"]["pontos"]["0"]["ponto"], (5.0, -2.0))
         self.assertEqual(molde["graduacao_tabela"]["pontos"]["0"]["valores"]["G"], {"dx": 0.0, "dy": 1.0})
 
+    def test_mover_molde_desloca_contornos_importados_da_graduacao(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0)],
+            "_runtime_path_polilinha_tela_cache_multi": {"antigo": object()},
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "P",
+                    "base": True,
+                    "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+                },
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "pontos": [(1.0, 1.0), (11.0, 1.0), (11.0, 6.0)],
+                },
+            ],
+        }
+
+        mover_elemento_por_delta(molde, 5.0, -2.0)
+
+        self.assertEqual(molde["pontos"], [(5.0, -2.0), (15.0, -2.0)])
+        self.assertEqual(
+            molde["graduacao_contornos_importados"][0]["pontos"],
+            [(5.0, -2.0), (15.0, -2.0), (15.0, 3.0)],
+        )
+        self.assertEqual(
+            molde["graduacao_contornos_importados"][1]["pontos"],
+            [(6.0, -1.0), (16.0, -1.0), (16.0, 4.0)],
+        )
+        self.assertNotIn("_runtime_path_polilinha_tela_cache_multi", molde)
+
     def test_rotacionar_molde_gira_pontos_e_vetores_de_graduacao(self):
         molde = {
             "tipo": "polyline",

@@ -1,0 +1,65 @@
+[
+  {
+    "nome": "GOLA 2X",
+    "pontos": 61,
+    "principais": 2,
+    "auxiliares": 57,
+    "base": "P"
+  },
+  {
+    "nome": "FRENTE 2X",
+    "pontos": 46,
+    "principais": 11,
+    "auxiliares": 34,
+    "base": "P"
+  },
+  {
+    "nome": "FORRO FRENTE 1X",
+    "pontos": 49,
+    "principais": 11,
+    "auxiliares": 37,
+    "base": "P"
+  },
+  {
+    "nome": "MANGA 2X",
+    "pontos": 21,
+    "principais": 3,
+    "auxiliares": 17,
+    "base": "P"
+  },
+  {
+    "nome": "COSTAS 2X",
+    "pontos": 25,
+    "principais": 5,
+    "auxiliares": 19,
+    "base": "P"
+  },
+  {
+    "nome": "CHIMANGO COSTAS 2X",
+    "pontos": 19,
+    "principais": 4,
+    "auxiliares": 14,
+    "base": "P"
+  },
+  {
+    "nome": "BABADIO MANG 2X",
+    "pontos": 5,
+    "principais": 4,
+    "auxiliares": 0,
+    "base": "P"
+  },
+  {
+    "nome": "LEVANTA MAG 2X",
+    "pontos": 21,
+    "principais": 0,
+    "auxiliares": 20,
+    "base": "P"
+  },
+  {
+    "nome": "ROLITE GOLA 2X",
+    "pontos": 5,
+    "principais": 4,
+    "auxiliares": 0,
+    "base": "P"
+  }
+]

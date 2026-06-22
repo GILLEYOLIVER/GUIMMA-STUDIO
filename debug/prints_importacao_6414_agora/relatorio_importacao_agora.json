@@ -1,0 +1,117 @@
+{
+  "grade_detectada": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "controles_graduacao_visual": false,
+  "moldes": [
+    {
+      "nome": "GOLA 2X",
+      "controles_base_principais": 6,
+      "controles_base_auxiliares": 53,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "FRENTE 2X",
+      "controles_base_principais": 13,
+      "controles_base_auxiliares": 32,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "FORRO FRENTE 1X",
+      "controles_base_principais": 12,
+      "controles_base_auxiliares": 36,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "MANGA 2X",
+      "controles_base_principais": 4,
+      "controles_base_auxiliares": 16,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "COSTAS 2X",
+      "controles_base_principais": 5,
+      "controles_base_auxiliares": 19,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "CHIMANGO COSTAS 2X",
+      "controles_base_principais": 6,
+      "controles_base_auxiliares": 12,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "BABADIO MANG 2X",
+      "controles_base_principais": 4,
+      "controles_base_auxiliares": 0,
+      "contornos_graduacao": [
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ]
+    },
+    {
+      "nome": "LEVANTA MAG 2X",
+      "controles_base_principais": 4,
+      "controles_base_auxiliares": 16,
+      "contornos_graduacao": [
+        "G"
+      ]
+    },
+    {
+      "nome": "ROLITE GOLA 2X",
+      "controles_base_principais": 4,
+      "controles_base_auxiliares": 0,
+      "contornos_graduacao": [
+        "G"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 import sys
 from types import MethodType
 from typing import Sequence
@@ -115,6 +116,9 @@ class GuimmaStudioApp:
     def __init__(self, argv: Sequence[str] | None = None):
         self._argv = argv_com_fonte_padrao(list(argv or sys.argv))
         self.qt_app = QApplication(self._argv)
+        self._sigint_timer: QTimer | None = None
+        self._sigint_handler_anterior = None
+        self._interrompido_por_sigint = False
         self.qt_app.setApplicationName(APP_NOME)
         aplicar_fonte_padrao(self.qt_app)
         self._aplicar_traducao_qt_ptbr()
@@ -494,6 +498,42 @@ class GuimmaStudioApp:
         scroll.horizontalScrollBar().setValue(0)
         scroll.reinstalar_filtros()
 
+    def _instalar_encerramento_sigint(self) -> None:
+        try:
+            self._sigint_handler_anterior = signal.getsignal(signal.SIGINT)
+
+            def _encerrar(_signum, _frame):
+                self._interrompido_por_sigint = True
+                self.qt_app.exit(130)
+
+            signal.signal(signal.SIGINT, _encerrar)
+            self._sigint_timer = QTimer(self.qt_app)
+            self._sigint_timer.setInterval(150)
+            self._sigint_timer.timeout.connect(lambda: None)
+            self._sigint_timer.start()
+        except Exception:
+            self._sigint_timer = None
+            self._sigint_handler_anterior = None
+
+    def _restaurar_encerramento_sigint(self) -> None:
+        if self._sigint_timer is not None:
+            self._sigint_timer.stop()
+            self._sigint_timer = None
+        if self._sigint_handler_anterior is not None:
+            try:
+                signal.signal(signal.SIGINT, self._sigint_handler_anterior)
+            except Exception:
+                pass
+            self._sigint_handler_anterior = None
+
     def run(self) -> int:
-        self.janela_principal.exibir_inicial()
-        return self.qt_app.exec()
+        self._instalar_encerramento_sigint()
+        try:
+            self.janela_principal.exibir_inicial()
+            codigo = self.qt_app.exec()
+            return 130 if self._interrompido_por_sigint else codigo
+        except KeyboardInterrupt:
+            self.qt_app.quit()
+            return 130
+        finally:
+            self._restaurar_encerramento_sigint()

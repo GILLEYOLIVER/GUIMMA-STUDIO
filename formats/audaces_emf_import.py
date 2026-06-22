@@ -4,6 +4,7 @@ import os
 import shutil
 import struct
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from math import acos, atan2, cos, pi, sin
 from pathlib import Path
@@ -370,6 +371,7 @@ class AudacesEMFImport:
                     "molde": bool(el.fechado and el.metadados.get("subtipo_audaces") == "contorno"),
                     "bloqueado": False,
                     "render_smooth": bool(el.metadados.get("subtipo_audaces") in {"contorno", "costura"}),
+                    "renderizacao": "curva_suave_importada" if el.metadados.get("subtipo_audaces") in {"contorno", "costura"} else "polyline",
                 }
             )
         for tx in doc.textos:
@@ -460,6 +462,26 @@ class AudacesEMFImport:
             candidatos.extend(vs_root.glob("*/*/VC/Auxiliary/Build/vcvars64.bat"))
         return sorted(candidatos, reverse=True)[0] if candidatos else None
 
+    @staticmethod
+    def _comando_compilador_posix(compilador: str, fonte_rel: str, exe_rel: str) -> list[str]:
+        comando = [compilador, "-O2", "-std=c++17"]
+        if sys.platform == "darwin":
+            try:
+                proc = subprocess.run(
+                    ["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+                    text=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                sdk = proc.stdout.strip() if proc.returncode == 0 else ""
+            except Exception:
+                sdk = ""
+            include_cpp = Path(sdk) / "usr" / "include" / "c++" / "v1" if sdk else None
+            if include_cpp and include_cpp.exists():
+                comando.extend(["-isystem", str(include_cpp)])
+        comando.extend([fonte_rel, "-o", exe_rel])
+        return comando
+
     @classmethod
     def _garantir_motor_cpp(cls) -> Path | None:
         fonte, exe = cls._motor_cpp_paths()
@@ -481,7 +503,7 @@ class AudacesEMFImport:
         compilador = shutil.which("g++") or shutil.which("clang++")
         comandos: list[tuple[list[str], str | None]] = []
         if compilador:
-            comandos.append(([compilador, "-O2", "-std=c++17", fonte_rel, "-o", exe_rel], None))
+            comandos.append((cls._comando_compilador_posix(compilador, fonte_rel, exe_rel), None))
         vcvars = cls._localizar_vcvars64()
         if vcvars:
             cmd = f'call "{vcvars}" >nul && cl /nologo /O2 /EHsc /std:c++17 /Fe:"{exe_rel}" "{fonte_rel}"'
@@ -520,7 +542,7 @@ class AudacesEMFImport:
         linhas = [
             f"closed {1 if contorno.fechado else 0}",
             f"max_move {max_move:.12g}",
-            "corner_angle 132",
+            "corner_angle 136",
             f"count {len(pontos)}",
         ]
         linhas.extend(f"{float(x):.17g} {float(y):.17g}" for x, y in pontos)
@@ -1231,7 +1253,7 @@ class AudacesEMFImport:
             pts = pts[:-1]
         if len(pts) < 6:
             return elemento.pontos
-        forte = 125.0
+        forte = 136.0
         cortes = [0]
         for i in range(1, len(pts) - 1):
             ang = self._angulo_interno_graus(pts[i - 1], pts[i], pts[i + 1])

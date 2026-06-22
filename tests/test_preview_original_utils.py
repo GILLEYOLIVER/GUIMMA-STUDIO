@@ -62,6 +62,23 @@ class PreviewOriginalUtilsTestCase(unittest.TestCase):
 
         self.assertEqual(len(painter.linhas), 6)
 
+    def test_sombra_ignora_molde_audaces_graduado(self):
+        canvas = _FakeCanvas()
+        painter = _FakePainter()
+        elemento = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0)],
+            "graduacao_tamanhos": [{"tamanho": "P", "base": True}],
+            "graduacao_contornos_importados": [
+                {"tamanho": "P", "base": True, "pontos": [(0.0, 0.0), (10.0, 0.0)]}
+            ],
+        }
+
+        desenhar_elementos_originais(canvas, painter, {0: elemento})
+
+        self.assertEqual(painter.linhas, [])
+
 
 if __name__ == "__main__":
     unittest.main()

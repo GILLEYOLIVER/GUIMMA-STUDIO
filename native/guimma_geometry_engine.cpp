@@ -327,7 +327,7 @@ static std::vector<Pt> cleanup(std::vector<Pt> pts, bool closed, double max_move
 int main() {
     bool closed = false;
     double max_move = 0.35;
-    double corner_angle = 132.0;
+    double corner_angle = 136.0;
     int count = 0;
     std::vector<Pt> pts;
 

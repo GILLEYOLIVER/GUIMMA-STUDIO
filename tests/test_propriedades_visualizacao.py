@@ -978,6 +978,41 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "PP/P/M/G/GG/NOVO_INF_1(M)")
         self.assertNotEqual(dialog.cmb_grade_tamanhos.currentText(), "P-G(M)")
 
+    def test_carregar_graduacao_audaces_recupera_grade_xml_quando_salva_numerica(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-G2(P)", "1-4(2)"])
+        dialog._renderizar_tabela_graduacao = lambda: None
+
+        molde = {
+            "graduacao_grade_nome": "1-4(2)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "1", "base": False},
+                {"ativo": True, "tamanho": "2", "base": True},
+                {"ativo": True, "tamanho": "3", "base": False},
+                {"ativo": True, "tamanho": "4", "base": False},
+            ],
+            "tamanho_base_detectado": "P",
+            "graduacao_dimensoes_xml": {
+                "PP": {"largura": 10.0, "altura": 20.0, "base": False},
+                "P": {"largura": 11.0, "altura": 21.0, "base": True},
+                "M": {"largura": 12.0, "altura": 22.0, "base": False},
+                "G": {"largura": 13.0, "altura": 23.0, "base": False},
+                "GG": {"largura": 14.0, "altura": 24.0, "base": False},
+                "G1": {"largura": 15.0, "altura": 25.0, "base": False},
+                "G2": {"largura": 16.0, "altura": 26.0, "base": False},
+            },
+        }
+
+        PropriedadesMoldesDialog._carregar_graduacao_do_molde(dialog, molde)
+
+        self.assertEqual(
+            [linha["tamanho"] for linha in dialog._graduacao_linhas],
+            ["PP", "P", "M", "G", "GG", "G1", "G2"],
+        )
+        self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas if linha.get("base")], ["P"])
+        self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "PP-G2(P)")
+
     def test_propriedades_define_conflito_quando_grade_difere_do_modelo(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         base = {

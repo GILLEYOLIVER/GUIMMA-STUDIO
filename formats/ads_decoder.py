@@ -18,11 +18,13 @@ class ADSGeometryDecoder:
     def analisar(self) -> dict[str, Any]:
         assinatura = self._detectar_assinatura()
         blocos = self.tentar_descomprimir_blocos()
+        diagnostico_cadz = self._diagnostico_camada_cadz(assinatura)
         strings = self.extrair_strings()
         pontos32 = self.extrair_pontos_float32()
         pontos64 = self.extrair_pontos_float64()
         polilinhas_brutas = self.detectar_polilinhas()
         confianca = self._avaliar_confianca(assinatura, polilinhas_brutas, strings)
+        regras_graduacao = self.extrair_regras_graduacao()
         geometria_convertida = confianca == "high"
         polilinhas = polilinhas_brutas if geometria_convertida else []
         motivo = (
@@ -45,6 +47,8 @@ class ADSGeometryDecoder:
             "motivo": motivo,
             "polilinhas_candidatas": polilinhas[:5],
             "elementos_canvas": [],
+            "diagnostico_cadz": diagnostico_cadz,
+            **regras_graduacao,
         }
         return self._relatorio
 
@@ -112,6 +116,25 @@ class ADSGeometryDecoder:
                         )
         return candidatos[:20]
 
+    def extrair_regras_graduacao(self) -> dict[str, Any]:
+        diagnostico = self._diagnostico_camada_cadz(self._detectar_assinatura())
+        motivo = (
+            "file.ads CADZ com camada binaria protegida/ofuscada detectada; "
+            "foram encontrados cabecalho nibble-swap e alta entropia, mas nenhum "
+            "bloco XML/zlib ou tabela dx/dy validavel."
+            if diagnostico.get("payload_provavelmente_protegido")
+            else (
+                "file.ads CADZ ainda sem parser estrutural para pontos de controle "
+                "e deslocamentos dx/dy originais por tamanho."
+            )
+        )
+        return {
+            "regras_graduacao_decodificadas": False,
+            "pontos_controle_decodificados": False,
+            "tabela_graduacao": {},
+            "motivo_regras_graduacao": motivo,
+        }
+
     def gerar_relatorio(self) -> dict[str, Any]:
         return self._relatorio or self.analisar()
 
@@ -120,6 +143,113 @@ class ADSGeometryDecoder:
         if b"CADZ" in cabecalho:
             return "CADZ"
         return None
+
+    @classmethod
+    def _swap_nibbles(cls, dados: bytes) -> bytes:
+        return bytes(((b & 0x0F) << 4) | (b >> 4) for b in dados)
+
+    @classmethod
+    def _entropia_bytes(cls, dados: bytes) -> float:
+        if not dados:
+            return 0.0
+        contagem = {b: dados.count(b) for b in set(dados)}
+        total = float(len(dados))
+        return -sum((qtd / total) * math.log2(qtd / total) for qtd in contagem.values())
+
+    @staticmethod
+    def _buffer_tem_estrutura_aberta(dados: bytes) -> bool:
+        amostra = dados[:200000]
+        if any(
+            assinatura in amostra
+            for assinatura in (
+                b"<?xml",
+                b"<DATA_FILE_AUDACES",
+                b"<PATTERN",
+                b"<GRADE",
+                b'"dx"',
+                b'"dy"',
+                b'"DX"',
+                b'"DY"',
+                b" DX=",
+                b" DY=",
+            )
+        ):
+            return True
+        if not amostra:
+            return False
+        texto = sum(32 <= b <= 126 or b in (9, 10, 13) for b in amostra)
+        proporcao_texto = texto / len(amostra)
+        return proporcao_texto >= 0.75 and any(ch in amostra for ch in (b"{", b"[", b"<", b"="))
+
+    @staticmethod
+    def _tem_texto_ou_compressao_valida(dados: bytes) -> bool:
+        amostra = dados[:200000]
+        if ADSGeometryDecoder._buffer_tem_estrutura_aberta(amostra):
+            return True
+
+        limite = max(0, len(amostra) - 2)
+        for i in range(limite):
+            if amostra[i] == 0x78 and amostra[i + 1] in (0x01, 0x5E, 0x9C, 0xDA):
+                try:
+                    descomprimido = zlib.decompress(dados[i:])
+                    if len(descomprimido) >= 32 and ADSGeometryDecoder._buffer_tem_estrutura_aberta(descomprimido):
+                        return True
+                except Exception:
+                    pass
+            if i < len(amostra) - 3 and amostra[i : i + 3] == b"\x1f\x8b\x08":
+                try:
+                    descomprimido = gzip.decompress(dados[i:])
+                    if len(descomprimido) >= 32 and ADSGeometryDecoder._buffer_tem_estrutura_aberta(descomprimido):
+                        return True
+                except Exception:
+                    pass
+        return False
+
+    def _diagnostico_camada_cadz(self, assinatura: str | None = None) -> dict[str, Any]:
+        if not self.raw:
+            return {
+                "nibble_swap_detectado": False,
+                "payload_provavelmente_protegido": False,
+                "motivo": "binario vazio",
+            }
+
+        inicio_payload = 20 if assinatura == "CADZ" and len(self.raw) >= 20 else None
+        if inicio_payload is None and len(self.raw) >= 8 and self.raw[4:8] == b"\x80\x00\x00\x00":
+            inicio_payload = 8
+        if inicio_payload is None:
+            return {
+                "nibble_swap_detectado": False,
+                "payload_provavelmente_protegido": False,
+                "motivo": "cabecalho CADZ/SEC nao identificado",
+            }
+
+        decodificado = self.raw[:inicio_payload] + self._swap_nibbles(self.raw[inicio_payload:])
+        pos = inicio_payload
+        while pos < len(decodificado) and 32 <= decodificado[pos] <= 126:
+            pos += 1
+        trecho_printavel = decodificado[inicio_payload:pos]
+        digitos = re.match(rb"[0-9]{16,}", trecho_printavel or b"")
+        entropia_raw = self._entropia_bytes(self.raw[inicio_payload:inicio_payload + 4096])
+        entropia_swap = self._entropia_bytes(decodificado[inicio_payload:inicio_payload + 4096])
+        tem_texto_ou_compressao = self._tem_texto_ou_compressao_valida(decodificado[inicio_payload:])
+        nibble_swap_detectado = bool(digitos and len(digitos.group(0)) >= 64)
+        payload_protegido = bool(nibble_swap_detectado and entropia_swap >= 7.5 and not tem_texto_ou_compressao)
+        return {
+            "inicio_payload": inicio_payload,
+            "nibble_swap_detectado": nibble_swap_detectado,
+            "cabecalho_ascii_decodificado_len": len(trecho_printavel),
+            "cabecalho_digitos_len": len(digitos.group(0)) if digitos else 0,
+            "cabecalho_ascii_decodificado": trecho_printavel[:160].decode("ascii", errors="ignore"),
+            "entropia_payload_raw_4k": round(entropia_raw, 4),
+            "entropia_payload_nibble_swap_4k": round(entropia_swap, 4),
+            "texto_ou_compressao_valida_detectada": tem_texto_ou_compressao,
+            "payload_provavelmente_protegido": payload_protegido,
+            "motivo": (
+                "camada nibble-swap detectada; payload restante tem alta entropia e nao expos XML/zlib"
+                if payload_protegido
+                else "camada CADZ inspecionada sem tabela estrutural validada"
+            ),
+        }
 
     @staticmethod
     def _extrair_pontos_de_buffer(buf: bytes, fmt: str, size: int) -> list[tuple[float, float]]:

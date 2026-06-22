@@ -18,6 +18,8 @@ def desenhar_elementos_originais(canvas, painter, elementos) -> None:
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         for el in _iter_elementos(elementos):
+            if _ignorar_preview_original(el):
+                continue
             _desenhar_pontos(canvas, painter, el.get("pontos", []) or [])
             _desenhar_linha_simples(canvas, painter, el)
             _desenhar_controles(canvas, painter, el)
@@ -36,6 +38,17 @@ def _iter_elementos(elementos) -> Iterable[dict]:
             el = item[1]
         if isinstance(el, dict):
             yield el
+
+
+def _ignorar_preview_original(el: dict) -> bool:
+    if not isinstance(el, dict) or not el.get("molde"):
+        return False
+    if isinstance(el.get("graduacao_contornos_importados"), list) and el.get("graduacao_contornos_importados"):
+        return True
+    if isinstance(el.get("graduacao_contornos_regularizados_preview"), list) and el.get("graduacao_contornos_regularizados_preview"):
+        return True
+    metadados = el.get("metadados") if isinstance(el.get("metadados"), dict) else {}
+    return bool(metadados.get("importado_como_molde_real")) and bool(el.get("graduacao_tamanhos"))
 
 
 def _desenhar_pontos(canvas, painter, pontos) -> None:

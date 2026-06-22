@@ -40,6 +40,10 @@ CHAVES_ESTRUTURAS_COM_PONTOS = (
     "piques_config",
     "graduacao_tabela",
     "graduacao_pontos",
+    "graduacao_tabela_derivada",
+    "graduacao_pontos_derivados",
+    "graduacao_contornos_importados",
+    "graduacao_contornos_regularizados_preview",
 )
 
 CHAVES_ROTACAO_LISTAS_TUPLAS = {
@@ -75,6 +79,7 @@ def mover_elemento_por_delta(elemento: dict, dx: float, dy: float) -> None:
     for chave in CHAVES_ESTRUTURAS_COM_PONTOS:
         if chave in elemento:
             elemento[chave] = mover_valor_estruturado_por_delta(elemento.get(chave), dx, dy)
+    limpar_cache_runtime_elemento(elemento)
 
 
 def rotacionar_elemento_por_funcao(elemento: dict, rotacionar_ponto) -> None:
@@ -95,6 +100,15 @@ def rotacionar_elemento_por_funcao(elemento: dict, rotacionar_ponto) -> None:
         if chave in elemento:
             elemento[chave] = rotacionar_valor_estruturado_por_funcao(elemento.get(chave), rotacionar_ponto)
     rotacionar_vetores_graduacao_por_funcao(elemento, rotacionar_ponto)
+    limpar_cache_runtime_elemento(elemento)
+
+
+def limpar_cache_runtime_elemento(elemento: dict) -> None:
+    if not isinstance(elemento, dict):
+        return
+    for chave in list(elemento):
+        if str(chave).startswith("_runtime_"):
+            elemento.pop(chave, None)
 
 
 def _mover_lista_ou_mapa_pontos(valor, dx: float, dy: float):

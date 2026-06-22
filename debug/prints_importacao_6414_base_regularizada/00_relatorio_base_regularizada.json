@@ -1,0 +1,87 @@
+{
+  "arquivo": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "prints": [
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_base_regularizada/01_resultado_render_regularizado.png",
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_base_regularizada/02_detalhe_render_regularizado.png",
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_base_regularizada/03_bruto_vs_regularizado.png",
+    "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_base_regularizada/04_diagnostico_file_ads.png"
+  ],
+  "grade_detectada": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "diagnostico_file_ads": {
+    "assinatura": "CADZ",
+    "tamanho_bytes": 488648,
+    "blocos_comprimidos_detectados": 0,
+    "strings_encontradas": 7802,
+    "possiveis_pontos_float32": 205983,
+    "possiveis_pontos_float64": 176194,
+    "contornos_candidatos": 0,
+    "contornos_brutos_candidatos": 20,
+    "geometria_convertida": false,
+    "geometry_confidence": "low",
+    "motivo": "Dados internos preservados. O parser estrutural do file.ads ainda nao confirmou contornos editaveis; use o preview apenas como referencia.",
+    "polilinhas_candidatas": [],
+    "elementos_canvas": [],
+    "diagnostico_cadz": {
+      "inicio_payload": 20,
+      "nibble_swap_detectado": true,
+      "cabecalho_ascii_decodificado_len": 133,
+      "cabecalho_digitos_len": 128,
+      "cabecalho_ascii_decodificado": "14015140024711107076377078136973154702224918230676259064160461584567987390849681464294019335166448884395692605897776672355301348T9T,d",
+      "entropia_payload_raw_4k": 7.9176,
+      "entropia_payload_nibble_swap_4k": 7.9176,
+      "texto_ou_compressao_valida_detectada": false,
+      "payload_provavelmente_protegido": true,
+      "motivo": "camada nibble-swap detectada; payload restante tem alta entropia e nao expos XML/zlib"
+    },
+    "regras_graduacao_decodificadas": false,
+    "pontos_controle_decodificados": false,
+    "tabela_graduacao": {},
+    "motivo_regras_graduacao": "file.ads CADZ com camada binaria protegida/ofuscada detectada; foram encontrados cabecalho nibble-swap e alta entropia, mas nenhum bloco XML/zlib ou tabela dx/dy validavel.",
+    "arquivo_binario": "file.ads",
+    "pacote": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.adsx"
+  },
+  "molde_detalhe": {
+    "raw_contornos": [
+      "P",
+      "M",
+      "G",
+      "GG",
+      "G1",
+      "G2"
+    ],
+    "regularizados": [
+      "PP",
+      "P",
+      "M",
+      "G",
+      "GG",
+      "G1",
+      "G2"
+    ],
+    "sinteticos": [
+      "PP"
+    ],
+    "render_regularizada": true,
+    "metodo": "transformacao_bbox_base",
+    "tem_tabela_real": false,
+    "tem_tabela_derivada": true
+  },
+  "fit_geral": {
+    "min_x": -119.93360673084707,
+    "min_y": -80.31465317919076,
+    "max_x": 119.93360673084707,
+    "max_y": 80.31465317919076,
+    "zoom": 5.540707484687214
+  },
+  "fit_detalhe": {
+    "min_x": -19.875247435819574,
+    "min_y": 2.9090346820809287,
+    "max_x": 44.07210673084707,
+    "max_y": 80.31465317919076,
+    "zoom": 10.85192543266564
+  }
+}

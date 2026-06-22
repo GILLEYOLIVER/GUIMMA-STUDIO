@@ -1,5 +1,5 @@
 {
-  "arquivo_emf": "C:\\Users\\User\\AppData\\Local\\Temp\\tmpr7efew7u\\01.emf",
+  "arquivo_emf": "/var/folders/yg/9wbblsc96sv1p9970_r38b_c0000gn/T/tmpu7gmo4c9/01.emf",
   "records_emf_total": 3,
   "records_emf_tipos": {
     "1": 1,
@@ -56,11 +56,21 @@
     "motor_cpp_curvas": 0,
     "motor_cpp_falhas": 0,
     "elementos_canvas_final": 1,
+    "contornos_graduacao_ocultos": 0,
+    "grupos_graduados_detectados": 1,
+    "moldes_nomeados": 1,
+    "fios_detectados": 0,
+    "grupos_graduados": 1,
+    "calibracao_dimensoes_xml": {
+      "aplicado": false,
+      "moldes_calibrados": 0,
+      "detalhes": []
+    },
     "moldes_reais_criados": 1
   },
   "mensagem_final": "Audaces EMF + XML importado: 1 moldes reais criados, 0 contornos unidos, 0 curvas reconstruídas.",
   "mensagem_diagnostico": "Pós-processamento não alterou geometria.",
-  "canvas_origem": "moldes_reais",
+  "canvas_origem": "moldes_reais_processados",
   "canvas_moldes_renderizados": 1,
-  "canvas_elementos_emf_renderizados": 0
+  "canvas_elementos_emf_renderizados": 1
 }

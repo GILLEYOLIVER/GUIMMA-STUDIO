@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from importlib.util import find_spec
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,6 +42,110 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
 
         self.assertEqual(len(controles), 1)
         self.assertEqual((controles[0].x(), controles[0].y()), (10.0, 5.0))
+
+    def test_selecao_molde_mostra_todos_controles_oficiais_importados(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        base = [QPointF(float(i), 0.0) for i in range(8)]
+        molde = {
+            "controle_cantos": [
+                (10.0, 5.0),
+                (11.0, 5.0),
+                (12.0, 5.0),
+                (13.0, 5.0),
+                (14.0, 5.0),
+            ]
+        }
+
+        controles = canvas._pontos_controle_selecao_molde(base, molde)
+
+        self.assertEqual(
+            [(p.x(), p.y()) for p in controles],
+            [(10.0, 5.0), (11.0, 5.0), (12.0, 5.0), (13.0, 5.0), (14.0, 5.0)],
+        )
+
+    def test_selecao_molde_mostra_auxiliares_sem_duplicar_principais(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        principais = [QPointF(10.0, 5.0), QPointF(11.0, 5.0)]
+        molde = {
+            "controle_auxiliares": [(10.0, 5.0), (10.5, 5.2)],
+            "pontos_auxiliares": [{"x": 10.5, "y": 5.2}, {"x": 10.75, "y": 5.4}],
+        }
+
+        auxiliares = canvas._pontos_auxiliares_selecao_molde(molde, principais)
+
+        self.assertEqual([(p.x(), p.y()) for p in auxiliares], [(10.5, 5.2), (10.75, 5.4)])
+
+    def test_controles_audaces_aparecem_apenas_na_base_nao_na_graduacao(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem": "audaces_emf_xml",
+            "mostrar_controles": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+            "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)],
+            "controle_auxiliares": [(5.0, 0.0), (10.0, 4.0)],
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "cor": "#0080ff",
+                    "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+                },
+                {
+                    "tamanho": "G",
+                    "cor": "#ffffff",
+                    "pontos": [(-2.0, -2.0), (12.0, -2.0), (12.0, 10.0), (-2.0, 10.0), (-2.0, -2.0)],
+                },
+            ],
+        }
+        canvas = VisualizacaoCanvas(CenaDocumento(elementos=[molde]))
+        canvas._elemento_visivel_no_viewport = lambda _el: True
+        canvas._elemento_oculto_por_visualizacao_molde = lambda _el: False
+        chamadas = []
+
+        def registrar(_painter, ponto, _cor, _forma, _raio):
+            chamadas.append((round(ponto.x(), 3), round(ponto.y(), 3)))
+
+        canvas._desenhar_marcador_ponto_tela = registrar
+
+        canvas._desenhar_controles_audaces_finais(object())
+
+        self.assertEqual(len(chamadas), 6)
+        self.assertEqual(
+            chamadas,
+            [
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 8.0),
+                (0.0, 8.0),
+                (5.0, 0.0),
+                (10.0, 4.0),
+            ],
+        )
+
+    def test_residuo_importado_some_quando_graduacao_global_oculta(self):
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "molde_id": "emf-001",
+            "mostrar_graduacao": False,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+        }
+        residuo = {
+            "tipo": "polyline",
+            "origem": "audaces_emf",
+            "subtipo_audaces": "linha_interna",
+            "ocultar_quando_graduacao_oculta": True,
+            "pontos": [(1.0, 1.0), (2.0, 2.0)],
+            "metadados": {"ocultar_graduacao_molde_id": "emf-001"},
+        }
+        canvas = VisualizacaoCanvas(CenaDocumento(elementos=[molde, residuo]))
+
+        self.assertTrue(canvas._elemento_oculto_por_visualizacao_molde(residuo))
+
+        molde["mostrar_graduacao"] = True
+        canvas._runtime_indice_vinculos = None
+
+        self.assertFalse(canvas._elemento_oculto_por_visualizacao_molde(residuo))
 
     def test_selecao_molde_antigo_sem_controles_mantem_fallback_visual(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
@@ -1039,6 +1144,39 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertEqual(len(chamadas), 1)
         self.assertIs(chamadas[0][0], canvas.cena.elementos[0])
 
+    def test_paint_nao_desenha_graduacao_duas_vezes_fora_do_overlay(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.resize(220, 160)
+        canvas._grid_visivel = False
+        canvas.cena.elementos.append(
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 0.0)],
+                "graduacao_tamanhos": [
+                    {"ativo": True, "tamanho": "P", "base": True},
+                    {"ativo": True, "tamanho": "M", "base": False},
+                ],
+                "graduacao_contornos_importados": [
+                    {"tamanho": "P", "base": True, "pontos": [(0.0, 0.0), (10.0, 0.0), (0.0, 0.0)]},
+                    {"tamanho": "M", "base": False, "pontos": [(1.0, 0.0), (11.0, 0.0), (1.0, 0.0)]},
+                ],
+            }
+        )
+        chamadas = []
+        canvas._desenhar_graduacao_moldes_visiveis = lambda _painter, _visiveis=None: chamadas.append("direto")
+        canvas._desenhar_overlays_moldes = lambda _painter, _visiveis=None: chamadas.append("overlay")
+
+        image = QImage(220, 160, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        try:
+            canvas.render(painter, QPoint(0, 0))
+        finally:
+            painter.end()
+
+        self.assertEqual(chamadas, ["overlay"])
+
     def test_rascunho_propriedades_oculta_elemento_real_correspondente(self):
         canvas = VisualizacaoCanvas(CenaDocumento())
         canvas.cena.elementos.extend(
@@ -1404,6 +1542,252 @@ class VisualizacaoControlesTestCase(unittest.TestCase):
         self.assertIn(((5.0, 0.0), (5.0, 1.0)), segmentos)
         self.assertIn(((5.0, -2.0), (5.0, -1.0)), segmentos)
         self.assertIn(((5.0, 2.0), (5.0, 3.0)), segmentos)
+
+    def test_graduacao_importada_preserva_faixas_sem_spline_visual(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        chamadas_suaves = []
+        chamadas_retas = []
+        canvas._desenhar_polilinha_suavizada = (
+            lambda _painter, pontos, **kwargs: chamadas_suaves.append((len(pontos), kwargs))
+        )
+        canvas._desenhar_polilinha = lambda *args, **kwargs: chamadas_retas.append((args, kwargs))
+        painter = SimpleNamespace(save=lambda: None, restore=lambda: None)
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "render_smooth": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "P",
+                    "base": True,
+                    "cor": "#00d000",
+                    "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+                },
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+                },
+            ],
+        }
+
+        canvas._desenhar_graduacao_tabela_molde(painter, molde, canvas._base_graduacao_elemento(molde))
+
+        self.assertEqual(len(chamadas_suaves), 1)
+        self.assertEqual(len(chamadas_retas), 1)
+        _args, kwargs_grade = chamadas_retas[0]
+        self.assertEqual(kwargs_grade.get("cor"), "#0080ff")
+        self.assertEqual(kwargs_grade.get("cache_key"), ("graduacao", "M"))
+        self.assertIs(kwargs_grade.get("elemento"), molde)
+
+    def test_graduacao_importada_simplifica_faixas_durante_zoom_interativo(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas._zoom_interativo = True
+        chamadas_suaves = []
+        chamadas_retas = []
+        canvas._desenhar_polilinha_suavizada = (
+            lambda _painter, pontos, **kwargs: chamadas_suaves.append((len(pontos), kwargs))
+        )
+        canvas._desenhar_polilinha = lambda *args, **kwargs: chamadas_retas.append((args, kwargs))
+        painter = SimpleNamespace(save=lambda: None, restore=lambda: None)
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "render_smooth": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "P",
+                    "base": True,
+                    "cor": "#00d000",
+                    "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+                },
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+                },
+            ],
+        }
+
+        canvas._desenhar_graduacao_tabela_molde(painter, molde, canvas._base_graduacao_elemento(molde))
+
+        self.assertEqual(len(chamadas_suaves), 1)
+        self.assertEqual(len(chamadas_retas), 1)
+        _args, kwargs_grade = chamadas_retas[0]
+        self.assertEqual(kwargs_grade.get("cor"), "#0080ff")
+        self.assertEqual(kwargs_grade.get("cache_key"), ("graduacao", "M"))
+
+    def test_suavizacao_visual_nao_trava_vertices_de_curva_importada(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        pontos = [
+            QPointF(10.0, 0.0),
+            QPointF(8.66, 5.0),
+            QPointF(5.0, 8.66),
+            QPointF(0.0, 10.0),
+            QPointF(-5.0, 8.66),
+            QPointF(-8.66, 5.0),
+            QPointF(-10.0, 0.0),
+            QPointF(-8.66, -5.0),
+            QPointF(-5.0, -8.66),
+            QPointF(0.0, -10.0),
+            QPointF(5.0, -8.66),
+            QPointF(8.66, -5.0),
+            QPointF(10.0, 0.0),
+        ]
+        elemento = {
+            "origem": "audaces_emf",
+            "controle_cantos": [(p.x(), p.y()) for p in pontos[:-1]],
+        }
+
+        preservados = canvas._pontos_preservados_suavizacao(elemento, pontos)
+
+        self.assertEqual(preservados, [])
+
+    def test_suavizacao_visual_preserva_quinas_fortes(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        pontos = [
+            QPointF(0.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 8.0),
+            QPointF(0.0, 8.0),
+            QPointF(0.0, 0.0),
+        ]
+        elemento = {
+            "origem": "audaces_emf",
+            "controle_cantos": [(p.x(), p.y()) for p in pontos[:-1]],
+        }
+
+        preservados = canvas._pontos_preservados_suavizacao(elemento, pontos)
+
+        self.assertEqual(len(preservados), 8)
+
+    def test_graduacao_regularizada_tem_prioridade_sobre_contorno_bruto_importado(self):
+        base = [QPointF(0.0, 0.0), QPointF(10.0, 0.0), QPointF(10.0, 8.0), QPointF(0.0, 8.0), QPointF(0.0, 0.0)]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+            "graduacao_renderizar_regularizada": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(40.0, 0.0), (50.0, 0.0), (50.0, 8.0), (40.0, 8.0), (40.0, 0.0)],
+                }
+            ],
+            "graduacao_contornos_regularizados_preview": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 8.0), (20.0, 8.0), (20.0, 0.0)],
+                }
+            ],
+        }
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        self.assertEqual(len(contornos), 1)
+        _nome, _cor, pontos = contornos[0]
+        self.assertEqual(pontos[0].x(), 20.0)
+
+    def test_graduacao_derivada_preserva_topologia_da_base_com_v(self):
+        base = [
+            QPointF(0.0, 0.0),
+            QPointF(4.0, 0.0),
+            QPointF(5.0, 2.0),
+            QPointF(6.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(10.0, 8.0),
+            QPointF(0.0, 8.0),
+            QPointF(0.0, 0.0),
+        ]
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(p.x(), p.y()) for p in base],
+            "graduacao_renderizar_por_tabela_derivada": True,
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "P", "base": True, "cor": "#00d000"},
+                {"ativo": True, "tamanho": "M", "base": False, "cor": "#0080ff"},
+            ],
+            "graduacao_tabela_derivada": {
+                "modo": "dx_dy",
+                "base": "P",
+                "pontos": {
+                    "0": {"indice": 0, "ponto": (0.0, 0.0), "valores": {"M": {"dx": 1.0, "dy": 1.0}}},
+                    "1": {"indice": 2, "ponto": (5.0, 2.0), "valores": {"M": {"dx": 1.0, "dy": 1.0}}},
+                    "2": {"indice": 5, "ponto": (10.0, 8.0), "valores": {"M": {"dx": 1.0, "dy": 1.0}}},
+                },
+            },
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "cor": "#0080ff",
+                    "pontos": [(-1.0, -1.0), (11.0, -1.0), (11.0, 9.0), (-1.0, 9.0), (-1.0, -1.0)],
+                }
+            ],
+        }
+
+        contornos = VisualizacaoCanvas._contornos_graduacao_tabela(molde, base)
+
+        self.assertEqual(len(contornos), 1)
+        _nome, _cor, pontos_m = contornos[0]
+        self.assertEqual(len(pontos_m), len(base))
+        self.assertTrue(any(abs(p.x() - 6.0) < 1e-6 and abs(p.y() - 3.0) < 1e-6 for p in pontos_m))
+
+    def test_hit_test_em_contorno_importado_seleciona_molde_dono(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        canvas.zoom = 10.0
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)],
+            "graduacao_contornos_importados": [
+                {
+                    "tamanho": "M",
+                    "base": False,
+                    "pontos": [(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0), (20.0, 0.0)],
+                }
+            ],
+        }
+        canvas.cena.elementos = [molde]
+
+        self.assertEqual(canvas._indices_elementos_em_ponto(QPointF(25.0, 0.0)), [0])
+
+    def test_suavizacao_preserva_quina_importada_acima_de_90_graus(self):
+        canvas = VisualizacaoCanvas(CenaDocumento())
+        pontos = [
+            QPointF(0.0, 0.0),
+            QPointF(10.0, 0.0),
+            QPointF(14.0, 8.0),
+            QPointF(20.0, 8.0),
+            QPointF(20.0, 12.0),
+            QPointF(0.0, 12.0),
+            QPointF(0.0, 0.0),
+        ]
+
+        quinas = canvas._quinas_contorno_para_suavizacao(pontos)
+
+        self.assertIn((10.0, 0.0), [(p.x(), p.y()) for p in quinas])
 
 
 if __name__ == "__main__":

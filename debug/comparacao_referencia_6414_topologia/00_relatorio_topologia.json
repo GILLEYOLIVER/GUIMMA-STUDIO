@@ -1,0 +1,529 @@
+{
+  "info_importacao": {
+    "moldes_reais": 9,
+    "grade_detectada": {
+      "nome": "PP-G2(P)",
+      "tamanho_base": "P",
+      "quantidade_tamanhos": 7
+    },
+    "xml_usado": true
+  },
+  "moldes": [
+    {
+      "nome": "GOLA 2X",
+      "base_pontos": 60,
+      "contornos": {
+        "PP": 61,
+        "M": 61,
+        "G": 61,
+        "GG": 61,
+        "G1": 61,
+        "G2": 61
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 6,
+      "controles_auxiliares": 53,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "FRENTE 2X",
+      "base_pontos": 45,
+      "contornos": {
+        "PP": 46,
+        "M": 46,
+        "G": 46,
+        "GG": 46,
+        "G1": 46,
+        "G2": 46
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 13,
+      "controles_auxiliares": 32,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "FORRO FRENTE 1X",
+      "base_pontos": 48,
+      "contornos": {
+        "PP": 49,
+        "M": 49,
+        "G": 49,
+        "GG": 49,
+        "G1": 49,
+        "G2": 49
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 12,
+      "controles_auxiliares": 36,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "MANGA 2X",
+      "base_pontos": 20,
+      "contornos": {
+        "PP": 21,
+        "M": 21,
+        "G": 21,
+        "GG": 21,
+        "G1": 21,
+        "G2": 21
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 4,
+      "controles_auxiliares": 16,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "COSTAS 2X",
+      "base_pontos": 24,
+      "contornos": {
+        "PP": 25,
+        "M": 25,
+        "G": 25,
+        "GG": 25,
+        "G1": 25,
+        "G2": 25
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 5,
+      "controles_auxiliares": 19,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "CHIMANGO COSTAS 2X",
+      "base_pontos": 18,
+      "contornos": {
+        "PP": 19,
+        "M": 19,
+        "G": 19,
+        "GG": 19,
+        "G1": 19,
+        "G2": 19
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 6,
+      "controles_auxiliares": 12,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "BABADIO MANG 2X",
+      "base_pontos": 4,
+      "contornos": {
+        "PP": 5,
+        "M": 5,
+        "G": 5,
+        "GG": 5,
+        "G1": 5,
+        "G2": 5
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 4,
+      "controles_auxiliares": 0,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "LEVANTA MAG 2X",
+      "base_pontos": 20,
+      "contornos": {
+        "PP": 21,
+        "M": 21,
+        "G": 21,
+        "GG": 21,
+        "G1": 21,
+        "G2": 21
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 4,
+      "controles_auxiliares": 16,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    },
+    {
+      "nome": "ROLITE GOLA 2X",
+      "base_pontos": 4,
+      "contornos": {
+        "PP": 5,
+        "M": 5,
+        "G": 5,
+        "GG": 5,
+        "G1": 5,
+        "G2": 5
+      },
+      "contornos_topologia_base": true,
+      "controles_principais": 4,
+      "controles_auxiliares": 0,
+      "renderizar_regularizada": true,
+      "renderizar_por_tabela_derivada": false,
+      "suavizar_topologia_base": true,
+      "metodo": "topologia_base_dimensoes_xml",
+      "grade": [
+        [
+          "PP",
+          false,
+          "#bdbdbd"
+        ],
+        [
+          "P",
+          true,
+          "#00d000"
+        ],
+        [
+          "M",
+          false,
+          "#0080ff"
+        ],
+        [
+          "G",
+          false,
+          "#ffffff"
+        ],
+        [
+          "GG",
+          false,
+          "#ff00ff"
+        ],
+        [
+          "G1",
+          false,
+          "#ff8000"
+        ],
+        [
+          "G2",
+          false,
+          "#aa00ff"
+        ]
+      ]
+    }
+  ],
+  "perf_render": {
+    "completo": {
+      "media_ms": 145.64,
+      "max_ms": 199.3,
+      "min_ms": 131.81
+    },
+    "interativo": {
+      "media_ms": 61.26,
+      "max_ms": 65.84,
+      "min_ms": 58.15
+    }
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "emf": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.emf",
+  "xml": "/Users/gilleydeoliveiraguimaraes/Desktop/6414 BLUSA GOLA PADRE E ROLITE MANGA DE PREGAS.xml",
+  "prints": {
+    "overview": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_desktop_emf_xml/01_visao_geral_emf_xml_base_p.png",
+    "frente": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_desktop_emf_xml/02_detalhe_frente_base_p_xml.png",
+    "manga": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_desktop_emf_xml/03_detalhe_manga_base_p_xml.png",
+    "raw_vs_regularized": "/Users/gilleydeoliveiraguimaraes/PycharmProjects/GUIMMA-STUDIO/debug/prints_importacao_6414_desktop_emf_xml/04_raw_vs_regularizado_frente.png"
+  },
+  "mensagem": "EMF importado: 9 moldes reais detectados, 674 segmentos unidos, 5 fios detectados.",
+  "nomes_moldes_origem": "xml_adjacente",
+  "grade_detectada": {
+    "nome": "PP-G2(P)",
+    "tamanho_base": "P",
+    "quantidade_tamanhos": 7
+  },
+  "motor_cpp_curvas": 9,
+  "motor_cpp_falhas": 0,
+  "moldes": [
+    {
+      "nome": "GOLA 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "G2"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "FRENTE 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "M",
+        "G",
+        "G1",
+        "G2"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "FORRO FRENTE 1X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "G"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "MANGA 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "M",
+        "G",
+        "G1",
+        "G2",
+        "T6"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "COSTAS 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "G2"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "CHIMANGO COSTAS 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "M",
+        "G",
+        "G1",
+        "G2",
+        "T6"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "BABADIO MANG 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "P",
+        "M",
+        "G",
+        "G2",
+        "T5"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "LEVANTA MAG 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "M"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    },
+    {
+      "nome": "ROLITE GOLA 2X",
+      "base": "P",
+      "preview": [
+        "PP",
+        "P",
+        "M",
+        "G",
+        "GG",
+        "G1",
+        "G2"
+      ],
+      "raw": [
+        "M"
+      ],
+      "metodo": "transformacao_bbox_base_xml_dimensoes",
+      "dimensoes_xml_referencia": 6
+    }
+  ]
+}
