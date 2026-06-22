@@ -1361,6 +1361,9 @@ class Ferramenta(FerramentaBase):
             return False
         tabela = molde.setdefault("graduacao_tabela", {})
         tabela["modo"] = "dx_dy"
+        if self._graduacao_dxf_agrupada_usa_pontos_principais(molde):
+            tabela["pontos_principais_apenas"] = True
+            tabela["pontos"] = self._filtrar_pontos_cfg_para_pontos(tabela.get("pontos"), pontos)
         pontos_cfg = tabela.setdefault("pontos", {})
         valores = dialog.valores()
         for ponto_idx in alvo_indices:
@@ -1374,6 +1377,8 @@ class Ferramenta(FerramentaBase):
             }
         molde["graduacao_pontos"] = deepcopy(pontos_cfg)
         molde["mostrar_graduacao"] = True
+        molde["graduacao_preferir_tabela_dxdy"] = True
+        molde["graduacao_renderizar_por_tabela_derivada"] = False
         if registrar_historico and hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
         return True
@@ -1998,14 +2003,28 @@ class Ferramenta(FerramentaBase):
         if not self._eh_molde_graduavel(molde):
             return []
         base = self._pontos_de_origem(molde.get("pontos") if isinstance(molde, dict) else None)
-        for chave in (
-            "pontos_controle_principais",
-            "controle_cantos",
-            "pontos_controle_curva",
-            "pontos_controle",
-            "pontos",
-            "pontos_graduacao",
-        ):
+        tabela = molde.get("graduacao_tabela") if isinstance(molde, dict) else None
+        pontos_tabela = tabela.get("pontos") if isinstance(tabela, dict) else None
+        controles = molde.get("pontos_controle_principais") or molde.get("controle_cantos") or []
+        usar_principais = self._graduacao_dxf_agrupada_usa_pontos_principais(molde)
+        preferir_base = bool(
+            not usar_principais
+            and (
+                molde.get("graduacao_preferir_tabela_dxdy")
+                or (
+                    isinstance(pontos_tabela, dict)
+                    and isinstance(controles, list)
+                    and len(pontos_tabela) > len(controles)
+                )
+            )
+        )
+        if usar_principais:
+            chaves = ("pontos_controle_principais", "controle_cantos", "pontos_controle", "pontos")
+        elif preferir_base:
+            chaves = ("pontos", "pontos_controle_principais", "controle_cantos", "pontos_controle_curva", "pontos_controle", "pontos_graduacao")
+        else:
+            chaves = ("pontos_controle_principais", "controle_cantos", "pontos_controle_curva", "pontos_controle", "pontos", "pontos_graduacao")
+        for chave in chaves:
             valor = molde.get(chave)
             pontos = self._pontos_de_origem(valor)
             if not pontos:
@@ -2014,6 +2033,56 @@ class Ferramenta(FerramentaBase):
                 continue
             return pontos
         return base
+
+    @staticmethod
+    def _graduacao_dxf_agrupada_usa_pontos_principais(molde: dict | None) -> bool:
+        if not isinstance(molde, dict):
+            return False
+        if molde.get("graduacao_tabela_apenas_pontos_principais"):
+            return True
+        if str(molde.get("origem") or "").strip() == "dxf_matriz_graduada":
+            return True
+        metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
+        return bool(metadados.get("matriz_tamanhos_dxf"))
+
+    @classmethod
+    def _filtrar_pontos_cfg_para_pontos(cls, pontos_cfg: dict | None, pontos: list[QPointF]) -> dict:
+        if not isinstance(pontos_cfg, dict) or not pontos:
+            return {}
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        diagonal = hypot(max(xs) - min(xs), max(ys) - min(ys)) if xs and ys else 0.0
+        tolerancia = max(1e-6, diagonal * 0.001)
+        saida: dict[str, dict] = {}
+        ocupados: set[int] = set()
+        for chave, cfg in sorted(pontos_cfg.items(), key=lambda item: str(item[0])):
+            if not isinstance(cfg, dict):
+                continue
+            ponto_cfg = cls._ponto_qt(cfg.get("ponto"))
+            idx = None
+            if ponto_cfg is not None:
+                dist, idx_candidato = min(
+                    (cls._dist(ponto_cfg, ponto), p_idx)
+                    for p_idx, ponto in enumerate(pontos)
+                )
+                if dist <= tolerancia:
+                    idx = int(idx_candidato)
+            if idx is None and ponto_cfg is None:
+                try:
+                    idx_cfg = int(cfg.get("indice", chave))
+                except Exception:
+                    idx_cfg = -1
+                if 0 <= idx_cfg < len(pontos):
+                    idx = int(idx_cfg)
+            if idx is None or idx in ocupados:
+                continue
+            ocupados.add(idx)
+            novo = deepcopy(cfg)
+            novo["indice"] = int(idx)
+            novo["numero"] = int(idx) + 1
+            novo["ponto"] = (float(pontos[idx].x()), float(pontos[idx].y()))
+            saida[str(idx)] = novo
+        return saida
 
     def _pontos_de_origem(self, origem) -> list[QPointF]:
         pontos: list[QPointF] = []

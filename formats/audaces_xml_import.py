@@ -23,6 +23,8 @@ class AudacesXMLPatternSize:
     perimetro_curva: float | None
     largura: float | None
     altura: float | None
+    quantidade: int | None = None
+    quantidade_posicionada: int | None = None
 
 
 @dataclass
@@ -129,6 +131,8 @@ class AudacesXMLImport:
                         perimetro_curva=self._num(self._txt(sp, "CURVE_PER_SP", "CURVE_PERIMETER_SP")),
                         largura=self._num(self._txt(sp, "WIDTH_SP", "LARGURA_SP")),
                         altura=self._num(self._txt(sp, "HEIGHT_SP", "ALTURA_SP")),
+                        quantidade=self._int(self._txt(sp, "QUANT_SP", "QUANTITY_SP", "QTD_SP")),
+                        quantidade_posicionada=self._int(self._txt(sp, "QUANT_PLACED", "PLACED_SP")),
                     )
                 )
             pecas.append(

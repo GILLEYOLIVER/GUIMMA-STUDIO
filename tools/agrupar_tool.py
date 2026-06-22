@@ -195,6 +195,8 @@ class Ferramenta(FerramentaBase):
             return False
 
         pontos_cfg_original = self._pontos_cfg_graduacao(molde)
+        if self._graduacao_dxf_agrupada_usa_pontos_principais(molde):
+            pontos_cfg_original = self._filtrar_pontos_cfg_para_pontos(pontos_cfg_original, pontos)
         if not pontos_cfg_original:
             self._status(canvas, "Agrupar: este molde ainda não possui tabela de graduação.")
             return False
@@ -245,11 +247,15 @@ class Ferramenta(FerramentaBase):
 
         tabela = deepcopy(molde.get("graduacao_tabela")) if isinstance(molde.get("graduacao_tabela"), dict) else {}
         tabela["modo"] = "dx_dy"
+        if self._graduacao_dxf_agrupada_usa_pontos_principais(molde):
+            tabela["pontos_principais_apenas"] = True
         tabela["pontos"] = nova_cfg
         molde["graduacao_tabela"] = tabela
         molde["graduacao_pontos"] = deepcopy(nova_cfg)
         molde["graduacao_tamanhos_ativos"] = [nome for nome in nomes if nome]
         molde["mostrar_graduacao"] = True
+        molde["graduacao_preferir_tabela_dxdy"] = True
+        molde["graduacao_renderizar_por_tabela_derivada"] = False
 
         if registrar_historico and hasattr(canvas, "_registrar_historico"):
             canvas._registrar_historico()
@@ -312,21 +318,85 @@ class Ferramenta(FerramentaBase):
     def _pontos_contorno(self, molde: dict | None, *, permitir_separado: bool = False) -> list[QPointF]:
         if not self._eh_molde_graduavel(molde, permitir_separado=permitir_separado):
             return []
+        tabela = molde.get("graduacao_tabela") if isinstance(molde, dict) else None
+        pontos_tabela = tabela.get("pontos") if isinstance(tabela, dict) else None
+        controles = molde.get("pontos_controle_principais") or molde.get("controle_cantos") or []
+        usar_principais = self._graduacao_dxf_agrupada_usa_pontos_principais(molde)
+        preferir_base = bool(
+            not usar_principais
+            and (
+                molde.get("graduacao_preferir_tabela_dxdy")
+                or (
+                    isinstance(pontos_tabela, dict)
+                    and isinstance(controles, list)
+                    and len(pontos_tabela) > len(controles)
+                )
+            )
+        )
         origem = None
-        for chave in (
-            "pontos_controle_principais",
-            "controle_cantos",
-            "pontos_graduacao",
-            "pontos_controle_curva",
-            "pontos_controle",
-            "pontos",
-        ):
+        if usar_principais:
+            chaves = ("pontos_controle_principais", "controle_cantos", "pontos_controle", "pontos")
+        elif preferir_base:
+            chaves = ("pontos", "pontos_controle_principais", "controle_cantos", "pontos_graduacao", "pontos_controle_curva", "pontos_controle")
+        else:
+            chaves = ("pontos_controle_principais", "controle_cantos", "pontos_graduacao", "pontos_controle_curva", "pontos_controle", "pontos")
+        for chave in chaves:
             valor = molde.get(chave)
             if isinstance(valor, list) and valor:
                 origem = valor
                 break
         pontos = [p for p in (self._ponto_qt(item) for item in origem or []) if p is not None]
         return self._abrir_contorno(pontos)
+
+    @staticmethod
+    def _graduacao_dxf_agrupada_usa_pontos_principais(molde: dict | None) -> bool:
+        if not isinstance(molde, dict):
+            return False
+        if molde.get("graduacao_tabela_apenas_pontos_principais"):
+            return True
+        if str(molde.get("origem") or "").strip() == "dxf_matriz_graduada":
+            return True
+        metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
+        return bool(metadados.get("matriz_tamanhos_dxf"))
+
+    @classmethod
+    def _filtrar_pontos_cfg_para_pontos(cls, pontos_cfg: dict | None, pontos: list[QPointF]) -> dict:
+        if not isinstance(pontos_cfg, dict) or not pontos:
+            return {}
+        xs = [p.x() for p in pontos]
+        ys = [p.y() for p in pontos]
+        diagonal = hypot(max(xs) - min(xs), max(ys) - min(ys)) if xs and ys else 0.0
+        tolerancia = max(1e-6, diagonal * 0.001)
+        saida: dict[str, dict] = {}
+        ocupados: set[int] = set()
+        for chave, cfg in sorted(pontos_cfg.items(), key=lambda item: str(item[0])):
+            if not isinstance(cfg, dict):
+                continue
+            ponto_cfg = cls._ponto_qt(cfg.get("ponto"))
+            idx = None
+            if ponto_cfg is not None:
+                dist, idx_candidato = min(
+                    (cls._dist(ponto_cfg, ponto), p_idx)
+                    for p_idx, ponto in enumerate(pontos)
+                )
+                if dist <= tolerancia:
+                    idx = int(idx_candidato)
+            if idx is None and ponto_cfg is None:
+                try:
+                    idx_cfg = int(cfg.get("indice", chave))
+                except Exception:
+                    idx_cfg = -1
+                if 0 <= idx_cfg < len(pontos):
+                    idx = int(idx_cfg)
+            if idx is None or idx in ocupados:
+                continue
+            ocupados.add(idx)
+            novo = deepcopy(cfg)
+            novo["indice"] = int(idx)
+            novo["numero"] = int(idx) + 1
+            novo["ponto"] = (float(pontos[idx].x()), float(pontos[idx].y()))
+            saida[str(idx)] = novo
+        return saida
 
     def _linhas_tamanhos(self, molde: dict) -> list[dict]:
         linhas = molde.get("graduacao_tamanhos")

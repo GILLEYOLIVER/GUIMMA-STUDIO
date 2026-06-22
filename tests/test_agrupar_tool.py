@@ -244,6 +244,49 @@ class AgruparToolTestCase(unittest.TestCase):
 
         self.assertEqual(canvas.ferramenta_ativa, "selecionar")
 
+    def test_pontos_contorno_dxf_agrupado_usa_so_pontos_principais(self):
+        ferramenta = FerramentaAgrupar()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem": "dxf_matriz_graduada",
+            "pontos": [
+                (0.0, 0.0),
+                (2.0, 0.4),
+                (4.0, 0.8),
+                (6.0, 0.4),
+                (8.0, 0.0),
+                (8.0, 5.0),
+                (0.0, 5.0),
+                (0.0, 0.0),
+            ],
+            "controle_cantos": [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)],
+            "graduacao_preferir_tabela_dxdy": True,
+            "graduacao_tabela": {
+                "pontos": {
+                    str(idx): {"indice": idx, "ponto": ponto, "valores": {"G": {"dx": 1.0, "dy": 0.0}}}
+                    for idx, ponto in enumerate(
+                        [
+                            (0.0, 0.0),
+                            (2.0, 0.4),
+                            (4.0, 0.8),
+                            (6.0, 0.4),
+                            (8.0, 0.0),
+                            (8.0, 5.0),
+                            (0.0, 5.0),
+                        ]
+                    )
+                }
+            },
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(
+            pontos,
+            [QPointF(0.0, 0.0), QPointF(8.0, 0.0), QPointF(8.0, 5.0), QPointF(0.0, 5.0)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

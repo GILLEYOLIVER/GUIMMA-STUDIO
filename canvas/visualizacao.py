@@ -3079,11 +3079,8 @@ class VisualizacaoCanvas(QWidget):
                 self._desenhar_eixo_dobra_salvo(painter, el)
 
             self._desenhar_graduacao_tabela_molde(painter, el, base)
-            if renderizacao_interativa:
-                if idx in self._selecionados:
-                    self._desenhar_selecao_molde(painter, base, el)
-                continue
             self._desenhar_marcacoes_piques_elemento(painter, el, self._cor_linha_elemento(el))
+            self._desenhar_linhas_auxiliares_base_molde(painter, el, idx)
 
             if idx in getattr(self, "_piscando_ponto_restauracao_indices", set()) and getattr(self, "_piscando_ponto_restauracao_visivel", False):
                 self._desenhar_piscar_ponto_restauracao(painter, base)
@@ -3235,13 +3232,24 @@ class VisualizacaoCanvas(QWidget):
             molde_audaces = origem_controles.startswith("audaces_") or bool(
                 metadados_controles.get("importado_como_molde_real")
             )
+            controles_permanentes = bool(
+                el.get("mostrar_controles_permanente")
+                or metadados_controles.get("mostrar_controles_permanente")
+            )
+            manipulacao_ativa = self._ferramenta_manipulacao_ativa()
             if el.get("mostrar_controles", True) and (
-                self._ferramenta_manipulacao_ativa() or idx in self._selecionados or molde_audaces
+                manipulacao_ativa or idx in self._selecionados or molde_audaces or controles_permanentes
             ):
                 principais = [QPointF(float(x), float(y)) for x, y in el.get("controle_cantos", [])]
-                auxiliares = [QPointF(float(x), float(y)) for x, y in el.get("controle_auxiliares", [])]
+                desenhar_auxiliares = manipulacao_ativa or molde_audaces or (
+                    idx in self._selecionados and not controles_permanentes
+                )
+                auxiliares = [
+                    QPointF(float(x), float(y))
+                    for x, y in el.get("controle_auxiliares", [])
+                ] if desenhar_auxiliares else []
                 cor_principal, forma_principal = self._config_ponto_molde("ponto_graduado", "#d8d8d8", "Quadrado")
-                cor_aux, forma_aux = self._config_ponto_molde("ponto_nao_graduado", "#ff3b30", "Losango")
+                cor_aux, forma_aux = self._config_ponto_molde("ponto_nao_graduado", "#2da8ff", "Losango")
                 raio_principal = 4
                 raio_aux = 3
                 if molde_audaces:
@@ -3266,6 +3274,68 @@ class VisualizacaoCanvas(QWidget):
                         cor_aux,
                         forma_aux,
                         raio_aux,
+                    )
+
+    def _desenhar_linhas_auxiliares_base_molde(self, painter: QPainter, el: dict, idx: int | None = None) -> None:
+        if not isinstance(el, dict) or el.get("mostrar_linhas_auxiliares", True) is False:
+            return
+        linhas = el.get("linhas_auxiliares_base")
+        if not isinstance(linhas, list) or not linhas:
+            return
+        cor = self._cor_linha_elemento(el, "#ffffff")
+        espessura = max(0.85, float(el.get("espessura", 1.0) or 1.0) * 0.9)
+        selecionado = idx in self._selecionados if idx is not None else False
+        manipulacao_ativa = self._ferramenta_manipulacao_ativa()
+        base = self._base_graduacao_elemento(el)
+        linhas_grade = self._linhas_graduacao_nao_base(el)
+        deslocamentos_por_tamanho = (
+            self._deslocamentos_piques_graduados_configurados(el, base, linhas_grade)
+            if len(base) >= 2 and linhas_grade
+            else {}
+        )
+        for linha in linhas:
+            origem = linha.get("pontos") if isinstance(linha, dict) else linha
+            if not isinstance(origem, list) or len(origem) < 2:
+                continue
+            pontos = [pt for item in origem if (pt := self._qpoint_serializado(item)) is not None]
+            if len(pontos) < 2:
+                continue
+            self._desenhar_polilinha(
+                painter,
+                pontos,
+                cor=str(linha.get("cor") or cor) if isinstance(linha, dict) else cor,
+                espessura=espessura,
+                estilo=str(linha.get("estilo") or "solid") if isinstance(linha, dict) else "solid",
+            )
+            if isinstance(linha, dict) and linha.get("aplicar_todos_tamanhos", True) and deslocamentos_por_tamanho:
+                for linha_grade in linhas_grade:
+                    nome_tamanho = str(linha_grade.get("tamanho") or linha_grade.get("nome") or "").strip()
+                    deslocamentos = deslocamentos_por_tamanho.get(nome_tamanho)
+                    if not nome_tamanho or not deslocamentos:
+                        continue
+                    pontos_graduados: list[QPointF] = []
+                    for pt in pontos:
+                        deslocamento = self._deslocamento_graduacao_no_ponto(base, deslocamentos, pt)
+                        if deslocamento is None:
+                            pontos_graduados = []
+                            break
+                        pontos_graduados.append(QPointF(pt.x() + deslocamento.x(), pt.y() + deslocamento.y()))
+                    if len(pontos_graduados) >= 2:
+                        self._desenhar_polilinha(
+                            painter,
+                            pontos_graduados,
+                            cor=self._cor_tamanho_graduacao(el, nome_tamanho, str(linha_grade.get("cor") or cor)),
+                            espessura=espessura,
+                            estilo=str(linha.get("estilo") or "solid"),
+                        )
+            if selecionado or manipulacao_ativa:
+                for pt in (pontos[0], pontos[-1]):
+                    self._desenhar_marcador_ponto_tela(
+                        painter,
+                        self._cena_para_tela(pt),
+                        "#2da8ff",
+                        "Quadrado",
+                        4,
                     )
 
     def _desenhar_controles_audaces_finais(self, painter: QPainter) -> None:
@@ -3898,7 +3968,54 @@ class VisualizacaoCanvas(QWidget):
                 pontos_derivados = el.get("graduacao_pontos_derivados")
             if isinstance(pontos_derivados, dict):
                 pontos_cfg = pontos_derivados
+        if isinstance(pontos_cfg, dict) and VisualizacaoCanvas._graduacao_dxf_agrupada_usa_pontos_principais(el):
+            pontos_cfg = VisualizacaoCanvas._filtrar_pontos_cfg_graduacao_para_referencias(
+                pontos_cfg,
+                VisualizacaoCanvas._pontos_referencia_graduacao(el),
+            )
         return pontos_cfg if isinstance(pontos_cfg, dict) else None
+
+    @staticmethod
+    def _graduacao_dxf_agrupada_usa_pontos_principais(el: dict | None) -> bool:
+        if not isinstance(el, dict):
+            return False
+        if el.get("graduacao_tabela_apenas_pontos_principais"):
+            return True
+        if str(el.get("origem") or "").strip() == "dxf_matriz_graduada":
+            return True
+        metadados = el.get("metadados") if isinstance(el.get("metadados"), dict) else {}
+        return bool(metadados.get("matriz_tamanhos_dxf"))
+
+    @staticmethod
+    def _filtrar_pontos_cfg_graduacao_para_referencias(pontos_cfg: dict, referencias: list[QPointF]) -> dict:
+        referencias_validas = [p for p in referencias or [] if isinstance(p, QPointF)]
+        if not isinstance(pontos_cfg, dict) or not referencias_validas:
+            return {}
+        xs = [p.x() for p in referencias_validas]
+        ys = [p.y() for p in referencias_validas]
+        diagonal = hypot(max(xs) - min(xs), max(ys) - min(ys)) if xs and ys else 0.0
+        tolerancia = max(1e-6, diagonal * 0.001)
+        saida: dict[str, dict] = {}
+        ocupados: set[int] = set()
+        for chave, cfg in sorted(pontos_cfg.items(), key=lambda item: str(item[0])):
+            if not isinstance(cfg, dict):
+                continue
+            ponto_cfg = VisualizacaoCanvas._qpoint_graduacao_cfg(cfg.get("ponto"))
+            if ponto_cfg is None:
+                continue
+            dist, idx = min(
+                (VisualizacaoCanvas._dist_qpoints(ponto_cfg, ponto), p_idx)
+                for p_idx, ponto in enumerate(referencias_validas)
+            )
+            if dist > tolerancia or idx in ocupados:
+                continue
+            ocupados.add(int(idx))
+            novo = deepcopy(cfg)
+            novo["indice"] = int(idx)
+            novo["numero"] = int(idx) + 1
+            novo["ponto"] = (float(referencias_validas[idx].x()), float(referencias_validas[idx].y()))
+            saida[str(idx)] = novo
+        return saida
 
     @staticmethod
     def _deslocamentos_graduacao_tamanho(
@@ -3997,6 +4114,18 @@ class VisualizacaoCanvas(QWidget):
         if not isinstance(el, dict):
             return []
         contorno_valido = contorno if isinstance(contorno, list) and len(contorno) >= 2 else None
+        if el.get("graduacao_preferir_tabela_dxdy") and not VisualizacaoCanvas._graduacao_dxf_agrupada_usa_pontos_principais(el):
+            pontos_base = []
+            origem_base = el.get("pontos")
+            if isinstance(origem_base, list):
+                for item in origem_base:
+                    ponto = VisualizacaoCanvas._qpoint_graduacao_cfg(item)
+                    if ponto is not None:
+                        pontos_base.append(ponto)
+                if len(pontos_base) > 1 and VisualizacaoCanvas._dist_qpoints(pontos_base[0], pontos_base[-1]) <= 1e-7:
+                    pontos_base.pop()
+                if pontos_base:
+                    return pontos_base
         for chave in (
             "pontos_controle_principais",
             "controle_cantos",
@@ -4640,10 +4769,12 @@ class VisualizacaoCanvas(QWidget):
         for pt in pontos_controle:
             self._desenhar_marcador_ponto_tela(painter, pt, cor_ponto, forma_ponto, 4)
 
-        pontos_auxiliares = [self._cena_para_tela(pt) for pt in self._pontos_auxiliares_selecao_molde(el, pontos_controle)]
-        cor_aux, forma_aux = self._config_ponto_molde("ponto_nao_graduado", "#ff3b30", "Losango")
-        for pt in pontos_auxiliares:
-            self._desenhar_marcador_ponto_tela(painter, pt, cor_aux, forma_aux, 3)
+        controles_permanentes = bool(el.get("mostrar_controles_permanente")) if isinstance(el, dict) else False
+        if self._ferramenta_manipulacao_ativa() or not controles_permanentes:
+            pontos_auxiliares = [self._cena_para_tela(pt) for pt in self._pontos_auxiliares_selecao_molde(el, pontos_controle)]
+            cor_aux, forma_aux = self._config_ponto_molde("ponto_nao_graduado", "#2da8ff", "Losango")
+            for pt in pontos_auxiliares:
+                self._desenhar_marcador_ponto_tela(painter, pt, cor_aux, forma_aux, 3)
 
     def _desenhar_marcador_ponto_tela(
             self,
@@ -5314,6 +5445,8 @@ class VisualizacaoCanvas(QWidget):
     def _ferramenta_manipulacao_ativa(self) -> bool:
         return str(self.ferramenta_ativa or "") in {
             "manipular_pontos",
+            "inserir_ponto",
+            "excluir_ponto",
             "mover",
             "mover_ponto",
             "mover_pontos",

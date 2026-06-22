@@ -331,6 +331,54 @@ class TabelaToolTestCase(unittest.TestCase):
 
         self.assertEqual(pontos, [QPointF(0.0, 0.0), QPointF(8.0, 0.0)])
 
+    def test_pontos_contorno_dxf_agrupado_ignora_tabela_antiga_com_auxiliares(self):
+        ferramenta = FerramentaTabela()
+        molde = {
+            "tipo": "polyline",
+            "molde": True,
+            "origem": "dxf_matriz_graduada",
+            "pontos": [
+                (0.0, 0.0),
+                (2.0, 0.4),
+                (4.0, 0.8),
+                (6.0, 0.4),
+                (8.0, 0.0),
+                (8.0, 5.0),
+                (0.0, 5.0),
+                (0.0, 0.0),
+            ],
+            "pontos_controle_principais": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 8.0, "y": 0.0},
+                {"x": 8.0, "y": 5.0},
+                {"x": 0.0, "y": 5.0},
+            ],
+            "graduacao_preferir_tabela_dxdy": True,
+            "graduacao_tabela": {
+                "pontos": {
+                    str(idx): {"indice": idx, "ponto": ponto, "valores": {"G": {"dx": 1.0, "dy": 0.0}}}
+                    for idx, ponto in enumerate(
+                        [
+                            (0.0, 0.0),
+                            (2.0, 0.4),
+                            (4.0, 0.8),
+                            (6.0, 0.4),
+                            (8.0, 0.0),
+                            (8.0, 5.0),
+                            (0.0, 5.0),
+                        ]
+                    )
+                }
+            },
+        }
+
+        pontos = ferramenta._pontos_contorno(molde)
+
+        self.assertEqual(
+            pontos,
+            [QPointF(0.0, 0.0), QPointF(8.0, 0.0), QPointF(8.0, 5.0), QPointF(0.0, 5.0)],
+        )
+
     def test_pontos_contorno_nao_limita_a_pontos_ja_graduados(self):
         ferramenta = FerramentaTabela()
         molde = {
