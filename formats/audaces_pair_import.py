@@ -1561,20 +1561,36 @@ class AudacesPairImport:
         if labels_xml:
             cores_ordenadas = [cor for _ordem, _label, cor in ordenadas]
             label_por_cor = cls._mapear_cores_para_grade_xml(cores_ordenadas, labels_xml, base_xml)
-            cor_por_label = {label: cor for cor, label in label_por_cor.items()}
-            linhas = [
-                {
-                    "ativo": True,
-                    "tamanho": label,
-                    "cor": cls._cor_grade_faltante(label),
-                    "base": label == base_xml,
-                    "visivel_emf": label in cor_por_label,
-                }
-                for label in labels_xml
-            ]
-            linhas, base_xml = cls._garantir_base_unica_linhas(linhas, base_xml)
-            grade_nome = f"{labels_xml[0]}-{labels_xml[-1]}({base_xml})" if base_xml else f"{labels_xml[0]}-{labels_xml[-1]}"
-            return grade_nome, linhas, base_xml
+            labels_visiveis: list[str] = []
+            cor_por_label: dict[str, str] = {}
+            for cor in cores_ordenadas:
+                label = str(label_por_cor.get(cor) or "").strip()
+                if not label:
+                    continue
+                if label not in labels_visiveis:
+                    labels_visiveis.append(label)
+                    cor_por_label[label] = cor
+            if len(labels_visiveis) >= 2:
+                base_visivel = cls._tamanho_em_lista(base_xml, labels_visiveis)
+                if not base_visivel:
+                    base_visivel = cls._resolver_tamanho_base(labels_visiveis, [])
+                linhas = [
+                    {
+                        "ativo": True,
+                        "tamanho": label,
+                        "cor": cor_por_label.get(label) or cls._cor_grade_faltante(label),
+                        "base": label == base_visivel,
+                        "visivel_emf": True,
+                    }
+                    for label in labels_visiveis
+                ]
+                linhas, base_visivel = cls._garantir_base_unica_linhas(linhas, base_visivel)
+                grade_nome = (
+                    f"{labels_visiveis[0]}-{labels_visiveis[-1]}({base_visivel})"
+                    if base_visivel
+                    else f"{labels_visiveis[0]}-{labels_visiveis[-1]}"
+                )
+                return grade_nome, linhas, base_visivel
 
         labels = [label for _ordem, label, _cor in ordenadas]
         candidato_cor = "P" if "P" in labels else "G" if "G" in labels else None
@@ -1592,7 +1608,7 @@ class AudacesPairImport:
         candidatos: list[tuple[int, str]] = []
         for tx in textos or []:
             texto = " ".join(str(tx.get("texto") or "").strip().split())
-            if len(texto) < 2:
+            if len(texto) < 2 or "#" in texto:
                 continue
             pos = tx.get("pos")
             if not isinstance(pos, (tuple, list)) or len(pos) != 2:
@@ -2120,9 +2136,6 @@ class AudacesPairImport:
                         peca_base_xml = getattr(pecas_xml[idx_xml], "tamanho_base", None)
                 except (TypeError, ValueError):
                     peca_base_xml = None
-            grade_xml = cls._grade_por_dimensoes_xml(meta.get("xml_pattern_sizes"), peca_base_xml)
-            if grade_xml and (not grade_local or len(grade_xml[1]) > len(grade_local[1])):
-                grade_local = grade_xml
             if grade_local:
                 grade_nome, linhas, base = grade_local
                 el["graduacao_grade_nome"] = grade_nome

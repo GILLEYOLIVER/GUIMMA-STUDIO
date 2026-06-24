@@ -268,14 +268,21 @@ def _contexto_audaces_associado_dxf(
 
             xml_doc = AudacesXMLImport.abrir(xml)
             labels, base_xml = _grade_xml_doc_dxf(xml_doc)
+            pecas_validas = _pecas_xml_validas_dxf(list(getattr(xml_doc, "pecas", []) or []))
+            tem_quantidade_explicitada = any(
+                _quantidade_tamanho_xml_dxf(tamanho) is not None
+                for peca in pecas_validas
+                for tamanho in (getattr(peca, "tamanhos", []) or [])
+            )
             contexto.update({
                 "audaces_associado": True,
                 "xml_path": str(xml),
                 "xml_doc": xml_doc,
                 "xml_grade_labels": labels,
                 "xml_tamanho_base": base_xml,
+                "xml_grade_quantidade_explicitada": tem_quantidade_explicitada,
                 "xml_modelo": getattr(xml_doc, "nome_modelo", ""),
-                "xml_pecas": list(getattr(xml_doc, "pecas", []) or []),
+                "xml_pecas": pecas_validas,
             })
         except Exception as exc:
             contexto["xml_path"] = str(xml)
@@ -317,6 +324,8 @@ def _grade_xml_doc_dxf(xml_doc) -> tuple[list[str], str | None]:
     bases: list[str] = []
     tem_quantidade_explicitada = False
     for peca in getattr(xml_doc, "pecas", []) or []:
+        if _nome_marcado_reflexao_dxf(getattr(peca, "nome", "")):
+            continue
         base = str(getattr(peca, "tamanho_base", "") or "").strip()
         if base:
             bases.append(base)
@@ -485,6 +494,8 @@ def _selecionar_peca_xml_dxf(nome: str, pecas: list, usados: set[int]) -> tuple[
     alvo = _normalizar_nome_peca_dxf(nome)
     candidatos: list[tuple[int, object, int]] = []
     for idx, peca in enumerate(pecas):
+        if _nome_marcado_reflexao_dxf(getattr(peca, "nome", "")):
+            continue
         nome_peca = _normalizar_nome_peca_dxf(getattr(peca, "nome", ""))
         if not nome_peca:
             continue
@@ -505,6 +516,18 @@ def _normalizar_nome_peca_dxf(valor: str | None) -> str:
     texto = texto.upper()
     texto = re.sub(r"\s+", " ", texto)
     return texto.strip()
+
+
+def _nome_marcado_reflexao_dxf(valor: str | None) -> bool:
+    return "#" in str(valor or "")
+
+
+def _pecas_xml_validas_dxf(pecas: list) -> list:
+    return [
+        peca
+        for peca in (pecas or [])
+        if not _nome_marcado_reflexao_dxf(getattr(peca, "nome", ""))
+    ]
 
 
 def _dimensoes_peca_xml_dxf(peca, *, labels: list[str], tamanho_base: str) -> dict:
@@ -528,6 +551,44 @@ def _dimensoes_peca_xml_dxf(peca, *, labels: list[str], tamanho_base: str) -> di
     return dims
 
 
+def _contornos_fechados_ou_quase_fechados_matriz_dxf(elementos: list[dict]) -> list[dict]:
+    saida: list[dict] = []
+    for el in elementos:
+        if not isinstance(el, dict) or len(el.get("pontos") or []) < 4:
+            continue
+        if el.get("fechado"):
+            saida.append(el)
+            continue
+        pontos = [(float(x), float(y)) for x, y in (el.get("pontos") or [])]
+        bbox = _bbox(pontos)
+        if not bbox:
+            continue
+        largura = max(float(bbox[2]) - float(bbox[0]), 0.0)
+        altura = max(float(bbox[3]) - float(bbox[1]), 0.0)
+        if max(largura, altura) < 4.0 or min(largura, altura) < 1.0:
+            continue
+        diag = max((largura * largura + altura * altura) ** 0.5, 1e-9)
+        gap = _dist(pontos[0], pontos[-1])
+        if gap > max(0.35, diag * 0.015):
+            continue
+        fechados = list(pontos)
+        if _dist(fechados[0], fechados[-1]) > TOLERANCIA_CONEXAO:
+            fechados.append(fechados[0])
+        area = abs(_area_assinada_dxf(fechados))
+        area_bbox = max(largura * altura, 1e-9)
+        if area < 8.0 or area / area_bbox < 0.05:
+            continue
+        novo = dict(el)
+        novo["pontos"] = _simplificar_pontos_redundantes(fechados)
+        novo["fechado"] = True
+        novo["fechado_por_gap_importacao"] = True
+        metadados = dict(novo.get("metadados") or {})
+        metadados["fechado_por_gap_importacao"] = True
+        novo["metadados"] = metadados
+        saida.append(novo)
+    return saida
+
+
 def _consolidar_matriz_tamanhos_dxf(
     elementos: list[dict],
     textos: list[dict],
@@ -538,37 +599,42 @@ def _consolidar_matriz_tamanhos_dxf(
 ) -> list[dict]:
     if not textos:
         return []
-    fechados = [
-        el
-        for el in elementos
-        if isinstance(el, dict) and el.get("fechado") and len(el.get("pontos") or []) >= 4
-    ]
+    contexto_audaces = contexto_audaces or {}
+    pecas_xml_validas = _pecas_xml_validas_dxf(contexto_audaces.get("xml_pecas") or [])
+    nomes_xml_validos = {
+        _normalizar_nome_peca_dxf(getattr(peca, "nome", ""))
+        for peca in pecas_xml_validas
+        if _normalizar_nome_peca_dxf(getattr(peca, "nome", ""))
+    }
+    fechados = _contornos_fechados_ou_quase_fechados_matriz_dxf(elementos)
     abertos = [
         el
         for el in elementos
         if isinstance(el, dict) and not el.get("fechado") and len(el.get("pontos") or []) >= 2
     ]
-    if len(fechados) < 2:
+    if not fechados:
         return []
 
     por_nome = _agrupar_contornos_por_texto_central(fechados, textos)
     grupos = {}
     dedup_stats_por_nome: dict[str, dict] = {}
     for nome, contornos in por_nome.items():
-        if len(contornos) < 2:
+        if _nome_marcado_reflexao_dxf(nome):
+            continue
+        nome_xml = _normalizar_nome_peca_dxf(nome)
+        manter_unitario_xml = bool(nome_xml and nome_xml in nomes_xml_validos)
+        if len(contornos) < 2 and not manter_unitario_xml:
             continue
         contornos, dedup_stats = _deduplicar_contornos_matriz_dxf(contornos)
         contornos = _cluster_principal_contornos_compativeis(contornos)
-        if len(contornos) >= 2:
+        if len(contornos) >= 2 or (len(contornos) == 1 and manter_unitario_xml):
             grupos[nome] = contornos
             dedup_stats_por_nome[nome] = dedup_stats
-    grupos = {nome: contornos for nome, contornos in grupos.items() if len(contornos) >= 2}
     if not grupos:
         return []
 
     saida: list[dict] = []
     moldes_para_linhas: list[tuple[dict, list[tuple[float, float]]]] = []
-    contexto_audaces = contexto_audaces or {}
     labels_xml = [
         str(label or "").strip()
         for label in (contexto_audaces.get("xml_grade_labels") or [])
@@ -582,12 +648,13 @@ def _consolidar_matriz_tamanhos_dxf(
             tamanho_base=tamanho_base_efetivo,
             grade_tamanhos=grade_tamanhos,
         )
-        qtd_grade_global = max(len(contornos) for contornos in grupos.values())
-        linhas_grade_global = _limitar_linhas_grade_aos_contornos_dxf(
-            linhas_grade_global,
-            qtd_grade_global,
-            tamanho_base_efetivo,
-        )
+        if not contexto_audaces.get("xml_grade_quantidade_explicitada"):
+            qtd_grade_global = max(len(contornos) for contornos in grupos.values())
+            linhas_grade_global = _limitar_linhas_grade_aos_contornos_dxf(
+                linhas_grade_global,
+                qtd_grade_global,
+                tamanho_base_efetivo,
+            )
     else:
         qtd_grade_global = max(len(contornos) for contornos in grupos.values())
         linhas_grade_global = _linhas_grade_para_quantidade(
@@ -657,7 +724,8 @@ def _consolidar_matriz_tamanhos_dxf(
             "subtipo_audaces": "contorno",
             "graduacao_preferir_tabela_dxdy": True,
             "graduacao_renderizar_por_tabela_derivada": False,
-            "graduacao_preservar_cores_importadas": True,
+            "graduacao_preservar_cores_importadas": False,
+            "graduacao_cores_sinteticas": True,
             "graduacao_grade_nome": "-".join(labels) + f"({tamanho_base_final})",
             "graduacao_tamanhos": [
                 {
@@ -685,6 +753,7 @@ def _consolidar_matriz_tamanhos_dxf(
                 "matriz_tamanhos_dxf": True,
                 "contornos_origem": len(contornos),
                 "agrupamento": "sobreposto_por_texto_central_e_geometria",
+                "graduacao_cores_origem": "sintetica_guimma",
             },
         }
         _aplicar_contexto_audaces_dxf(
@@ -1494,7 +1563,11 @@ def _agrupar_contornos_por_texto_central(fechados: list[dict], textos: list[dict
     textos_validos = [
         texto
         for texto in textos
-        if str(texto.get("texto") or "").strip() and isinstance(texto.get("pos"), tuple)
+        if (
+            str(texto.get("texto") or "").strip()
+            and not _nome_marcado_reflexao_dxf(texto.get("texto"))
+            and isinstance(texto.get("pos"), tuple)
+        )
     ]
     for contorno in fechados:
         nome = _texto_central_do_contorno(contorno, textos_validos)
@@ -1515,7 +1588,7 @@ def _texto_central_do_contorno(contorno: dict, textos: list[dict]) -> str | None
     for texto in textos:
         nome = str(texto.get("texto") or "").strip()
         pos = texto.get("pos")
-        if not nome or not isinstance(pos, tuple):
+        if not nome or _nome_marcado_reflexao_dxf(nome) or not isinstance(pos, tuple):
             continue
         dentro = _ponto_em_poligono(pos, pontos)
         if not dentro:
@@ -1836,6 +1909,15 @@ def _area_bbox(el: dict) -> float:
     if not bbox:
         return 0.0
     return max(bbox[2] - bbox[0], 0.0) * max(bbox[3] - bbox[1], 0.0)
+
+
+def _area_assinada_dxf(pontos: list[tuple[float, float]]) -> float:
+    pts = [(float(x), float(y)) for x, y in (pontos or [])]
+    if len(pts) < 3:
+        return 0.0
+    if pts[0] != pts[-1]:
+        pts.append(pts[0])
+    return sum((x1 * y2) - (x2 * y1) for (x1, y1), (x2, y2) in zip(pts, pts[1:])) / 2.0
 
 
 def _centro_bbox(bbox: tuple[float, float, float, float] | None) -> tuple[float, float]:

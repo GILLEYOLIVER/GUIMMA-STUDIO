@@ -31,6 +31,39 @@ if _cpp is None:
         _cpp = None
 
 
+_SIMBOLOS_CPP_ESPERADOS = (
+    "Point",
+    "SnapEngine",
+    "SnapKind",
+    "SnapPoint",
+    "PolylineElement",
+    "distance",
+    "project_on_segment",
+    "snap_kind_to_string",
+    "sample_quadratic_bezier",
+    "sample_parabola_3p",
+    "sample_catmull_rom",
+    "sample_catmull_rom_centripetal_dynamic",
+    "polygon_area",
+    "polyline_length",
+    "normalize_closed_polyline",
+    "unfold_mirrored_contour",
+    "seam_offset_closed",
+    "point_in_polygon",
+    "point_in_polygon_or_boundary",
+    "extract_smallest_enclosing_contour",
+    "extract_local_enclosing_contour",
+)
+
+_WRAPPERS_PYTHON_CPP = (
+    "extract_local_enclosing_contour_cpp",
+    "extract_smallest_enclosing_contour_cpp",
+    "seam_offset_closed_cpp",
+    "sample_catmull_rom_centripetal_dynamic_cpp",
+    "unfold_mirrored_contour_cpp",
+)
+
+
 def cpp_disponivel() -> bool:
     """Retorna True quando o modulo C++ foi compilado e importado corretamente."""
     return _cpp is not None
@@ -39,6 +72,23 @@ def cpp_disponivel() -> bool:
 def modulo_cpp():
     """Retorna o modulo C++ carregado, ou None quando o build nativo nao existe."""
     return _cpp
+
+
+def diagnostico_cpp() -> dict[str, object]:
+    """Retorna um contrato estavel sobre o backend C++ carregado."""
+    modulo = _cpp
+    simbolos = {
+        nome: bool(modulo is not None and hasattr(modulo, nome))
+        for nome in _SIMBOLOS_CPP_ESPERADOS
+    }
+    return {
+        "disponivel": modulo is not None,
+        "modulo": str(getattr(modulo, "__name__", "")) if modulo is not None else "",
+        "arquivo": str(getattr(modulo, "__file__", "")) if modulo is not None else "",
+        "simbolos": simbolos,
+        "simbolos_ausentes": [nome for nome, ok in simbolos.items() if not ok],
+        "wrappers_python": list(_WRAPPERS_PYTHON_CPP),
+    }
 
 
 def _elementos_para_polylines(elements: list[dict]) -> list[list[tuple[float, float]]]:

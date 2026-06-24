@@ -156,3 +156,36 @@ As janelas de abrir/salvar/recuperar usam filtros restritos para projeto GUIMMA 
 - UI: aplica diffs, atualiza seleção/overlay e registra comando no histórico.
 
 Com esse contrato, cada ferramenta deixa de “fazer a matemática” e passa a orquestrar operações de alto nível.
+
+## Plano hibrido Python + C++
+
+O caminho recomendado para o GUIMMA nao e reescrever tudo em C++ de uma vez. A arquitetura alvo e hibrida:
+
+- Python/Qt continua responsavel por interface, ribbon, janelas, canvas, selecao, historico, arquivos e fluxo das ferramentas.
+- C++ fica responsavel pelo nucleo geometrico puro: intersecoes, corte, uniao, offset de costura, extracao de faces, snapping, curvas e topologia.
+- O contato entre as camadas deve passar sempre por `core.geometry_cpp_bridge`; ferramentas nao importam `guimma_geometry_cpp` diretamente.
+- Toda chamada nativa precisa ter fallback Python ate a operacao estar validada por testes de equivalencia.
+
+### Contrato do bridge
+
+`core.geometry_cpp_bridge.diagnostico_cpp()` expõe um contrato estavel para saber se o motor nativo carregou, qual arquivo `.pyd/.so/.dylib` esta em uso e quais simbolos esperados estao disponiveis.
+
+Esse diagnostico deve ser usado antes de migracoes maiores e pode alimentar logs, telas de suporte ou testes de ambiente. Se o modulo C++ nao existir, o programa deve continuar funcionando com o Python atual.
+
+### Ordem pratica de migracao
+
+1. Medicao, snapping e curvas simples ficam como base ja migrada.
+2. Costura total e offsets seguem no C++ quando possivel, com fallback Python.
+3. Corte e unir devem ser os proximos candidatos: calcular intersecoes, gerar segmentos de corte, manter piques, descontar costura e preservar pontos de controle no motor.
+4. Extrair molde deve migrar a parte pesada de fechamento/topologia por clique, mantendo a janela e as opcoes no Python.
+5. Importacao DXF/EMF deve continuar no Python enquanto o problema principal for leitura de formatos, mas normalizacao geometrica pesada pode ir para C++ depois.
+
+### Regra para cada nova migracao
+
+- Criar primeiro uma funcao pequena no C++ com entrada e saida neutras (`list[tuple[float, float]]`, numeros, flags e dicionarios simples).
+- Expor no pybind11.
+- Encapsular em `core.geometry_cpp_bridge`.
+- Testar equivalencia com o Python existente.
+- Trocar a ferramenta para chamar o wrapper seguro, preservando fallback.
+
+Assim o projeto ganha desempenho e previsibilidade sem jogar fora o que ja funciona no Python.

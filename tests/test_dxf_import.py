@@ -131,6 +131,9 @@ class DxfImportTestCase(unittest.TestCase):
         self.assertIn("fio_origem", molde)
         self.assertIn("fio_fim", molde)
         self.assertFalse(molde.get("mostrar_numeros"))
+        self.assertFalse(molde.get("graduacao_preservar_cores_importadas"))
+        self.assertTrue(molde.get("graduacao_cores_sinteticas"))
+        self.assertEqual(molde["metadados"].get("graduacao_cores_origem"), "sintetica_guimma")
         self.assertEqual([g["tamanho"] for g in molde.get("graduacao_contornos_importados", [])], ["PP", "P"])
         self.assertEqual(molde["pontos"], [(20.0, 0.0), (32.0, 0.0), (32.0, 6.0), (20.0, 6.0), (20.0, 0.0)])
         pontos_grade = molde["graduacao_tabela"]["pontos"]
@@ -651,6 +654,117 @@ class DxfImportTestCase(unittest.TestCase):
         alinhado = dxf_import_module._alinhar_pontos_ao_base(menor_com_inicio_em_outro_canto, base)
 
         self.assertEqual(alinhado, [(21.0, 0.5), (31.0, 0.5), (31.0, 5.5), (21.0, 5.5), (21.0, 0.5)])
+
+    def test_matriz_fecha_polyline_aberta_com_gap_pequeno(self):
+        texto = _dxf_entities(
+            [
+                *_contorno_linhas([(0, 0), (18, 0), (18, 5), (0, 5), (0, 0.25)]),
+                *_text("BABADIO MANG 2X", 9, 2),
+                *_contorno_linhas([(24, 0), (44, 0), (44, 6), (24, 6), (24, 0.25)]),
+                *_text("BABADIO MANG 2X", 34, 2),
+            ]
+        )
+
+        elementos = self._importar_texto(texto, agrupar_matriz=True)
+
+        moldes = [el for el in elementos if el.get("molde")]
+        self.assertEqual(len(moldes), 1)
+        molde = moldes[0]
+        self.assertEqual(molde.get("nome_molde"), "BABADIO MANG 2X")
+        self.assertEqual([c["tamanho"] for c in molde["graduacao_contornos_importados"]], ["PP", "P"])
+        self.assertTrue(any((c.get("pontos") or [])[0] == (c.get("pontos") or [])[-1] for c in molde["graduacao_contornos_importados"]))
+
+    def test_matriz_mantem_peca_unitaria_quando_xml_confirma_nome(self):
+        texto = _dxf_entities(
+            [
+                *_line(0, 0, 20, 0),
+                *_line(20, 0, 20, 4),
+                *_line(20, 4, 0, 4),
+                *_line(0, 4, 0, 0),
+                *_text("ROLITE GOLA 2X", 10, 2),
+            ]
+        )
+        xml = """<?xml version="1.0" encoding="iso-8859-1"?>
+<DATA_FILE_AUDACES>
+  <MODEL NAME_M="6414 TESTE">
+    <PATTERNS>
+      <PATTERN NAME_P="ROLITE GOLA 2X">
+        <SIZES_P BASE_NAME="M">
+          <SIZE_P NAME_SP="M" QUANT_PLACED="1" QUANT_SP="1" />
+          <SIZE_P NAME_SP="G" QUANT_PLACED="1" QUANT_SP="1" />
+          <SIZE_P NAME_SP="GG" QUANT_PLACED="1" QUANT_SP="1" />
+        </SIZES_P>
+      </PATTERN>
+    </PATTERNS>
+  </MODEL>
+</DATA_FILE_AUDACES>
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "6414 B.dxf"
+            caminho.write_text(texto, encoding="utf-8")
+            caminho.with_suffix(".xml").write_text(xml, encoding="iso-8859-1")
+
+            elementos = importar_dxf_para_elementos(str(caminho), agrupar_matriz=True)
+
+        moldes = [el for el in elementos if el.get("molde")]
+        self.assertEqual(len(moldes), 1)
+        molde = moldes[0]
+        self.assertEqual(molde.get("nome_molde"), "ROLITE GOLA 2X")
+        self.assertEqual([linha["tamanho"] for linha in molde["graduacao_tamanhos"]], ["M", "G", "GG"])
+        self.assertEqual([c["tamanho"] for c in molde["graduacao_contornos_importados"]], ["M", "G", "GG"])
+        self.assertEqual(sum(1 for c in molde["graduacao_contornos_importados"] if not c.get("gerado_por_tabela_dxf")), 1)
+
+    def test_matriz_ignora_texto_e_xml_marcados_com_reflexao(self):
+        texto = _dxf_entities(
+            [
+                *_line(0, 0, 10, 0),
+                *_line(10, 0, 10, 5),
+                *_line(10, 5, 0, 5),
+                *_line(0, 5, 0, 0),
+                *_text("COSTAS 2X", 5, 2),
+                *_line(20, 0, 32, 0),
+                *_line(32, 0, 32, 6),
+                *_line(32, 6, 20, 6),
+                *_line(20, 6, 20, 0),
+                *_text("COSTAS 2X", 26, 2),
+                *_line(50, 0, 62, 0),
+                *_line(62, 0, 62, 6),
+                *_line(62, 6, 50, 6),
+                *_line(50, 6, 50, 0),
+                *_text("COSTAS 2X #", 56, 2),
+            ]
+        )
+        xml = """<?xml version="1.0" encoding="iso-8859-1"?>
+<DATA_FILE_AUDACES>
+  <MODEL NAME_M="6414 TESTE">
+    <PATTERNS>
+      <PATTERN NAME_P="COSTAS 2X">
+        <SIZES_P BASE_NAME="P">
+          <SIZE_P NAME_SP="PP" QUANT_PLACED="1" QUANT_SP="1" />
+          <SIZE_P NAME_SP="P" QUANT_PLACED="1" QUANT_SP="1" />
+        </SIZES_P>
+      </PATTERN>
+      <PATTERN NAME_P="COSTAS 2X #">
+        <SIZES_P BASE_NAME="P">
+          <SIZE_P NAME_SP="PP" QUANT_PLACED="1" QUANT_SP="1" />
+          <SIZE_P NAME_SP="P" QUANT_PLACED="1" QUANT_SP="1" />
+        </SIZES_P>
+      </PATTERN>
+    </PATTERNS>
+  </MODEL>
+</DATA_FILE_AUDACES>
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "6414 B.dxf"
+            caminho.write_text(texto, encoding="utf-8")
+            caminho.with_suffix(".xml").write_text(xml, encoding="iso-8859-1")
+
+            elementos = importar_dxf_para_elementos(str(caminho), agrupar_matriz=True)
+
+        nomes = [el.get("nome_molde") for el in elementos if el.get("molde")]
+        self.assertEqual(nomes, ["COSTAS 2X"])
+        molde = next(el for el in elementos if el.get("molde"))
+        self.assertNotIn("#", molde.get("nome_molde", ""))
 
     def test_importacao_dxf_padrao_preserva_matriz_sem_agrupar(self):
         texto = _dxf_entities(

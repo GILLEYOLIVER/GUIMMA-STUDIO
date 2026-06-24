@@ -5,6 +5,7 @@ import unittest
 from importlib.util import find_spec
 from math import atan2, cos, pi, sin
 from types import SimpleNamespace
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -13,7 +14,8 @@ if find_spec("PySide6") is None:
     QApplication = None
     QPointF = None
 else:
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QPainterPath
     from PySide6.QtWidgets import QApplication
 
     from tools.extrair_molde_tool import Ferramenta as FerramentaExtrairMolde
@@ -114,6 +116,22 @@ class _FakeCanvasCriacaoMolde:
         pass
 
 
+class _FakeCanvasContorno:
+    def __init__(self, elementos, zoom=1.0):
+        self.cena = SimpleNamespace(elementos=elementos)
+        self.zoom = zoom
+        self._selecionados = set()
+
+    def width(self):
+        return 400
+
+    def height(self):
+        return 300
+
+    def update(self):
+        pass
+
+
 @unittest.skipIf(FerramentaExtrairMolde is None, "PySide6 não disponível neste ambiente")
 class ExtrairMoldeToolTestCase(unittest.TestCase):
     @classmethod
@@ -138,6 +156,87 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         candidatos = ferramenta._detectar_candidatos_contorno(canvas, QPointF(6.0, 0.0))
 
         self.assertEqual(candidatos, [contorno])
+
+    def test_automatico_usa_linha_auxiliar_como_barreira_pelo_clique(self):
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["usar_auxiliares"] = True
+        canvas = _FakeCanvasContorno(
+            [
+                {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)]},
+                {"tipo": "polyline", "pontos": [(0.0, 4.0), (10.0, 4.0)], "subtipo_audaces": "linha_auxiliar"},
+            ],
+            zoom=20.0,
+        )
+
+        superior = ferramenta._detectar_candidatos_contorno(canvas, QPointF(5.0, 6.0))[0]
+        inferior = ferramenta._detectar_candidatos_contorno(canvas, QPointF(5.0, 2.0))[0]
+
+        self.assertAlmostEqual(min(y for _x, y in superior), 4.0)
+        self.assertAlmostEqual(max(y for _x, y in superior), 8.0)
+        self.assertAlmostEqual(min(y for _x, y in inferior), 0.0)
+        self.assertAlmostEqual(max(y for _x, y in inferior), 4.0)
+
+    def test_automatico_ignora_barreira_auxiliar_quando_opcao_desligada(self):
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["usar_auxiliares"] = False
+        canvas = _FakeCanvasContorno(
+            [
+                {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)]},
+                {"tipo": "polyline", "pontos": [(0.0, 4.0), (10.0, 4.0)], "subtipo_audaces": "linha_auxiliar"},
+            ],
+            zoom=20.0,
+        )
+
+        contorno = ferramenta._detectar_candidatos_contorno(canvas, QPointF(5.0, 6.0))[0]
+
+        self.assertAlmostEqual(min(y for _x, y in contorno), 0.0)
+        self.assertAlmostEqual(max(y for _x, y in contorno), 8.0)
+
+    def test_manual_monta_perimetro_por_segmentos(self):
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["modo"] = "Manual"
+        ferramenta._cfg["usar_auxiliares"] = True
+        canvas = _FakeCanvasContorno(
+            [
+                {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]},
+                {"tipo": "polyline", "pontos": [(10.0, 0.0), (10.0, 8.0)]},
+                {"tipo": "polyline", "pontos": [(10.0, 8.0), (0.0, 8.0)]},
+                {"tipo": "polyline", "pontos": [(0.0, 8.0), (0.0, 0.0)]},
+            ],
+            zoom=100.0,
+        )
+
+        for pos in (QPointF(5.0, 0.0), QPointF(10.0, 4.0), QPointF(5.0, 8.0), QPointF(0.0, 4.0)):
+            self.assertTrue(ferramenta._adicionar_segmento_manual_por_clique(canvas, pos))
+
+        self.assertIsNone(ferramenta._contorno_manual_atual())
+        contorno = ferramenta._contorno_manual_atual(fechar_final=True)
+        self.assertIsNotNone(contorno)
+        self.assertEqual(contorno[0], contorno[-1])
+        self.assertAlmostEqual(abs(ferramenta._area_contorno(contorno)), 80.0)
+
+    def test_manual_adiciona_curva_inteira_para_continuar_contorno(self):
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["modo"] = "Manual"
+        ferramenta._cfg["usar_auxiliares"] = True
+        canvas = _FakeCanvasContorno(
+            [
+                {"tipo": "polyline", "pontos": [(0.0, 0.0), (10.0, 0.0)]},
+                {"tipo": "bezier_quadratica", "p0": (10.0, 0.0), "p1": (10.0, 8.0), "p2": (0.0, 8.0)},
+                {"tipo": "polyline", "pontos": [(0.0, 8.0), (0.0, 0.0)]},
+            ],
+            zoom=100.0,
+        )
+
+        self.assertTrue(ferramenta._adicionar_segmento_manual_por_clique(canvas, QPointF(5.0, 0.0)))
+        self.assertTrue(ferramenta._adicionar_segmento_manual_por_clique(canvas, QPointF(7.5, 6.0)))
+        self.assertTrue(ferramenta._adicionar_segmento_manual_por_clique(canvas, QPointF(0.0, 4.0)))
+
+        self.assertIsNone(ferramenta._contorno_manual_atual())
+        contorno = ferramenta._contorno_manual_atual(fechar_final=True)
+        self.assertIsNotNone(contorno)
+        self.assertEqual(contorno[0], contorno[-1])
+        self.assertGreater(len(contorno), 4)
 
     def test_preview_de_contorno_grande_e_limitado_para_nao_travar_pintura(self):
         ferramenta = FerramentaExtrairMolde()
@@ -585,6 +684,127 @@ class ExtrairMoldeToolTestCase(unittest.TestCase):
         self.assertEqual(len(canvas.cena.elementos), 1)
         self.assertEqual(canvas._selecionados, set())
         self.assertEqual(ferramenta._selecoes_manuais, {0})
+
+    def test_extracao_mostra_cursor_ocupado_e_restaura(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        ferramenta = FerramentaExtrairMolde()
+
+        with (
+            mock.patch("tools.extrair_molde_tool.QApplication.setOverrideCursor") as set_cursor,
+            mock.patch("tools.extrair_molde_tool.QApplication.restoreOverrideCursor") as restore_cursor,
+            mock.patch("tools.extrair_molde_tool.QApplication.processEvents") as process_events,
+        ):
+            ok = ferramenta._executar_com_cursor_ocupado(canvas, lambda: True)
+
+        self.assertTrue(ok)
+        set_cursor.assert_called_once_with(Qt.WaitCursor)
+        restore_cursor.assert_called_once()
+        self.assertGreaterEqual(process_events.call_count, 2)
+
+    def test_snapshot_do_arraste_ignora_cache_qt_nao_copiavel(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "pontos": [(0.0, 0.0), (10.0, 0.0)],
+                "_runtime_path": QPainterPath(QPointF(0.0, 0.0)),
+            }
+        ]
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._selecoes_manuais = {0}
+
+        ferramenta._iniciar_arraste_molde(canvas, QPointF(1.0, 2.0))
+
+        self.assertTrue(ferramenta._arrastando_molde)
+        self.assertIn(0, ferramenta._snapshot_cancelamento)
+        self.assertNotIn("_runtime_path", ferramenta._snapshot_cancelamento[0])
+
+    def test_molde_extraido_herda_pique_e_linha_auxiliar_da_origem(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)],
+                "pontos_controle_principais": [{"x": 5.0, "y": 0.0, "origem": "pique"}],
+                "pontos_controle_pique": [(5.0, 0.0)],
+                "piques_config": [
+                    {
+                        "tipo": "T - forma T",
+                        "ponto": (5.0, 0.0),
+                        "ponto_controle": (5.0, 0.0),
+                        "sobre_contorno": True,
+                        "segmentos": [((5.0, 0.0), (5.0, 0.5))],
+                    }
+                ],
+                "linhas_auxiliares_base": [
+                    {"tipo": "linha_auxiliar", "pontos": [(2.0, 6.0), (7.0, 6.0)], "origem": "teste"},
+                    {"tipo": "linha_auxiliar", "pontos": [(20.0, 6.0), (25.0, 6.0)], "origem": "fora"},
+                ],
+            }
+        ]
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["detectar_piques"] = True
+        ferramenta._cfg["detectar_auxiliares"] = True
+
+        ok = ferramenta._criar_molde_de_contorno_extraido(
+            canvas,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+        )
+
+        self.assertTrue(ok)
+        novo = canvas.cena.elementos[-1]
+        self.assertTrue(novo.get("mostrar_piques"))
+        self.assertEqual(novo["piques_config"][0]["ponto"], (5.0, 0.0))
+        self.assertIn((5.0, 0.0), novo["pontos_controle_pique"])
+        self.assertIn((5.0, 0.0), novo["controle_cantos"])
+        self.assertTrue(novo.get("mostrar_linhas_auxiliares"))
+        self.assertEqual(len(novo["linhas_auxiliares_base"]), 1)
+        self.assertEqual(novo["linhas_auxiliares_base"][0]["pontos"], [(2.0, 6.0), (7.0, 6.0)])
+
+    def test_molde_extraido_nao_herda_pique_nem_auxiliar_com_caixas_desmarcadas(self):
+        canvas = _FakeCanvasCriacaoMolde()
+        canvas.cena.elementos = [
+            {
+                "tipo": "polyline",
+                "molde": True,
+                "pontos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+                "controle_cantos": [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)],
+                "pontos_controle_principais": [{"x": 5.0, "y": 0.0, "origem": "pique"}],
+                "pontos_controle_pique": [(5.0, 0.0)],
+                "piques_config": [
+                    {
+                        "tipo": "T - forma T",
+                        "ponto": (5.0, 0.0),
+                        "ponto_controle": (5.0, 0.0),
+                        "sobre_contorno": True,
+                        "segmentos": [((5.0, 0.0), (5.0, 0.5))],
+                    }
+                ],
+                "linhas_auxiliares_base": [
+                    {"tipo": "linha_auxiliar", "pontos": [(2.0, 6.0), (7.0, 6.0)], "origem": "teste"},
+                ],
+            }
+        ]
+        ferramenta = FerramentaExtrairMolde()
+        ferramenta._cfg["detectar_piques"] = False
+        ferramenta._cfg["detectar_auxiliares"] = False
+        ferramenta._cfg["usar_auxiliares"] = True
+
+        ok = ferramenta._criar_molde_de_contorno_extraido(
+            canvas,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+        )
+
+        self.assertTrue(ok)
+        novo = canvas.cena.elementos[-1]
+        self.assertNotIn("piques_config", novo)
+        self.assertNotIn("pontos_controle_pique", novo)
+        self.assertNotIn("linhas_auxiliares_base", novo)
+        self.assertFalse(novo.get("mostrar_piques", False))
+        self.assertFalse(novo.get("mostrar_linhas_auxiliares", False))
+        self.assertNotIn((5.0, 0.0), novo["controle_cantos"])
 
     def test_molde_extraido_mantem_grade_do_modelo_em_vez_de_grade_isolada(self):
         canvas = _FakeCanvasCriacaoMolde()

@@ -9,6 +9,7 @@ from uuid import uuid4
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -32,8 +33,9 @@ from core.geometry_bridge_accelerated import (
     polyline_from_element,
 )
 from tools.tool_base import FerramentaBase
+from tools.elemento_runtime_utils import copiar_elemento_sem_runtime
 from tools.movimento_utils import mover_elemento_por_delta
-from ui.posicao_janelas import ajustar_para_area, instalar_memoria_posicao
+from ui.posicao_janelas import instalar_memoria_posicao, posicao_salva, restaurar_posicao
 
 
 class Ferramenta(FerramentaBase):
@@ -122,6 +124,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_hover_tempo: float = 0.0
         self._ultimo_hover_pos: QPointF | None = None
         self._ultima_pos_cena: QPointF | None = None
+        self._manual_contorno_pontos: list[tuple[float, float]] = []
 
     def on_activate(self, canvas):
         super().on_activate(canvas)
@@ -152,6 +155,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_hover_tempo = 0.0
         self._ultimo_hover_pos = None
         self._ultima_pos_cena = None
+        self._manual_contorno_pontos = []
         self._sincronizar_cfg_da_ui()
         self._abrir_config(canvas)
         self.set_status("Clique esquerdo soma partes ao molde. Direito/Enter extrai. Depois solte com esquerdo; duplo clique encerra.")
@@ -181,6 +185,7 @@ class Ferramenta(FerramentaBase):
         self._ultimo_hover_tempo = 0.0
         self._ultimo_hover_pos = None
         self._ultima_pos_cena = None
+        self._manual_contorno_pontos = []
         if self._dialog is not None and isValid(self._dialog):
             self._dialog.hide()
 
@@ -224,7 +229,27 @@ class Ferramenta(FerramentaBase):
 
         if event.button() == Qt.LeftButton:
             if self._cfg.get("modo") == "Manual":
-                candidatos = self._detectar_candidatos_linha_manual(canvas, pos_clique)
+                if self._adicionar_segmento_manual_por_clique(canvas, pos_clique):
+                    self._contorno_hover_preview = []
+                    self._contornos_candidatos = []
+                    self._indice_candidato_atual = 0
+                    self._contornos_auto_coords = []
+                    self._contornos_extraidos_preview = []
+                    self.set_status("Manual: trecho adicionado. Continue clicando no contorno; clique direito fecha e extrai.")
+                    self._selecoes_manuais.clear()
+                    self._idx_selecionado = None
+                    canvas._selecionados = set()
+                    self._molde_criado = False
+                    self._molde_posicionado = False
+                    self._ultimo_clique_falho = None
+                    canvas.update()
+                    event.accept()
+                    return True
+                self.set_status("Manual: clique sobre o proximo trecho do contorno. Direito fecha apenas quando terminar.")
+                self._ultimo_clique_falho = QPointF(pos_clique)
+                canvas.update()
+                event.accept()
+                return True
             else:
                 candidatos = self._detectar_candidatos_contorno(canvas, pos_clique)
             if not candidatos:
@@ -269,6 +294,15 @@ class Ferramenta(FerramentaBase):
                 canvas.update()
                 event.accept()
                 return True
+            if self._cfg.get("modo") == "Manual" and self._manual_contorno_pontos:
+                contorno_manual = self._contorno_manual_atual(fechar_final=True)
+                if not contorno_manual:
+                    self.set_status("Manual: ainda faltam trechos para formar um perimetro.")
+                    canvas.update()
+                    event.accept()
+                    return True
+                self._contornos_auto_coords = [contorno_manual]
+                self._contornos_extraidos_preview = [self._preview_de_contorno(contorno_manual)]
             if not self._contornos_auto_coords and not self._selecoes_manuais:
                 self.set_status("Selecione primeiro uma area/contorno com clique esquerdo.")
                 event.accept()
@@ -541,6 +575,9 @@ class Ferramenta(FerramentaBase):
     def on_paint_overlay(self, canvas, painter: QPainter):
         if self._contorno_hover_preview and not self._arrastando_molde:
             self._desenhar_contorno(canvas, painter, self._contorno_hover_preview, QColor("#8ed8ff"), 1.2)
+        if self._manual_contorno_pontos and not self._arrastando_molde:
+            pts = [QPointF(float(x), float(y)) for x, y in self._manual_contorno_pontos]
+            self._desenhar_contorno(canvas, painter, pts, QColor("#ff2a2a"), 2.2)
         for idx in self._selecoes_manuais:
             if 0 <= idx < len(canvas.cena.elementos):
                 el = canvas.cena.elementos[idx]
@@ -626,6 +663,7 @@ class Ferramenta(FerramentaBase):
         self._contornos_auto_coords = []
         self._contornos_extraidos_preview = []
         self._contornos_preparados = {}
+        self._manual_contorno_pontos = []
         self._molde_criado = False
         self._molde_posicionado = False
         self._idx_selecionado = None
@@ -644,7 +682,7 @@ class Ferramenta(FerramentaBase):
         return QPointF(0.0, 0.0)
 
     def _extrair_e_iniciar_arraste(self, canvas, pos: QPointF) -> bool:
-        ok = self._criar_molde(canvas)
+        ok = self._executar_com_cursor_ocupado(canvas, lambda: self._criar_molde(canvas))
         if not ok:
             return False
         self._ultimo_clique_falho = None
@@ -655,6 +693,22 @@ class Ferramenta(FerramentaBase):
         self.set_status("Molde em maos: mova o mouse. Clique esquerdo solta, clique direito cancela.")
         canvas.update()
         return True
+
+    def _executar_com_cursor_ocupado(self, canvas, acao):
+        app = QApplication.instance()
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self.set_status("Extraindo molde...")
+            if hasattr(canvas, "update"):
+                canvas.update()
+            if app is not None:
+                QApplication.processEvents()
+            return acao()
+        finally:
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+                QApplication.processEvents()
 
     def _alternar_candidato(self, canvas) -> None:
         total = len(self._contornos_candidatos)
@@ -1046,6 +1100,8 @@ class Ferramenta(FerramentaBase):
         molde["pontos_controle_principais"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_cantos"]]
         molde["pontos_graduacao"] = [{"x": float(x), "y": float(y)} for x, y in base]
         molde["pontos_auxiliares"] = [{"x": float(x), "y": float(y)} for x, y in molde["controle_auxiliares"]]
+        if canvas is not None:
+            self._herdar_piques_e_linhas_auxiliares(molde, canvas, pontos)
 
     def _aplicar_estilo_atual_molde(self, molde: dict) -> None:
         canvas = getattr(self, "_canvas", None)
@@ -1057,6 +1113,190 @@ class Ferramenta(FerramentaBase):
         )
         molde.setdefault("estilo", getattr(canvas, "_linha_estilo", "solid"))
         molde.setdefault("amplitude", getattr(canvas, "_linha_amplitude", 1.0))
+
+    def _herdar_piques_e_linhas_auxiliares(self, molde: dict, canvas, contorno: list[tuple[float, float]]) -> None:
+        if not hasattr(canvas, "cena"):
+            return
+        if self._cfg.get("detectar_piques", True):
+            piques, marcacoes, controles = self._coletar_piques_origem(canvas, contorno)
+            if piques:
+                molde["piques_config"] = piques
+                molde["mostrar_piques"] = True
+                if marcacoes:
+                    molde["marcacoes_no_perimetro"] = marcacoes
+                if controles:
+                    molde["pontos_controle_pique"] = controles
+                    self._adicionar_controles_pique_herdados(molde, controles, contorno)
+        if self._cfg.get("detectar_auxiliares", False):
+            linhas = self._coletar_linhas_auxiliares_origem(canvas, contorno)
+            if linhas:
+                molde["linhas_auxiliares_base"] = linhas
+                molde["mostrar_linhas_auxiliares"] = True
+
+    def _coletar_piques_origem(
+        self,
+        canvas,
+        contorno: list[tuple[float, float]],
+    ) -> tuple[list[dict], list[tuple[float, float]], list[tuple[float, float]]]:
+        configs: list[dict] = []
+        marcacoes: list[tuple[float, float]] = []
+        controles: list[tuple[float, float]] = []
+        for el in getattr(canvas.cena, "elementos", []) or []:
+            if not isinstance(el, dict) or not el.get("molde"):
+                continue
+            for cfg in el.get("piques_config", []) or []:
+                if not isinstance(cfg, dict):
+                    continue
+                ponto = self._ponto_cfg_pique(cfg)
+                if ponto is None or not self._ponto_no_contorno(ponto, contorno, tol=0.20):
+                    continue
+                if any(self._dist_tuple(ponto, existente) <= 1e-4 for existente in marcacoes):
+                    continue
+                novo = deepcopy(cfg)
+                novo.setdefault("ponto", ponto)
+                novo.setdefault("ponto_controle", ponto)
+                novo.setdefault("sobre_contorno", True)
+                configs.append(novo)
+                marcacoes.append(ponto)
+                controles.append(ponto)
+            for p in el.get("marcacoes_no_perimetro", []) or []:
+                ponto = self._tupla_ponto_generica(p)
+                if ponto is not None and self._ponto_no_contorno(ponto, contorno, tol=0.20):
+                    marcacoes.append(ponto)
+            for p in el.get("pontos_controle_pique", []) or []:
+                ponto = self._tupla_ponto_generica(p)
+                if ponto is not None and self._ponto_no_contorno(ponto, contorno, tol=0.20):
+                    controles.append(ponto)
+        return configs, self._deduplicar_pontos(marcacoes, 1e-4), self._deduplicar_pontos(controles, 1e-4)
+
+    def _adicionar_controles_pique_herdados(
+        self,
+        molde: dict,
+        controles: list[tuple[float, float]],
+        contorno: list[tuple[float, float]],
+    ) -> None:
+        cantos = [self._tupla_ponto_generica(p) for p in molde.get("controle_cantos", []) or []]
+        cantos = [p for p in cantos if p is not None]
+        principais = [p for p in molde.get("pontos_controle_principais", []) or [] if isinstance(p, dict)]
+        for ponto in controles:
+            if not self._ponto_no_contorno(ponto, contorno, tol=0.20):
+                continue
+            if not any(self._dist_tuple(ponto, existente) <= 1e-4 for existente in cantos):
+                cantos.append(ponto)
+            if not any(self._dist_tuple(ponto, self._tupla_ponto_generica(item) or (float("inf"), float("inf"))) <= 1e-4 for item in principais):
+                principais.append({"x": float(ponto[0]), "y": float(ponto[1]), "origem": "pique", "divide_costura": False})
+        cantos = self._ordenar_pontos_ao_longo_contorno(cantos, contorno)
+        molde["controle_cantos"] = cantos
+        molde["pontos_controle_principais"] = principais
+
+    def _ordenar_pontos_ao_longo_contorno(
+        self,
+        pontos: list[tuple[float, float]],
+        contorno: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        return sorted(self._deduplicar_pontos(pontos, 1e-4), key=lambda p: self._posicao_ponto_no_contorno(p, contorno))
+
+    def _posicao_ponto_no_contorno(self, ponto: tuple[float, float], contorno: list[tuple[float, float]]) -> float:
+        acumulado = 0.0
+        melhor = float("inf")
+        melhor_param = float("inf")
+        for a, b in zip(contorno, contorno[1:]):
+            ax, ay = a
+            bx, by = b
+            dx = bx - ax
+            dy = by - ay
+            seg_len2 = (dx * dx) + (dy * dy)
+            if seg_len2 <= 1e-12:
+                continue
+            t = max(0.0, min(1.0, (((ponto[0] - ax) * dx) + ((ponto[1] - ay) * dy)) / seg_len2))
+            proj = (ax + (dx * t), ay + (dy * t))
+            dist = self._dist_tuple(ponto, proj)
+            param = acumulado + (self._dist_tuple(a, b) * t)
+            if dist < melhor:
+                melhor = dist
+                melhor_param = param
+            acumulado += self._dist_tuple(a, b)
+        return melhor_param
+
+    def _coletar_linhas_auxiliares_origem(self, canvas, contorno: list[tuple[float, float]]) -> list[dict]:
+        linhas: list[dict] = []
+        for el in getattr(canvas.cena, "elementos", []) or []:
+            if not isinstance(el, dict) or not el.get("molde"):
+                continue
+            for linha in el.get("linhas_auxiliares_base", []) or []:
+                if not isinstance(linha, dict):
+                    continue
+                pontos = self._pontos_linha_auxiliar(linha)
+                if len(pontos) < 2:
+                    continue
+                if not self._linha_auxiliar_dentro_contorno(pontos, contorno):
+                    continue
+                if any(self._linhas_equivalentes(pontos, self._pontos_linha_auxiliar(existente)) for existente in linhas):
+                    continue
+                linhas.append(deepcopy(linha))
+        return linhas
+
+    def _linha_auxiliar_dentro_contorno(
+        self,
+        pontos: list[tuple[float, float]],
+        contorno: list[tuple[float, float]],
+    ) -> bool:
+        amostras: list[tuple[float, float]] = []
+        for a, b in zip(pontos, pontos[1:]):
+            for passo in range(5):
+                t = passo / 4.0
+                amostras.append((a[0] + ((b[0] - a[0]) * t), a[1] + ((b[1] - a[1]) * t)))
+        if not amostras:
+            amostras = list(pontos)
+        for ponto in amostras:
+            if self._ponto_no_contorno(ponto, contorno, tol=0.12):
+                continue
+            if not self._ponto_dentro_poligono_coords(ponto, contorno):
+                return False
+        return True
+
+    def _pontos_linha_auxiliar(self, linha: dict) -> list[tuple[float, float]]:
+        pontos = linha.get("pontos", []) if isinstance(linha, dict) else []
+        return self._pontos_elemento_como_tuplas(pontos or [])
+
+    def _linhas_equivalentes(self, a: list[tuple[float, float]], b: list[tuple[float, float]], tol: float = 1e-4) -> bool:
+        if len(a) != len(b) or not a:
+            return False
+        direta = all(self._dist_tuple(pa, pb) <= tol for pa, pb in zip(a, b))
+        inversa = all(self._dist_tuple(pa, pb) <= tol for pa, pb in zip(a, reversed(b)))
+        return direta or inversa
+
+    def _ponto_cfg_pique(self, cfg: dict) -> tuple[float, float] | None:
+        for chave in ("ponto", "ponto_controle"):
+            ponto = self._tupla_ponto_generica(cfg.get(chave))
+            if ponto is not None:
+                return ponto
+        segmentos = cfg.get("segmentos")
+        if isinstance(segmentos, list):
+            pts: list[tuple[float, float]] = []
+            for segmento in segmentos:
+                if not isinstance(segmento, (list, tuple)) or len(segmento) != 2:
+                    continue
+                for p in segmento:
+                    ponto = self._tupla_ponto_generica(p)
+                    if ponto is not None:
+                        pts.append(ponto)
+            if pts:
+                return (sum(x for x, _y in pts) / len(pts), sum(y for _x, y in pts) / len(pts))
+        return None
+
+    def _tupla_ponto_generica(self, valor) -> tuple[float, float] | None:
+        if isinstance(valor, dict):
+            try:
+                return (float(valor.get("x")), float(valor.get("y")))
+            except Exception:
+                return None
+        if isinstance(valor, (list, tuple)) and len(valor) == 2:
+            try:
+                return (float(valor[0]), float(valor[1]))
+            except Exception:
+                return None
+        return None
 
     def _ordenar_controles_principais_extraidos(self, cantos: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(cantos) != 2:
@@ -1398,7 +1638,19 @@ class Ferramenta(FerramentaBase):
                 candidatos.append((float(x), float(y)))
             for p in el.get("pontos_controle_principais", []) or []:
                 if isinstance(p, dict):
+                    if not self._cfg.get("detectar_piques", True) and str(p.get("origem") or "").lower() == "pique":
+                        continue
                     candidatos.append((float(p.get("x", 0.0)), float(p.get("y", 0.0))))
+            if self._cfg.get("detectar_piques", True):
+                for p in el.get("pontos_controle_pique", []) or []:
+                    pt = self._tupla_ponto_generica(p)
+                    if pt is not None:
+                        candidatos.append(pt)
+                for cfg in el.get("piques_config", []) or []:
+                    if isinstance(cfg, dict):
+                        pt = self._ponto_cfg_pique(cfg)
+                        if pt is not None:
+                            candidatos.append(pt)
             for pt in candidatos:
                 if self._ponto_no_contorno(pt, contorno, tol=0.08):
                     pontos_ref.append(pt)
@@ -1700,7 +1952,11 @@ class Ferramenta(FerramentaBase):
         canvas.update()
 
     def _iniciar_arraste_molde(self, canvas, pos: QPointF):
-        self._snapshot_cancelamento = {idx: deepcopy(canvas.cena.elementos[idx]) for idx in self._selecoes_manuais if 0 <= idx < len(canvas.cena.elementos)}
+        self._snapshot_cancelamento = {
+            idx: copiar_elemento_sem_runtime(canvas.cena.elementos[idx])
+            for idx in self._selecoes_manuais
+            if 0 <= idx < len(canvas.cena.elementos)
+        }
         self._indices_molde_em_arraste = set(self._selecoes_manuais)
         self._arrastando_molde = True
         self._ultimo_pos_arrasto = QPointF(pos)
@@ -1751,6 +2007,7 @@ class Ferramenta(FerramentaBase):
         self._contornos_candidatos = []
         self._indice_candidato_atual = 0
         self._ultimo_hover_pos = None
+        self._manual_contorno_pontos = []
         if self._dialog is not None and isValid(self._dialog):
             self._dialog.hide()
         self._arrastando_molde = False
@@ -1782,6 +2039,7 @@ class Ferramenta(FerramentaBase):
         self._contornos_candidatos = []
         self._indice_candidato_atual = 0
         self._ultimo_hover_pos = None
+        self._manual_contorno_pontos = []
         self._molde_criado = False
         self._molde_posicionado = False
         self._arrastando_molde = False
@@ -1818,19 +2076,15 @@ class Ferramenta(FerramentaBase):
         ponto = (pos.x(), pos.y())
         candidatos: list[list[tuple[float, float]]] = []
         candidatos_rapidos = self._contornos_fechados_sob_cursor_rapido(canvas, ponto)
-        for cont in candidatos_rapidos:
-            self._adicionar_candidato_contorno(candidatos, ponto, cont)
-        if candidatos:
-            candidatos.sort(key=lambda c: (self._distancia_ponto_contorno(ponto, c), abs(self._area_contorno(c))))
-            return candidatos
 
         total_elementos = len(getattr(canvas.cena, "elementos", []) or [])
         raio = max(12.0, min(canvas.width(), canvas.height()) / max(canvas.zoom, 1e-6) * (0.25 if leve else 0.45))
         if total_elementos > 160:
             raio = min(raio, 38.0 if leve else 55.0)
-        elementos = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio * 1.8)
+        elementos_base = self._elementos_para_fechamento(canvas.cena.elementos)
+        elementos = self._elementos_proximos_para_extracao(elementos_base, ponto, raio * 1.8)
         if not elementos:
-            elementos = [] if total_elementos > 160 else list(canvas.cena.elementos)
+            elementos = [] if total_elementos > 160 else list(elementos_base)
         if total_elementos > 160 and len(elementos) > 80:
             elementos = sorted(elementos, key=lambda el: self._distancia_elemento_ao_ponto(el, ponto))[:80]
         tentativas = [
@@ -1838,7 +2092,7 @@ class Ferramenta(FerramentaBase):
             lambda: extract_smallest_enclosing_contour(elementos, ponto, search_radius=raio, tol=0.01),
         ]
         if not leve and total_elementos <= 160:
-            tentativas.append(lambda: self._detectar_contorno_fechado(canvas, pos))
+            tentativas.append(lambda: self._detectar_contorno_fechado(canvas, pos, elementos_override=elementos_base))
         for tentativa in tentativas:
             try:
                 cont = tentativa()
@@ -1846,12 +2100,51 @@ class Ferramenta(FerramentaBase):
                 cont = None
             if cont:
                 self._adicionar_candidato_contorno(candidatos, ponto, cont)
+        for cont in candidatos_rapidos:
+            cont_norm = self._normalizar_pontos_contorno(cont)
+            substituiu = False
+            for idx, existente in enumerate(candidatos):
+                if self._contornos_equivalentes(cont_norm, existente, tol=1e-4):
+                    candidatos[idx] = cont_norm
+                    substituiu = True
+                    break
+            if not substituiu:
+                self._adicionar_candidato_contorno(candidatos, ponto, cont_norm)
         for idx in self._indices_polylines_contem_ponto(canvas, pos):
             if 0 <= idx < len(canvas.cena.elementos):
                 cont = self._normalizar_pontos_contorno(canvas.cena.elementos[idx].get("pontos", []))
                 self._adicionar_candidato_contorno(candidatos, ponto, cont)
-        candidatos.sort(key=lambda c: (abs(self._area_contorno(c)), self._perimetro_contorno(c)))
+        candidatos.sort(
+            key=lambda c: (
+                not self._ponto_dentro_poligono_coords(ponto, c),
+                abs(self._area_contorno(c)),
+                self._perimetro_contorno(c),
+            )
+        )
         return candidatos
+
+    def _elementos_para_fechamento(self, elementos: list[dict]) -> list[dict]:
+        if bool(self._cfg.get("usar_auxiliares", True)):
+            return list(elementos)
+        filtrados: list[dict] = []
+        for el in elementos:
+            if self._elemento_auxiliar_aberto(el):
+                continue
+            filtrados.append(el)
+        return filtrados
+
+    def _elemento_auxiliar_aberto(self, el: dict) -> bool:
+        if not isinstance(el, dict):
+            return False
+        subtipo = str(el.get("subtipo_audaces") or el.get("metadados", {}).get("subtipo_audaces") or "").lower()
+        if subtipo not in {"linha_interna", "linha_auxiliar", "auxiliar"}:
+            return False
+        pontos = polyline_from_element(el)
+        if len(pontos) < 2:
+            return False
+        if self._elemento_fechado(el, pontos):
+            return False
+        return True
 
     def _contornos_fechados_sob_cursor_rapido(self, canvas, ponto: tuple[float, float]) -> list[list[tuple[float, float]]]:
         tolerancia = self._tolerancia_clique_linha(canvas)
@@ -1888,6 +2181,95 @@ class Ferramenta(FerramentaBase):
         for a, b in zip(pts, pts[1:]):
             menor = min(menor, point_segment_distance(ponto, a, b))
         return menor
+
+    def _trecho_manual_proximo(
+        self,
+        canvas,
+        pos: QPointF,
+    ) -> list[tuple[float, float]] | None:
+        ponto = (float(pos.x()), float(pos.y()))
+        tolerancia = self._tolerancia_clique_linha(canvas)
+        melhor: list[tuple[float, float]] | None = None
+        melhor_dist = float("inf")
+        for el in self._elementos_para_fechamento(getattr(canvas.cena, "elementos", []) or []):
+            if not isinstance(el, dict):
+                continue
+            pts = self._normalizar_pontos_abertos(polyline_from_element(el))
+            if len(pts) < 2:
+                continue
+            fechado = self._elemento_fechado(el, pts)
+            for a, b in zip(pts, pts[1:]):
+                dist = point_segment_distance(ponto, a, b)
+                if dist <= tolerancia and dist < melhor_dist:
+                    melhor = [(float(a[0]), float(a[1])), (float(b[0]), float(b[1]))] if fechado else pts
+                    melhor_dist = dist
+        return melhor
+
+    def _adicionar_segmento_manual_por_clique(self, canvas, pos: QPointF) -> bool:
+        trecho = self._trecho_manual_proximo(canvas, pos)
+        if trecho is None:
+            return False
+        trecho = self._normalizar_pontos_abertos(trecho)
+        if len(trecho) < 2 or self._dist_tuple(trecho[0], trecho[-1]) <= 1e-9:
+            return False
+        tol = max(0.35, self._tolerancia_clique_linha(canvas) * 0.6)
+        if not self._manual_contorno_pontos:
+            self._manual_contorno_pontos = list(trecho)
+            return True
+
+        inicio = self._manual_contorno_pontos[0]
+        fim = self._manual_contorno_pontos[-1]
+        a = trecho[0]
+        b = trecho[-1]
+        if self._dist_tuple(fim, a) <= tol:
+            self._manual_contorno_pontos.extend(trecho[1:])
+            return True
+        if self._dist_tuple(fim, b) <= tol:
+            self._manual_contorno_pontos.extend(list(reversed(trecho))[1:])
+            return True
+        if self._dist_tuple(inicio, b) <= tol:
+            self._manual_contorno_pontos = trecho[:-1] + self._manual_contorno_pontos
+            return True
+        if self._dist_tuple(inicio, a) <= tol:
+            self._manual_contorno_pontos = list(reversed(trecho))[1:] + self._manual_contorno_pontos
+            return True
+        self.set_status("Manual: esse segmento nao encosta no caminho atual.")
+        return False
+
+    def _normalizar_pontos_abertos(self, pontos: list[tuple[float, float]] | list) -> list[tuple[float, float]]:
+        coords: list[tuple[float, float]] = []
+        for x, y in pontos:
+            pt = (float(x), float(y))
+            if not coords or self._dist_tuple(coords[-1], pt) > 1e-6:
+                coords.append(pt)
+        return coords
+
+    def _elemento_fechado(self, el: dict, pontos: list[tuple[float, float]] | None = None) -> bool:
+        pts = pontos if pontos is not None else polyline_from_element(el)
+        if len(pts) < 2:
+            return False
+        return self._dist_tuple(pts[0], pts[-1]) <= 1e-6 or bool(el.get("fechado")) or bool(el.get("molde"))
+
+    def _fechar_manual_se_conectou(self, tol: float) -> None:
+        if len(self._manual_contorno_pontos) < 4:
+            return
+        if self._dist_tuple(self._manual_contorno_pontos[0], self._manual_contorno_pontos[-1]) <= tol:
+            self._manual_contorno_pontos[-1] = self._manual_contorno_pontos[0]
+
+    def _contorno_manual_atual(self, fechar_final: bool = False) -> list[tuple[float, float]] | None:
+        if not fechar_final:
+            return None
+        pontos_abertos = self._normalizar_pontos_abertos(self._manual_contorno_pontos)
+        if len(pontos_abertos) < 3:
+            return None
+        if self._dist_tuple(pontos_abertos[0], pontos_abertos[-1]) > 1e-6:
+            pontos_abertos = [*pontos_abertos, pontos_abertos[0]]
+        pontos = self._normalizar_pontos_contorno(pontos_abertos)
+        if len(pontos) < 4 or self._dist_tuple(pontos[0], pontos[-1]) > 1e-6:
+            return None
+        if abs(self._area_contorno(pontos)) <= 1e-8:
+            return None
+        return pontos
 
     def _detectar_candidatos_linha_manual(
         self,
@@ -1933,13 +2315,19 @@ class Ferramenta(FerramentaBase):
                 saida.append(cont)
         return saida
 
-    def _detectar_contorno_fechado(self, canvas, pos: QPointF) -> list[tuple[float, float]] | None:
+    def _detectar_contorno_fechado(
+        self,
+        canvas,
+        pos: QPointF,
+        elementos_override: list[dict] | None = None,
+    ) -> list[tuple[float, float]] | None:
         ponto = (pos.x(), pos.y())
         inicio_busca = monotonic()
         limite_tempo_s = 2.2
         tentativas_local = 0
         tentativas_fallback = 0
-        total_elementos = len(canvas.cena.elementos)
+        elementos_cena = elementos_override if elementos_override is not None else canvas.cena.elementos
+        total_elementos = len(elementos_cena)
         self._log_extracao(f"início busca ponto={ponto} elementos={total_elementos}")
 
         # Caminho rápido principal: considera fechamentos por elementos locais,
@@ -1956,9 +2344,9 @@ class Ferramenta(FerramentaBase):
             if not any(abs(r - ex) <= 1e-6 for ex in raios_ordenados):
                 raios_ordenados.append(r)
         raio_max_local = max(raios_ordenados) if raios_ordenados else 20.0
-        elementos_locais = self._elementos_proximos_para_extracao(canvas.cena.elementos, ponto, raio_max_local * 1.8)
+        elementos_locais = self._elementos_proximos_para_extracao(elementos_cena, ponto, raio_max_local * 1.8)
         if not elementos_locais:
-            elementos_locais = list(canvas.cena.elementos)
+            elementos_locais = list(elementos_cena)
         self._log_extracao(
             f"pré-filtro local: elementos_locais={len(elementos_locais)} raio_max={formatar_numero(raio_max_local, 2)} zoom={formatar_numero(canvas.zoom, 4)}"
         )
@@ -2141,6 +2529,17 @@ class Ferramenta(FerramentaBase):
             for i in range(n):
                 ax, ay = ba[i]
                 bx, by = bb[(i + shift) % n]
+                if abs(ax - bx) > tol or abs(ay - by) > tol:
+                    ok = False
+                    break
+            if ok:
+                return True
+        rb = list(reversed(bb))
+        for shift in range(n):
+            ok = True
+            for i in range(n):
+                ax, ay = ba[i]
+                bx, by = rb[(i + shift) % n]
                 if abs(ax - bx) > tol or abs(ay - by) > tol:
                     ok = False
                     break
@@ -2421,7 +2820,14 @@ class Ferramenta(FerramentaBase):
                 self._dialog.height(),
                 abaixo_coordenadas=True,
             )
-            self._dialog.move(ajustar_para_area(self._dialog, canvas.mapToGlobal(destino_local)))
+            chave = "dialog:extrair_molde"
+            fallback = canvas.mapToGlobal(destino_local)
+            if posicao_salva(chave) is not None:
+                restaurar_posicao(self._dialog, chave, fallback=None, preferir_fallback_inicial=False)
+            else:
+                primeira = not bool(getattr(self._dialog, "_guimma_extrair_posicao_inicial_consumida", False))
+                restaurar_posicao(self._dialog, chave, fallback=fallback, preferir_fallback_inicial=primeira)
+            self._dialog._guimma_extrair_posicao_inicial_consumida = True
 
     def _salvar_cfg(self, *_):
         self._salvar_cfg_global()

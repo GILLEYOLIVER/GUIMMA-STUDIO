@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import core.geometry_cpp_bridge as geometry_cpp_bridge
 from core.geometry_bridge import (
     extract_local_enclosing_contour as extract_local_python,
     extract_smallest_enclosing_contour as extract_smallest_python,
@@ -12,6 +13,7 @@ from core.geometry_bridge_accelerated import (
 )
 from core.geometry_cpp_bridge import cpp_disponivel
 from core.geometry_cpp_bridge import (
+    diagnostico_cpp,
     extract_local_enclosing_contour_cpp,
     sample_catmull_rom_centripetal_dynamic_cpp,
     extract_smallest_enclosing_contour_cpp,
@@ -32,6 +34,56 @@ def _canonical_contour(points: list[tuple[float, float]] | None) -> set[tuple[fl
     if points is None:
         return None
     return {(round(x, 7), round(y, 7)) for x, y in points}
+
+
+class GeometryCppDiagnosticsTestCase(unittest.TestCase):
+    def test_diagnostico_cpp_tem_contrato_estavel(self):
+        diagnostico = diagnostico_cpp()
+
+        self.assertEqual(diagnostico["disponivel"], cpp_disponivel())
+        self.assertIn("modulo", diagnostico)
+        self.assertIn("arquivo", diagnostico)
+        self.assertIn("simbolos", diagnostico)
+        self.assertIn("simbolos_ausentes", diagnostico)
+        self.assertIn("wrappers_python", diagnostico)
+        self.assertIsInstance(diagnostico["simbolos"], dict)
+        self.assertIsInstance(diagnostico["simbolos_ausentes"], list)
+        self.assertIsInstance(diagnostico["wrappers_python"], list)
+
+        simbolos_obrigatorios = {
+            "distance",
+            "project_on_segment",
+            "seam_offset_closed",
+            "extract_local_enclosing_contour",
+            "extract_smallest_enclosing_contour",
+            "SnapEngine",
+        }
+        self.assertTrue(simbolos_obrigatorios.issubset(diagnostico["simbolos"]))
+        self.assertIn("seam_offset_closed_cpp", diagnostico["wrappers_python"])
+
+        if cpp_disponivel():
+            self.assertEqual(diagnostico["modulo"], "guimma_geometry_cpp")
+            self.assertTrue(diagnostico["arquivo"])
+            self.assertTrue(any(diagnostico["simbolos"].values()))
+        else:
+            self.assertEqual(diagnostico["modulo"], "")
+            self.assertEqual(diagnostico["arquivo"], "")
+
+    def test_wrappers_cpp_retornam_none_sem_modulo_nativo(self):
+        modulo_original = geometry_cpp_bridge._cpp
+        geometry_cpp_bridge._cpp = None
+        try:
+            self.assertFalse(geometry_cpp_bridge.cpp_disponivel())
+            self.assertFalse(geometry_cpp_bridge.diagnostico_cpp()["disponivel"])
+            self.assertIsNone(geometry_cpp_bridge.seam_offset_closed_cpp([(0.0, 0.0), (1.0, 0.0)], 1.0))
+            self.assertIsNone(
+                geometry_cpp_bridge.extract_local_enclosing_contour_cpp(
+                    _rectangle_elements(),
+                    (5.0, 3.0),
+                )
+            )
+        finally:
+            geometry_cpp_bridge._cpp = modulo_original
 
 
 @unittest.skipUnless(cpp_disponivel(), "guimma_geometry_cpp nao compilado neste ambiente")

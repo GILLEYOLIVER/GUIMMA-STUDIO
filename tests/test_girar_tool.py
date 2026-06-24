@@ -23,7 +23,7 @@ if find_spec("PySide6") is None:
     Qt = _QtIndisponivel()
 else:
     from PySide6.QtCore import QPointF, Qt
-    from PySide6.QtWidgets import QApplication, QWidget
+    from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
     from tools.girar_tool import Ferramenta as FerramentaGirar
 
@@ -120,6 +120,44 @@ class GirarToolTestCase(unittest.TestCase):
         self.assertIsNone(ferramenta._pivo_2p)
         self.assertIsNone(ferramenta._referencia_2p)
         self.assertIsNone(ferramenta._preview_2p)
+
+    def test_botao_90_aplica_giro_imediato_em_2_pontos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaGirar()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Girar em 2 pontos")
+
+        botao_90 = next(botao for botao in dialog.findChildren(QPushButton) if botao.text() == "90")
+        botao_90.click()
+
+        ponto_inicial, ponto_final = canvas.cena.elementos[0]["pontos"]
+        self.assertAlmostEqual(ponto_inicial[0], 5.0)
+        self.assertAlmostEqual(ponto_inicial[1], -5.0)
+        self.assertAlmostEqual(ponto_final[0], 5.0)
+        self.assertAlmostEqual(ponto_final[1], 5.0)
+        self.assertEqual(canvas.historico, 1)
+        self.assertEqual(ferramenta._estado_2p, "pivo")
+
+    def test_botao_90_usa_pivo_marcado_em_2_pontos(self):
+        canvas = _FakeCanvas()
+        ferramenta = FerramentaGirar()
+        ferramenta.on_activate(canvas)
+        dialog = ferramenta._obter_dialog(canvas)
+        dialog.cmb_modo.setCurrentText("Girar em 2 pontos")
+
+        self.assertTrue(ferramenta.on_mouse_press(canvas, _FakeEvent(pos=QPointF(0.0, 0.0))))
+        botao_90 = next(botao for botao in dialog.findChildren(QPushButton) if botao.text() == "90")
+        botao_90.click()
+
+        ponto_inicial, ponto_final = canvas.cena.elementos[0]["pontos"]
+        self.assertAlmostEqual(ponto_inicial[0], 0.0)
+        self.assertAlmostEqual(ponto_inicial[1], 0.0)
+        self.assertAlmostEqual(ponto_final[0], 0.0)
+        self.assertAlmostEqual(ponto_final[1], 10.0)
+        self.assertEqual(canvas.historico, 1)
+        self.assertEqual(ferramenta._estado_2p, "pivo")
+        self.assertIsNone(ferramenta._pivo_2p)
 
     def test_girar_em_2_pontos_guia_do_segundo_ponto_usa_ima_leve(self):
         canvas = _FakeCanvas()
