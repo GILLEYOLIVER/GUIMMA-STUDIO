@@ -1033,6 +1033,89 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas if linha.get("base")], ["P"])
         self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "PP-G2(P)")
 
+    def test_carregar_graduacao_dxf_preserva_tamanhos_reais_mesmo_com_xml_maior(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-G2(P)", "M-GG(G)"])
+        dialog._renderizar_tabela_graduacao = lambda: None
+
+        molde = {
+            "origem_importador": "dxf",
+            "graduacao_grade_nome": "M-GG(G)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "M", "cor": "#00e6d0", "base": False},
+                {"ativo": True, "tamanho": "G", "cor": "#d7df00", "base": True},
+                {"ativo": True, "tamanho": "GG", "cor": "#0000ff", "base": False},
+            ],
+            "tamanho_base_detectado": "G",
+            "graduacao_regularizada_por_base": {
+                "tamanhos_reais": ["M", "G", "GG"],
+            },
+            "metadados": {
+                "matriz_tamanhos_dxf": True,
+            },
+            "graduacao_dimensoes_xml": {
+                "PP": {"largura": 9.0, "altura": 20.0, "base": False},
+                "P": {"largura": 10.0, "altura": 21.0, "base": False},
+                "M": {"largura": 11.0, "altura": 22.0, "base": False},
+                "G": {"largura": 12.0, "altura": 23.0, "base": True},
+                "GG": {"largura": 13.0, "altura": 24.0, "base": False},
+                "G1": {"largura": 14.0, "altura": 25.0, "base": False},
+                "G2": {"largura": 15.0, "altura": 26.0, "base": False},
+            },
+        }
+
+        PropriedadesMoldesDialog._carregar_graduacao_do_molde(dialog, molde)
+
+        self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas], ["M", "G", "GG"])
+        self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas if linha.get("base")], ["G"])
+        self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "M-GG(G)")
+
+    def test_carregar_graduacao_audaces_descarta_tamanhos_xml_sem_contorno_real(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog.cmb_grade_tamanhos = QComboBox()
+        dialog.cmb_grade_tamanhos.addItems(["P-G(M)", "PP-G2(P)"])
+        dialog._renderizar_tabela_graduacao = lambda: None
+
+        molde = {
+            "origem": "audaces_emf_xml_molde_real",
+            "graduacao_grade_nome": "PP-G2(P)",
+            "graduacao_tamanhos": [
+                {"ativo": True, "tamanho": "PP", "cor": "#bdbdbd", "base": False, "visivel_emf": False},
+                {"ativo": True, "tamanho": "P", "cor": "#00d000", "base": True, "visivel_emf": True},
+                {"ativo": True, "tamanho": "M", "cor": "#0080ff", "base": False, "visivel_emf": True},
+                {"ativo": True, "tamanho": "G", "cor": "#ffffff", "base": False, "visivel_emf": True},
+                {"ativo": True, "tamanho": "GG", "cor": "#ff00ff", "base": False, "visivel_emf": False},
+                {"ativo": True, "tamanho": "G1", "cor": "#ff8000", "base": False, "visivel_emf": False},
+                {"ativo": True, "tamanho": "G2", "cor": "#aa00ff", "base": False, "visivel_emf": False},
+            ],
+            "tamanho_base_detectado": "P",
+            "metadados": {
+                "graduacao_importada_origem": "emf_contornos_coloridos",
+            },
+            "graduacao_contornos_importados": [
+                {"tamanho": "P", "base": True, "cor": "#00d000", "pontos": [(0, 0), (1, 0), (1, 1), (0, 0)]},
+                {"tamanho": "M", "base": False, "cor": "#0080ff", "pontos": [(0, 0), (2, 0), (2, 2), (0, 0)]},
+                {"tamanho": "G", "base": False, "cor": "#ffffff", "pontos": [(0, 0), (3, 0), (3, 3), (0, 0)]},
+            ],
+            "graduacao_dimensoes_xml": {
+                "PP": {},
+                "P": {"base": True},
+                "M": {},
+                "G": {},
+                "GG": {},
+                "G1": {},
+                "G2": {},
+            },
+        }
+
+        PropriedadesMoldesDialog._carregar_graduacao_do_molde(dialog, molde)
+
+        self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas], ["P", "M", "G"])
+        self.assertEqual([linha["tamanho"] for linha in dialog._graduacao_linhas if linha.get("base")], ["P"])
+        self.assertEqual(dialog.cmb_grade_tamanhos.currentText(), "P-G(P)")
+        self.assertNotEqual(dialog.cmb_grade_tamanhos.currentText(), "PP-G2(P)")
+
     def test_propriedades_define_conflito_quando_grade_difere_do_modelo(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
         base = {
@@ -1235,6 +1318,24 @@ class PropriedadesVisualizacaoTestCase(unittest.TestCase):
         self.assertTrue(dialog.lbl_alerta_grade.isHidden())
         self.assertEqual(item_primeiro.toolTip(0), "")
         self.assertEqual(item_segundo.toolTip(0), "")
+
+    def test_sinal_antigo_do_combo_tecido_nao_altera_arvore_reconstruida(self):
+        dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)
+        dialog._suspender_combo_tecido_arvore = False
+        dialog._geracao_arvore_tecidos = 2
+        elementos = [{"molde": True, "tecido": "1", "grupo_molde": "1"}]
+        dialog._elementos_edicao = lambda: elementos
+
+        PropriedadesMoldesDialog._alterar_tecido_grupo_pela_arvore(
+            dialog,
+            None,
+            "2",
+            tecido_antigo="1",
+            indices_afetados=(0,),
+            geracao=1,
+        )
+
+        self.assertEqual(elementos[0]["tecido"], "1")
 
     def test_editar_nome_tamanho_na_tabela_atualiza_grade_do_molde(self):
         dialog = PropriedadesMoldesDialog.__new__(PropriedadesMoldesDialog)

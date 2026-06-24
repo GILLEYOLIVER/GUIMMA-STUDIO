@@ -287,6 +287,30 @@ class ImportacaoMoldesDialogTestCase(unittest.TestCase):
             self.assertEqual(janela._resolver_par_audaces_emf_xml(emf), (str(emf), str(xml)))
             self.assertEqual(janela._resolver_par_audaces_emf_xml(xml), (str(emf), str(xml)))
 
+    def test_titulo_aba_importada_usa_nome_do_arquivo(self):
+        self.assertEqual(
+            GuimmaStudioMainWindow._titulo_aba_importacao(r"C:\moldes\6414 B.dxf", "DXF agrupado"),
+            "6414 B",
+        )
+
+    def test_registrar_anexos_importacao_inclui_dxf_xml_e_emf_associados(self):
+        janela = GuimmaStudioMainWindow()
+        self.addCleanup(janela.close)
+        with tempfile.TemporaryDirectory() as td:
+            pasta = Path(td)
+            dxf = pasta / "6414 B.dxf"
+            xml = pasta / "6414 B.xml"
+            emf = pasta / "6414 B.emf"
+            dxf.write_bytes(b"dxf")
+            xml.write_bytes(b"xml")
+            emf.write_bytes(b"emf")
+
+            janela._registrar_arquivos_associados_importacao(dxf, tipo="dxf_agrupado")
+
+        anexos = janela.projeto_atual.preferencias_usuario.get("arquivos_importados_anexos", [])
+        self.assertEqual(sorted(item["nome"] for item in anexos), ["6414 B.dxf", "6414 B.emf", "6414 B.xml"])
+        self.assertTrue(all(str(item.get("anexo_zip", "")).startswith("attachments/imports/") for item in anexos))
+
     def test_moldes_reais_importados_sao_centralizados_no_canvas(self):
         class CanvasFake:
             def __init__(self):

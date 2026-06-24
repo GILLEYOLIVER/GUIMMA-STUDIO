@@ -78,6 +78,28 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
             self.assertEqual(doc.tamanhos_modelo[0].nome, 'G2')
             self.assertEqual(len(doc.pecas), 1)
 
+    def test_xml_import_ignora_peca_marcada_com_reflexao(self):
+        xml = '''<?xml version="1.0" encoding="ISO-8859-1"?>
+<DATA_FILE_AUDACES>
+  <MODEL NAME_M="Modelo" />
+  <PATTERNS>
+    <PATTERN NAME_P="COSTAS 2X">
+      <SIZES_P><SIZE_P NAME_SP="M" QUANT_SP="1" /></SIZES_P>
+    </PATTERN>
+    <PATTERN NAME_P="COSTAS 2X #">
+      <SIZES_P><SIZE_P NAME_SP="M" QUANT_SP="1" /></SIZES_P>
+    </PATTERN>
+  </PATTERNS>
+</DATA_FILE_AUDACES>
+'''
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'reflexao.xml'
+            p.write_text(xml, encoding='iso-8859-1')
+
+            doc = AudacesXMLImport.abrir(p)
+
+        self.assertEqual([peca.nome for peca in doc.pecas], ['COSTAS 2X'])
+
     def test_emf_import(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / '01.emf'
@@ -163,9 +185,9 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertIsNotNone(grade)
         _nome, linhas, base = grade
         self.assertEqual(base, 'P')
+        self.assertEqual([linha['tamanho'] for linha in linhas], ['P', 'M', 'G'])
         self.assertEqual([linha['tamanho'] for linha in linhas if linha.get('base')], ['P'])
         self.assertEqual([linha['tamanho'] for linha in linhas if linha.get('visivel_emf')], ['P', 'M', 'G'])
-        self.assertFalse(next(linha for linha in linhas if linha['tamanho'] == 'PP')['visivel_emf'])
 
     def test_regularizar_graduacao_importada_gera_pp_e_tamanhos_faltantes(self):
         elemento = {
@@ -621,9 +643,9 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertEqual(info.get('diagnostico_file_ads', {}).get('assinatura'), 'CADZ')
         self.assertFalse(info.get('diagnostico_file_ads', {}).get('regras_graduacao_decodificadas'))
         self.assertFalse(info.get('graduacao_regras_exatas'))
-        self.assertEqual(grade.get('nome'), 'PP-G2(P)')
+        self.assertEqual(grade.get('nome'), 'P-GG(P)')
         self.assertEqual(grade.get('tamanho_base'), 'P')
-        self.assertEqual(grade.get('quantidade_tamanhos'), 7)
+        self.assertEqual(grade.get('quantidade_tamanhos'), 4)
         self.assertGreaterEqual(len(moldes), 5)
         calibracao = info.get('calibracao_dimensoes_xml') or {}
         self.assertTrue(calibracao.get('aplicado'))
@@ -652,7 +674,7 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         primeiro_com_grade = next(el for el in moldes if el.get('graduacao_tamanhos'))
         self.assertEqual(
             [linha.get('tamanho') for linha in primeiro_com_grade.get('graduacao_tamanhos')],
-            ['PP', 'P', 'M', 'G', 'GG', 'G1', 'G2'],
+            ['P', 'M', 'G', 'GG'],
         )
         self.assertEqual(
             [linha.get('tamanho') for linha in primeiro_com_grade.get('graduacao_tamanhos') if linha.get('base')],
@@ -661,13 +683,7 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertEqual(primeiro_com_grade.get('tamanho_base'), 'P')
         self.assertEqual(primeiro_com_grade.get('tamanho_base_detectado'), 'P')
         self.assertFalse(primeiro_com_grade.get('graduacao_regras_exatas'))
-        self.assertEqual(
-            [item.get('tamanho') for item in primeiro_com_grade.get('graduacao_contornos_regularizados_preview')],
-            ['PP'],
-        )
-        self.assertTrue(
-            next(item for item in primeiro_com_grade.get('graduacao_contornos_regularizados_preview') if item.get('tamanho') == 'PP').get('sintetico')
-        )
+        self.assertEqual(primeiro_com_grade.get('graduacao_contornos_regularizados_preview'), [])
         self.assertFalse(primeiro_com_grade.get('graduacao_renderizar_regularizada'))
         self.assertFalse(primeiro_com_grade.get('graduacao_suavizar_topologia_base'))
         self.assertIn('M', [item.get('tamanho') for item in primeiro_com_grade.get('graduacao_contornos_importados', [])])
@@ -675,10 +691,10 @@ class TestAudacesEMFXMLImport(unittest.TestCase):
         self.assertEqual(primeiro_com_grade.get('graduacao_tabela_derivada', {}).get('base'), 'P')
         self.assertNotIn('graduacao_tabela', primeiro_com_grade)
         self.assertFalse(primeiro_com_grade.get('graduacao_preferir_tabela_dxdy'))
-        self.assertIn(
-            'PP',
-            primeiro_com_grade.get('graduacao_tabela_derivada', {}).get('pontos', {}).get('0', {}).get('valores', {}),
-        )
+        valores_grade = primeiro_com_grade.get('graduacao_tabela_derivada', {}).get('pontos', {}).get('0', {}).get('valores', {})
+        self.assertNotIn('PP', valores_grade)
+        self.assertNotIn('G1', valores_grade)
+        self.assertNotIn('G2', valores_grade)
         self.assertTrue(primeiro_com_grade.get('render_smooth'))
         self.assertTrue(any(el.get('controle_cantos') for el in moldes))
         self.assertTrue(any(el.get('pontos_controle_principais') for el in moldes))

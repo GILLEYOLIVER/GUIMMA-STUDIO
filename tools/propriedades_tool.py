@@ -1573,6 +1573,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._itens_molde_por_indice: dict[int, QTreeWidgetItem] = {}
         self._combos_tecido_por_item: dict[int, QComboBox] = {}
         self._suspender_combo_tecido_arvore = False
+        self._geracao_arvore_tecidos = 0
         self._indice_atual: int | None = self._indice_molde_preferencial()
         self._cor_visual = "#ffffff"
         self._graduacao_linhas: list[dict] = []
@@ -2514,6 +2515,103 @@ class PropriedadesMoldesDialog(QDialog):
         texto_grade = str(grade_nome or "").strip()
         return bool(texto_grade and texto_grade.startswith("1-") and any(not nome.isdigit() for nome in nomes_xml))
 
+    def _deve_preservar_linhas_importadas_do_dxf(self, molde: dict | None, linhas: list[dict]) -> bool:
+        if not isinstance(molde, dict) or not linhas:
+            return False
+        nomes = [str(linha.get("tamanho") or "").strip() for linha in linhas if isinstance(linha, dict)]
+        nomes = [nome for nome in nomes if nome]
+        if not nomes or all(nome.isdigit() for nome in nomes):
+            return False
+        metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
+        regularizada = molde.get("graduacao_regularizada_por_base")
+        regularizada = regularizada if isinstance(regularizada, dict) else {}
+        tamanhos_reais = [
+            str(nome or "").strip()
+            for nome in (regularizada.get("tamanhos_reais") or [])
+            if str(nome or "").strip()
+        ]
+        if tamanhos_reais:
+            nomes_norm = [self._normalizar_nome_tamanho_graduacao(nome) for nome in nomes]
+            reais_norm = [self._normalizar_nome_tamanho_graduacao(nome) for nome in tamanhos_reais]
+            return nomes_norm == reais_norm
+        origem = str(molde.get("origem_importador") or molde.get("origem") or metadados.get("origem") or "").strip().lower()
+        return bool(metadados.get("matriz_tamanhos_dxf") or origem.startswith("dxf"))
+
+    def _graduacao_importada_por_contornos_reais(
+        self,
+        molde: dict | None,
+        linhas: list[dict],
+    ) -> tuple[str, list[dict]] | None:
+        if not isinstance(molde, dict):
+            return None
+        metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
+        origem = str(
+            molde.get("origem_importador")
+            or molde.get("origem")
+            or metadados.get("origem")
+            or ""
+        ).strip().lower()
+        if not (
+            origem.startswith("audaces")
+            or origem.startswith("dxf")
+            or metadados.get("matriz_tamanhos_dxf")
+            or metadados.get("graduacao_importada_origem")
+        ):
+            return None
+        contornos = molde.get("graduacao_contornos_importados")
+        if not isinstance(contornos, list):
+            return None
+        labels: list[str] = []
+        dados_por_label: dict[str, dict] = {}
+        for item in contornos:
+            if not isinstance(item, dict):
+                continue
+            if item.get("sintetico") or item.get("regularizado_por_base"):
+                continue
+            label = str(item.get("tamanho") or item.get("nome") or "").strip()
+            if not label:
+                continue
+            chave = self._normalizar_nome_tamanho_graduacao(label)
+            if chave not in dados_por_label:
+                labels.append(label)
+                dados_por_label[chave] = item
+        if len(labels) < 2:
+            return None
+        linhas_por_norm = {
+            self._normalizar_nome_tamanho_graduacao(linha.get("tamanho") or linha.get("nome")): linha
+            for linha in linhas
+            if isinstance(linha, dict) and str(linha.get("tamanho") or linha.get("nome") or "").strip()
+        }
+        base_preferida = str(molde.get("tamanho_base_detectado") or molde.get("tamanho_base") or "").strip()
+        base_norm = self._normalizar_nome_tamanho_graduacao(base_preferida)
+        if base_norm not in {self._normalizar_nome_tamanho_graduacao(label) for label in labels}:
+            base_preferida = next(
+                (
+                    str(item.get("tamanho") or item.get("nome") or "").strip()
+                    for item in contornos
+                    if isinstance(item, dict) and item.get("base") and str(item.get("tamanho") or item.get("nome") or "").strip()
+                ),
+                labels[len(labels) // 2],
+            )
+        base_norm = self._normalizar_nome_tamanho_graduacao(base_preferida)
+        linhas_reais: list[dict] = []
+        for idx, label in enumerate(labels):
+            norm = self._normalizar_nome_tamanho_graduacao(label)
+            linha_atual = linhas_por_norm.get(norm, {})
+            item = dados_por_label.get(norm, {})
+            cor = str(linha_atual.get("cor") or item.get("cor") or "#ffffff")
+            linhas_reais.append({
+                "ativo": bool(linha_atual.get("ativo", True)),
+                "tamanho": label,
+                "cor": cor,
+                "base": norm == base_norm,
+            })
+        if not any(linha.get("base") for linha in linhas_reais):
+            linhas_reais[len(linhas_reais) // 2]["base"] = True
+            base_preferida = str(linhas_reais[len(linhas_reais) // 2].get("tamanho") or "")
+        grade_nome = f"{labels[0]}-{labels[-1]}({base_preferida})"
+        return grade_nome, linhas_reais
+
     def _nome_grade_compativel_com_linhas(self, grade_nome: str, linhas: list[dict]) -> str:
         nomes = [str(linha.get("tamanho") or linha.get("nome") or "").strip() for linha in linhas]
         nomes = [nome for nome in nomes if nome]
@@ -2615,10 +2713,16 @@ class PropriedadesMoldesDialog(QDialog):
         if isinstance(molde, dict):
             linhas = self._normalizar_linhas_graduacao(molde.get("graduacao_tamanhos"))
             grade_nome = str(molde.get("graduacao_grade_nome") or "").strip()
+            importada_real = self._graduacao_importada_por_contornos_reais(molde, linhas)
+            if importada_real is not None:
+                grade_nome, linhas = importada_real
             importada_xml = self._graduacao_importada_por_dimensoes_xml(molde)
-            if importada_xml is not None:
+            if importada_xml is not None and importada_real is None:
                 grade_xml, linhas_xml = importada_xml
-                if self._deve_usar_graduacao_xml_importada(linhas, grade_nome, linhas_xml):
+                if (
+                    not self._deve_preservar_linhas_importadas_do_dxf(molde, linhas)
+                    and self._deve_usar_graduacao_xml_importada(linhas, grade_nome, linhas_xml)
+                ):
                     grade_nome = grade_xml
                     linhas = linhas_xml
 
@@ -2643,6 +2747,8 @@ class PropriedadesMoldesDialog(QDialog):
     @staticmethod
     def _molde_tem_cores_graduacao_importadas(molde: dict | None) -> bool:
         if not isinstance(molde, dict):
+            return False
+        if molde.get("graduacao_preservar_cores_importadas") is False:
             return False
         metadados = molde.get("metadados") if isinstance(molde.get("metadados"), dict) else {}
         origem = str(
@@ -3891,6 +3997,7 @@ class PropriedadesMoldesDialog(QDialog):
         self._atualizar_conflitos_grade_modelo()
         self._itens_molde_por_indice = {}
         self._combos_tecido_por_item = {}
+        self._geracao_arvore_tecidos = int(getattr(self, "_geracao_arvore_tecidos", 0)) + 1
         _log_propriedades_debug(f"recarregar_lista(): moldes encontrados={len(self._refs)}; indice_atual_anterior={atual_idx}")
         self._suspender_item_changed = True
         self._suspender_combo_tecido_arvore = True
@@ -4016,6 +4123,30 @@ class PropriedadesMoldesDialog(QDialog):
 
         return sorted(tecidos, key=_ord_tecido)
 
+    @staticmethod
+    def _dados_item_tecido_arvore(item: QTreeWidgetItem | None) -> tuple[str, list[int]]:
+        if item is None:
+            return "", []
+        try:
+            tecido = str(item.data(0, Qt.UserRole + 1) or item.text(0) or "").strip()
+        except RuntimeError:
+            return "", []
+        except Exception:
+            tecido = ""
+        indices: list[int] = []
+        try:
+            for i in range(item.childCount()):
+                filho = item.child(i)
+                idx = filho.data(0, Qt.UserRole)
+                if idx is None:
+                    continue
+                indices.append(int(idx))
+        except RuntimeError:
+            return tecido, []
+        except Exception:
+            pass
+        return tecido, indices
+
     def _instalar_combo_tecido_item(self, item: QTreeWidgetItem, tecido_atual: str):
         combo = QComboBox(self.arvore)
         combo.setEditable(True)
@@ -4034,22 +4165,57 @@ class PropriedadesMoldesDialog(QDialog):
             opcoes.append(tecido_atual)
         combo.addItems(opcoes)
         combo.setCurrentText(str(tecido_atual or "1"))
-        combo.activated.connect(lambda _=0, it=item, cb=combo: self._alterar_tecido_grupo_pela_arvore(it, cb.currentText()))
+        tecido_origem, indices_moldes = self._dados_item_tecido_arvore(item)
+        if not tecido_origem:
+            tecido_origem = str(tecido_atual or "1").strip() or "1"
+        indices_moldes = tuple(indices_moldes)
+        geracao = int(getattr(self, "_geracao_arvore_tecidos", 0))
+        combo.setProperty("guimma_tecido_origem", tecido_origem)
+        combo.setProperty("guimma_geracao_arvore", geracao)
+        combo.activated.connect(
+            lambda _=0, cb=combo, origem=tecido_origem, indices=indices_moldes, gen=geracao: (
+                self._alterar_tecido_grupo_pela_arvore(
+                    None,
+                    cb.currentText(),
+                    tecido_antigo=origem,
+                    indices_afetados=indices,
+                    geracao=gen,
+                )
+            )
+        )
         if combo.lineEdit() is not None:
             combo.lineEdit().editingFinished.connect(
-                lambda it=item, cb=combo: self._alterar_tecido_grupo_pela_arvore(it, cb.currentText())
+                lambda cb=combo, origem=tecido_origem, indices=indices_moldes, gen=geracao: (
+                    self._alterar_tecido_grupo_pela_arvore(
+                        None,
+                        cb.currentText(),
+                        tecido_antigo=origem,
+                        indices_afetados=indices,
+                        geracao=gen,
+                    )
+                )
             )
         self.arvore.setItemWidget(item, 0, combo)
         self._combos_tecido_por_item[id(item)] = combo
 
     def eventFilter(self, obj, event):  # noqa: N802
         if isinstance(obj, QComboBox) and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
-            item_tecido = None
-            for item_id, combo in self._combos_tecido_por_item.items():
-                if combo is obj:
-                    item_tecido = next((it for it in self._iter_items(self.arvore.topLevelItem(0)) if id(it) == item_id), None)
-                    break
-            tecido = str(item_tecido.data(0, Qt.UserRole + 1) or "").strip() if item_tecido is not None else ""
+            geracao_combo = obj.property("guimma_geracao_arvore")
+            if geracao_combo is not None and int(geracao_combo) != int(getattr(self, "_geracao_arvore_tecidos", 0)):
+                event.ignore()
+                return True
+            tecido = str(obj.property("guimma_tecido_origem") or "").strip()
+            if not tecido:
+                item_tecido = None
+                try:
+                    raiz = self.arvore.topLevelItem(0)
+                    for item_id, combo in self._combos_tecido_por_item.items():
+                        if combo is obj:
+                            item_tecido = next((it for it in self._iter_items(raiz) if id(it) == item_id), None)
+                            break
+                    tecido = str(item_tecido.data(0, Qt.UserRole + 1) or "").strip() if item_tecido is not None else ""
+                except RuntimeError:
+                    tecido = ""
             if tecido and hasattr(event, "mimeData") and event.mimeData().hasFormat(ArvoreTecidosMoldes.MIME_MOLDE):
                 if event.type() == QEvent.Drop:
                     indices = ArvoreTecidosMoldes._indices_mime(event.mimeData())
@@ -4088,16 +4254,35 @@ class PropriedadesMoldesDialog(QDialog):
         self._atualizar_opcoes_tecido()
         QTimer.singleShot(0, self.recarregar_lista)
 
-    def _alterar_tecido_grupo_pela_arvore(self, item: QTreeWidgetItem, novo_tecido: str):
+    def _alterar_tecido_grupo_pela_arvore(
+        self,
+        item: QTreeWidgetItem | None,
+        novo_tecido: str,
+        *,
+        tecido_antigo: str | None = None,
+        indices_afetados=None,
+        geracao: int | None = None,
+    ):
         if self._suspender_combo_tecido_arvore:
+            return
+        if geracao is not None and int(geracao) != int(getattr(self, "_geracao_arvore_tecidos", 0)):
             return
         novo_tecido = str(novo_tecido or "").strip()
         if not novo_tecido:
             return
-        try:
-            tecido_antigo = str(item.data(0, Qt.UserRole + 1) or item.text(0) or "").strip()
-        except Exception:
-            tecido_antigo = str(item.text(0) or "").strip()
+        indices_normalizados: list[int] = []
+        if indices_afetados is not None:
+            try:
+                indices_normalizados = [int(idx) for idx in indices_afetados]
+            except Exception:
+                indices_normalizados = []
+        if tecido_antigo is None or not indices_normalizados:
+            tecido_item, indices_item = self._dados_item_tecido_arvore(item)
+            if tecido_antigo is None:
+                tecido_antigo = tecido_item
+            if not indices_normalizados:
+                indices_normalizados = indices_item
+        tecido_antigo = str(tecido_antigo or "").strip()
         if novo_tecido == tecido_antigo:
             return
 
@@ -4106,12 +4291,7 @@ class PropriedadesMoldesDialog(QDialog):
             return
 
         indices_afetados: list[int] = []
-        for i in range(item.childCount()):
-            filho = item.child(i)
-            idx = filho.data(0, Qt.UserRole)
-            if idx is None:
-                continue
-            idx_int = int(idx)
+        for idx_int in indices_normalizados:
             if 0 <= idx_int < len(elementos):
                 el = elementos[idx_int]
                 if isinstance(el, dict) and el.get("molde"):
@@ -4119,11 +4299,16 @@ class PropriedadesMoldesDialog(QDialog):
                     el["grupo_molde"] = novo_tecido
                     indices_afetados.append(idx_int)
 
-        try:
-            item.setData(0, Qt.UserRole + 1, novo_tecido)
-        except Exception:
-            pass
-        item.setText(0, novo_tecido)
+        if not indices_afetados:
+            return
+        if item is not None:
+            try:
+                item.setData(0, Qt.UserRole + 1, novo_tecido)
+                item.setText(0, novo_tecido)
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
         if self._indice_atual in indices_afetados and hasattr(self, "ed_tecido"):
             with QSignalBlocker(self.ed_tecido):
                 self.ed_tecido.setCurrentText(novo_tecido)

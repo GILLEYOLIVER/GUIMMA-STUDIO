@@ -115,6 +115,9 @@ class AudacesXMLImport:
     def extrair_pecas(self) -> list[AudacesXMLPattern]:
         pecas: list[AudacesXMLPattern] = []
         for pat in self.raiz.findall(".//PATTERNS/PATTERN"):
+            nome_peca = self._txt(pat, "NAME_P", "NAME", default="Peça").strip() or "Peça"
+            if "#" in nome_peca:
+                continue
             tamanhos: list[AudacesXMLPatternSize] = []
             sizes_p = pat.find(".//SIZES_P")
             tamanho_base = ""
@@ -137,7 +140,7 @@ class AudacesXMLImport:
                 )
             pecas.append(
                 AudacesXMLPattern(
-                    nome=self._txt(pat, "NAME_P", "NAME", default="Peça").strip() or "Peça",
+                    nome=nome_peca,
                     descricao=self._txt(pat, "DESC_P", "DESCRIPTION_P", "DESC", default="").strip(),
                     tecido=self._txt(pat, "NAME_FAB", "FABRIC_P", "TECIDO", default="").strip(),
                     quantidade=self._int(self._txt(pat, "QT_MOD", "QUANTITY_P", "QTD", "QUANTIDADE")),

@@ -73,9 +73,11 @@ class GirarDialog(QDialog):
         raiz.addLayout(form)
         raiz.addWidget(self.chk_copia)
         linha = QHBoxLayout()
+        self.botoes_angulo = []
         for valor in (-90, 90, 180):
             btn = QPushButton(str(valor))
             btn.clicked.connect(lambda _=False, v=valor: self.sp_angulo.setValue(float(v)))
+            self.botoes_angulo.append((btn, float(valor)))
             linha.addWidget(btn)
         raiz.addLayout(linha)
 
@@ -202,6 +204,8 @@ class Ferramenta(FerramentaBase):
         if not hasattr(dialog, "_hooked"):
             dialog._hooked = True  # type: ignore[attr-defined]
             dialog.cmb_modo.currentTextChanged.connect(lambda _texto, c=canvas: self._modo_alterado(c))
+            for botao, angulo in dialog.botoes_angulo:
+                botao.clicked.connect(lambda _=False, v=angulo, c=canvas: self._aplicar_angulo_predefinido(c, v))
         return dialog
 
     def _restaurar_dialog(self, canvas, dialog: GirarDialog) -> None:
@@ -213,13 +217,13 @@ class Ferramenta(FerramentaBase):
             fallback = canvas.mapToGlobal(QPoint(max(24, canvas.width() - dialog.width() - 32), 92))
         restaurar_posicao(dialog, dialog._chave_posicao, fallback=fallback)
 
-    def _aplicar(self, canvas) -> None:
+    def _aplicar(self, canvas, pivo_forcado: QPointF | None = None) -> None:
         indices = self._indices_selecionados(canvas)
         if not indices:
             self._status(canvas, "Girar: selecione ao menos um elemento.")
             return
         dialog = self._obter_dialog(canvas)
-        pivo = self._pivo(canvas, indices, dialog.cmb_pivo.currentText())
+        pivo = QPointF(pivo_forcado) if pivo_forcado is not None else self._pivo(canvas, indices, dialog.cmb_pivo.currentText())
         if pivo is None:
             self._status(canvas, "Girar: não foi possível calcular o pivô.")
             return
@@ -251,6 +255,14 @@ class Ferramenta(FerramentaBase):
         self._operacao_finalizada = True
         self._direito_confirma_fechamento = False
         self._status(canvas, f"Giro de {ang:g}° aplicado em {len(indices)} elemento(s). Clique esquerdo continua; direito fecha.")
+
+    def _aplicar_angulo_predefinido(self, canvas, angulo: float) -> None:
+        dialog = self._obter_dialog(canvas)
+        dialog.sp_angulo.setValue(float(angulo))
+        pivo_2p = QPointF(self._pivo_2p) if self._pivo_2p is not None else None
+        self._restaurar_snapshot_2p(canvas)
+        self._resetar_2p()
+        self._aplicar(canvas, pivo_forcado=pivo_2p)
 
     def _mouse_press_2p(self, canvas, event) -> bool:
         pos = canvas._ponto_com_snap(event.position())

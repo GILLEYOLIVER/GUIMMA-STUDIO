@@ -269,16 +269,27 @@ class CosturaToolTestCase(unittest.TestCase):
         self.assertEqual(canvas.historico, 1)
         self.assertEqual(canvas.atualizacoes, 1)
 
-    def test_costura_por_trecho_adjacente_mescla_e_fecha_canto_comum(self):
+    def test_costura_por_trecho_adjacente_nao_mescla_segmento_vizinho(self):
         ferramenta = self._preparar_ferramenta_sem_dialog()
         canvas = self._CanvasFake([self._elemento_quadrado(), self._costura_existente([0])])
 
         self.assertTrue(ferramenta._aplicar_segmentos(canvas, 0, {1}, [1]))
 
         costuras = [el for el in canvas.cena.elementos if el.get("subtipo_audaces") == "costura"]
-        self.assertEqual(len(costuras), 1)
-        self.assertEqual(costuras[0].get("costura_segmentos"), [0, 1])
-        self.assertNotIn((10.0, 0.0), costuras[0].get("pontos", [])[1:-1])
+        self.assertEqual(sorted(tuple(el.get("costura_segmentos", [])) for el in costuras), [(0,), (1,)])
+
+    def test_preview_selecionar_realca_apenas_segmento_escolhido(self):
+        ferramenta = self._preparar_ferramenta_sem_dialog()
+        ferramenta._atualizar_tabela_atual = lambda *_args, **_kwargs: None
+        canvas = self._CanvasFake([self._elemento_quadrado(), self._costura_existente([0])])
+        ferramenta._alvo_idx = 0
+        ferramenta._segmentos_selecionados = {1}
+        ferramenta._segmentos_ordem = [1]
+
+        ferramenta._atualizar_preview_segmentos(canvas)
+
+        self.assertEqual(len(ferramenta._realce_segmentos), 1)
+        self.assertEqual(ferramenta._segmentos_ordem, [1])
 
     def test_costura_por_trecho_substitui_apenas_trecho_sobreposto(self):
         ferramenta = self._preparar_ferramenta_sem_dialog()

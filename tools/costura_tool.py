@@ -892,7 +892,7 @@ class Ferramenta(FerramentaBase):
             return
         self._preview_idx = idx
         elemento = canvas.cena.elementos[idx]
-        segmentos_preview = self._segmentos_com_costuras_adjacentes_para_preview(canvas, idx, {seg_idx})
+        segmentos_preview = {seg_idx}
         base_interativa = self._base_interativa_elemento(elemento)
         ordem_preview = self._ordenar_segmentos_contiguos(base_interativa, segmentos_preview) or [seg_idx]
         self._preview = [QPointF(x, y) for x, y in self._gerar_costura_segmentos_atual(
@@ -930,7 +930,7 @@ class Ferramenta(FerramentaBase):
             return
         pontos = self._pontos_fechados(canvas.cena.elementos[idx])
         base_interativa = self._base_interativa_elemento(canvas.cena.elementos[idx])
-        segmentos_preview = self._segmentos_com_costuras_adjacentes_para_preview(canvas, idx, self._segmentos_selecionados)
+        segmentos_preview = set(self._segmentos_selecionados)
         ordem = self._segmentos_ordem or self._ordenar_segmentos_horario(base_interativa, segmentos_preview)
         ordem = self._ordenar_segmentos_contiguos(base_interativa, segmentos_preview) or ordem
         self._segmentos_ordem = ordem
@@ -988,13 +988,6 @@ class Ferramenta(FerramentaBase):
         total_segmentos = self._total_segmentos(canvas, idx)
         segmentos_novos = {int(s) % total_segmentos for s in segmentos} if total_segmentos else set()
         segmentos_aplicar = set(segmentos_novos)
-        if total_segmentos and 0 < len(segmentos_novos) < total_segmentos:
-            segmentos_aplicar = self._segmentos_mesclados_com_costuras_adjacentes(
-                canvas,
-                molde_id,
-                segmentos_novos,
-                total_segmentos,
-            )
 
         base_interativa = self._base_interativa_elemento(alvo)
         ordem_aplicar = self._ordenar_segmentos_contiguos(base_interativa, segmentos_aplicar) or (

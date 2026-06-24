@@ -132,6 +132,29 @@ class ADSXIOTestCase(unittest.TestCase):
             ads_preservado = reaberto.audaces_adsx_original["arquivos_preservados"]["file.ads"]["conteudo_base64"]
             self.assertTrue(base64.b64decode(ads_preservado).startswith(b"CADZ"))
 
+    def test_salvar_gs_anexa_arquivos_importados(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pasta = Path(tmp)
+            conteudo = b"DXF fake"
+            projeto = Projeto()
+            projeto.preferencias_usuario["arquivos_importados_anexos"] = [
+                {
+                    "id": "abc123",
+                    "nome": "molde.dxf",
+                    "anexo_zip": "attachments/imports/abc123_molde.dxf",
+                    "conteudo_base64": base64.b64encode(conteudo).decode("ascii"),
+                }
+            ]
+
+            caminho_gs = pasta / "teste.gs"
+            GSProjectIO.salvar(projeto, caminho_gs)
+
+            with ZipFile(caminho_gs, "r") as pacote:
+                self.assertEqual(pacote.read("attachments/imports/abc123_molde.dxf"), conteudo)
+            reaberto = GSProjectIO.abrir(caminho_gs)
+            anexo = reaberto.preferencias_usuario["arquivos_importados_anexos"][0]
+            self.assertEqual(base64.b64decode(anexo["conteudo_base64"]), conteudo)
+
     def test_adsx_invalido(self):
         with tempfile.TemporaryDirectory() as tmp:
             caminho = Path(tmp) / "invalido.adsx"

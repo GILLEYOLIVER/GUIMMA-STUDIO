@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -5553,10 +5554,12 @@ class GuimmaStudioMainWindow(QMainWindow):
 
     def _importar_audaces_emf_xml_para_canvas(self, emf_path: str, xml_path: str) -> bool:
         self.projeto_atual = AudacesPairImport.importar(emf_path, xml_path, self.projeto_atual)
+        self._registrar_arquivo_importado_anexo(emf_path, tipo="audaces_emf")
+        self._registrar_arquivo_importado_anexo(xml_path, tipo="audaces_xml")
         info = self.projeto_atual.preferencias_usuario.get("audaces_emf_xml_importacao", {})
         self._arquivo_atual = None
         self._limpar_abas_documentos()
-        self._adicionar_aba_documento("EMF + XML", emf_path)
+        self._adicionar_aba_documento(self._titulo_aba_importacao(emf_path, "EMF + XML"), emf_path)
         area = self._area_documento_atual()
         moldes_doc = self.projeto_atual.documentos[0].moldes if self.projeto_atual.documentos else []
         elementos_canvas = info.get("elementos_canvas", [])
@@ -5811,11 +5814,14 @@ class GuimmaStudioMainWindow(QMainWindow):
         *,
         anexar: bool = False,
     ):
+        titulo_final = self._titulo_aba_importacao(caminho_origem, titulo_aba)
+        self._registrar_arquivo_importado_anexo(caminho_origem, tipo=titulo_aba)
         if anexar:
             area = self._area_documento_atual()
             if area:
                 novos = [dict(el) for el in elementos if isinstance(el, dict)]
                 area.canvas.cena.elementos.extend(novos)
+                self._registrar_arquivos_associados_importacao(caminho_origem, tipo=titulo_aba)
                 if hasattr(area.canvas, "_registrar_historico"):
                     area.canvas._registrar_historico()
                 self._reenquadrar_area_importada(area, area.canvas.cena.elementos)
@@ -5825,7 +5831,8 @@ class GuimmaStudioMainWindow(QMainWindow):
                 return
         self._arquivo_atual = None
         self._limpar_abas_documentos()
-        self._adicionar_aba_documento(titulo_aba, caminho_origem)
+        self._registrar_arquivos_associados_importacao(caminho_origem, tipo=titulo_aba)
+        self._adicionar_aba_documento(titulo_final, caminho_origem)
         area = self._area_documento_atual()
         if area:
             area.canvas.cena.elementos = [dict(el) for el in elementos if isinstance(el, dict)]
@@ -5836,6 +5843,60 @@ class GuimmaStudioMainWindow(QMainWindow):
         self.backstage.hide()
         self._agendar_salvar_estado_silencioso()
         self._agendar_reencaixe_janela_canvas()
+
+    @staticmethod
+    def _titulo_aba_importacao(caminho_origem: str | Path | None, fallback: str) -> str:
+        try:
+            nome = Path(str(caminho_origem or "")).stem.strip()
+        except Exception:
+            nome = ""
+        return nome or str(fallback or "").strip() or "Importado"
+
+    def _registrar_arquivos_associados_importacao(self, caminho_origem: str | Path | None, *, tipo: str = "") -> None:
+        try:
+            origem = Path(str(caminho_origem or ""))
+        except Exception:
+            return
+        if not origem.exists():
+            return
+        self._registrar_arquivo_importado_anexo(origem, tipo=tipo)
+        if origem.suffix.lower() == ".dxf":
+            for extensao in (".xml", ".emf"):
+                associado = origem.with_suffix(extensao)
+                if associado.exists():
+                    self._registrar_arquivo_importado_anexo(associado, tipo=f"{tipo}_associado".strip("_"))
+
+    def _registrar_arquivo_importado_anexo(self, caminho: str | Path | None, *, tipo: str = "") -> None:
+        try:
+            origem = Path(str(caminho or ""))
+        except Exception:
+            return
+        if not origem.exists() or not origem.is_file():
+            return
+        try:
+            bruto = origem.read_bytes()
+        except Exception:
+            return
+        digest = hashlib.sha256(bruto).hexdigest()
+        prefs = self.projeto_atual.preferencias_usuario
+        anexos = prefs.setdefault("arquivos_importados_anexos", [])
+        if not isinstance(anexos, list):
+            anexos = []
+            prefs["arquivos_importados_anexos"] = anexos
+        if any(isinstance(item, dict) and item.get("sha256") == digest for item in anexos):
+            return
+        nome = origem.name
+        anexo_id = digest[:16]
+        anexos.append({
+            "id": anexo_id,
+            "nome": nome,
+            "tipo": str(tipo or origem.suffix.lstrip(".") or "importado"),
+            "caminho_original": str(origem),
+            "tamanho_bytes": len(bruto),
+            "sha256": digest,
+            "anexo_zip": f"attachments/imports/{anexo_id}_{nome}",
+            "conteudo_base64": base64.b64encode(bruto).decode("ascii"),
+        })
 
     def _reenquadrar_area_importada(self, area, elementos: list[dict], *, zoom_max: float = 8.0):
         if not area or not elementos:
@@ -8696,6 +8757,7 @@ class GuimmaStudioMainWindow(QMainWindow):
             area_doc.aplicar_tema(self._tema_interface())
             area_doc.unidade_menu_solicitado.connect(self._abrir_menu_unidade_medida_em)
             self._garantir_coordenadas_abertas(area_doc)
+            area_doc.setProperty("arquivo_origem", doc.get("arquivo_origem") or None)
             self._marcar_area_como_salva(area_doc)
             nome = doc.get("nome") or "(Sem nome)"
             if str(nome).strip().startswith("(Sem nome)"):
@@ -8715,6 +8777,7 @@ class GuimmaStudioMainWindow(QMainWindow):
     def _capturar_estado_documento_canvas(self, area: AreaDocumentoWidget) -> dict:
         return {
             "elementos": area.canvas.elementos_para_salvar(),
+            "arquivo_origem": str(area.property("arquivo_origem") or ""),
             "painel_coordenadas_visivel": area.canvas.painel_coordenadas_visivel(),
             "zoom": float(area.canvas.zoom),
             "origem_cena": {
