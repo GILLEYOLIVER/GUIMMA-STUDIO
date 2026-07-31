@@ -1,43 +1,30 @@
 {
-  "arquivo_emf": "C:\\Users\\User\\Área de Trabalho\\GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG\\GIL 132 3.emf",
-  "records_emf_total": 9751,
+  "arquivo_emf": "C:\\Users\\User\\AppData\\Local\\Temp\\tmp0nqijcxg\\01.emf",
+  "records_emf_total": 3,
   "records_emf_tipos": {
     "1": 1,
-    "14": 1,
-    "18": 1310,
-    "25": 706,
-    "37": 2669,
-    "39": 706,
-    "40": 1410,
-    "43": 655,
-    "87": 1589,
-    "95": 704
+    "3": 1,
+    "14": 1
   },
-  "quantidade_polyline": 1589,
-  "quantidade_polygon": 0,
+  "quantidade_polyline": 0,
+  "quantidade_polygon": 1,
   "quantidade_polybezier": 0,
   "quantidade_textos": 0,
-  "elementos_vetoriais_convertidos": 481,
-  "contornos_fechados": 20,
-  "moldes_reais_criados": 20,
-  "pecas_xml_lidas": 20,
-  "pecas_xml_associadas": 20,
+  "elementos_vetoriais_convertidos": 1,
+  "contornos_fechados": 1,
+  "moldes_reais_criados": 1,
+  "pecas_xml_lidas": 1,
+  "pecas_xml_associadas": 1,
   "pecas_xml_sem_associacao": 0,
   "bounds_emf": [
-    -42.520975065779396,
-    -42.520975065779396,
-    13337.412512299472,
-    9099.48866407679
+    0.0,
+    0.0,
+    1417.36583552598,
+    850.419501315588
   ],
   "escala_usada": {
     "sx": 1.0,
-    "sy": 1.0,
-    "frame_cm": [
-      0.0,
-      0.0,
-      25.892,
-      17.75
-    ]
+    "sy": 1.0
   },
   "escala_manual_aplicada": 14.1736583552598,
   "medida_guimma_referencia_mm": 544.28,
@@ -45,37 +32,33 @@
   "fator_escala_final": 14.1736583552598,
   "unidade_resultado": "cm_calibrado_por_referencia_mm",
   "records_nao_suportados": {
-    "14": 1,
-    "18": 1310,
-    "25": 706,
-    "39": 706,
-    "95": 704
+    "14": 1
   },
   "avisos": [
     "Escala calibrada manualmente aplicada ao EMF: fator 14.17365836."
   ],
   "diagnostico_antes": {
-    "elementos_emf": 481,
-    "segmentos_soltos": 481,
-    "contorno": 0,
+    "elementos_emf": 1,
+    "segmentos_soltos": 0,
+    "contorno": 1,
     "costura": 0,
-    "linha_interna": 481
+    "linha_interna": 0
   },
   "diagnostico_depois": {
-    "segmentos_unidos": 366,
-    "contornos_fechados_encontrados": 48,
-    "contornos_classificados_como_contorno": 20,
-    "contornos_classificados_como_costura": 12,
-    "contornos_classificados_como_linha_interna": 70,
-    "contornos_ignorados": 13,
-    "contornos_abertos_restantes": 67,
-    "curvas_reconstruidas": 32,
-    "elementos_canvas_final": 115,
-    "moldes_reais_criados": 20
+    "segmentos_unidos": 0,
+    "contornos_fechados_encontrados": 1,
+    "contornos_classificados_como_contorno": 1,
+    "contornos_classificados_como_costura": 0,
+    "contornos_classificados_como_linha_interna": 0,
+    "contornos_ignorados": 0,
+    "contornos_abertos_restantes": 0,
+    "curvas_reconstruidas": 0,
+    "elementos_canvas_final": 1,
+    "moldes_reais_criados": 1
   },
-  "mensagem_final": "Audaces EMF + XML importado: 20 moldes reais criados, 366 contornos unidos, 32 curvas reconstruídas.",
-  "mensagem_diagnostico": null,
+  "mensagem_final": "Audaces EMF + XML importado: 1 moldes reais criados, 0 contornos unidos, 0 curvas reconstruídas.",
+  "mensagem_diagnostico": "Pós-processamento não alterou geometria.",
   "canvas_origem": "moldes_reais",
-  "canvas_moldes_renderizados": 20,
+  "canvas_moldes_renderizados": 1,
   "canvas_elementos_emf_renderizados": 0
 }
